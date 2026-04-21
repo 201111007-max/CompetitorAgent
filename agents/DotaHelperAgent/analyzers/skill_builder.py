@@ -1,7 +1,12 @@
 """技能加点建议模块"""
 
 from typing import Dict, List, Optional
-from ..utils.api_client import OpenDotaClient
+
+# 支持两种导入方式：包导入和直接运行
+try:
+    from ..utils.api_client import OpenDotaClient
+except ImportError:
+    from utils.api_client import OpenDotaClient
 
 
 class SkillBuilder:

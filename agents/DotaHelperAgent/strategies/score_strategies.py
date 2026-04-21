@@ -3,7 +3,11 @@
 from typing import List, Dict, Tuple, Any
 from abc import ABC, abstractmethod
 
-from ..core.config import MatchupConfig
+# 支持两种导入方式：包导入和直接运行
+try:
+    from ..core.config import MatchupConfig
+except ImportError:
+    from core.config import MatchupConfig
 
 
 class IScoreStrategy(ABC):

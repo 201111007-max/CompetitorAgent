@@ -2,9 +2,15 @@
 
 from typing import List, Dict, Tuple, Optional, Any
 
-from ..utils.api_client import OpenDotaClient
-from ..core.config import MatchupConfig
-from ..strategies.score_strategies import IScoreStrategy, WinRateStrategy
+# 支持两种导入方式：包导入和直接运行
+try:
+    from ..utils.api_client import OpenDotaClient
+    from ..core.config import MatchupConfig
+    from ..strategies.score_strategies import IScoreStrategy, WinRateStrategy
+except ImportError:
+    from utils.api_client import OpenDotaClient
+    from core.config import MatchupConfig
+    from strategies.score_strategies import IScoreStrategy, WinRateStrategy
 
 
 class HeroAnalyzer:

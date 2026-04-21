@@ -7,8 +7,13 @@ from typing import Dict, List, Optional, Any
 from pathlib import Path
 import time
 
-from ..cache.cache_manager import CacheManager
-from ..core.config import AgentConfig, RateLimitConfig, CacheConfig
+# 支持两种导入方式：包导入和直接运行
+try:
+    from ..cache.cache_manager import CacheManager
+    from ..core.config import AgentConfig, RateLimitConfig, CacheConfig
+except ImportError:
+    from cache.cache_manager import CacheManager
+    from core.config import AgentConfig, RateLimitConfig, CacheConfig
 
 
 class OpenDotaClient:
@@ -50,24 +55,26 @@ class OpenDotaClient:
             self.config = None
             self.api_key = api_key
             rate_config = RateLimitConfig(delay_seconds=rate_limit_delay)
-            cache_config = CacheConfig(cache_dir=cache_dir, ttl_hours=cache_ttl_hours)
+            cache_config = CacheConfig(ttl_hours=cache_ttl_hours)
         
         self.session = requests.Session()
         self.rate_limit_delay = rate_config.delay_seconds
         self._last_request_time = 0
-        
+
         # 初始化缓存管理器
-        cache_path = cache_dir or cache_config.cache_dir
-        if not os.path.isabs(cache_path):
-            cache_path = str(Path(__file__).parent.parent / cache_path)
-        
-        self.cache = CacheManager.from_config(cache_config) if config else CacheManager(
-            cache_dir=cache_path,
-            ttl_hours=cache_config.ttl_hours,
-            max_size_mb=cache_config.max_size_mb,
-            max_items=cache_config.max_items,
-        )
-        
+        if config:
+            self.cache = CacheManager.from_config(cache_config)
+        else:
+            cache_path = cache_dir or cache_config.cache_dir
+            if not os.path.isabs(cache_path):
+                cache_path = str(Path(__file__).parent.parent / cache_path)
+            self.cache = CacheManager(
+                cache_dir=cache_path,
+                ttl_hours=cache_config.ttl_hours,
+                max_size_mb=cache_config.max_size_mb,
+                max_items=cache_config.max_items,
+            )
+
         # 英雄列表内存缓存（常用数据）
         self._heroes_cache: Optional[List[Dict]] = None
 
@@ -161,13 +168,31 @@ class OpenDotaClient:
     def get_item_timings(self, use_cache: bool = True) -> Optional[List[Dict]]:
         """获取物品购买时机数据（带缓存）"""
         cache_key = "item_timings"
-        
+
         if use_cache:
             cached = self.cache.get(cache_key)
             if cached is not None:
                 return cached
-        
+
         result = self._make_request("/scenarios/itemTimings")
+        if result is not None and use_cache:
+            self.cache.set(cache_key, result)
+        return result
+
+    def get_constants(self, use_cache: bool = True) -> Optional[Dict[str, Any]]:
+        """获取游戏常量数据（物品、英雄等）（带缓存）
+
+        Returns:
+            Dict: 包含 items, heroes 等常量数据
+        """
+        cache_key = "game_constants"
+
+        if use_cache:
+            cached = self.cache.get(cache_key)
+            if cached is not None:
+                return cached
+
+        result = self._make_request("/constants")
         if result is not None and use_cache:
             self.cache.set(cache_key, result)
         return result

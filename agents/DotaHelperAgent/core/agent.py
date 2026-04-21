@@ -2,11 +2,19 @@
 
 from typing import List, Dict, Optional, Any
 
-from ..utils.api_client import OpenDotaClient
-from ..analyzers.hero_analyzer import HeroAnalyzer
-from ..analyzers.item_recommender import ItemRecommender
-from ..analyzers.skill_builder import SkillBuilder
-from .config import AgentConfig, MatchupConfig
+# 支持两种导入方式：包导入和直接运行
+try:
+    from ..utils.api_client import OpenDotaClient
+    from ..analyzers.hero_analyzer import HeroAnalyzer
+    from ..analyzers.item_recommender import ItemRecommender
+    from ..analyzers.skill_builder import SkillBuilder
+    from .config import AgentConfig, MatchupConfig
+except ImportError:
+    from utils.api_client import OpenDotaClient
+    from analyzers.hero_analyzer import HeroAnalyzer
+    from analyzers.item_recommender import ItemRecommender
+    from analyzers.skill_builder import SkillBuilder
+    from config import AgentConfig, MatchupConfig
 
 
 class DotaHelperAgent:

@@ -10,7 +10,11 @@ from typing import Dict, Any, Optional, Callable, List, Tuple
 from datetime import datetime, timedelta
 from functools import wraps
 
-from ..core.config import CacheConfig
+# 支持两种导入方式：包导入和直接运行
+try:
+    from ..core.config import CacheConfig
+except ImportError:
+    from core.config import CacheConfig
 
 
 class CacheManager:

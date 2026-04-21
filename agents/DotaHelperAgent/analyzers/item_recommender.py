@@ -1,19 +1,37 @@
 """物品推荐模块"""
 
 from typing import List, Dict, Optional, Tuple
-from dotaconstants import items
-from ..utils.api_client import OpenDotaClient
+
+# 支持两种导入方式：包导入和直接运行
+try:
+    from ..utils.api_client import OpenDotaClient
+except ImportError:
+    from utils.api_client import OpenDotaClient
 
 
 class ItemRecommender:
     """物品出装推荐器"""
 
-    # 游戏阶段定义（分钟）
     EARLY_GAME = 15
     MID_GAME = 30
 
     def __init__(self, client: OpenDotaClient):
         self.client = client
+        self._items_cache: Optional[Dict[int, Dict]] = None
+
+    def _ensure_items_cache(self) -> None:
+        """确保物品常量数据已缓存"""
+        if self._items_cache is not None:
+            return
+
+        try:
+            constants = self.client.get_constants()
+            if constants and isinstance(constants, dict):
+                self._items_cache = constants.get("items", {})
+            else:
+                self._items_cache = {}
+        except (AttributeError, TypeError, ConnectionError):
+            self._items_cache = {}
 
     def recommend_items(
         self,
@@ -98,7 +116,8 @@ class ItemRecommender:
 
     def _get_item_name(self, item_id: int) -> str:
         """获取物品名称"""
-        item_data = items.get(item_id)
+        self._ensure_items_cache()
+        item_data = self._items_cache.get(item_id)
         if item_data and "name" in item_data:
             return item_data["name"]
         return f"item_{item_id}"
