@@ -1,5 +1,6 @@
-"""缓存管理模块 - 支持每日自动更新的缓存系统"""
+"""缓存管理模块 - 基于 SQLite 的高性能缓存系统"""
 
+import sqlite3
 import json
 import hashlib
 import time
@@ -21,12 +22,14 @@ class CacheManager:
     """缓存管理器
     
     特性：
+    - 基于 SQLite 数据库，高性能
     - 支持按天自动过期
-    - 支持内存缓存 + 文件缓存两级缓存
+    - 支持内存缓存 + SQLite 缓存两级缓存
     - 支持缓存键自动生成
     - 装饰器支持，简化使用
     - 线程安全
     - LRU 淘汰机制
+    - 支持复杂查询
     """
     
     def __init__(
@@ -35,7 +38,8 @@ class CacheManager:
         ttl_hours: int = 24,
         max_size_mb: int = 100,
         max_items: int = 1000,
-        enable_memory_cache: bool = True
+        enable_memory_cache: bool = True,
+        db_name: str = "cache.db"
     ):
         """初始化缓存管理器
         
@@ -45,9 +49,11 @@ class CacheManager:
             max_size_mb: 最大缓存大小（MB），默认 100MB
             max_items: 最大缓存项数量，默认 1000
             enable_memory_cache: 是否启用内存缓存，默认 True
+            db_name: SQLite 数据库文件名，默认 cache.db
         """
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(exist_ok=True)
+        self.db_path = self.cache_dir / db_name
         self.ttl_hours = ttl_hours
         self.max_size_mb = max_size_mb
         self.max_items = max_items
@@ -67,6 +73,45 @@ class CacheManager:
             "misses": 0,
             "evictions": 0,
         }
+        
+        # 初始化 SQLite 数据库
+        self._init_database()
+    
+    def _init_database(self) -> None:
+        """初始化 SQLite 数据库"""
+        with self._lock:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # 创建缓存表
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS cache_items (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    timestamp REAL NOT NULL,
+                    created_at TEXT NOT NULL,
+                    access_count INTEGER DEFAULT 0,
+                    last_access REAL,
+                    size_bytes INTEGER NOT NULL
+                )
+            ''')
+            
+            # 创建索引以加速查询
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_timestamp ON cache_items(timestamp)
+            ''')
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_last_access ON cache_items(last_access)
+            ''')
+            
+            conn.commit()
+            conn.close()
+    
+    def _get_connection(self) -> sqlite3.Connection:
+        """获取数据库连接"""
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        conn.row_factory = sqlite3.Row
+        return conn
     
     @classmethod
     def from_config(cls, config: CacheConfig) -> "CacheManager":
@@ -90,10 +135,6 @@ class CacheManager:
         key_bytes = pickle.dumps(key_obj, protocol=pickle.HIGHEST_PROTOCOL)
         return hashlib.sha256(key_bytes).hexdigest()
     
-    def _get_cache_file(self, cache_key: str) -> Path:
-        """获取缓存文件路径"""
-        return self.cache_dir / f"{cache_key}.json"
-    
     def _is_expired(self, timestamp: float) -> bool:
         """检查缓存是否过期"""
         if timestamp == 0:
@@ -107,32 +148,47 @@ class CacheManager:
     
     def _evict_if_needed(self) -> None:
         """如果超过限制，淘汰最旧的缓存（LRU）"""
-        # 检查数量限制
-        cache_files = [
-            (f.stat().st_mtime, f)
-            for f in self.cache_dir.glob("*.json")
-        ]
-        
-        # 按大小检查
-        total_size = sum(f.stat().st_size for _, f in cache_files)
-        max_size_bytes = self.max_size_mb * 1024 * 1024
-        
-        # 淘汰最旧的文件直到满足限制
-        cache_files.sort()  # 按修改时间排序
-        
-        while (len(cache_files) > self.max_items or total_size > max_size_bytes) and cache_files:
-            _, oldest_file = cache_files.pop(0)
-            try:
-                oldest_file.unlink()
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            
+            # 检查数量限制
+            cursor.execute("SELECT COUNT(*) FROM cache_items")
+            count = cursor.fetchone()[0]
+            
+            # 检查大小限制
+            cursor.execute("SELECT COALESCE(SUM(size_bytes), 0) FROM cache_items")
+            total_size = cursor.fetchone()[0]
+            max_size_bytes = self.max_size_mb * 1024 * 1024
+            
+            # 淘汰最旧的缓存
+            while count > self.max_items or total_size > max_size_bytes:
+                # 删除最久未访问的记录
+                cursor.execute('''
+                    DELETE FROM cache_items 
+                    WHERE key = (
+                        SELECT key FROM cache_items 
+                        ORDER BY last_access ASC 
+                        LIMIT 1
+                    )
+                ''')
+                
+                if cursor.rowcount == 0:
+                    break
+                
+                count -= 1
+                cursor.execute("SELECT COALESCE(SUM(size_bytes), 0) FROM cache_items")
+                total_size = cursor.fetchone()[0]
                 self._stats["evictions"] += 1
-                total_size -= oldest_file.stat().st_size if oldest_file.exists() else 0
-            except Exception:
-                pass
+            
+            conn.commit()
+        finally:
+            conn.close()
     
     def get(self, cache_key: str) -> Optional[Any]:
         """获取缓存
         
-        优先级：内存缓存 > 文件缓存
+        优先级：内存缓存 > SQLite 缓存
         线程安全
         """
         with self._lock:
@@ -148,30 +204,51 @@ class CacheManager:
                     del self._memory_timestamp[cache_key]
                     self._memory_access_time.pop(cache_key, None)
             
-            # 2. 检查文件缓存
-            cache_file = self._get_cache_file(cache_key)
-            if cache_file.exists():
-                try:
-                    with open(cache_file, "r", encoding="utf-8") as f:
-                        data = json.load(f)
+            # 2. 检查 SQLite 缓存
+            conn = self._get_connection()
+            try:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT value, timestamp FROM cache_items 
+                    WHERE key = ?
+                ''', (cache_key,))
+                
+                row = cursor.fetchone()
+                if row:
+                    value_str = row["value"]
+                    timestamp = row["timestamp"]
                     
-                    # 检查文件缓存是否过期
-                    if not self._is_expired(data.get("_timestamp", 0)):
+                    # 检查是否过期
+                    if not self._is_expired(timestamp):
+                        # 反序列化数据
+                        try:
+                            data = json.loads(value_str)
+                        except json.JSONDecodeError:
+                            data = pickle.loads(eval(value_str))
+                        
                         # 加载到内存缓存
                         if self.enable_memory_cache:
-                            self._memory_cache[cache_key] = data.get("_data")
-                            self._memory_timestamp[cache_key] = data.get("_timestamp")
+                            self._memory_cache[cache_key] = data
+                            self._memory_timestamp[cache_key] = timestamp
                             self._update_access_time(cache_key)
                         
+                        # 更新访问统计
+                        cursor.execute('''
+                            UPDATE cache_items 
+                            SET access_count = access_count + 1, last_access = ?
+                            WHERE key = ?
+                        ''', (time.time(), cache_key))
+                        conn.commit()
+                        
                         self._stats["hits"] += 1
-                        return data.get("_data")
+                        return data
                     else:
-                        # 文件缓存过期，删除
-                        cache_file.unlink()
+                        # 缓存过期，删除
+                        cursor.execute('DELETE FROM cache_items WHERE key = ?', (cache_key,))
+                        conn.commit()
                         self._stats["evictions"] += 1
-                except (json.JSONDecodeError, KeyError):
-                    # 缓存文件损坏，删除
-                    cache_file.unlink()
+            finally:
+                conn.close()
             
             self._stats["misses"] += 1
             return None
@@ -190,17 +267,98 @@ class CacheManager:
                 self._memory_timestamp[cache_key] = timestamp
                 self._update_access_time(cache_key)
             
-            # 2. 保存到文件缓存
-            cache_file = self._get_cache_file(cache_key)
-            with open(cache_file, "w", encoding="utf-8") as f:
-                json.dump({
-                    "_data": data,
-                    "_timestamp": timestamp,
-                    "_created": datetime.now().isoformat()
-                }, f, ensure_ascii=False, indent=2)
+            # 2. 保存到 SQLite 缓存
+            conn = self._get_connection()
+            try:
+                cursor = conn.cursor()
+                
+                # 序列化数据
+                try:
+                    value_str = json.dumps(data, ensure_ascii=False)
+                except (TypeError, ValueError):
+                    # 如果不能 JSON 序列化，使用 pickle
+                    value_str = repr(pickle.dumps(data, protocol=pickle.HIGHEST_PROTOCOL))
+                
+                # 计算大小
+                size_bytes = len(value_str.encode('utf-8'))
+                
+                # 使用 INSERT OR REPLACE
+                cursor.execute('''
+                    INSERT OR REPLACE INTO cache_items 
+                    (key, value, timestamp, created_at, access_count, last_access, size_bytes)
+                    VALUES (?, ?, ?, ?, 0, ?, ?)
+                ''', (
+                    cache_key,
+                    value_str,
+                    timestamp,
+                    datetime.now().isoformat(),
+                    time.time(),
+                    size_bytes
+                ))
+                
+                conn.commit()
+            finally:
+                conn.close()
             
             # 3. 检查是否需要淘汰
             self._evict_if_needed()
+    
+    def delete(self, cache_key: str) -> bool:
+        """删除指定缓存
+        
+        Returns:
+            bool: 是否成功删除
+        """
+        with self._lock:
+            # 清理内存缓存
+            self._memory_cache.pop(cache_key, None)
+            self._memory_timestamp.pop(cache_key, None)
+            self._memory_access_time.pop(cache_key, None)
+            
+            # 清理 SQLite 缓存
+            conn = self._get_connection()
+            try:
+                cursor = conn.cursor()
+                cursor.execute('DELETE FROM cache_items WHERE key = ?', (cache_key,))
+                conn.commit()
+                return cursor.rowcount > 0
+            finally:
+                conn.close()
+    
+    def exists(self, cache_key: str) -> bool:
+        """检查缓存是否存在
+        
+        Returns:
+            bool: 是否存在
+        """
+        with self._lock:
+            # 检查内存缓存
+            if self.enable_memory_cache and cache_key in self._memory_cache:
+                if not self._is_expired(self._memory_timestamp.get(cache_key, 0)):
+                    return True
+            
+            # 检查 SQLite 缓存
+            conn = self._get_connection()
+            try:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT timestamp FROM cache_items WHERE key = ?
+                ''', (cache_key,))
+                
+                row = cursor.fetchone()
+                if row:
+                    timestamp = row["timestamp"]
+                    if not self._is_expired(timestamp):
+                        return True
+                    else:
+                        # 过期，删除
+                        cursor.execute('DELETE FROM cache_items WHERE key = ?', (cache_key,))
+                        conn.commit()
+                        self._stats["evictions"] += 1
+                
+                return False
+            finally:
+                conn.close()
     
     def clear(self) -> None:
         """清空所有缓存"""
@@ -210,20 +368,95 @@ class CacheManager:
             self._memory_timestamp.clear()
             self._memory_access_time.clear()
             
-            # 清空文件缓存
-            for cache_file in self.cache_dir.glob("*.json"):
-                try:
-                    cache_file.unlink()
-                except Exception:
-                    pass
+            # 清空 SQLite 缓存
+            conn = self._get_connection()
+            try:
+                cursor = conn.cursor()
+                cursor.execute('DELETE FROM cache_items')
+                conn.commit()
+            finally:
+                conn.close()
             
             # 重置统计
             self._stats = {"hits": 0, "misses": 0, "evictions": 0}
     
-    def get_stats(self) -> Dict[str, int]:
+    def get_stats(self) -> Dict[str, Any]:
         """获取缓存统计"""
         with self._lock:
-            return self._stats.copy()
+            conn = self._get_connection()
+            try:
+                cursor = conn.cursor()
+                
+                # 获取基本信息
+                cursor.execute("SELECT COUNT(*) as count, COALESCE(SUM(size_bytes), 0) as total_size FROM cache_items")
+                row = cursor.fetchone()
+                item_count = row["count"]
+                total_size = row["total_size"]
+                
+                # 计算命中率
+                total_requests = self._stats["hits"] + self._stats["misses"]
+                hit_rate = (self._stats["hits"] / total_requests * 100) if total_requests > 0 else 0.0
+                
+                return {
+                    "hits": self._stats["hits"],
+                    "misses": self._stats["misses"],
+                    "evictions": self._stats["evictions"],
+                    "hit_rate": f"{hit_rate:.2f}%",  # 字符串格式
+                    "hit_rate_float": hit_rate,  # 数字格式
+                    "item_count": item_count,
+                    "total_size_bytes": total_size,
+                    "total_size_mb": f"{total_size / (1024 * 1024):.2f} MB",
+                    "memory_cache_items": len(self._memory_cache)
+                }
+            finally:
+                conn.close()
+    
+    def reset_stats(self) -> None:
+        """重置统计信息"""
+        with self._lock:
+            self._stats = {"hits": 0, "misses": 0, "evictions": 0}
+    
+    def cleanup_expired(self) -> int:
+        """清理所有过期的缓存
+        
+        Returns:
+            int: 清理的缓存数量
+        """
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                cursor = conn.cursor()
+                
+                # 计算过期时间戳
+                expired_timestamp = time.time() - (self.ttl_hours * 3600)
+                
+                # 删除过期记录
+                cursor.execute('''
+                    DELETE FROM cache_items 
+                    WHERE timestamp < ?
+                ''', (expired_timestamp,))
+                
+                deleted_count = cursor.rowcount
+                conn.commit()
+                
+                return deleted_count
+            finally:
+                conn.close()
+    
+    def get_all_keys(self) -> List[str]:
+        """获取所有缓存键
+        
+        Returns:
+            List[str]: 缓存键列表
+        """
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                cursor = conn.cursor()
+                cursor.execute("SELECT key FROM cache_items")
+                return [row["key"] for row in cursor.fetchall()]
+            finally:
+                conn.close()
     
     def cached(self, prefix: str = "", ttl_hours: Optional[int] = None):
         """缓存装饰器

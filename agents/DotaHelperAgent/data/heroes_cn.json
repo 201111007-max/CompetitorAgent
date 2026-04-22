@@ -1,0 +1,506 @@
+{
+  "103": {
+    "cn": "上古巨神",
+    "en": "Elder Titan"
+  },
+  "85": {
+    "cn": "不朽尸王",
+    "en": "Undying"
+  },
+  "8": {
+    "cn": "主宰",
+    "en": "Juggernaut"
+  },
+  "102": {
+    "cn": "亚巴顿",
+    "en": "Abaddon"
+  },
+  "98": {
+    "cn": "伐木机",
+    "en": "Timbersaw"
+  },
+  "34": {
+    "cn": "修补匠",
+    "en": "Tinker"
+  },
+  "90": {
+    "cn": "光之守卫",
+    "en": "Keeper of the Light"
+  },
+  "56": {
+    "cn": "克林克兹",
+    "en": "Clinkz"
+  },
+  "57": {
+    "cn": "全能骑士",
+    "en": "Omniknight"
+  },
+  "38": {
+    "cn": "兽王",
+    "en": "Beastmaster"
+  },
+  "104": {
+    "cn": "军团指挥官",
+    "en": "Legion Commander"
+  },
+  "47": {
+    "cn": "冥界亚龙",
+    "en": "Viper"
+  },
+  "42": {
+    "cn": "冥魂大帝",
+    "en": "Wraith King"
+  },
+  "110": {
+    "cn": "凤凰",
+    "en": "Phoenix"
+  },
+  "145": {
+    "cn": "凯",
+    "en": "Kez"
+  },
+  "40": {
+    "cn": "剧毒术士",
+    "en": "Venomancer"
+  },
+  "32": {
+    "cn": "力丸",
+    "en": "Riki"
+  },
+  "96": {
+    "cn": "半人马战行者",
+    "en": "Centaur Warrunner"
+  },
+  "6": {
+    "cn": "卓尔游侠",
+    "en": "Drow Ranger"
+  },
+  "51": {
+    "cn": "发条技师",
+    "en": "Clockwerk"
+  },
+  "10": {
+    "cn": "变体精灵",
+    "en": "Morphling"
+  },
+  "88": {
+    "cn": "司夜刺客",
+    "en": "Nyx Assassin"
+  },
+  "59": {
+    "cn": "哈斯卡",
+    "en": "Huskar"
+  },
+  "54": {
+    "cn": "噬魂鬼",
+    "en": "Lifestealer"
+  },
+  "46": {
+    "cn": "圣堂刺客",
+    "en": "Templar Assassin"
+  },
+  "20": {
+    "cn": "复仇之魂",
+    "en": "Vengeful Spirit"
+  },
+  "107": {
+    "cn": "大地之灵",
+    "en": "Earth Spirit"
+  },
+  "101": {
+    "cn": "天怒法师",
+    "en": "Skywrath Mage"
+  },
+  "121": {
+    "cn": "天涯墨客",
+    "en": "Grimstroke"
+  },
+  "113": {
+    "cn": "天穹守望者",
+    "en": "Arc Warden"
+  },
+  "89": {
+    "cn": "娜迦海妖",
+    "en": "Naga Siren"
+  },
+  "108": {
+    "cn": "孽主",
+    "en": "Underlord"
+  },
+  "22": {
+    "cn": "宙斯",
+    "en": "Zeus"
+  },
+  "112": {
+    "cn": "寒冬飞龙",
+    "en": "Winter Wyvern"
+  },
+  "19": {
+    "cn": "小小",
+    "en": "Tiny"
+  },
+  "105": {
+    "cn": "工程师",
+    "en": "Techies"
+  },
+  "100": {
+    "cn": "巨牙海民",
+    "en": "Tusk"
+  },
+  "95": {
+    "cn": "巨魔战将",
+    "en": "Troll Warlord"
+  },
+  "30": {
+    "cn": "巫医",
+    "en": "Witch Doctor"
+  },
+  "31": {
+    "cn": "巫妖",
+    "en": "Lich"
+  },
+  "13": {
+    "cn": "帕克",
+    "en": "Puck"
+  },
+  "14": {
+    "cn": "帕吉",
+    "en": "Pudge"
+  },
+  "45": {
+    "cn": "帕格纳",
+    "en": "Pugna"
+  },
+  "87": {
+    "cn": "干扰者",
+    "en": "Disruptor"
+  },
+  "44": {
+    "cn": "幻影刺客",
+    "en": "Phantom Assassin"
+  },
+  "12": {
+    "cn": "幻影长矛手",
+    "en": "Phantom Lancer"
+  },
+  "67": {
+    "cn": "幽鬼",
+    "en": "Spectre"
+  },
+  "11": {
+    "cn": "影魔",
+    "en": "Shadow Fiend"
+  },
+  "109": {
+    "cn": "恐怖利刃",
+    "en": "Terrorblade"
+  },
+  "50": {
+    "cn": "戴泽",
+    "en": "Dazzle"
+  },
+  "52": {
+    "cn": "拉席克",
+    "en": "Leshrac"
+  },
+  "86": {
+    "cn": "拉比克",
+    "en": "Rubick"
+  },
+  "7": {
+    "cn": "撼地者",
+    "en": "Earthshaker"
+  },
+  "1": {
+    "cn": "敌法师",
+    "en": "Anti-Mage"
+  },
+  "2": {
+    "cn": "斧王",
+    "en": "Axe"
+  },
+  "93": {
+    "cn": "斯拉克",
+    "en": "Slark"
+  },
+  "28": {
+    "cn": "斯拉达",
+    "en": "Slardar"
+  },
+  "18": {
+    "cn": "斯温",
+    "en": "Sven"
+  },
+  "23": {
+    "cn": "昆卡",
+    "en": "Kunkka"
+  },
+  "60": {
+    "cn": "暗夜魔王",
+    "en": "Night Stalker"
+  },
+  "79": {
+    "cn": "暗影恶魔",
+    "en": "Shadow Demon"
+  },
+  "27": {
+    "cn": "暗影萨满",
+    "en": "Shadow Shaman"
+  },
+  "69": {
+    "cn": "末日使者",
+    "en": "Doom"
+  },
+  "37": {
+    "cn": "术士",
+    "en": "Warlock"
+  },
+  "64": {
+    "cn": "杰奇洛",
+    "en": "Jakiro"
+  },
+  "83": {
+    "cn": "树精卫士",
+    "en": "Treant Protector"
+  },
+  "123": {
+    "cn": "森海飞霞",
+    "en": "Hoodwink"
+  },
+  "43": {
+    "cn": "死亡先知",
+    "en": "Death Prophet"
+  },
+  "76": {
+    "cn": "殁境神蚀者",
+    "en": "Outworld Destroyer"
+  },
+  "5": {
+    "cn": "水晶室女",
+    "en": "Crystal Maiden"
+  },
+  "75": {
+    "cn": "沉默术士",
+    "en": "Silencer"
+  },
+  "16": {
+    "cn": "沙王",
+    "en": "Sand King"
+  },
+  "81": {
+    "cn": "混沌骑士",
+    "en": "Chaos Knight"
+  },
+  "29": {
+    "cn": "潮汐猎人",
+    "en": "Tidehunter"
+  },
+  "106": {
+    "cn": "灰烬之灵",
+    "en": "Ember Spirit"
+  },
+  "73": {
+    "cn": "炼金术士",
+    "en": "Alchemist"
+  },
+  "70": {
+    "cn": "熊战士",
+    "en": "Ursa"
+  },
+  "35": {
+    "cn": "狙击手",
+    "en": "Sniper"
+  },
+  "80": {
+    "cn": "独行德鲁伊",
+    "en": "Lone Druid"
+  },
+  "77": {
+    "cn": "狼人",
+    "en": "Lycan"
+  },
+  "137": {
+    "cn": "獸",
+    "en": "Primal Beast"
+  },
+  "129": {
+    "cn": "玛尔斯",
+    "en": "Mars"
+  },
+  "136": {
+    "cn": "玛西",
+    "en": "Marci"
+  },
+  "138": {
+    "cn": "琼英碧灵",
+    "en": "Muerta"
+  },
+  "128": {
+    "cn": "电炎绝手",
+    "en": "Snapfire"
+  },
+  "39": {
+    "cn": "痛苦女王",
+    "en": "Queen of Pain"
+  },
+  "36": {
+    "cn": "瘟疫法师",
+    "en": "Necrophos"
+  },
+  "131": {
+    "cn": "百戏大王",
+    "en": "Ringmaster"
+  },
+  "72": {
+    "cn": "矮人直升机",
+    "en": "Gyrocopter"
+  },
+  "120": {
+    "cn": "石鳞剑士",
+    "en": "Pangolier"
+  },
+  "135": {
+    "cn": "破晓辰星",
+    "en": "Dawnbreaker"
+  },
+  "74": {
+    "cn": "祈求者",
+    "en": "Invoker"
+  },
+  "111": {
+    "cn": "神谕者",
+    "en": "Oracle"
+  },
+  "3": {
+    "cn": "祸乱之源",
+    "en": "Bane"
+  },
+  "9": {
+    "cn": "米拉娜",
+    "en": "Mirana"
+  },
+  "82": {
+    "cn": "米波",
+    "en": "Meepo"
+  },
+  "92": {
+    "cn": "维萨吉",
+    "en": "Visage"
+  },
+  "63": {
+    "cn": "编织者",
+    "en": "Weaver"
+  },
+  "94": {
+    "cn": "美杜莎",
+    "en": "Medusa"
+  },
+  "61": {
+    "cn": "育母蜘蛛",
+    "en": "Broodmother"
+  },
+  "53": {
+    "cn": "自然先知",
+    "en": "Nature's Prophet"
+  },
+  "91": {
+    "cn": "艾欧",
+    "en": "Io"
+  },
+  "25": {
+    "cn": "莉娜",
+    "en": "Lina"
+  },
+  "26": {
+    "cn": "莱恩",
+    "en": "Lion"
+  },
+  "126": {
+    "cn": "虚无之灵",
+    "en": "Void Spirit"
+  },
+  "41": {
+    "cn": "虚空假面",
+    "en": "Faceless Void"
+  },
+  "65": {
+    "cn": "蝙蝠骑士",
+    "en": "Batrider"
+  },
+  "4": {
+    "cn": "血魔",
+    "en": "Bloodseeker"
+  },
+  "71": {
+    "cn": "裂魂人",
+    "en": "Spirit Breaker"
+  },
+  "33": {
+    "cn": "谜团",
+    "en": "Enigma"
+  },
+  "62": {
+    "cn": "赏金猎人",
+    "en": "Bounty Hunter"
+  },
+  "68": {
+    "cn": "远古冰魄",
+    "en": "Ancient Apparition"
+  },
+  "119": {
+    "cn": "邪影芳灵",
+    "en": "Dark Willow"
+  },
+  "78": {
+    "cn": "酒仙",
+    "en": "Brewmaster"
+  },
+  "99": {
+    "cn": "钢背兽",
+    "en": "Bristleback"
+  },
+  "66": {
+    "cn": "陈",
+    "en": "Chen"
+  },
+  "15": {
+    "cn": "雷泽",
+    "en": "Razor"
+  },
+  "48": {
+    "cn": "露娜",
+    "en": "Luna"
+  },
+  "17": {
+    "cn": "风暴之灵",
+    "en": "Storm Spirit"
+  },
+  "21": {
+    "cn": "风行者",
+    "en": "Windranger"
+  },
+  "84": {
+    "cn": "食人魔魔法师",
+    "en": "Ogre Magi"
+  },
+  "97": {
+    "cn": "马格纳斯",
+    "en": "Magnus"
+  },
+  "58": {
+    "cn": "魅惑魔女",
+    "en": "Enchantress"
+  },
+  "55": {
+    "cn": "黑暗贤者",
+    "en": "Dark Seer"
+  },
+  "114": {
+    "cn": "齐天大圣",
+    "en": "Monkey King"
+  },
+  "49": {
+    "cn": "龙骑士",
+    "en": "Dragon Knight"
+  }
+}

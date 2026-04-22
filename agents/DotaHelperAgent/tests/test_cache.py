@@ -221,8 +221,13 @@ class TestMemoryCache:
         
         assert len(manager._memory_cache) == 0
         
-        cache_files = list(Path(temp_cache_dir).glob("*.json"))
-        assert len(cache_files) > 0
+        # 检查 SQLite 数据库文件是否存在
+        db_file = Path(temp_cache_dir) / "cache.db"
+        assert db_file.exists()
+        
+        # 检查数据库中有数据
+        stats = manager.get_stats()
+        assert stats["item_count"] > 0
 
 
 class TestCacheStats:
@@ -253,7 +258,7 @@ class TestCacheStats:
         
         assert updated_stats["hits"] >= 2
         assert updated_stats["misses"] >= 1
-        assert updated_stats["hit_rate"] > 0
+        assert updated_stats["hit_rate_float"] > 0
     
     def test_reset_stats(self, temp_cache_dir):
         """测试重置统计"""
@@ -322,9 +327,7 @@ class TestCacheDecorator:
         shutil.rmtree(tmpdir, ignore_errors=True)
     
     def test_get_cache_decorator(self, temp_cache_dir):
-        """测试 @get_cache 装饰器"""
-        from cache.cache_manager import get_cache
-        
+        """测试缓存装饰器"""
         manager = CacheManager(
             cache_dir=temp_cache_dir,
             ttl_hours=24,
@@ -333,13 +336,13 @@ class TestCacheDecorator:
         
         call_count = [0]
         
-        @get_cache("test_prefix")
+        @manager.cached(prefix="test_prefix")
         def expensive_function(x, y):
             call_count[0] += 1
             return x + y
         
-        result1 = expensive_function(manager, 1, 2)
-        result2 = expensive_function(manager, 1, 2)
+        result1 = expensive_function(1, 2)
+        result2 = expensive_function(1, 2)
         
         assert result1 == 3
         assert result2 == 3

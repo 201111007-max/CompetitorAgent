@@ -2,6 +2,8 @@
 
 from .core.agent import DotaHelperAgent
 from .utils.api_client import OpenDotaClient
+from .utils.localization import DotaLocalizer, get_localizer, get_hero_name_cn, get_item_name_cn
+from .utils.llm_client import LLMClient, LLMConfig, DotaLLMAnalyzer
 from .analyzers.hero_analyzer import HeroAnalyzer
 from .analyzers.item_recommender import ItemRecommender
 from .analyzers.skill_builder import SkillBuilder
@@ -13,6 +15,7 @@ from .core.config import (
     CacheConfig,
     RateLimitConfig,
     LogConfig,
+    LLMConfig,
 )
 
 __version__ = "1.0.0"
@@ -23,20 +26,32 @@ __all__ = [
     "HeroAnalyzer",
     "ItemRecommender",
     "SkillBuilder",
-    
+
+    # 本地化
+    "DotaLocalizer",
+    "get_localizer",
+    "get_hero_name_cn",
+    "get_item_name_cn",
+
+    # LLM
+    "LLMClient",
+    "LLMConfig",
+    "DotaLLMAnalyzer",
+
     # 缓存
     "CacheManager",
     "get_cache",
-    
+
     # 策略
     "IScoreStrategy",
     "WinRateStrategy",
     "PopularityStrategy",
-    
+
     # 配置
     "AgentConfig",
     "MatchupConfig",
     "CacheConfig",
     "RateLimitConfig",
     "LogConfig",
+    "LLMConfig",
 ]

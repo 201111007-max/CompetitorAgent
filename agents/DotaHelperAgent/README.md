@@ -1,19 +1,21 @@
 # DotaHelperAgent - Dota 2 英雄推荐助手
 
-基于 OpenDota API 的智能 Dota 2 英雄推荐 Agent，提供英雄克制分析、出装推荐和技能加点建议。
+基于 OpenDota API 的智能 Dota 2 英雄推荐 Agent，提供英雄克制分析、出装推荐和技能加点建议。**全模块支持 LLM 优先，数据驱动兜底的混合模式**，提供更智能的推荐和策略建议。
 
 ## ✨ 特性
 
-- **英雄推荐** - 根据己方和对方阵容，推荐最佳英雄选择
+- **英雄推荐** - 根据己方和对方阵容，推荐最佳英雄选择（🤖 LLM 优先）
 - **克制分析** - 分析英雄间的克制关系，提供数据支撑
-- **出装推荐** - 根据游戏阶段推荐最优物品搭配
-- **技能加点** - 基于英雄定位推荐技能加点顺序
+- **出装推荐** - 根据游戏阶段推荐最优物品搭配（🤖 LLM 优先）
+- **技能加点** - 基于英雄定位推荐技能加点顺序（🤖 LLM 优先）
 - **智能缓存** - 两级缓存架构（内存 + 文件），减少 API 调用
 - **速率限制** - 自动限流，符合 OpenDota API 限制（60 次/分钟）
 - **可配置化** - 支持灵活的配置选项
 - **策略模式** - 支持多种评分策略，易于扩展
 - **缓存预热** - 支持预加载热门数据，提升性能
 - **线程安全** - 缓存支持多线程并发访问
+- **🆕 混合模式架构** - **所有核心功能优先使用 LLM**，数据驱动作为兜底
+- **🆕 中文本地化** - 英雄和物品中文名称支持
 
 ## 📦 安装
 
@@ -112,6 +114,166 @@ result = agent.recommend_heroes(
 )
 ```
 
+### 🆕 LLM 增强分析（可选）
+
+支持接入本地部署的大模型（如 LM Studio、Ollama），提供智能推荐解释。
+
+#### 方式一：使用配置文件（推荐）
+
+1. 复制配置文件模板：
+```bash
+cp agents/DotaHelperAgent/config/llm_config.yaml.example agents/DotaHelperAgent/config/llm_config.yaml
+```
+
+2. 编辑 `agents/DotaHelperAgent/config/llm_config.yaml`：
+```yaml
+llm:
+  enabled: true
+  base_url: "http://127.0.0.1:1234/v1"  # 本地模型服务地址
+  model: "qwen3.5-9b"                    # 模型名称
+  temperature: 0.7
+  max_tokens: 2048
+```
+
+3. 使用配置：
+```python
+from agents.DotaHelperAgent import DotaHelperAgent, AgentConfig, LLMConfig
+
+# 自动从配置文件加载 LLM 配置
+llm_config = LLMConfig.from_yaml()  # 自动查找配置文件
+config = AgentConfig(llm=llm_config)
+agent = DotaHelperAgent(config=config)
+```
+
+#### 方式二：代码中直接配置
+
+```python
+from agents.DotaHelperAgent import (
+    DotaHelperAgent,
+    AgentConfig,
+    LLMConfig,
+)
+
+# 代码中直接配置（优先级高于配置文件）
+llm_config = LLMConfig(
+    enabled=True,
+    base_url="http://127.0.0.1:1234/v1",  # 本地模型服务地址
+    model="qwen3.5-9b",                    # 模型名称
+    temperature=0.7,
+    max_tokens=2048,
+)
+
+config = AgentConfig(llm=llm_config)
+agent = DotaHelperAgent(config=config)
+```
+
+#### 使用 LLM 功能
+
+```python
+# 获取推荐（优先使用 LLM，失败则使用数据驱动兜底）
+result = agent.recommend_heroes(
+    our_heroes=["Anti-Mage"],
+    enemy_heroes=["Pudge", "Phantom Assassin"],
+    top_n=3
+)
+
+# 查看推荐来源
+print(f"推荐来源：{result.get('source', 'unknown')}")  # 'llm' 或 'data'
+
+# 使用 LLM 解释推荐原因
+for rec in result['recommendations']:
+    explanation = agent.explain_recommendation_with_llm(
+        hero_name=rec['hero_name'],
+        enemy_heroes=result['enemy_team'],
+        win_rate=0.55,  # 示例胜率
+        reasons=rec['reasons']
+    )
+    if explanation:
+        print(f"\n🤖 AI 解释: {explanation}")
+
+# 使用 LLM 分析阵容
+analysis = agent.analyze_composition_with_llm(
+    our_heroes=result['our_team'],
+    enemy_heroes=result['enemy_team']
+)
+if analysis:
+    print(f"\n📊 AI 阵容分析: {analysis}")
+
+# 向 LLM 提问
+answer = agent.ask_llm("什么英雄最克制帕吉？")
+if answer:
+    print(f"\n❓ AI 回答: {answer}")
+```
+
+## 🏗️ 架构设计
+
+### 混合模式架构（Hybrid Architecture）
+
+本项目采用**LLM 优先，数据驱动兜底**的混合模式架构，所有核心功能模块都遵循以下设计原则：
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      用户请求                                 │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   HybridAnalyzer (基类)                      │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │ 1. 优先尝试 LLM 执行                                     │  │
+│  │    - 智能分析                                           │  │
+│  │    - 灵活响应                                           │  │
+│  │    - 结构化输出                                         │  │
+│  └───────────────────────────────────────────────────────┘  │
+│                            │                                  │
+│                    [LLM 失败？]                               │
+│                            │                                  │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │ 2. 回退到数据驱动执行                                    │  │
+│  │    - 可靠数据                                           │  │
+│  │    - 规则分析                                           │  │
+│  │    - 稳定输出                                           │  │
+│  └───────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│                      返回结果 + 来源标识                       │
+│  - source: "llm" | "data"                                   │
+│  - success: true | false                                    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 核心模块
+
+所有分析器模块都继承自 `HybridAnalyzer` 基类，实现统一的执行流程：
+
+- **HybridHeroAnalyzer** - 英雄推荐与阵容分析
+- **HybridItemRecommender** - 物品出装推荐
+- **HybridSkillBuilder** - 技能加点建议
+
+### 代码复用性
+
+通过 `hybrid_base.py` 提供通用的基类和工具：
+
+- **ExecutionSource** - 执行来源枚举
+- **HybridExecutor** - 混合执行器模板
+- **HybridAnalyzer** - 分析器基类（带 LLM 支持）
+
+```python
+# 示例：使用混合模式
+recommender = HybridItemRecommender(client, llm_enabled=True)
+
+# LLM 优先，自动回退
+result = recommender.recommend_items(
+    hero_name="axe",
+    game_stage="mid",
+    enemy_heroes=["anti-mage", "crystal_maiden"]
+)
+
+print(f"推荐来源：{result.get('source')}")  # "llm" 或 "data"
+```
+
 ## 📁 项目结构
 
 ```
@@ -130,7 +292,9 @@ DotaHelperAgent/
 │   └── score_strategies.py # 胜率/热度策略
 ├── utils/                  # 工具模块
 │   ├── __init__.py
-│   └── api_client.py      # OpenDota API 客户端
+│   ├── api_client.py      # OpenDota API 客户端
+│   ├── llm_client.py      # LLM 客户端（可选）
+│   └── localization.py    # 中文本地化
 ├── cache/                  # 缓存模块
 │   ├── __init__.py
 │   └── cache_manager.py   # 缓存管理器
@@ -157,8 +321,9 @@ DotaHelperAgent/
 
 ```python
 agent = DotaHelperAgent(
-    api_key=None,  # API Key 可选
-    config=None    # 配置对象可选
+    api_key=None,      # API Key 可选
+    config=None,       # 配置对象可选
+    enable_llm=None    # 是否启用 LLM（可选，默认使用配置）
 )
 
 # 主要方法
@@ -167,6 +332,12 @@ agent.recommend_build(hero_name, role="core", game_stage="all")
 agent.get_counter_heroes(target_hero, top_n=5)
 agent.warm_up_cache()           # 预热缓存
 agent.clear_cache()             # 清空缓存
+
+# 🆕 LLM 增强方法（需要启用 LLM）
+agent.explain_recommendation_with_llm(hero_name, enemy_heroes, win_rate, reasons)
+agent.analyze_composition_with_llm(our_heroes, enemy_heroes)
+agent.ask_llm(question, context=None)
+agent.is_llm_enabled()          # 检查 LLM 是否已启用
 ```
 
 ### 2. OpenDotaClient
@@ -275,12 +446,24 @@ rate_config = RateLimitConfig(
     max_retries=3,
 )
 
+# LLM 配置
+llm_config = LLMConfig(
+    enabled=True,                          # 是否启用 LLM
+    base_url="http://127.0.0.1:1234/v1",   # 本地模型服务地址
+    model="qwen3.5-9b",                    # 模型名称
+    api_key=None,                          # API Key（本地通常不需要）
+    temperature=0.7,                       # 温度参数
+    max_tokens=2048,                       # 最大生成 token 数
+    timeout=60,                            # 超时时间（秒）
+)
+
 # 总配置
 agent_config = AgentConfig(
     api_key=None,
     matchup=matchup_config,
     cache=cache_config,
     rate_limit=rate_config,
+    llm=llm_config,                        # 🆕 LLM 配置
 )
 ```
 

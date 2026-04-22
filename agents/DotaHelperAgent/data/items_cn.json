@@ -1,0 +1,1166 @@
+{
+  "1": {
+    "cn": "闪烁匕首",
+    "en": "blink"
+  },
+  "2": {
+    "cn": "攻击之爪",
+    "en": "blades_of_attack"
+  },
+  "3": {
+    "cn": "阔剑",
+    "en": "broadsword"
+  },
+  "4": {
+    "cn": "锁子甲",
+    "en": "chainmail"
+  },
+  "5": {
+    "cn": "大剑",
+    "en": "claymore"
+  },
+  "6": {
+    "cn": "铁意头盔",
+    "en": "helm_of_iron_will"
+  },
+  "7": {
+    "cn": "标枪",
+    "en": "javelin"
+  },
+  "8": {
+    "cn": "秘银锤",
+    "en": "mithril_hammer"
+  },
+  "9": {
+    "cn": "板甲",
+    "en": "platemail"
+  },
+  "10": {
+    "cn": "短棍",
+    "en": "quarterstaff"
+  },
+  "11": {
+    "cn": "压制之刃",
+    "en": "quelling_blade"
+  },
+  "12": {
+    "cn": "守护指环",
+    "en": "ring_of_protection"
+  },
+  "13": {
+    "cn": "力量手套",
+    "en": "gauntlets"
+  },
+  "14": {
+    "cn": "敏捷便鞋",
+    "en": "slippers"
+  },
+  "15": {
+    "cn": "智力斗篷",
+    "en": "mantle"
+  },
+  "16": {
+    "cn": "铁树枝干",
+    "en": "branches"
+  },
+  "17": {
+    "cn": "力量腰带",
+    "en": "belt_of_strength"
+  },
+  "18": {
+    "cn": "精灵布带",
+    "en": "boots_of_elves"
+  },
+  "19": {
+    "cn": "法师长袍",
+    "en": "robe"
+  },
+  "20": {
+    "cn": "圆环",
+    "en": "circlet"
+  },
+  "21": {
+    "cn": "食人魔之斧",
+    "en": "ogre_axe"
+  },
+  "22": {
+    "cn": "欢欣之刃",
+    "en": "blade_of_alacrity"
+  },
+  "23": {
+    "cn": "魔力法杖",
+    "en": "staff_of_wizardry"
+  },
+  "24": {
+    "cn": "极限法球",
+    "en": "ultimate_orb"
+  },
+  "25": {
+    "cn": "加速手套",
+    "en": "gloves"
+  },
+  "26": {
+    "cn": "吸血面具",
+    "en": "lifesteal"
+  },
+  "27": {
+    "cn": "回复戒指",
+    "en": "ring_of_regen"
+  },
+  "28": {
+    "cn": "贤者面罩",
+    "en": "sobi_mask"
+  },
+  "29": {
+    "cn": "速度之靴",
+    "en": "boots"
+  },
+  "30": {
+    "cn": "真视宝石",
+    "en": "gem"
+  },
+  "31": {
+    "cn": "抗魔斗篷",
+    "en": "cloak"
+  },
+  "32": {
+    "cn": "闪避护符",
+    "en": "talisman_of_evasion"
+  },
+  "33": {
+    "cn": "奶酪",
+    "en": "cheese"
+  },
+  "34": {
+    "cn": "魔棒",
+    "en": "magic_stick"
+  },
+  "36": {
+    "cn": "魔杖",
+    "en": "magic_wand"
+  },
+  "37": {
+    "cn": "幽魂权杖",
+    "en": "ghost"
+  },
+  "38": {
+    "cn": "净化药水",
+    "en": "clarity"
+  },
+  "39": {
+    "cn": "治疗药膏",
+    "en": "flask"
+  },
+  "40": {
+    "cn": "显影之尘",
+    "en": "dust"
+  },
+  "41": {
+    "cn": "魔瓶",
+    "en": "bottle"
+  },
+  "42": {
+    "cn": "侦察守卫",
+    "en": "ward_observer"
+  },
+  "43": {
+    "cn": "岗哨守卫",
+    "en": "ward_sentry"
+  },
+  "44": {
+    "cn": "树之祭祀",
+    "en": "tango"
+  },
+  "46": {
+    "cn": "回城卷轴",
+    "en": "tpscroll"
+  },
+  "48": {
+    "cn": "远行鞋",
+    "en": "travel_boots"
+  },
+  "50": {
+    "cn": "相位鞋",
+    "en": "phase_boots"
+  },
+  "51": {
+    "cn": "恶魔刀锋",
+    "en": "demon_edge"
+  },
+  "52": {
+    "cn": "鹰歌弓",
+    "en": "eagle"
+  },
+  "53": {
+    "cn": "掠夺者之斧",
+    "en": "reaver"
+  },
+  "54": {
+    "cn": "圣者遗物",
+    "en": "relic"
+  },
+  "55": {
+    "cn": "振奋宝石",
+    "en": "hyperstone"
+  },
+  "56": {
+    "cn": "治疗指环",
+    "en": "ring_of_health"
+  },
+  "57": {
+    "cn": "虚无宝石",
+    "en": "void_stone"
+  },
+  "58": {
+    "cn": "神秘法杖",
+    "en": "mystic_staff"
+  },
+  "59": {
+    "cn": "能量之球",
+    "en": "energy_booster"
+  },
+  "60": {
+    "cn": "精气之球",
+    "en": "point_booster"
+  },
+  "61": {
+    "cn": "活力之球",
+    "en": "vitality_booster"
+  },
+  "63": {
+    "cn": "动力鞋",
+    "en": "power_treads"
+  },
+  "65": {
+    "cn": "迈达斯之手",
+    "en": "hand_of_midas"
+  },
+  "67": {
+    "cn": "空明杖",
+    "en": "oblivion_staff"
+  },
+  "69": {
+    "cn": "坚韧球",
+    "en": "pers"
+  },
+  "71": {
+    "cn": "穷鬼盾",
+    "en": "poor_mans_shield"
+  },
+  "73": {
+    "cn": "护腕",
+    "en": "bracer"
+  },
+  "75": {
+    "cn": "怨灵系带",
+    "en": "wraith_band"
+  },
+  "77": {
+    "cn": "空灵挂件",
+    "en": "null_talisman"
+  },
+  "79": {
+    "cn": "梅肯斯姆",
+    "en": "mekansm"
+  },
+  "81": {
+    "cn": "弗拉迪米尔的祭品",
+    "en": "vladmir"
+  },
+  "86": {
+    "cn": "玄冥盾牌",
+    "en": "buckler"
+  },
+  "88": {
+    "cn": "王者之戒",
+    "en": "ring_of_basilius"
+  },
+  "90": {
+    "cn": "洞察烟斗",
+    "en": "pipe"
+  },
+  "92": {
+    "cn": "影之灵龛",
+    "en": "urn_of_shadows"
+  },
+  "94": {
+    "cn": "恢复头巾",
+    "en": "headdress"
+  },
+  "96": {
+    "cn": "邪恶镰刀",
+    "en": "sheepstick"
+  },
+  "98": {
+    "cn": "紫怨",
+    "en": "orchid"
+  },
+  "100": {
+    "cn": "Eul的神圣法杖",
+    "en": "cyclone"
+  },
+  "102": {
+    "cn": "原力法杖",
+    "en": "force_staff"
+  },
+  "104": {
+    "cn": "达贡之神力",
+    "en": "dagon"
+  },
+  "106": {
+    "cn": "死灵书",
+    "en": "necronomicon"
+  },
+  "108": {
+    "cn": "阿哈利姆神杖",
+    "en": "ultimate_scepter"
+  },
+  "110": {
+    "cn": "刷新球",
+    "en": "refresher"
+  },
+  "112": {
+    "cn": "强袭胸甲",
+    "en": "assault"
+  },
+  "114": {
+    "cn": "恐鳌之心",
+    "en": "heart"
+  },
+  "116": {
+    "cn": "黑皇杖",
+    "en": "black_king_bar"
+  },
+  "117": {
+    "cn": "不朽之守护",
+    "en": "aegis"
+  },
+  "119": {
+    "cn": "希瓦的守护",
+    "en": "shivas_guard"
+  },
+  "121": {
+    "cn": "血精石",
+    "en": "bloodstone"
+  },
+  "123": {
+    "cn": "林肯法球",
+    "en": "sphere"
+  },
+  "125": {
+    "cn": "先锋盾",
+    "en": "vanguard"
+  },
+  "127": {
+    "cn": "刃甲",
+    "en": "blade_mail"
+  },
+  "129": {
+    "cn": "振魂石",
+    "en": "soul_booster"
+  },
+  "131": {
+    "cn": "挑战头巾",
+    "en": "hood_of_defiance"
+  },
+  "133": {
+    "cn": "圣剑",
+    "en": "rapier"
+  },
+  "135": {
+    "cn": "金箍棒",
+    "en": "monkey_king_bar"
+  },
+  "137": {
+    "cn": "辉耀",
+    "en": "radiance"
+  },
+  "139": {
+    "cn": "蝴蝶",
+    "en": "butterfly"
+  },
+  "141": {
+    "cn": "代达罗斯之殇",
+    "en": "greater_crit"
+  },
+  "143": {
+    "cn": "碎颅锤",
+    "en": "basher"
+  },
+  "145": {
+    "cn": "狂战斧",
+    "en": "bfury"
+  },
+  "147": {
+    "cn": "幻影斧",
+    "en": "manta"
+  },
+  "149": {
+    "cn": "水晶剑",
+    "en": "lesser_crit"
+  },
+  "151": {
+    "cn": "莫尔迪基安的臂章",
+    "en": "armlet"
+  },
+  "152": {
+    "cn": "影刃",
+    "en": "invis_sword"
+  },
+  "154": {
+    "cn": "散夜对剑",
+    "en": "sange_and_yasha"
+  },
+  "156": {
+    "cn": "撒旦之邪力",
+    "en": "satanic"
+  },
+  "158": {
+    "cn": "雷神之锤",
+    "en": "mjollnir"
+  },
+  "160": {
+    "cn": "斯嘉蒂之眼",
+    "en": "skadi"
+  },
+  "162": {
+    "cn": "散华",
+    "en": "sange"
+  },
+  "164": {
+    "cn": "支配头盔",
+    "en": "helm_of_the_dominator"
+  },
+  "166": {
+    "cn": "漩涡",
+    "en": "maelstrom"
+  },
+  "168": {
+    "cn": "黯灭",
+    "en": "desolator"
+  },
+  "170": {
+    "cn": "夜叉",
+    "en": "yasha"
+  },
+  "172": {
+    "cn": "疯狂面具",
+    "en": "mask_of_madness"
+  },
+  "174": {
+    "cn": "净魂之刃",
+    "en": "diffusal_blade"
+  },
+  "176": {
+    "cn": "虚灵之刃",
+    "en": "ethereal_blade"
+  },
+  "178": {
+    "cn": "灵魂之戒",
+    "en": "soul_ring"
+  },
+  "180": {
+    "cn": "奥术鞋",
+    "en": "arcane_boots"
+  },
+  "181": {
+    "cn": "淬毒之珠",
+    "en": "orb_of_venom"
+  },
+  "182": {
+    "cn": "圆盾",
+    "en": "stout_shield"
+  },
+  "185": {
+    "cn": "韧鼓",
+    "en": "ancient_janggo"
+  },
+  "187": {
+    "cn": "勇气勋章",
+    "en": "medallion_of_courage"
+  },
+  "188": {
+    "cn": "诡计之雾",
+    "en": "smoke_of_deceit"
+  },
+  "190": {
+    "cn": "纷争面纱",
+    "en": "veil_of_discord"
+  },
+  "193": {
+    "cn": "死灵书",
+    "en": "necronomicon_2"
+  },
+  "194": {
+    "cn": "死灵书",
+    "en": "necronomicon_3"
+  },
+  "196": {
+    "cn": "净魂之刃",
+    "en": "diffusal_blade_2"
+  },
+  "201": {
+    "cn": "达贡之神力",
+    "en": "dagon_2"
+  },
+  "202": {
+    "cn": "达贡之神力",
+    "en": "dagon_3"
+  },
+  "203": {
+    "cn": "达贡之神力",
+    "en": "dagon_4"
+  },
+  "204": {
+    "cn": "达贡之神力",
+    "en": "dagon_5"
+  },
+  "206": {
+    "cn": "阿托斯之棍",
+    "en": "rod_of_atos"
+  },
+  "208": {
+    "cn": "深渊之刃",
+    "en": "abyssal_blade"
+  },
+  "210": {
+    "cn": "天堂之戟",
+    "en": "heavens_halberd"
+  },
+  "212": {
+    "cn": "天鹰之戒",
+    "en": "ring_of_aquila"
+  },
+  "214": {
+    "cn": "静谧之鞋",
+    "en": "tranquil_boots"
+  },
+  "215": {
+    "cn": "暗影护符",
+    "en": "shadow_amulet"
+  },
+  "216": {
+    "cn": "魔法芒果",
+    "en": "enchanted_mango"
+  },
+  "218": {
+    "cn": "侦察·岗哨守卫",
+    "en": "ward_dispenser"
+  },
+  "220": {
+    "cn": "远行鞋",
+    "en": "travel_boots_2"
+  },
+  "226": {
+    "cn": "清莲宝珠",
+    "en": "lotus_orb"
+  },
+  "229": {
+    "cn": "炎阳纹章",
+    "en": "solar_crest"
+  },
+  "231": {
+    "cn": "卫士胫甲",
+    "en": "guardian_greaves"
+  },
+  "232": {
+    "cn": "以太透镜",
+    "en": "aether_lens"
+  },
+  "235": {
+    "cn": "玲珑心",
+    "en": "octarine_core"
+  },
+  "236": {
+    "cn": "魔龙枪",
+    "en": "dragon_lance"
+  },
+  "237": {
+    "cn": "仙灵之火",
+    "en": "faerie_fire"
+  },
+  "239": {
+    "cn": "寒铁钢爪",
+    "en": "iron_talon"
+  },
+  "240": {
+    "cn": "枯萎之珠",
+    "en": "blight_stone"
+  },
+  "241": {
+    "cn": "树之祭祀（共享）",
+    "en": "tango_single"
+  },
+  "242": {
+    "cn": "赤红甲",
+    "en": "crimson_guard"
+  },
+  "244": {
+    "cn": "风灵之纹",
+    "en": "wind_lace"
+  },
+  "247": {
+    "cn": "银月之晶",
+    "en": "moon_shard"
+  },
+  "249": {
+    "cn": "白银之锋",
+    "en": "silver_edge"
+  },
+  "250": {
+    "cn": "血棘",
+    "en": "bloodthorn"
+  },
+  "252": {
+    "cn": "回音战刃",
+    "en": "echo_sabre"
+  },
+  "254": {
+    "cn": "微光披风",
+    "en": "glimmer_cape"
+  },
+  "257": {
+    "cn": "知识之书",
+    "en": "tome_of_knowledge"
+  },
+  "261": {
+    "cn": "王冠",
+    "en": "crown"
+  },
+  "263": {
+    "cn": "飓风长戟",
+    "en": "hurricane_pike"
+  },
+  "265": {
+    "cn": "凝魂之露",
+    "en": "infused_raindrop"
+  },
+  "269": {
+    "cn": "圣洁吊坠",
+    "en": "holy_locket"
+  },
+  "271": {
+    "cn": "阿哈利姆福佑",
+    "en": "ultimate_scepter_2"
+  },
+  "273": {
+    "cn": "散慧对剑",
+    "en": "kaya_and_sange"
+  },
+  "277": {
+    "cn": "慧夜对剑",
+    "en": "yasha_and_kaya"
+  },
+  "279": {
+    "cn": "恐鳌之戒",
+    "en": "ring_of_tarrasque"
+  },
+  "287": {
+    "cn": "基恩镜片",
+    "en": "keen_optic"
+  },
+  "288": {
+    "cn": "林野长弓",
+    "en": "grove_bow"
+  },
+  "289": {
+    "cn": "加速护符",
+    "en": "quickening_charm"
+  },
+  "290": {
+    "cn": "贤者石",
+    "en": "philosophers_stone"
+  },
+  "291": {
+    "cn": "原力鞋",
+    "en": "force_boots"
+  },
+  "292": {
+    "cn": "寂灭",
+    "en": "desolator_2"
+  },
+  "294": {
+    "cn": "先哲之石",
+    "en": "seer_stone"
+  },
+  "300": {
+    "cn": "永恒遗物",
+    "en": "timeless_relic"
+  },
+  "301": {
+    "cn": "神镜盾",
+    "en": "mirror_shield"
+  },
+  "304": {
+    "cn": "铁树之木",
+    "en": "ironwood_tree"
+  },
+  "305": {
+    "cn": "蜂王浆",
+    "en": "royal_jelly"
+  },
+  "306": {
+    "cn": "学徒之礼",
+    "en": "pupils_gift"
+  },
+  "309": {
+    "cn": "智灭",
+    "en": "mind_breaker"
+  },
+  "311": {
+    "cn": "法术棱镜",
+    "en": "spell_prism"
+  },
+  "326": {
+    "cn": "网虫腿",
+    "en": "spider_legs"
+  },
+  "327": {
+    "cn": "不朽尸王的头盔",
+    "en": "helm_of_the_undying"
+  },
+  "331": {
+    "cn": "臂甲",
+    "en": "vambrace"
+  },
+  "334": {
+    "cn": "魔童之爪",
+    "en": "imp_claw"
+  },
+  "335": {
+    "cn": "闪灵",
+    "en": "flicker"
+  },
+  "336": {
+    "cn": "望远镜",
+    "en": "spy_gadget"
+  },
+  "349": {
+    "cn": "奥术指环",
+    "en": "arcane_ring"
+  },
+  "354": {
+    "cn": "海洋之心",
+    "en": "ocean_heart"
+  },
+  "355": {
+    "cn": "扫帚柄",
+    "en": "broom_handle"
+  },
+  "356": {
+    "cn": "可靠铁铲",
+    "en": "trusty_shovel"
+  },
+  "357": {
+    "cn": "幽冥披巾",
+    "en": "nether_shawl"
+  },
+  "358": {
+    "cn": "炎龙之鳞",
+    "en": "dragon_scale"
+  },
+  "359": {
+    "cn": "精华指环",
+    "en": "essence_ring"
+  },
+  "361": {
+    "cn": "魔力箭袋",
+    "en": "enchanted_quiver"
+  },
+  "362": {
+    "cn": "忍者用具",
+    "en": "ninja_gear"
+  },
+  "363": {
+    "cn": "幻术师披风",
+    "en": "illusionsts_cape"
+  },
+  "366": {
+    "cn": "极",
+    "en": "apex"
+  },
+  "367": {
+    "cn": "弩炮",
+    "en": "ballista"
+  },
+  "370": {
+    "cn": "冥灵书",
+    "en": "demonicon"
+  },
+  "371": {
+    "cn": "天崩",
+    "en": "fallen_sky"
+  },
+  "372": {
+    "cn": "海盗帽",
+    "en": "pirate_hat"
+  },
+  "374": {
+    "cn": "机械之心",
+    "en": "ex_machina"
+  },
+  "375": {
+    "cn": "暗淡胸针",
+    "en": "faded_broach"
+  },
+  "376": {
+    "cn": "骑士剑",
+    "en": "paladin_sword"
+  },
+  "377": {
+    "cn": "恶牛角",
+    "en": "minotaur_horn"
+  },
+  "378": {
+    "cn": "毁灭灵球",
+    "en": "orb_of_destruction"
+  },
+  "379": {
+    "cn": "平世剑",
+    "en": "the_leveller"
+  },
+  "381": {
+    "cn": "巨神残铁",
+    "en": "titan_sliver"
+  },
+  "473": {
+    "cn": "巫毒面具",
+    "en": "voodoo_mask"
+  },
+  "485": {
+    "cn": "闪电指套",
+    "en": "blitz_knuckles"
+  },
+  "534": {
+    "cn": "巫师之刃",
+    "en": "witch_blade"
+  },
+  "565": {
+    "cn": "碎裂背心",
+    "en": "chipped_vest"
+  },
+  "569": {
+    "cn": "腐蚀之珠",
+    "en": "orb_of_corrosion"
+  },
+  "571": {
+    "cn": "欺诈师斗篷",
+    "en": "trickster_cloak"
+  },
+  "573": {
+    "cn": "精灵外衣",
+    "en": "elven_tunic"
+  },
+  "574": {
+    "cn": "火焰斗篷",
+    "en": "cloak_of_flames"
+  },
+  "577": {
+    "cn": "附魂面具",
+    "en": "possessed_mask"
+  },
+  "585": {
+    "cn": "风暴宝器",
+    "en": "stormcrafter"
+  },
+  "589": {
+    "cn": "仙灵饰品",
+    "en": "mysterious_hat"
+  },
+  "593": {
+    "cn": "毛毛帽",
+    "en": "fluffy_hat"
+  },
+  "596": {
+    "cn": "猎鹰战刃",
+    "en": "falcon_blade"
+  },
+  "598": {
+    "cn": "法师克星",
+    "en": "mage_slayer"
+  },
+  "600": {
+    "cn": "盛势闪光",
+    "en": "overwhelming_blink"
+  },
+  "603": {
+    "cn": "迅疾闪光",
+    "en": "swift_blink"
+  },
+  "604": {
+    "cn": "秘奥闪光",
+    "en": "arcane_blink"
+  },
+  "609": {
+    "cn": "阿哈利姆魔晶",
+    "en": "aghanims_shard"
+  },
+  "610": {
+    "cn": "风之杖",
+    "en": "wind_waker"
+  },
+  "635": {
+    "cn": "统御头盔",
+    "en": "helm_of_the_overlord"
+  },
+  "638": {
+    "cn": "五锋长剑",
+    "en": "penta_edged_sword"
+  },
+  "675": {
+    "cn": "通灵头带",
+    "en": "psychic_headband"
+  },
+  "676": {
+    "cn": "祭礼长袍",
+    "en": "ceremonial_robe"
+  },
+  "677": {
+    "cn": "暗影邪典",
+    "en": "book_of_shadows"
+  },
+  "678": {
+    "cn": "巨人之戒",
+    "en": "giants_ring"
+  },
+  "680": {
+    "cn": "凌厉长鞭",
+    "en": "bullwhip"
+  },
+  "686": {
+    "cn": "银闪护符",
+    "en": "quicksilver_amulet"
+  },
+  "692": {
+    "cn": "永世法衣",
+    "en": "eternal_shroud"
+  },
+  "725": {
+    "cn": "阿哈利姆魔晶 - 消耗品",
+    "en": "aghanims_shard_roshan"
+  },
+  "727": {
+    "cn": "阿哈利姆福佑 - 肉山",
+    "en": "ultimate_scepter_roshan"
+  },
+  "825": {
+    "cn": "简朴短帽",
+    "en": "ascetic_cap"
+  },
+  "828": {
+    "cn": "飞贼之刃",
+    "en": "misericorde"
+  },
+  "829": {
+    "cn": "秘术师铠甲",
+    "en": "force_field"
+  },
+  "834": {
+    "cn": "雷火弹",
+    "en": "black_powder_bag"
+  },
+  "835": {
+    "cn": "仙灵榴弹",
+    "en": "paintball"
+  },
+  "837": {
+    "cn": "行巫之祸",
+    "en": "heavy_blade"
+  },
+  "838": {
+    "cn": "豚杆",
+    "en": "unstable_wand"
+  },
+  "840": {
+    "cn": "杂技玩具",
+    "en": "pogo_stick"
+  },
+  "911": {
+    "cn": "英灵胸针",
+    "en": "revenants_brooch"
+  },
+  "931": {
+    "cn": "宽容之靴",
+    "en": "boots_of_bearing"
+  },
+  "939": {
+    "cn": "鱼叉",
+    "en": "harpoon"
+  },
+  "945": {
+    "cn": "宁静种籽",
+    "en": "seeds_of_serenity"
+  },
+  "946": {
+    "cn": "追击之矛",
+    "en": "lance_of_pursuit"
+  },
+  "947": {
+    "cn": "玄奥手镯",
+    "en": "occult_bracelet"
+  },
+  "990": {
+    "cn": "维齐尔之眼",
+    "en": "eye_of_the_vizier"
+  },
+  "1076": {
+    "cn": "行家阵列",
+    "en": "specialists_array"
+  },
+  "1077": {
+    "cn": "瑞斯图尔尖匕",
+    "en": "dagger_of_ristul"
+  },
+  "1090": {
+    "cn": "仁慈与恩泽",
+    "en": "muertas_gun"
+  },
+  "1097": {
+    "cn": "散魂剑",
+    "en": "disperser"
+  },
+  "1107": {
+    "cn": "灵匣",
+    "en": "phylactery"
+  },
+  "1122": {
+    "cn": "宝冕",
+    "en": "diadem"
+  },
+  "1123": {
+    "cn": "血腥榴弹",
+    "en": "blood_grenade"
+  },
+  "1124": {
+    "cn": "勇气之光",
+    "en": "spark_of_courage"
+  },
+  "1125": {
+    "cn": "丰饶之环",
+    "en": "cornucopia"
+  },
+  "1128": {
+    "cn": "长盾",
+    "en": "pavise"
+  },
+  "1154": {
+    "cn": "奶酪块",
+    "en": "royale_with_cheese"
+  },
+  "1158": {
+    "cn": "邪道私语",
+    "en": "whisper_of_the_dread"
+  },
+  "1466": {
+    "cn": "缚灵索",
+    "en": "gungir"
+  },
+  "1575": {
+    "cn": "冰霜之珠",
+    "en": "orb_of_frost"
+  },
+  "1598": {
+    "cn": "不屈之眼",
+    "en": "unrelenting_eye"
+  },
+  "1599": {
+    "cn": "魔力药水",
+    "en": "mana_draught"
+  },
+  "1600": {
+    "cn": "撕裂之鞭",
+    "en": "rippers_lash"
+  },
+  "1601": {
+    "cn": "致残之弩",
+    "en": "crippling_crossbow"
+  },
+  "1602": {
+    "cn": "烈风护体",
+    "en": "gale_guard"
+  },
+  "1603": {
+    "cn": "火药手套",
+    "en": "gunpowder_gauntlets"
+  },
+  "1604": {
+    "cn": "炽热纹章",
+    "en": "searing_signet"
+  },
+  "1605": {
+    "cn": "锯齿短刀",
+    "en": "serrated_shiv"
+  },
+  "1606": {
+    "cn": "蝌蚪护符",
+    "en": "polliwog_charm"
+  },
+  "1607": {
+    "cn": "放大单片镜",
+    "en": "magnifying_monocle"
+  },
+  "1608": {
+    "cn": "皮洛士斗篷",
+    "en": "pyrrhic_cloak"
+  },
+  "1637": {
+    "cn": "狗头人酒杯",
+    "en": "kobold_cup"
+  },
+  "1638": {
+    "cn": "休眠珍品",
+    "en": "dormant_curio"
+  },
+  "1639": {
+    "cn": "魅影之衣",
+    "en": "sisters_shroud"
+  },
+  "1640": {
+    "cn": "基迪花粉袋",
+    "en": "jidi_pollen_bag"
+  },
+  "1641": {
+    "cn": "殁境法杖",
+    "en": "outworld_staff"
+  },
+  "1642": {
+    "cn": "德尊血式",
+    "en": "dezun_bloodrite"
+  },
+  "1643": {
+    "cn": "巨人之槌",
+    "en": "giant_maul"
+  },
+  "1644": {
+    "cn": "天赐华冠",
+    "en": "divine_regalia"
+  },
+  "1645": {
+    "cn": "失节华冠",
+    "en": "divine_regalia_broken"
+  },
+  "1802": {
+    "cn": "赛莉蒙妮之冠",
+    "en": "tiara_of_selemene"
+  },
+  "1806": {
+    "cn": "圣斧",
+    "en": "devastator"
+  },
+  "1808": {
+    "cn": "绝刃",
+    "en": "angels_demise"
+  },
+  "4300": {
+    "cn": "挚爱回忆",
+    "en": "ofrenda"
+  },
+  "4301": {
+    "cn": "占卜之铲",
+    "en": "ofrenda_shovel"
+  },
+  "4302": {
+    "cn": "先祖的财富",
+    "en": "ofrenda_pledge"
+  }
+}
