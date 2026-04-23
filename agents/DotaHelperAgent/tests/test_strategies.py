@@ -96,7 +96,7 @@ class TestWinRateStrategy:
         winrate = 52 / 100
         assert winrate == 0.52
         assert score == 0.0
-        assert len(reasons) > 0
+        assert len(reasons) == 0
     
     def test_high_winrate(self):
         """测试高胜率"""

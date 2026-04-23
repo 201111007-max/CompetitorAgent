@@ -16,6 +16,9 @@
 - **线程安全** - 缓存支持多线程并发访问
 - **🆕 混合模式架构** - **所有核心功能优先使用 LLM**，数据驱动作为兜底
 - **🆕 中文本地化** - 英雄和物品中文名称支持
+- **🆕 ReAct Agent** - 支持推理-行动循环，自主决策和工具调用
+- **🆕 Agent 记忆系统** - 短期/长期/情景记忆，支持上下文理解
+- **🆕 工具封装** - 将分析器封装为标准化 Tools，供 Agent 自主调用
 
 ## 📦 安装
 
@@ -281,7 +284,9 @@ DotaHelperAgent/
 ├── core/                   # 核心模块
 │   ├── __init__.py
 │   ├── agent.py           # 主 Agent 类
-│   └── config.py          # 配置管理
+│   ├── config.py          # 配置管理
+│   ├── react_agent.py     # ReAct Agent 实现
+│   └── tool_registry.py   # 工具注册表
 ├── analyzers/              # 分析器模块
 │   ├── __init__.py
 │   ├── hero_analyzer.py   # 英雄克制分析
@@ -298,6 +303,14 @@ DotaHelperAgent/
 ├── cache/                  # 缓存模块
 │   ├── __init__.py
 │   └── cache_manager.py   # 缓存管理器
+├── memory/                 # 记忆模块
+│   ├── __init__.py
+│   └── memory.py          # Agent 记忆系统
+├── tools/                  # 工具模块
+│   ├── __init__.py
+│   ├── base.py            # Tool 基类
+│   ├── hero_tools.py      # 英雄相关 Tools
+│   └── build_tools.py     # 出装/技能 Tools
 ├── examples/               # 使用示例
 │   └── usage_examples.py
 ├── tests/                  # 测试目录
@@ -308,7 +321,8 @@ DotaHelperAgent/
 │   ├── test_config.py     # 配置类测试
 │   ├── test_strategies.py # 评分策略测试
 │   ├── test_analyzers.py  # 分析器测试
-│   └── test_api_client.py # API 客户端测试
+│   ├── test_api_client.py # API 客户端测试
+│   └── test_react.py      # ReAct Agent 测试
 ├── README.md              # 本文件
 └── __init__.py            # 包入口
 ```
@@ -413,7 +427,107 @@ recommendations = analyzer.analyze_matchups(
 counters = analyzer.get_counter_heroes("Phantom Assassin", top_n=5)
 ```
 
-### 5. 配置类
+### 5. AgentMemory (记忆系统)
+
+Agent 记忆系统，支持短期记忆、长期记忆和情景记忆，让 Agent 具备上下文理解能力。
+
+```python
+from agents.DotaHelperAgent.memory import AgentMemory
+
+# 创建记忆系统
+memory = AgentMemory(memory_dir="memory_data")
+
+# 记住信息
+memory.remember("user_preference", {"role": "carry"}, memory_type="long")
+memory.remember("last_query", "推荐克制帕吉的英雄", memory_type="short")
+
+# 回忆信息
+preference = memory.recall("user_preference", memory_type="long")
+
+# 获取相关上下文
+context = memory.get_relevant_context("帕吉", limit=3)
+
+# 清空记忆
+memory.clear_all()
+```
+
+### 6. ReActAgent (推理-行动 Agent)
+
+ReAct (Reasoning + Acting) 模式 Agent，实现自主决策和工具调用能力。
+
+```python
+from agents.DotaHelperAgent.core import ReActAgent, ToolRegistry
+from agents.DotaHelperAgent.tools import create_hero_tools, create_build_tools
+from agents.DotaHelperAgent.memory import AgentMemory
+
+# 创建工具注册表
+registry = ToolRegistry()
+
+# 注册工具（将现有分析器封装为 Tools）
+registry.register_batch(create_hero_tools(hero_analyzer, client))
+registry.register_batch(create_build_tools(item_recommender, skill_builder))
+
+# 创建 ReAct Agent
+agent = ReActAgent(
+    tool_registry=registry,
+    memory=AgentMemory(),
+    max_turns=5,
+    enable_reflection=True
+)
+
+# 解决问题（完整 ReAct 循环）
+result = agent.solve("推荐一个英雄来克制敌方阵容")
+
+# 查看推理过程
+print("推理步骤:", result['reasoning'])
+print("执行动作:", result['actions'])
+print("观察结果:", result['observations'])
+print("最终推荐:", result['recommendations'])
+```
+
+ReAct 循环流程：
+1. **Think** - 理解用户意图
+2. **Plan** - 制定行动计划
+3. **Execute** - 执行工具调用
+4. **Reflect** - 反思调整
+5. **Synthesize** - 综合输出
+
+### 7. ToolRegistry (工具注册表)
+
+管理 Agent 可用的所有 Tools，支持工具注册、分类和调用历史记录。
+
+```python
+from agents.DotaHelperAgent.core import ToolRegistry
+from agents.DotaHelperAgent.tools import Tool
+
+# 创建注册表
+registry = ToolRegistry()
+
+# 注册单个工具
+registry.register(Tool(
+    name="analyze_counter_picks",
+    description="分析克制英雄",
+    parameters={"our_heroes": list, "enemy_heroes": list},
+    func=hero_analyzer.analyze_matchups,
+    category="hero_analysis"
+))
+
+# 批量注册
+registry.register_batch([tool1, tool2, tool3])
+
+# 执行工具
+result = registry.execute("analyze_counter_picks", 
+                         our_heroes=["pudge"], 
+                         enemy_heroes=["anti-mage"])
+
+# 查看调用历史
+history = registry.get_call_history(limit=10)
+
+# 按类别获取工具
+hero_tools = registry.get_by_category("hero_analysis")
+```
+
+### 8. 配置类
 
 ```python
 from agents.DotaHelperAgent import (
@@ -691,6 +805,11 @@ pytest -v agents/DotaHelperAgent/tests/
   - 错误处理
   - 英雄转换方法
 
+- ✅ **ReAct Agent 测试** (`test_react.py`)
+  - ReActAgent 基本功能
+  - Tool 创建和执行
+  - 完整 ReAct 循环流程
+
 ### 测试示例
 
 ```python
@@ -798,6 +917,30 @@ agent = DotaHelperAgent(config=config)
   - 缓存管理 API
   - 性能优化建议
   - 缓存装饰器使用
+
+### v1.1.0
+- **新增 ReAct Agent 模式**
+  - 实现推理-行动循环 (Think-Plan-Execute-Reflect-Synthesize)
+  - 支持自主决策和工具调用
+  - 可配置最大循环轮数和反思机制
+- **新增 Agent 记忆系统**
+  - 短期记忆（当前会话上下文）
+  - 长期记忆（用户偏好等持久化信息）
+  - 情景记忆（历史事件记录）
+  - SQLite 持久化存储
+- **新增工具封装模块**
+  - Tool 基类和 ToolResult 结果封装
+  - 英雄分析 Tools（克制分析、阵容分析、Meta英雄）
+  - 出装/技能 Tools（物品推荐、技能加点）
+  - ToolRegistry 工具注册表
+- **新增 ReAct Agent 测试**
+  - 基础功能测试
+  - Tool 创建和执行测试
+  - 完整 ReAct 循环测试
+- **架构升级**
+  - 从智能工具库升级为真正的 Agent 架构
+  - 支持多轮对话和上下文理解
+  - 工具自主选择和调用能力
 
 ## 📄 License
 

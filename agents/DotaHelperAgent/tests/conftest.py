@@ -151,23 +151,23 @@ def mock_item_data():
     """模拟物品数据 fixture"""
     return {
         "start_game_items": {
-            "item_tango": 500,
-            "item_flask": 450,
-            "item_branches": 400,
+            1: 500,
+            2: 450,
+            3: 400,
         },
         "early_game_items": {
-            "item_boots": 800,
-            "item_magic_stick": 600,
-            "item_gauntlets": 500,
+            4: 800,
+            5: 600,
+            6: 500,
         },
         "mid_game_items": {
-            "item_blink": 1250,
-            "item_black_king_bar": 980,
-            "item_power_treads": 850,
+            7: 1250,
+            8: 980,
+            9: 850,
         },
         "late_game_items": {
-            "item_ultimate_scepter": 750,
-            "item_rapier": 300,
-            "item_heart": 600,
+            10: 750,
+            11: 300,
+            12: 600,
         }
     }

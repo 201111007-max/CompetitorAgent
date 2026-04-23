@@ -8,6 +8,8 @@ from .config import (
     RateLimitConfig,
     LogConfig,
 )
+from .tool_registry import ToolRegistry
+from .react_agent import ReActAgent
 
 __all__ = [
     "DotaHelperAgent",
@@ -16,4 +18,6 @@ __all__ = [
     "CacheConfig",
     "RateLimitConfig",
     "LogConfig",
+    "ToolRegistry",
+    "ReActAgent",
 ]

@@ -26,6 +26,15 @@ class HeroAnalyzer:
         self.client = client
         self.config = config or MatchupConfig()
         self._strategies: List[IScoreStrategy] = [WinRateStrategy()]
+        self._llm_analyzer = None
+    
+    def set_llm_analyzer(self, llm_analyzer) -> None:
+        """设置 LLM 分析器
+        
+        Args:
+            llm_analyzer: LLM 分析器实例
+        """
+        self._llm_analyzer = llm_analyzer
     
     def add_strategy(self, strategy: IScoreStrategy) -> None:
         """添加评分策略
