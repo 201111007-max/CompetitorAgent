@@ -1,9 +1,11 @@
 """DotaHelperAgent - Dota 2 英雄推荐助手
 
 全模块 LLM 优先，数据驱动兜底的混合模式实现
+集成 Memory 系统支持
 """
 
 from typing import List, Dict, Optional, Any
+import time
 
 # 支持两种导入方式：包导入和直接运行
 try:
@@ -12,6 +14,7 @@ try:
     from ..analyzers.hero_analyzer import HeroAnalyzer
     from ..analyzers.item_recommender import ItemRecommender
     from ..analyzers.skill_builder import SkillBuilder
+    from ..memory.memory import AgentMemory
     from .config import AgentConfig, MatchupConfig
 except ImportError:
     try:
@@ -20,6 +23,7 @@ except ImportError:
         from analyzers.hero_analyzer import HeroAnalyzer
         from analyzers.item_recommender import ItemRecommender
         from analyzers.skill_builder import SkillBuilder
+        from memory.memory import AgentMemory
         from core.config import AgentConfig, MatchupConfig
     except ImportError:
         from agents.DotaHelperAgent.utils.api_client import OpenDotaClient
@@ -27,6 +31,7 @@ except ImportError:
         from agents.DotaHelperAgent.analyzers.hero_analyzer import HeroAnalyzer
         from agents.DotaHelperAgent.analyzers.item_recommender import ItemRecommender
         from agents.DotaHelperAgent.analyzers.skill_builder import SkillBuilder
+        from agents.DotaHelperAgent.memory.memory import AgentMemory
         from agents.DotaHelperAgent.core.config import AgentConfig, MatchupConfig
 
 
@@ -39,13 +44,16 @@ class DotaHelperAgent:
     - 智能缓存
     - 速率限制
     - LLM 增强分析（可选）
+    - Memory 系统集成（短/长/情景记忆）
     """
 
     def __init__(
         self,
         api_key: Optional[str] = None,
         config: Optional[AgentConfig] = None,
-        enable_llm: Optional[bool] = None
+        enable_llm: Optional[bool] = None,
+        enable_memory: bool = True,
+        memory_dir: str = "memory"
     ):
         """初始化 Agent
 
@@ -53,6 +61,8 @@ class DotaHelperAgent:
             api_key: OpenDota API Key（可选）
             config: 配置对象（可选）
             enable_llm: 是否启用 LLM（可选，默认使用配置）
+            enable_memory: 是否启用 Memory 系统
+            memory_dir: 记忆存储目录
         """
         self.config = config
         self.client = OpenDotaClient(api_key=api_key, config=config)
@@ -90,6 +100,22 @@ class DotaHelperAgent:
             self.hero_analyzer.set_llm_analyzer(self.llm_analyzer)
             self.item_recommender.set_llm_analyzer(self.llm_analyzer)
             self.skill_builder.set_llm_analyzer(self.llm_analyzer)
+        
+        # 初始化 Memory 系统
+        self.enable_memory = enable_memory
+        self.memory = None
+        if enable_memory:
+            try:
+                self.memory = AgentMemory(
+                    memory_dir=memory_dir,
+                    short_term_ttl=3600,
+                    long_term_max_items=1000,
+                    episodic_max_entries=500
+                )
+                print(f"[OK] Memory 系统已初始化：{memory_dir}")
+            except Exception as e:
+                print(f"[WARN] Memory 系统初始化失败：{e}")
+                self.enable_memory = False
 
     def recommend_heroes(
         self,
@@ -182,3 +208,105 @@ class DotaHelperAgent:
             role=role,
             enemy_heroes=enemy_heroes or []
         )
+    
+    def get_relevant_context(self, query: str, limit: int = 5) -> List[Dict]:
+        """获取与当前查询相关的记忆上下文
+        
+        Args:
+            query: 当前查询
+            limit: 返回的最大记忆数量
+            
+        Returns:
+            相关记忆列表
+        """
+        if not self.enable_memory or not self.memory:
+            return []
+        
+        try:
+            return self.memory.get_relevant_context(query, limit=limit)
+        except Exception as e:
+            print(f"获取记忆上下文失败：{e}")
+            return []
+    
+    def save_query_result(self, query: str, result: Dict[str, Any], tags: Optional[List[str]] = None) -> None:
+        """保存查询结果到长期记忆
+        
+        Args:
+            query: 用户查询
+            result: 查询结果
+            tags: 标签列表
+        """
+        if not self.enable_memory or not self.memory:
+            return
+        
+        try:
+            self.memory.store(
+                key=f"query_{int(time.time())}_{hash(query) % 10000}",
+                value={
+                    "query": query,
+                    "result": result,
+                    "timestamp": time.time()
+                },
+                memory_type="long_term",
+                tags=tags or ["dota", "query"]
+            )
+        except Exception as e:
+            print(f"保存查询结果失败：{e}")
+    
+    def save_experience(
+        self,
+        event_type: str,
+        content: Any,
+        context: Optional[Dict] = None,
+        sentiment: Optional[str] = None,
+        outcome: Optional[str] = None
+    ) -> None:
+        """保存经验到情景记忆
+        
+        Args:
+            event_type: 事件类型
+            content: 事件内容
+            context: 事件上下文
+            sentiment: 情感倾向（positive/negative/neutral）
+            outcome: 事件结果
+        """
+        if not self.enable_memory or not self.memory:
+            return
+        
+        try:
+            self.memory.store_episodic(
+                event_type=event_type,
+                content=content,
+                context=context or {},
+                sentiment=sentiment,
+                outcome=outcome
+            )
+        except Exception as e:
+            print(f"保存经验失败：{e}")
+    
+    def clear_memory(self) -> None:
+        """清空所有记忆"""
+        if not self.enable_memory or not self.memory:
+            return
+        
+        try:
+            self.memory.clear_all()
+            print("✓ Memory 已清空")
+        except Exception as e:
+            print(f"清空记忆失败：{e}")
+    
+    def get_memory_stats(self) -> Dict[str, Any]:
+        """获取记忆系统统计信息
+        
+        Returns:
+            统计信息字典
+        """
+        if not self.enable_memory or not self.memory:
+            return {"enabled": False}
+        
+        try:
+            stats = self.memory.get_stats()
+            stats["enabled"] = True
+            return stats
+        except Exception as e:
+            return {"enabled": False, "error": str(e)}

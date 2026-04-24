@@ -6,14 +6,16 @@ import shutil
 from pathlib import Path
 from unittest.mock import Mock, MagicMock
 
-# 确保能导入模块 - 直接导入 config 模块，避免通过 __init__.py 导入
+# 确保能导入模块
 import sys
-sys.path.insert(0, str(Path(__file__).parent.parent / "core"))
-sys.path.insert(0, str(Path(__file__).parent.parent / "cache"))
+# 添加项目根目录到 sys.path，使模块导入能正常工作
+# 这样 cache_manager.py 中的 "from core.config import" 才能找到模块
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
 
 # 直接导入模块
-from config import AgentConfig, MatchupConfig, CacheConfig, RateLimitConfig
-from cache_manager import CacheManager
+from core.config import AgentConfig, MatchupConfig, CacheConfig, RateLimitConfig
+from cache.cache_manager import CacheManager
 
 
 @pytest.fixture

@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DotaHelperAgent - Dota 2 助手</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #e0e0e0;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            height: calc(100vh - 40px);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header {
+            background: linear-gradient(90deg, #e94560 0%, #ff6b6b 100%);
+            padding: 16px 20px;
+            text-align: center;
+            border-radius: 16px 16px 0 0;
+        }
+
+        .header h1 {
+            font-size: 20px;
+            font-weight: 600;
+            color: white;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .header p {
+            color: rgba(255,255,255,0.8);
+            font-size: 12px;
+            margin-top: 4px;
+        }
+
+        .chat-area {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .message {
+            max-width: 80%;
+            padding: 12px 16px;
+            border-radius: 16px;
+            line-height: 1.6;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .message.user {
+            align-self: flex-end;
+            background: linear-gradient(135deg, #e94560 0%, #ff6b6b 100%);
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+
+        .message.assistant {
+            align-self: flex-start;
+            background: rgba(255, 255, 255, 0.1);
+            border-bottom-left-radius: 4px;
+        }
+
+        .message .meta {
+            font-size: 11px;
+            opacity: 0.7;
+            margin-bottom: 6px;
+        }
+
+        .message .content {
+            font-size: 14px;
+        }
+
+        .input-area {
+            padding: 16px 20px;
+            background: rgba(0, 0, 0, 0.2);
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 0 0 16px 16px;
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .query-input {
+            flex: 1;
+            padding: 12px 16px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 24px;
+            color: white;
+            font-size: 15px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .query-input:focus {
+            border-color: #e94560;
+        }
+
+        .query-input::placeholder {
+            color: rgba(255, 255, 255, 0.4);
+        }
+
+        .send-btn {
+            width: 48px;
+            height: 48px;
+            border: none;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #e94560 0%, #ff6b6b 100%);
+            color: white;
+            font-size: 18px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .send-btn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 4px 12px rgba(233, 69, 96, 0.4);
+        }
+
+        .send-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .status-bar {
+            padding: 10px 20px;
+            background: rgba(0, 0, 0, 0.1);
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #00b894;
+        }
+
+        .status-dot.streaming {
+            background: #ffe66d;
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: rgba(255, 255, 255, 0.5);
+        }
+
+        .empty-state .icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+
+        .empty-state p {
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        .hint {
+            font-size: 12px;
+            color: rgba(255,255,255,0.4);
+            text-align: center;
+            padding: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎮 DotaHelperAgent</h1>
+            <p>您的 Dota 2 智能助手</p>
+        </div>
+
+        <div class="chat-area" id="chatArea">
+            <div class="empty-state" id="emptyState">
+                <div class="icon">💬</div>
+                <p>开始对话吧！<br>试试输入：推荐克制英雄（敌方：pudge, am）</p>
+            </div>
+        </div>
+
+        <div class="hint">支持格式：敌方：英雄1,英雄2 | 己方：英雄1,英雄2</div>
+
+        <div class="input-area">
+            <input type="text" class="query-input" id="queryInput" placeholder="输入您的问题，如：推荐克制敌方英雄">
+            <button class="send-btn" id="sendBtn" onclick="sendMessage()">➤</button>
+        </div>
+
+        <div class="status-bar">
+            <div class="status-dot" id="statusDot"></div>
+            <span id="statusText">就绪</span>
+        </div>
+    </div>
+
+    <script>
+        let isStreaming = false;
+        let sessionId = generateSessionId();
+
+        const chatArea = document.getElementById('chatArea');
+        const queryInput = document.getElementById('queryInput');
+        const sendBtn = document.getElementById('sendBtn');
+        const statusDot = document.getElementById('statusDot');
+        const statusText = document.getElementById('statusText');
+
+        function generateSessionId() {
+            return 'sess_' + Math.random().toString(36).substr(2, 9);
+        }
+
+        function parseHeroesFromQuery(query) {
+            const context = {
+                our_heroes: [],
+                enemy_heroes: []
+            };
+
+            const enemyPatterns = [
+                /敌方[：:]\s*([^，,。\n]+)/gi,
+                /enemy[：:]\s*([^，,。\n]+)/gi,
+                /敌方英雄[：:]\s*([^，,。\n]+)/gi
+            ];
+
+            const ourPatterns = [
+                /己方[：:]\s*([^，,。\n]+)/gi,
+                /our[：:]\s*([^，,。\n]+)/gi,
+                /己方英雄[：:]\s*([^，,。\n]+)/gi
+            ];
+
+            for (const pattern of enemyPatterns) {
+                let match;
+                while ((match = pattern.exec(query)) !== null) {
+                    const heroes = match[1].split(/[,，]/).map(h => h.trim()).filter(h => h);
+                    context.enemy_heroes.push(...heroes);
+                }
+            }
+
+            for (const pattern of ourPatterns) {
+                let match;
+                while ((match = pattern.exec(query)) !== null) {
+                    const heroes = match[1].split(/[,，]/).map(h => h.trim()).filter(h => h);
+                    context.our_heroes.push(...heroes);
+                }
+            }
+
+            context.our_heroes = [...new Set(context.our_heroes)];
+            context.enemy_heroes = [...new Set(context.enemy_heroes)];
+
+            return context;
+        }
+
+        function addMessage(role, content, meta = '') {
+            const empty = document.getElementById('emptyState');
+            if (empty) empty.remove();
+
+            const msg = document.createElement('div');
+            msg.className = `message ${role}`;
+            msg.innerHTML = `
+                ${meta ? `<div class="meta">${meta}</div>` : ''}
+                <div class="content">${content.replace(/\n/g, '<br>')}</div>
+            `;
+            chatArea.appendChild(msg);
+            chatArea.scrollTop = chatArea.scrollHeight;
+        }
+
+        function updateStatus(text, streaming = false) {
+            statusText.textContent = text;
+            statusDot.className = 'status-dot' + (streaming ? ' streaming' : '');
+        }
+
+        async function sendMessage() {
+            const query = queryInput.value.trim();
+            if (!query) return;
+
+            if (isStreaming) return;
+
+            updateStatus('处理中...');
+            sendBtn.disabled = true;
+            addMessage('user', query, new Date().toLocaleTimeString());
+            queryInput.value = '';
+
+            try {
+                const context = parseHeroesFromQuery(query);
+
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        query: query,
+                        session_id: sessionId,
+                        context: context
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    addMessage('assistant', data.final_answer || '处理完成');
+                } else {
+                    addMessage('assistant', `错误: ${data.error || '未知错误'}`);
+                }
+            } catch (error) {
+                addMessage('assistant', `请求失败: ${error.message}`);
+            } finally {
+                updateStatus('就绪');
+                sendBtn.disabled = false;
+                queryInput.focus();
+            }
+        }
+
+        queryInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+    </script>
+</body>
+</html>
