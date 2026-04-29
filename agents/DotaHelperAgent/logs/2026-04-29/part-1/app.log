@@ -1,0 +1,133 @@
+2026-04-29 20:11:14,281 | INFO     | werkzeug | [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.5.175:5000
+2026-04-29 20:11:14,282 | INFO     | werkzeug | [33mPress CTRL+C to quit[0m
+2026-04-29 20:11:14,289 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-04-29 20:11:15,183 | WARNING  | werkzeug |  * Debugger is active!
+2026-04-29 20:11:15,187 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-04-29 20:11:16,212 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:11:16] "GET /api/logs/stream?session_id=sess_j1erm7tqn HTTP/1.1" 200 -
+2026-04-29 20:11:16,212 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:11:16] "GET /api/logs/stream?session_id=sess_j1erm7tqn HTTP/1.1" 200 -
+2026-04-29 20:11:16,212 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:11:16] "GET /api/logs/stream?session_id=sess_j1erm7tqn HTTP/1.1" 200 -
+2026-04-29 20:11:16,212 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:11:16] "GET /api/logs/stream?session_id=sess_j1erm7tqn HTTP/1.1" 200 -
+2026-04-29 20:11:16,212 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:11:16] "GET /api/logs/stream?session_id=sess_j1erm7tqn HTTP/1.1" 200 -
+2026-04-29 20:11:16,213 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:11:16] "GET /api/logs/stream?session_id=sess_j1erm7tqn HTTP/1.1" 200 -
+2026-04-29 20:11:26,827 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:11:26] "GET /api/logs/files HTTP/1.1" 200 -
+2026-04-29 20:11:44,571 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:11:44] "GET /web/index.html HTTP/1.1" 200 -
+2026-04-29 20:11:44,688 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:11:44] "GET /api/logs?session_id=sess_oyuzi2xky&limit=100 HTTP/1.1" 200 -
+2026-04-29 20:11:44,803 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:11:44] "[33mGET /@vite/client HTTP/1.1[0m" 404 -
+2026-04-29 20:11:45,756 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:11:45] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:11:55,038 | INFO     | web_app | 收到聊天请求
+2026-04-29 20:11:55,039 | INFO     | web_app | 开始执行 ReAct 循环
+2026-04-29 20:11:55,057 | INFO     | web_app | ReAct 循环完成
+2026-04-29 20:11:55,059 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:11:55] "POST /api/chat HTTP/1.1" 200 -
+2026-04-29 20:14:38,389 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\__init__.py', reloading
+2026-04-29 20:14:38,457 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\__init__.py', reloading
+2026-04-29 20:14:38,459 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\__init__.py', reloading
+2026-04-29 20:14:38,459 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\__init__.py', reloading
+2026-04-29 20:14:39,542 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-04-29 20:14:40,454 | WARNING  | werkzeug |  * Debugger is active!
+2026-04-29 20:14:40,459 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-04-29 20:14:43,864 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:14:43] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:14:43,864 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:14:43] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:15:29,199 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\test_log_api.py', reloading
+2026-04-29 20:15:29,238 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\test_log_api.py', reloading
+2026-04-29 20:15:29,238 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\test_log_api.py', reloading
+2026-04-29 20:15:29,239 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\test_log_api.py', reloading
+2026-04-29 20:15:30,307 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-04-29 20:15:31,572 | WARNING  | werkzeug |  * Debugger is active!
+2026-04-29 20:15:31,578 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-04-29 20:15:34,626 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:15:34] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:15:34,626 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:15:34] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:15:34,626 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:15:34] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:15:34,626 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:15:34] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:16:35,769 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\test_log_config.py', reloading
+2026-04-29 20:16:35,827 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\test_log_config.py', reloading
+2026-04-29 20:16:35,827 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\test_log_config.py', reloading
+2026-04-29 20:16:35,828 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\test_log_config.py', reloading
+2026-04-29 20:16:35,924 | INFO     | werkzeug |  * Detected change in 'D:\\Anaconda3\\envs\\verl_env\\Lib\\site-packages\\_pytest\\outcomes.py', reloading
+2026-04-29 20:16:37,020 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-04-29 20:16:37,991 | WARNING  | werkzeug |  * Debugger is active!
+2026-04-29 20:16:37,995 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-04-29 20:16:41,349 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:16:41] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:16:41,350 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:16:41] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:16:41,350 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:16:41] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:16:41,350 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:16:41] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:16:41,350 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:16:41] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:16:41,350 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:16:41] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:18:05,833 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\test_memory_log_handler.py', reloading
+2026-04-29 20:18:05,861 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\test_memory_log_handler.py', reloading
+2026-04-29 20:18:05,862 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\test_memory_log_handler.py', reloading
+2026-04-29 20:18:07,111 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-04-29 20:18:08,340 | WARNING  | werkzeug |  * Debugger is active!
+2026-04-29 20:18:08,346 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-04-29 20:18:09,368 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:18:09] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:18:09,368 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:18:09] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:18:11,466 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:18:11] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:18:11,482 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:18:11] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:18:11,482 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:18:11] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:18:11,482 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:18:11] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:19:15,972 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\test_log_integration.py', reloading
+2026-04-29 20:19:16,007 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\test_log_integration.py', reloading
+2026-04-29 20:19:16,008 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\test_log_integration.py', reloading
+2026-04-29 20:19:17,094 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-04-29 20:19:17,990 | WARNING  | werkzeug |  * Debugger is active!
+2026-04-29 20:19:17,994 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-04-29 20:19:19,017 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:19:19] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:19:19,018 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:19:19] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:19:19,018 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:19:19] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:19:19,018 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:19:19] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:19:19,018 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:19:19] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:19:19,018 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:19:19] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:20:19,086 | INFO     | werkzeug |  * Detected change in 'D:\\Anaconda3\\Lib\\site-packages\\_pytest\\config\\__init__.py', reloading
+2026-04-29 20:20:20,151 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-04-29 20:20:21,070 | WARNING  | werkzeug |  * Debugger is active!
+2026-04-29 20:20:21,109 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-04-29 20:20:22,150 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:20:22] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:20:22,151 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:20:22] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:20:22,151 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:20:22] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:20:22,166 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:20:22] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:20:22,166 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:20:22] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:20:22,166 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:20:22] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:20:42,584 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\test_log_config.py', reloading
+2026-04-29 20:20:43,668 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-04-29 20:20:44,562 | WARNING  | werkzeug |  * Debugger is active!
+2026-04-29 20:20:44,566 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-04-29 20:20:45,583 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:20:45] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:20:45,599 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:20:45] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:20:45,599 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:20:45] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:20:45,599 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:20:45] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:20:45,599 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:20:45] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:20:45,600 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:20:45] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:20:51,089 | INFO     | werkzeug |  * Detected change in 'D:\\Anaconda3\\Lib\\unittest\\mock.py', reloading
+2026-04-29 20:20:51,218 | INFO     | web_app | 日志已清空
+2026-04-29 20:20:51,221 | INFO     | web_app | 日志已清空
+2026-04-29 20:20:52,153 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-04-29 20:20:52,655 | INFO     | web_app | 日志已清空
+2026-04-29 20:20:52,678 | INFO     | test | info message
+2026-04-29 20:20:52,678 | WARNING  | test | warning message
+2026-04-29 20:20:52,678 | ERROR    | test | error message
+2026-04-29 20:20:53,467 | WARNING  | werkzeug |  * Debugger is active!
+2026-04-29 20:20:53,472 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-04-29 20:20:54,494 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:20:54] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:20:54,495 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:20:54] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:20:54,495 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:20:54] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:20:54,495 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:20:54] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:20:54,495 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:20:54] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:20:54,495 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:20:54] "GET /api/logs/stream?session_id=sess_oyuzi2xky HTTP/1.1" 200 -
+2026-04-29 20:24:31,912 | INFO     | werkzeug | [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.5.175:5000
+2026-04-29 20:24:31,912 | INFO     | werkzeug | [33mPress CTRL+C to quit[0m
+2026-04-29 20:24:31,919 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-04-29 20:24:32,841 | WARNING  | werkzeug |  * Debugger is active!
+2026-04-29 20:24:32,845 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-04-29 20:24:51,488 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:24:51] "GET / HTTP/1.1" 200 -
+2026-04-29 20:24:51,669 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:24:51] "GET /api/logs?session_id=sess_fb7rn8d45&limit=100 HTTP/1.1" 200 -
+2026-04-29 20:24:51,886 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:24:51] "[33mGET /@vite/client HTTP/1.1[0m" 404 -
+2026-04-29 20:24:52,835 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:24:52] "GET /api/logs/stream?session_id=sess_fb7rn8d45 HTTP/1.1" 200 -
+2026-04-29 20:24:58,493 | INFO     | web_app | 收到聊天请求
+2026-04-29 20:24:58,494 | INFO     | web_app | 开始执行 ReAct 循环
+2026-04-29 20:24:58,511 | INFO     | web_app | ReAct 循环完成
+2026-04-29 20:24:58,513 | INFO     | werkzeug | 127.0.0.1 - - [29/Apr/2026 20:24:58] "POST /api/chat HTTP/1.1" 200 -

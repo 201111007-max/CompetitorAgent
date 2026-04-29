@@ -12,6 +12,7 @@ import time
 import uuid
 import threading
 import re
+import queue
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -21,6 +22,19 @@ from core.tool_registry import ToolRegistry
 from tools.agent_tools import create_all_tools
 from core.config import AgentConfig, LLMConfig
 from utils.llm_client import LLMClient
+from utils.log_config import setup_logging_with_memory, get_logger
+from utils.memory_log_handler import get_memory_handler
+
+# 初始化日志系统
+logger, memory_handler = setup_logging_with_memory(
+    log_level="DEBUG",
+    daily_max_bytes=300*1024*1024,  # 300MB 每天分片
+    memory_max_entries=2000,
+    console_output=True
+)
+
+# 获取应用日志记录器
+app_logger = get_logger("web_app", component="web")
 
 app = Flask(__name__)
 CORS(app)
@@ -86,10 +100,12 @@ def get_llm_client():
             llm_config = LLMConfig.from_yaml()
             if llm_config.enabled:
                 llm_client = LLMClient(llm_config)
+                app_logger.info("LLM client initialized successfully")
             else:
                 llm_client = None
+                app_logger.warning("LLM is disabled in config")
         except Exception as e:
-            print(f"Failed to initialize LLM client: {e}")
+            app_logger.error_ctx(f"Failed to initialize LLM client: {e}", extra_data={"error": str(e)})
             llm_client = None
     return llm_client
 
@@ -489,8 +505,16 @@ def chat():
     session_id = data.get('session_id', str(uuid.uuid4()))
     context = data.get('context', {})
 
+    # 记录请求日志
+    app_logger.info_ctx(
+        f"收到聊天请求",
+        session_id=session_id,
+        extra_data={"query": query, "context": context}
+    )
+
     # 如果没有 Agent Controller，回退到旧版实现
     if agent_controller is None:
+        app_logger.warning_ctx("Agent Controller 未初始化，使用旧版实现", session_id=session_id)
         return _chat_legacy(query, context, session_id)
 
     agt = get_agent()
@@ -505,6 +529,7 @@ def chat():
     if not query.strip():
         result["success"] = False
         result["error"] = "Query cannot be empty"
+        app_logger.warning_ctx("查询为空", session_id=session_id)
         return jsonify(result)
 
     try:
@@ -513,9 +538,14 @@ def chat():
             parsed = parse_heroes_with_llm(query)
             if parsed['our_heroes'] or parsed['enemy_heroes']:
                 context.update(parsed)
-                print(f"[DEBUG] Parsed heroes from query: {parsed}")
+                app_logger.debug_ctx(
+                    f"从查询中解析到英雄",
+                    session_id=session_id,
+                    extra_data={"parsed": parsed}
+                )
 
         # 使用 Agent Controller 执行 ReAct 循环
+        app_logger.info_ctx("开始执行 ReAct 循环", session_id=session_id)
         controller_result = agent_controller.solve(query, context)
         
         # 整合结果
@@ -535,8 +565,21 @@ def chat():
                 result["final_answer"] = _format_answer(answer_data)
             else:
                 result["final_answer"] = str(answer_data)
+            app_logger.info_ctx(
+                f"ReAct 循环完成",
+                session_id=session_id,
+                extra_data={
+                    "turn_count": controller_result.get("turn_count"),
+                    "duration": controller_result.get("duration")
+                }
+            )
         else:
             result["final_answer"] = controller_result.get("error", "处理失败")
+            app_logger.error_ctx(
+                f"ReAct 循环失败",
+                session_id=session_id,
+                extra_data={"error": controller_result.get("error")}
+            )
 
         # 保存到记忆（如果启用）
         if agent and agent.enable_memory:
@@ -546,6 +589,11 @@ def chat():
         result["success"] = False
         result["error"] = str(e)
         result["final_answer"] = f"处理查询时出错：{str(e)}"
+        app_logger.error_ctx(
+            f"处理查询时出错",
+            session_id=session_id,
+            extra_data={"error": str(e), "traceback": str(__import__('traceback').format_exc())}
+        )
 
     return jsonify(result)
 
@@ -794,6 +842,143 @@ def clear_memory():
         agent.clear_memory()
         return jsonify({"success": True})
     return jsonify({"success": False, "error": "Agent not initialized"})
+
+
+# === 日志 API 接口 ===
+
+@app.route('/api/logs', methods=['GET'])
+def get_logs():
+    """获取日志（从内存）"""
+    session_id = request.args.get('session_id')
+    level = request.args.get('level')
+    component = request.args.get('component')
+    limit = int(request.args.get('limit', 100))
+
+    logs = memory_handler.get_logs(
+        session_id=session_id,
+        level=level,
+        component=component,
+        limit=limit
+    )
+
+    return jsonify({"success": True, "logs": logs})
+
+
+@app.route('/api/logs/stream')
+def stream_logs():
+    """SSE 流式日志"""
+    session_id = request.args.get('session_id')
+
+    def generate():
+        log_queue = queue.Queue()
+
+        def on_new_log(log_entry):
+            if not session_id or log_entry.get('session_id') == session_id:
+                log_queue.put(log_entry)
+
+        memory_handler.subscribe(on_new_log)
+
+        try:
+            while True:
+                try:
+                    log_entry = log_queue.get(timeout=1)
+                    yield f"data: {json.dumps(log_entry)}\n\n"
+                except queue.Empty:
+                    # 发送心跳保持连接
+                    yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
+        finally:
+            memory_handler.unsubscribe(on_new_log)
+
+    return Response(
+        generate(),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no'
+        }
+    )
+
+
+@app.route('/api/logs/files', methods=['GET'])
+def get_log_files():
+    """获取日志文件列表（支持新的文件夹结构）"""
+    from pathlib import Path
+    import re
+
+    log_dir = Path(__file__).parent.parent / "logs"
+    files = []
+
+    if log_dir.exists():
+        # 遍历日期文件夹
+        for date_dir in sorted(log_dir.iterdir()):
+            if not date_dir.is_dir():
+                continue
+            if not re.match(r'\d{4}-\d{2}-\d{2}', date_dir.name):
+                continue
+
+            # 遍历 part 文件夹
+            for part_dir in sorted(date_dir.iterdir()):
+                if not part_dir.is_dir() or not part_dir.name.startswith('part-'):
+                    continue
+
+                for log_file in sorted(part_dir.glob("*.log*")):
+                    stat = log_file.stat()
+                    files.append({
+                        "name": log_file.name,
+                        "size": stat.st_size,
+                        "modified": stat.st_mtime,
+                        "path": str(log_file.relative_to(log_dir)),
+                        "date": date_dir.name,
+                        "part": part_dir.name
+                    })
+
+    return jsonify({"success": True, "files": files})
+
+
+@app.route('/api/logs/files/<path:filename>', methods=['GET'])
+def get_log_file_content(filename):
+    """获取日志文件内容"""
+    from pathlib import Path
+
+    log_dir = Path(__file__).parent.parent / "logs"
+    file_path = log_dir / filename
+
+    # 安全检查：确保文件在日志目录内
+    try:
+        file_path.relative_to(log_dir)
+    except ValueError:
+        return jsonify({"success": False, "error": "Invalid path"}), 403
+
+    if not file_path.exists():
+        return jsonify({"success": False, "error": "File not found"}), 404
+
+    # 支持 tail 参数获取最后 N 行
+    tail = request.args.get('tail', type=int)
+
+    try:
+        if tail:
+            lines = file_path.read_text(encoding='utf-8').splitlines()
+            content = '\n'.join(lines[-tail:])
+        else:
+            content = file_path.read_text(encoding='utf-8')
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+    return jsonify({
+        "success": True,
+        "filename": filename,
+        "content": content
+    })
+
+
+@app.route('/api/logs/clear', methods=['POST'])
+def clear_logs():
+    """清空内存日志"""
+    data = request.get_json() or {}
+    session_id = data.get('session_id')
+    memory_handler.clear(session_id)
+    app_logger.info_ctx("日志已清空", session_id=session_id)
+    return jsonify({"success": True})
 
 
 if __name__ == '__main__':

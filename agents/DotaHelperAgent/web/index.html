@@ -18,11 +18,24 @@
             color: #e0e0e0;
         }
 
+        .main-layout {
+            display: flex;
+            height: 100vh;
+        }
+
+        .chat-section {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+            min-width: 0;
+        }
+
         .container {
             max-width: 800px;
+            width: 100%;
             margin: 0 auto;
-            padding: 20px;
-            height: calc(100vh - 40px);
+            height: 100%;
             display: flex;
             flex-direction: column;
         }
@@ -197,44 +210,328 @@
             text-align: center;
             padding: 8px;
         }
+
+        /* 日志侧边栏样式 */
+        .log-sidebar {
+            width: 450px;
+            background: rgba(0, 0, 0, 0.3);
+            border-left: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            flex-direction: column;
+            transition: width 0.3s;
+        }
+
+        .log-sidebar.collapsed {
+            width: 0;
+            overflow: hidden;
+        }
+
+        .log-header {
+            padding: 12px 16px;
+            background: rgba(0, 0, 0, 0.2);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .log-header h3 {
+            margin: 0 0 8px 0;
+            font-size: 14px;
+            color: #fff;
+        }
+
+        .log-tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .tab-btn {
+            padding: 4px 12px;
+            font-size: 12px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: #fff;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .tab-btn.active {
+            background: linear-gradient(135deg, #e94560 0%, #ff6b6b 100%);
+        }
+
+        .log-controls {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .log-controls select,
+        .log-controls button {
+            padding: 4px 8px;
+            font-size: 11px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: #fff;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .log-panel {
+            display: none;
+            flex: 1;
+            overflow: hidden;
+            flex-direction: column;
+        }
+
+        .log-panel.active {
+            display: flex;
+        }
+
+        .log-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px;
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-size: 11px;
+        }
+
+        .log-entry {
+            padding: 6px 8px;
+            margin-bottom: 4px;
+            border-radius: 4px;
+            border-left: 3px solid;
+            background: rgba(255, 255, 255, 0.05);
+            animation: logFadeIn 0.2s ease;
+        }
+
+        @keyframes logFadeIn {
+            from { opacity: 0; transform: translateX(-10px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        .log-entry:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        /* 日志等级颜色 */
+        .log-entry.DEBUG { border-left-color: #6c757d; }
+        .log-entry.INFO { border-left-color: #17a2b8; }
+        .log-entry.WARNING { border-left-color: #ffc107; }
+        .log-entry.ERROR { border-left-color: #dc3545; }
+
+        .log-entry .log-header-line {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+            margin-bottom: 2px;
+        }
+
+        .log-entry .timestamp {
+            color: #888;
+            font-size: 10px;
+        }
+
+        .log-entry .level-badge {
+            padding: 1px 4px;
+            border-radius: 3px;
+            font-size: 9px;
+            font-weight: bold;
+        }
+
+        .log-entry .level-badge.DEBUG { background: #6c757d; }
+        .log-entry .level-badge.INFO { background: #17a2b8; }
+        .log-entry .level-badge.WARNING { background: #ffc107; color: #000; }
+        .log-entry .level-badge.ERROR { background: #dc3545; }
+
+        .log-entry .component-tag {
+            color: #9b59b6;
+            font-size: 10px;
+        }
+
+        .log-entry .logger-name {
+            color: #888;
+            font-size: 10px;
+        }
+
+        .log-entry .log-message {
+            color: #fff;
+            word-break: break-all;
+            line-height: 1.4;
+        }
+
+        .log-entry .log-extra-btn {
+            color: #3498db;
+            font-size: 10px;
+            cursor: pointer;
+            margin-top: 4px;
+        }
+
+        .log-entry .log-extra-content {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 6px;
+            margin-top: 4px;
+            border-radius: 4px;
+            font-size: 10px;
+            color: #aaa;
+            white-space: pre-wrap;
+            overflow-x: auto;
+        }
+
+        /* 文件列表面板 */
+        .file-list {
+            max-height: 150px;
+            overflow-y: auto;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .file-item {
+            padding: 8px 12px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .file-item:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .file-item .file-name {
+            font-size: 12px;
+            color: #fff;
+        }
+
+        .file-item .file-size {
+            font-size: 10px;
+            color: #888;
+        }
+
+        .file-content {
+            flex: 1;
+            overflow: auto;
+            padding: 12px;
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        .file-content pre {
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 11px;
+            color: #ccc;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        /* 侧边栏切换按钮 */
+        .sidebar-toggle {
+            position: fixed;
+            right: 20px;
+            bottom: 100px;
+            padding: 10px 16px;
+            background: linear-gradient(135deg, #e94560 0%, #ff6b6b 100%);
+            border: none;
+            border-radius: 24px;
+            color: white;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(233, 69, 96, 0.4);
+            z-index: 100;
+        }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>🎮 DotaHelperAgent</h1>
-            <p>您的 Dota 2 智能助手</p>
-        </div>
+    <div class="main-layout">
+        <!-- 聊天区域 -->
+        <div class="chat-section">
+            <div class="container">
+                <div class="header">
+                    <h1>🎮 DotaHelperAgent</h1>
+                    <p>您的 Dota 2 智能助手</p>
+                </div>
 
-        <div class="chat-area" id="chatArea">
-            <div class="empty-state" id="emptyState">
-                <div class="icon">💬</div>
-                <p>开始对话吧！<br>试试输入：推荐克制英雄（敌方：pudge, am）</p>
+                <div class="chat-area" id="chatArea">
+                    <div class="empty-state" id="emptyState">
+                        <div class="icon">💬</div>
+                        <p>开始对话吧！<br>试试输入：推荐克制英雄（敌方：pudge, am）</p>
+                    </div>
+                </div>
+
+                <div class="hint">支持格式：敌方：英雄1,英雄2 | 己方：英雄1,英雄2</div>
+
+                <div class="input-area">
+                    <input type="text" class="query-input" id="queryInput" placeholder="输入您的问题，如：推荐克制敌方英雄">
+                    <button class="send-btn" id="sendBtn" onclick="sendMessage()">➤</button>
+                </div>
+
+                <div class="status-bar">
+                    <div class="status-dot" id="statusDot"></div>
+                    <span id="statusText">就绪</span>
+                </div>
             </div>
         </div>
 
-        <div class="hint">支持格式：敌方：英雄1,英雄2 | 己方：英雄1,英雄2</div>
+        <!-- 日志侧边栏 -->
+        <div class="log-sidebar" id="logSidebar">
+            <div class="log-header">
+                <h3>📋 运行日志</h3>
+                <div class="log-tabs">
+                    <button class="tab-btn active" onclick="switchTab('live')">实时</button>
+                    <button class="tab-btn" onclick="switchTab('files')">文件</button>
+                </div>
+                <div class="log-controls">
+                    <select id="logFilter" onchange="filterLogs()">
+                        <option value="all">全部</option>
+                        <option value="DEBUG">Debug</option>
+                        <option value="INFO">Info</option>
+                        <option value="WARNING">Warning</option>
+                        <option value="ERROR">Error</option>
+                    </select>
+                    <select id="componentFilter" onchange="filterLogs()">
+                        <option value="all">所有组件</option>
+                        <option value="agent">Agent</option>
+                        <option value="tool">Tool</option>
+                        <option value="cache">Cache</option>
+                        <option value="api">API</option>
+                        <option value="web">Web</option>
+                    </select>
+                    <button onclick="clearLogs()" title="清空">🗑️</button>
+                    <button onclick="exportLogs()" title="导出">📥</button>
+                    <button onclick="toggleSidebar()" title="收起">✕</button>
+                </div>
+            </div>
 
-        <div class="input-area">
-            <input type="text" class="query-input" id="queryInput" placeholder="输入您的问题，如：推荐克制敌方英雄">
-            <button class="send-btn" id="sendBtn" onclick="sendMessage()">➤</button>
-        </div>
+            <!-- 实时日志面板 -->
+            <div class="log-panel active" id="livePanel">
+                <div class="log-content" id="logContent"></div>
+            </div>
 
-        <div class="status-bar">
-            <div class="status-dot" id="statusDot"></div>
-            <span id="statusText">就绪</span>
+            <!-- 日志文件面板 -->
+            <div class="log-panel" id="filesPanel">
+                <div class="file-list" id="fileList"></div>
+                <div class="file-content" id="fileContent">
+                    <p style="color: #888; text-align: center; padding: 40px;">点击左侧文件查看内容</p>
+                </div>
+            </div>
         </div>
     </div>
+
+    <!-- 侧边栏切换按钮 -->
+    <button class="sidebar-toggle" id="sidebarToggle" onclick="toggleSidebar()">
+        📋 日志
+    </button>
 
     <script>
         let isStreaming = false;
         let sessionId = generateSessionId();
+        let logEventSource = null;
+        let currentFilter = { level: 'all', component: 'all' };
+        let activeTab = 'live';
 
         const chatArea = document.getElementById('chatArea');
         const queryInput = document.getElementById('queryInput');
         const sendBtn = document.getElementById('sendBtn');
         const statusDot = document.getElementById('statusDot');
         const statusText = document.getElementById('statusText');
+        const logSidebar = document.getElementById('logSidebar');
+        const sidebarToggle = document.getElementById('sidebarToggle');
 
         function generateSessionId() {
             return 'sess_' + Math.random().toString(36).substr(2, 9);
@@ -343,6 +640,212 @@
             if (e.key === 'Enter') {
                 sendMessage();
             }
+        });
+
+        // === 日志功能 ===
+
+        function initLogStream() {
+            // 连接 SSE 日志流
+            logEventSource = new EventSource(`/api/logs/stream?session_id=${sessionId}`);
+
+            logEventSource.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if (data.type !== 'heartbeat') {
+                    addLogEntry(data);
+                }
+            };
+
+            logEventSource.onerror = (error) => {
+                console.error('Log stream error:', error);
+                setTimeout(initLogStream, 3000); // 3秒后重连
+            };
+        }
+
+        function addLogEntry(log) {
+            // 过滤
+            if (currentFilter.level !== 'all' && log.level !== currentFilter.level) return;
+            if (currentFilter.component !== 'all' && log.component !== currentFilter.component) return;
+
+            const container = document.getElementById('logContent');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${log.level}`;
+
+            const time = new Date(log.timestamp).toLocaleTimeString();
+            const extraInfo = log.extra_data ? '📎' : '';
+
+            entry.innerHTML = `
+                <div class="log-header-line">
+                    <span class="timestamp">${time}</span>
+                    <span class="level-badge ${log.level}">${log.level}</span>
+                    <span class="component-tag">${log.component}</span>
+                    <span class="logger-name">${log.logger}</span>
+                    ${extraInfo}
+                </div>
+                <div class="log-message">${escapeHtml(log.message)}</div>
+                ${log.extra_data ? `<div class="log-extra-btn" onclick="toggleExtra(this)">📋 详情</div>` : ''}
+            `;
+
+            // 保存 extra_data 到 DOM
+            if (log.extra_data) {
+                entry.dataset.extra = JSON.stringify(log.extra_data, null, 2);
+            }
+
+            container.appendChild(entry);
+            container.scrollTop = container.scrollHeight;
+
+            // 限制条目数
+            while (container.children.length > 500) {
+                container.removeChild(container.firstChild);
+            }
+        }
+
+        function toggleExtra(element) {
+            const entry = element.parentElement;
+            const extra = entry.querySelector('.log-extra-content');
+
+            if (extra) {
+                extra.remove();
+                element.textContent = '📋 详情';
+            } else {
+                const data = entry.dataset.extra;
+                const pre = document.createElement('pre');
+                pre.className = 'log-extra-content';
+                pre.textContent = data;
+                entry.appendChild(pre);
+                element.textContent = '📖 收起';
+            }
+        }
+
+        async function loadLogFiles() {
+            try {
+                const response = await fetch('/api/logs/files');
+                const data = await response.json();
+
+                const list = document.getElementById('fileList');
+                list.innerHTML = data.files.map(f => `
+                    <div class="file-item" onclick="loadFileContent('${f.name}')">
+                        <span class="file-name">${f.name}</span>
+                        <span class="file-size">${formatBytes(f.size)}</span>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Failed to load log files:', error);
+            }
+        }
+
+        async function loadFileContent(filename) {
+            try {
+                const response = await fetch(`/api/logs/files/${filename}?tail=100`);
+                const data = await response.json();
+
+                document.getElementById('fileContent').innerHTML = `
+                    <div style="margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                        <strong>${filename}</strong>
+                        <button onclick="loadFileContent('${filename}')" style="margin-left: 10px; padding: 2px 8px; font-size: 11px;">刷新</button>
+                    </div>
+                    <pre>${escapeHtml(data.content)}</pre>
+                `;
+            } catch (error) {
+                console.error('Failed to load file content:', error);
+            }
+        }
+
+        function formatBytes(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        }
+
+        function switchTab(tab) {
+            activeTab = tab;
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.log-panel').forEach(p => p.classList.remove('active'));
+
+            event.target.classList.add('active');
+            document.getElementById(tab + 'Panel').classList.add('active');
+
+            if (tab === 'files') {
+                loadLogFiles();
+            }
+        }
+
+        function filterLogs() {
+            currentFilter.level = document.getElementById('logFilter').value;
+            currentFilter.component = document.getElementById('componentFilter').value;
+
+            // 重新加载历史日志
+            loadHistoryLogs();
+        }
+
+        async function loadHistoryLogs() {
+            try {
+                const params = new URLSearchParams({
+                    session_id: sessionId,
+                    limit: '100'
+                });
+                if (currentFilter.level !== 'all') params.append('level', currentFilter.level);
+                if (currentFilter.component !== 'all') params.append('component', currentFilter.component);
+
+                const response = await fetch(`/api/logs?${params}`);
+                const data = await response.json();
+
+                const container = document.getElementById('logContent');
+                container.innerHTML = '';
+                data.logs.forEach(log => addLogEntry(log));
+            } catch (error) {
+                console.error('Failed to load logs:', error);
+            }
+        }
+
+        async function clearLogs() {
+            try {
+                await fetch('/api/logs/clear', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session_id: sessionId })
+                });
+                document.getElementById('logContent').innerHTML = '';
+            } catch (error) {
+                console.error('Failed to clear logs:', error);
+            }
+        }
+
+        async function exportLogs() {
+            try {
+                const params = new URLSearchParams({
+                    session_id: sessionId,
+                    limit: '1000'
+                });
+                const response = await fetch(`/api/logs?${params}`);
+                const data = await response.json();
+
+                const blob = new Blob([JSON.stringify(data.logs, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `logs_${sessionId}_${Date.now()}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+            } catch (error) {
+                console.error('Failed to export logs:', error);
+            }
+        }
+
+        function toggleSidebar() {
+            logSidebar.classList.toggle('collapsed');
+            sidebarToggle.style.display = logSidebar.classList.contains('collapsed') ? 'block' : 'none';
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // 页面加载时初始化
+        document.addEventListener('DOMContentLoaded', () => {
+            initLogStream();
+            loadHistoryLogs();
         });
     </script>
 </body>

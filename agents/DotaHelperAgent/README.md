@@ -10,6 +10,7 @@
 - 📚 **技能加点** - 基于英雄定位的加点顺序
 - 💾 **智能缓存** - 两级缓存（内存 + 文件），减少 API 调用
 - 🔄 **ReAct Agent** - 推理 - 行动循环，自主决策
+- 📝 **日志系统** - 完整的日志记录和前端实时展示
 
 ## 🏗️ 架构设计
 
@@ -308,6 +309,69 @@ pytest core/ -v     # 核心测试
 pytest unit/ -v     # 单元测试
 pytest e2e/ -v      # E2E 测试
 ```
+
+## 📝 日志系统
+
+DotaHelperAgent 内置了完整的日志系统，支持文件持久化和前端实时展示。
+
+### 日志特性
+
+- 📁 **文件持久化** - 自动轮转，多组件分离
+- 🔄 **实时推送** - SSE 流式传输到前端
+- 🔍 **灵活筛选** - 按级别、组件、会话筛选
+- 📊 **结构化存储** - JSON 格式便于解析
+
+### 日志文件结构
+
+```
+logs/
+├── app.log           # 主应用日志
+├── app.json.log      # 结构化 JSON 日志
+├── error.log         # 错误日志
+├── agent.log         # Agent 组件日志
+├── tool.log          # 工具调用日志
+├── cache.log         # 缓存操作日志
+├── api.log           # API 请求日志
+└── web.log           # Web 服务日志
+```
+
+### 在代码中使用日志
+
+```python
+from utils.log_config import get_logger
+
+# 获取日志记录器
+logger = get_logger("my_component", component="agent")
+
+# 普通日志
+logger.info("普通信息日志")
+
+# 带上下文的日志（自动记录 session_id 和 extra_data）
+logger.info_ctx(
+    "执行某个操作",
+    session_id="sess_xxx",
+    extra_data={"param1": "value1", "param2": 123}
+)
+```
+
+### 日志 API 接口
+
+| 接口 | 方法 | 说明 |
+|------|------|------|
+| `/api/logs` | GET | 获取日志（支持筛选） |
+| `/api/logs/stream` | GET | SSE 流式日志 |
+| `/api/logs/files` | GET | 获取日志文件列表 |
+| `/api/logs/files/<name>` | GET | 获取日志文件内容 |
+| `/api/logs/clear` | POST | 清空内存日志 |
+
+### 前端日志面板
+
+Web 界面右侧提供日志侧边栏，功能包括：
+
+- **实时日志** - 实时显示应用运行日志
+- **日志文件** - 查看历史日志文件
+- **筛选过滤** - 按日志级别、组件筛选
+- **导出功能** - 导出日志为 JSON 文件
 
 ## 📖 详细文档
 
