@@ -1,0 +1,7 @@
+2026-04-30 00:42:09,813 | INFO     | werkzeug |  * Detected change in 'D:\\Anaconda3\\Scripts\\conda-script.py', reloading
+2026-04-30 00:42:10,959 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-04-30 00:42:10,959 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-04-30 00:42:12,370 | WARNING  | werkzeug |  * Debugger is active!
+2026-04-30 00:42:12,375 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-04-30 00:42:12,385 | WARNING  | werkzeug |  * Debugger is active!
+2026-04-30 00:42:12,389 | INFO     | werkzeug |  * Debugger PIN: 108-400-749

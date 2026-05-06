@@ -64,7 +64,7 @@ class TestMemoryLogHandlerBasic:
         assert logs[0]['message'] == 'test message'
 
     def test_emit_with_formatter(self):
-        """测试emit方法使用格式化器"""
+        """测试 emit 方法使用格式化器"""
         handler = MemoryLogHandler(max_entries=10)
         formatter = logging.Formatter('%(name)s - %(message)s')
         handler.setFormatter(formatter)
@@ -86,7 +86,7 @@ class TestMemoryLogHandlerBasic:
         logs = handler.get_logs()
         assert len(logs) == 1
         # 格式化器应该被使用
-        assert 'test_logger' in logs[0].get('formatted', '')
+        assert 'test_logger' in logs[0].get('message', '')
 
 
 class TestMemoryLogHandlerFiltering:
@@ -494,6 +494,10 @@ class TestGetMemoryHandler:
 
     def test_singleton_behavior(self):
         """测试单例行为"""
+        # 重置单例以确保干净的测试环境
+        from utils.memory_log_handler import reset_memory_handler
+        reset_memory_handler()
+        
         handler1 = get_memory_handler(max_entries=100)
         handler2 = get_memory_handler(max_entries=200)
 

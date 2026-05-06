@@ -1,0 +1,160 @@
+2026-05-01 00:42:31,767 | INFO     | werkzeug |  * Detected change in 'D:\\Anaconda3\\Scripts\\conda-script.py', reloading
+2026-05-01 00:42:32,238 | INFO     | werkzeug |  * Detected change in 'D:\\Anaconda3\\Lib\\threading.py', reloading
+2026-05-01 00:42:32,239 | INFO     | werkzeug |  * Detected change in 'D:\\Anaconda3\\Lib\\site-packages\\werkzeug\\serving.py', reloading
+2026-05-01 00:42:32,241 | INFO     | werkzeug |  * Detected change in 'D:\\Anaconda3\\Lib\\socketserver.py', reloading
+2026-05-01 00:42:32,242 | INFO     | werkzeug |  * Detected change in 'D:\\Anaconda3\\Lib\\selectors.py', reloading
+2026-05-01 00:42:33,074 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-01 00:42:33,526 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-01 00:42:35,314 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-01 00:42:35,322 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-01 00:42:35,716 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-01 00:42:35,722 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-01 09:49:24,509 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\__init__.py', reloading
+2026-05-01 09:49:24,509 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\__init__.py', reloading
+2026-05-01 09:49:24,511 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\__init__.py', reloading
+2026-05-01 09:49:24,511 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\__init__.py', reloading
+2026-05-01 09:49:24,514 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\hero_analyzer.py', reloading
+2026-05-01 09:49:24,514 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\hero_analyzer.py', reloading
+2026-05-01 09:49:24,520 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\hybrid_hero_analyzer.py', reloading
+2026-05-01 09:49:24,520 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\hybrid_hero_analyzer.py', reloading
+2026-05-01 09:49:24,522 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\item_recommender.py', reloading
+2026-05-01 09:49:24,522 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\item_recommender.py', reloading
+2026-05-01 09:49:24,526 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\skill_builder.py', reloading
+2026-05-01 09:49:24,526 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\skill_builder.py', reloading
+2026-05-01 09:49:24,534 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\cache\\__init__.py', reloading
+2026-05-01 09:49:24,534 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\cache\\__init__.py', reloading
+2026-05-01 09:49:24,542 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\cache\\cache_manager.py', reloading
+2026-05-01 09:49:24,543 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\cache\\cache_manager.py', reloading
+2026-05-01 09:49:24,568 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\__init__.py', reloading
+2026-05-01 09:49:24,569 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\__init__.py', reloading
+2026-05-01 09:49:24,570 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\agent.py', reloading
+2026-05-01 09:49:24,571 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\agent.py', reloading
+2026-05-01 09:49:24,573 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\agent_controller.py', reloading
+2026-05-01 09:49:24,573 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\agent_controller.py', reloading
+2026-05-01 09:49:24,577 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\config.py', reloading
+2026-05-01 09:49:24,577 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\config.py', reloading
+2026-05-01 09:49:24,586 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\hybrid_base.py', reloading
+2026-05-01 09:49:24,585 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\hybrid_base.py', reloading
+2026-05-01 09:49:24,595 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\react_agent.py', reloading
+2026-05-01 09:49:24,595 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\react_agent.py', reloading
+2026-05-01 09:49:24,604 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\tool_registry.py', reloading
+2026-05-01 09:49:24,605 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\tool_registry.py', reloading
+2026-05-01 09:49:24,711 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\examples\\usage_examples.py', reloading
+2026-05-01 09:49:24,711 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\examples\\usage_examples.py', reloading
+2026-05-01 09:49:24,726 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\memory\\__init__.py', reloading
+2026-05-01 09:49:24,727 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\memory\\__init__.py', reloading
+2026-05-01 09:49:24,730 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\memory\\memory.py', reloading
+2026-05-01 09:49:24,731 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\memory\\memory.py', reloading
+2026-05-01 09:49:24,733 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\strategies\\__init__.py', reloading
+2026-05-01 09:49:24,734 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\strategies\\__init__.py', reloading
+2026-05-01 09:49:24,736 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\strategies\\score_strategies.py', reloading
+2026-05-01 09:49:24,760 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\__init__.py', reloading
+2026-05-01 09:49:24,763 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\__init__.py', reloading
+2026-05-01 09:49:24,769 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\api\\__init__.py', reloading
+2026-05-01 09:49:24,769 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\api\\__init__.py', reloading
+2026-05-01 09:49:24,773 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\api\\test_api_client.py', reloading
+2026-05-01 09:49:24,773 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\api\\test_api_client.py', reloading
+2026-05-01 09:49:24,777 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\api\\test_web_api.py', reloading
+2026-05-01 09:49:24,777 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\api\\test_web_api.py', reloading
+2026-05-01 09:49:24,780 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\conftest.py', reloading
+2026-05-01 09:49:24,780 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\conftest.py', reloading
+2026-05-01 09:49:24,789 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\core\\__init__.py', reloading
+2026-05-01 09:49:24,789 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\core\\__init__.py', reloading
+2026-05-01 09:49:24,794 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\core\\test_agent.py', reloading
+2026-05-01 09:49:24,794 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\core\\test_agent.py', reloading
+2026-05-01 09:49:24,797 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\core\\test_agent_architecture.py', reloading
+2026-05-01 09:49:24,797 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\core\\test_agent_architecture.py', reloading
+2026-05-01 09:49:24,799 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\core\\test_analyzers.py', reloading
+2026-05-01 09:49:24,800 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\core\\test_analyzers.py', reloading
+2026-05-01 09:49:24,802 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\core\\test_react.py', reloading
+2026-05-01 09:49:24,802 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\core\\test_react.py', reloading
+2026-05-01 09:49:24,810 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\core\\test_strategies.py', reloading
+2026-05-01 09:49:24,810 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\core\\test_strategies.py', reloading
+2026-05-01 09:49:24,818 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\e2e\\__init__.py', reloading
+2026-05-01 09:49:24,818 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\e2e\\__init__.py', reloading
+2026-05-01 09:49:24,823 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\e2e\\test_e2e_workflow.py', reloading
+2026-05-01 09:49:24,827 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\e2e\\test_e2e_workflow.py', reloading
+2026-05-01 09:49:24,829 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\integration\\__init__.py', reloading
+2026-05-01 09:49:24,830 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\integration\\__init__.py', reloading
+2026-05-01 09:49:24,838 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\__init__.py', reloading
+2026-05-01 09:49:24,839 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\__init__.py', reloading
+2026-05-01 09:49:24,842 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\test_log_api.py', reloading
+2026-05-01 09:49:24,842 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\test_log_api.py', reloading
+2026-05-01 09:49:24,847 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\test_log_config.py', reloading
+2026-05-01 09:49:24,847 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\test_log_config.py', reloading
+2026-05-01 09:49:24,852 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\test_log_integration.py', reloading
+2026-05-01 09:49:24,852 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\test_log_integration.py', reloading
+2026-05-01 09:49:24,861 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\test_memory_log_handler.py', reloading
+2026-05-01 09:49:24,862 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\test_memory_log_handler.py', reloading
+2026-05-01 09:49:24,865 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\run_api_e2e_tests.py', reloading
+2026-05-01 09:49:24,865 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\run_api_e2e_tests.py', reloading
+2026-05-01 09:49:24,867 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\run_tests.py', reloading
+2026-05-01 09:49:24,867 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\run_tests.py', reloading
+2026-05-01 09:49:24,871 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\unit\\__init__.py', reloading
+2026-05-01 09:49:24,872 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\unit\\__init__.py', reloading
+2026-05-01 09:49:24,876 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\unit\\test_cache.py', reloading
+2026-05-01 09:49:24,877 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\unit\\test_cache.py', reloading
+2026-05-01 09:49:24,880 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\unit\\test_config.py', reloading
+2026-05-01 09:49:24,880 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\unit\\test_config.py', reloading
+2026-05-01 09:49:24,882 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tools\\__init__.py', reloading
+2026-05-01 09:49:24,882 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tools\\__init__.py', reloading
+2026-05-01 09:49:24,885 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tools\\agent_tools.py', reloading
+2026-05-01 09:49:24,888 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tools\\agent_tools.py', reloading
+2026-05-01 09:49:24,889 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tools\\base.py', reloading
+2026-05-01 09:49:24,890 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tools\\base.py', reloading
+2026-05-01 09:49:24,892 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tools\\build_tools.py', reloading
+2026-05-01 09:49:24,892 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tools\\build_tools.py', reloading
+2026-05-01 09:49:24,897 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tools\\hero_tools.py', reloading
+2026-05-01 09:49:24,898 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tools\\hero_tools.py', reloading
+2026-05-01 09:49:24,905 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\utils\\__init__.py', reloading
+2026-05-01 09:49:24,905 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\utils\\__init__.py', reloading
+2026-05-01 09:49:24,956 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\utils\\api_client.py', reloading
+2026-05-01 09:49:24,956 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\utils\\api_client.py', reloading
+2026-05-01 09:49:24,964 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\utils\\llm_client.py', reloading
+2026-05-01 09:49:24,964 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\utils\\llm_client.py', reloading
+2026-05-01 09:49:24,979 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\utils\\localization.py', reloading
+2026-05-01 09:49:24,979 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\utils\\localization.py', reloading
+2026-05-01 09:49:24,984 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\utils\\log_config.py', reloading
+2026-05-01 09:49:24,984 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\utils\\log_config.py', reloading
+2026-05-01 09:49:24,999 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\utils\\memory_log_handler.py', reloading
+2026-05-01 09:49:24,999 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\utils\\memory_log_handler.py', reloading
+2026-05-01 09:49:25,013 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-01 09:49:25,013 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-01 09:49:26,509 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-01 09:49:26,511 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-01 09:49:31,281 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-01 09:49:31,281 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-01 09:49:31,344 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-01 09:49:31,348 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-01 19:53:37,229 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\__init__.py', reloading
+2026-05-01 19:53:37,229 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\__init__.py', reloading
+2026-05-01 19:53:37,245 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\__init__.py', reloading
+2026-05-01 19:53:37,245 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\__init__.py', reloading
+2026-05-01 19:53:37,295 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\hero_analyzer.py', reloading
+2026-05-01 19:53:37,295 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\hero_analyzer.py', reloading
+2026-05-01 19:53:37,315 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\hybrid_hero_analyzer.py', reloading
+2026-05-01 19:53:37,315 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\hybrid_hero_analyzer.py', reloading
+2026-05-01 19:53:37,493 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\item_recommender.py', reloading
+2026-05-01 19:53:37,493 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\item_recommender.py', reloading
+2026-05-01 19:53:37,524 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\skill_builder.py', reloading
+2026-05-01 19:53:37,524 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\skill_builder.py', reloading
+2026-05-01 19:53:37,561 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\cache\\__init__.py', reloading
+2026-05-01 19:53:37,562 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\cache\\__init__.py', reloading
+2026-05-01 19:53:37,581 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\cache\\cache_manager.py', reloading
+2026-05-01 19:53:37,581 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\cache\\cache_manager.py', reloading
+2026-05-01 19:53:37,624 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\__init__.py', reloading
+2026-05-01 19:53:37,624 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\__init__.py', reloading
+2026-05-01 19:53:37,630 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\agent.py', reloading
+2026-05-01 19:53:37,630 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\agent.py', reloading
+2026-05-01 19:53:37,634 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\agent_controller.py', reloading
+2026-05-01 19:53:37,634 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\agent_controller.py', reloading
+2026-05-01 19:53:37,646 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\config.py', reloading
+2026-05-01 19:53:37,647 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\hybrid_base.py', reloading
+2026-05-01 19:53:37,648 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\react_agent.py', reloading
+2026-05-01 19:53:37,676 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\tool_registry.py', reloading
+2026-05-01 19:53:39,171 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-01 19:53:39,181 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-01 19:53:46,479 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-01 19:53:46,507 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-01 19:53:46,513 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-01 19:53:46,536 | INFO     | werkzeug |  * Debugger PIN: 108-400-749

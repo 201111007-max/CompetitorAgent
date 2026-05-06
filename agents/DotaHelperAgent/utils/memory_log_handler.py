@@ -33,7 +33,8 @@ class MemoryLogHandler(logging.Handler):
 
     def emit(self, record: logging.LogRecord):
         """接收日志记录"""
-        self._queue.put(record)
+        # 同步处理日志，确保立即可用
+        self._store_log(record)
 
     def _process_queue(self):
         """后台处理日志队列"""
@@ -124,13 +125,26 @@ class MemoryLogHandler(logging.Handler):
         if callback in self._subscribers:
             self._subscribers.remove(callback)
 
+    def get_session_logs(self, session_id: str) -> List[Dict[str, Any]]:
+        """获取特定会话的日志"""
+        with self._lock:
+            if session_id in self._session_logs:
+                return list(self._session_logs[session_id])
+            return []
+
     def clear(self, session_id: Optional[str] = None):
         """清空日志"""
         with self._lock:
             if session_id:
+                # 清空特定会话的日志
                 if session_id in self._session_logs:
                     self._session_logs[session_id].clear()
+                # 从全局日志中移除该会话的日志
+                filtered_logs = [log for log in self._logs if log.get('session_id') != session_id]
+                self._logs.clear()
+                self._logs.extend(filtered_logs)
             else:
+                # 清空所有日志
                 self._logs.clear()
                 self._session_logs.clear()
 
@@ -151,3 +165,11 @@ def get_memory_handler(max_entries: int = 1000) -> MemoryLogHandler:
     if _memory_handler is None:
         _memory_handler = MemoryLogHandler(max_entries)
     return _memory_handler
+
+
+def reset_memory_handler():
+    """重置内存日志处理器单例（用于测试）"""
+    global _memory_handler
+    if _memory_handler is not None:
+        _memory_handler.close()
+        _memory_handler = None
