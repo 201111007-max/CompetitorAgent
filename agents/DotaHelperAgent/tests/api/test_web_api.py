@@ -1,4 +1,4 @@
-﻿"""Web API 集成测试
+"""Web API 集成测试
 
 测试 Flask 后端 API 端点的完整功能
 包括：健康检查、聊天接口、英雄解析、物品解析等
@@ -11,7 +11,7 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from web.app import app, parse_heroes_with_llm, parse_heroes_with_rules, parse_items_with_llm
+from web.app import app, parse_heroes_with_llm, parse_items_with_llm
 
 
 @pytest.fixture
@@ -147,53 +147,78 @@ class TestChatEndpoint:
 class TestHeroParsing:
     """测试英雄解析功能"""
     
-    def test_parse_heroes_with_rules_simple(self):
-        """测试规则解析 - 简单情况"""
-        query = "我们有敌法，黑鸟，小鹿，对面有军团，小鱼，兽"
-        result = parse_heroes_with_rules(query)
-        
-        assert 'our_heroes' in result
-        assert 'enemy_heroes' in result
-        assert isinstance(result['our_heroes'], list)
-        assert isinstance(result['enemy_heroes'], list)
-    
-    def test_parse_heroes_with_rules_english(self):
-        """测试规则解析 - 英文名"""
-        query = "our: anti-mage, invoker; enemy: pudge, axe"
-        result = parse_heroes_with_rules(query)
-        
-        assert 'our_heroes' in result
-        assert 'enemy_heroes' in result
-    
-    def test_parse_heroes_with_rules_mixed(self):
-        """测试规则解析 - 混合情况"""
-        query = "对面有 PA、小黑，我们选了斧王、祈求者"
-        result = parse_heroes_with_rules(query)
-        
-        assert 'our_heroes' in result
-        assert 'enemy_heroes' in result
-        print(f"[DEBUG] our={result['our_heroes']}, enemy={result['enemy_heroes']}")
-    
     def test_parse_heroes_with_llm_mock(self):
-        """测试 LLM 解析（模拟）"""
+        """测试 LLM 解析 - 模拟响应"""
         with patch('web.app.get_llm_client') as mock_get_client:
             mock_client = Mock()
             mock_client.chat.return_value = {
                 'choices': [{
                     'message': {
-                        'content': '{"our_heroes": ["anti-mage"], "enemy_heroes": ["pudge"]}'
+                        'content': '{"our_heroes": ["anti-mage", "obsidian_destroyer", "enchantress"], "enemy_heroes": ["legion_commander", "slark", "beastmaster"]}'
                     }
                 }]
             }
             mock_get_client.return_value = mock_client
             
-            # 这里需要实际调用 parse_heroes_with_llm
-            # 但由于 LLM 客户端可能未配置，使用规则解析作为备选
+            query = "我们有敌法，黑鸟，小鹿，对面有军团，小鱼，兽"
+            result = parse_heroes_with_llm(query)
+            
+            assert 'our_heroes' in result
+            assert 'enemy_heroes' in result
+            assert len(result['our_heroes']) == 3
+            assert len(result['enemy_heroes']) == 3
+    
+    def test_parse_heroes_with_llm_english(self):
+        """测试 LLM 解析 - 英文名"""
+        with patch('web.app.get_llm_client') as mock_get_client:
+            mock_client = Mock()
+            mock_client.chat.return_value = {
+                'choices': [{
+                    'message': {
+                        'content': '{"our_heroes": ["anti-mage", "invoker"], "enemy_heroes": ["pudge", "axe"]}'
+                    }
+                }]
+            }
+            mock_get_client.return_value = mock_client
+            
+            query = "our: anti-mage, invoker; enemy: pudge, axe"
+            result = parse_heroes_with_llm(query)
+            
+            assert 'our_heroes' in result
+            assert 'enemy_heroes' in result
+    
+    def test_parse_heroes_with_llm_mixed(self):
+        """测试 LLM 解析 - 混合情况"""
+        with patch('web.app.get_llm_client') as mock_get_client:
+            mock_client = Mock()
+            mock_client.chat.return_value = {
+                'choices': [{
+                    'message': {
+                        'content': '{"our_heroes": ["axe", "invoker"], "enemy_heroes": ["phantom_assassin", "drow_ranger"]}'
+                    }
+                }]
+            }
+            mock_get_client.return_value = mock_client
+            
+            query = "对面有 PA、小黑，我们选了斧王、祈求者"
+            result = parse_heroes_with_llm(query)
+            
+            assert 'our_heroes' in result
+            assert 'enemy_heroes' in result
+            print(f"[DEBUG] our={result['our_heroes']}, enemy={result['enemy_heroes']}")
+    
+    def test_parse_heroes_with_llm_no_client(self):
+        """测试 LLM 解析 - 客户端未初始化"""
+        with patch('web.app.get_llm_client') as mock_get_client:
+            mock_get_client.return_value = None
+            
             query = "我们有敌法，对面有帕吉"
             result = parse_heroes_with_llm(query)
             
             assert 'our_heroes' in result
             assert 'enemy_heroes' in result
+            assert result['our_heroes'] == []
+            assert result['enemy_heroes'] == []
 
 
 class TestItemParsing:
@@ -350,12 +375,23 @@ class TestEdgeCases:
     
     def test_hero_parsing_typos(self):
         """测试拼写错误处理"""
-        # "地方" 是 "敌方" 的 typo
-        query = "地方有敌法、小黑"
-        result = parse_heroes_with_rules(query)
-        
-        assert 'enemy_heroes' in result
-        # 应该识别为敌方英雄
+        with patch('web.app.get_llm_client') as mock_get_client:
+            mock_client = Mock()
+            mock_client.chat.return_value = {
+                'choices': [{
+                    'message': {
+                        'content': '{"our_heroes": [], "enemy_heroes": ["anti-mage", "drow_ranger"]}'
+                    }
+                }]
+            }
+            mock_get_client.return_value = mock_client
+            
+            # "地方" 是 "敌方" 的 typo
+            query = "地方有敌法、小黑"
+            result = parse_heroes_with_llm(query)
+            
+            assert 'enemy_heroes' in result
+            # 应该识别为敌方英雄
 
 
 class TestIntegration:

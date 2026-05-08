@@ -96,8 +96,12 @@ class ToolRegistry:
 
     def execute(self, tool_name: str, **kwargs) -> ToolResult:
         """执行 Tool"""
+        print(f"\n[TOOL_REGISTRY.execute] 执行工具: {tool_name}")
+        print(f"[TOOL_REGISTRY.execute] 参数: {kwargs}")
+        
         tool = self.get(tool_name)
         if tool is None:
+            print(f"[TOOL_REGISTRY.execute] 错误: 工具 '{tool_name}' 未找到")
             return ToolResult(
                 tool_name=tool_name,
                 status=ToolStatus.FAILURE,
@@ -105,10 +109,28 @@ class ToolRegistry:
                 error=f"Tool '{tool_name}' not found"
             )
 
+        print(f"[TOOL_REGISTRY.execute] 找到工具对象: {tool.name}, 类型: {type(tool)}")
+
         # 记录调用开始时间
         start_time = time.time()
         
-        result = tool.execute(**kwargs)
+        try:
+            result = tool.execute(**kwargs)
+            print(f"[TOOL_REGISTRY.execute] 工具执行完成")
+            print(f"[TOOL_REGISTRY.execute] 结果类型: {type(result)}")
+            print(f"[TOOL_REGISTRY.execute] 结果内容: {result}")
+        except Exception as e:
+            print(f"[TOOL_REGISTRY.execute] 工具执行异常: {str(e)}")
+            import traceback
+            print(f"[TOOL_REGISTRY.execute] Traceback: {traceback.format_exc()}")
+            execution_time = time.time() - start_time
+            result = ToolResult(
+                tool_name=tool_name,
+                status=ToolStatus.FAILURE,
+                data=None,
+                error=str(e),
+                execution_time=execution_time
+            )
         
         # 计算执行时间
         execution_time = time.time() - start_time

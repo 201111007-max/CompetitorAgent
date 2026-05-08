@@ -230,20 +230,39 @@ class OpenDotaClient:
         """将英雄名称转换为 ID
         
         Args:
-            hero_name: 英雄名称（支持 localized_name 或 name）
+            hero_name: 英雄名称（支持 localized_name、内部名称、下划线格式等）
             
         Returns:
             英雄 ID，未找到返回 None
         """
         heroes = self.get_heroes()
-        hero_name_lower = hero_name.lower()
+        hero_name_lower = hero_name.lower().strip()
         
         for hero in heroes:
-            # 匹配 localized_name（显示名称）
+            # 1. 匹配 localized_name（显示名称，如 "Faceless Void"）
             if hero.get("localized_name", "").lower() == hero_name_lower:
                 return hero["id"]
-            # 匹配 name（内部名称，如 npc_dota_hero_antimage）
-            if hero.get("name", "").lower().replace("npc_dota_hero_", "") == hero_name_lower:
+            
+            # 2. 匹配内部名称（如 "npc_dota_hero_faceless_void"）
+            if hero.get("name", "").lower() == hero_name_lower:
+                return hero["id"]
+            
+            # 3. 匹配去掉 "npc_dota_hero_" 前缀的名称（如 "faceless_void"）
+            internal_name = hero.get("name", "").lower().replace("npc_dota_hero_", "")
+            if internal_name == hero_name_lower:
+                return hero["id"]
+            
+            # 4. 匹配空格替换为下划线的 localized_name（如 "faceless_void" 匹配 "Faceless Void"）
+            localized_lower = hero.get("localized_name", "").lower()
+            if localized_lower.replace(" ", "_") == hero_name_lower:
+                return hero["id"]
+            
+            # 5. 匹配去掉连字符的名称（如 "anti-mage" 匹配 "antimage"）
+            if hero_name_lower.replace("-", "").replace("_", "") == internal_name.replace("-", "").replace("_", ""):
+                return hero["id"]
+            
+            # 6. 模糊匹配：检查 hero_name 是否是内部名称的一部分
+            if hero_name_lower in internal_name or internal_name in hero_name_lower:
                 return hero["id"]
         
         return None

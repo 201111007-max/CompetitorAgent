@@ -163,51 +163,80 @@ class AgentController:
         Returns:
             包含最终答案和相关元数据的字典
         """
+        print(f"\n{'='*60}")
+        print(f"[AGENT_CONTROLLER] 开始处理查询")
+        print(f"[AGENT_CONTROLLER] Query: {query}")
+        print(f"[AGENT_CONTROLLER] Context: {context}")
+        print(f"{'='*60}\n")
+        
         thought = AgentThought(query=query, context=context or {})
         self.current_thought = thought
 
         try:
             for turn in range(self.max_turns):
                 thought.increment_turn()
+                print(f"\n[AGENT_CONTROLLER] ===== 第 {turn + 1} 轮循环 =====")
 
                 # 1. Think - 理解问题
+                print(f"[AGENT_CONTROLLER] [Step 1/5] Think - 理解问题")
                 self._think(thought)
                 if thought.state == AgentState.FAILED:
+                    print(f"[AGENT_CONTROLLER] Think 步骤失败，终止循环")
                     break
 
                 # 2. Plan - 制定计划
+                print(f"[AGENT_CONTROLLER] [Step 2/5] Plan - 制定计划")
                 self._plan(thought)
                 if thought.state == AgentState.FAILED:
+                    print(f"[AGENT_CONTROLLER] Plan 步骤失败，终止循环")
                     break
 
                 # 3. Execute - 执行行动
+                print(f"[AGENT_CONTROLLER] [Step 3/5] Execute - 执行行动")
                 self._execute(thought)
                 if thought.state == AgentState.FAILED:
+                    print(f"[AGENT_CONTROLLER] Execute 步骤失败，终止循环")
                     break
 
                 # 4. Observe - 观察结果
+                print(f"[AGENT_CONTROLLER] [Step 4/5] Observe - 观察结果")
                 self._observe(thought)
 
                 # 5. Reflect - 反思（可选）
                 if self.enable_reflection:
+                    print(f"[AGENT_CONTROLLER] [Step 5/5] Reflect - 反思")
                     self._reflect(thought)
 
                 # 检查是否已完成
                 if thought.state == AgentState.COMPLETE:
+                    print(f"[AGENT_CONTROLLER] 循环完成，状态: COMPLETE")
                     break
 
                 # 如果已经收集了足够的信息，可以提前结束
                 if self._should_finalize(thought):
+                    print(f"[AGENT_CONTROLLER] 满足提前结束条件")
                     self._finalize(thought)
                     break
 
             # 如果达到最大轮数仍未完成，强制结束
             if thought.state not in [AgentState.COMPLETE, AgentState.FAILED]:
+                print(f"[AGENT_CONTROLLER] 达到最大轮数 ({self.max_turns})，强制结束")
                 self._finalize(thought)
 
-            return self._build_response(thought)
+            response = self._build_response(thought)
+            print(f"\n[AGENT_CONTROLLER] 最终响应:")
+            print(f"[AGENT_CONTROLLER]   State: {response.get('state')}")
+            print(f"[AGENT_CONTROLLER]   Success: {response.get('success')}")
+            print(f"[AGENT_CONTROLLER]   Turn Count: {response.get('turn_count')}")
+            print(f"[AGENT_CONTROLLER]   Duration: {response.get('duration'):.2f}s")
+            print(f"{'='*60}\n")
+            
+            return response
 
         except Exception as e:
+            print(f"[AGENT_CONTROLLER] 异常: {str(e)}")
+            import traceback
+            print(f"[AGENT_CONTROLLER] Traceback: {traceback.format_exc()}")
             thought.set_failed(str(e))
             return self._build_response(thought)
 
@@ -246,16 +275,22 @@ class AgentController:
 
         query = thought.query.lower()
         query_type = self._detect_query_type(query)
+        
+        print(f"[AGENT_CONTROLLER._plan] Query Type: {query_type}")
 
         # 根据查询类型选择工具
         available_tools = self._select_tools_for_query(query_type, thought.context)
+        
+        print(f"[AGENT_CONTROLLER._plan] Available Tools: {available_tools}")
+        print(f"[AGENT_CONTROLLER._plan] Context: {thought.context}")
 
         if not available_tools:
             thought.add_reasoning("没有找到合适的工具，尝试使用通用方法")
+            print(f"[AGENT_CONTROLLER._plan] No tools found, using fallback")
             available_tools = self.tool_registry.list_tools()
 
         thought.add_reasoning(f"计划使用工具：{available_tools}")
-        print(f"[DEBUG] Plan: query_type={query_type}, available_tools={available_tools}")
+        print(f"[AGENT_CONTROLLER._plan] Final planned tools: {available_tools}")
 
         # 制定行动顺序
         thought.context['planned_tools'] = available_tools
@@ -274,7 +309,11 @@ class AgentController:
         # 准备工具调用参数
         params = self._prepare_tool_parameters(thought.query, query_type, thought.context)
 
-        print(f"[DEBUG] Execute: planned_tools={planned_tools}, params={params}")
+        print(f"[AGENT_CONTROLLER._execute] Planned Tools: {planned_tools}")
+        print(f"[AGENT_CONTROLLER._execute] Query Type: {query_type}")
+        print(f"[AGENT_CONTROLLER._execute] Tool Parameters: {params}")
+        print(f"[AGENT_CONTROLLER._execute] our_heroes: {params.get('our_heroes', [])}")
+        print(f"[AGENT_CONTROLLER._execute] enemy_heroes: {params.get('enemy_heroes', [])}")
 
         # 执行工具调用
         for tool_name in planned_tools:
@@ -282,30 +321,39 @@ class AgentController:
             if tool:
                 try:
                     thought.add_reasoning(f"执行工具：{tool_name}")
-                    print(f"[DEBUG] Executing tool: {tool_name} with params: {params}")
+                    print(f"\n[AGENT_CONTROLLER._execute] >>> 执行工具: {tool_name}")
+                    print(f"[AGENT_CONTROLLER._execute]     参数: {params}")
                     result = self.tool_registry.execute(tool_name, **params)
-                    print(f"[DEBUG] Tool result: {result}")
+                    print(f"[AGENT_CONTROLLER._execute]     结果状态: {result.status.value if result else 'None'}")
+                    if result:
+                        print(f"[AGENT_CONTROLLER._execute]     结果数据: {result.data}")
+                        if result.error:
+                            print(f"[AGENT_CONTROLLER._execute]     错误信息: {result.error}")
                     thought.add_action(tool_name, params, result)
 
                     if result.is_success():
                         thought.add_observation(result.data)
+                        print(f"[AGENT_CONTROLLER._execute]     工具执行成功，已添加观察结果")
                         # 如果工具执行成功且有结果，可以考虑完成
                         if self._has_sufficient_data(thought):
+                            print(f"[AGENT_CONTROLLER._execute]     已收集足够数据，准备合成结果")
                             self._synthesize(thought)
                             return
                     else:
                         thought.add_reasoning(f"工具 {tool_name} 执行失败：{result.error}")
-                        print(f"[DEBUG] Tool failed: {tool_name}, error: {result.error}")
+                        print(f"[AGENT_CONTROLLER._execute]     工具执行失败: {result.error}")
 
                 except Exception as e:
                     thought.add_reasoning(f"工具 {tool_name} 执行异常：{str(e)}")
                     thought.add_action(tool_name, params, None)
-                    print(f"[DEBUG] Tool exception: {tool_name}, error: {str(e)}")
+                    print(f"[AGENT_CONTROLLER._execute]     工具执行异常: {str(e)}")
+                    import traceback
+                    print(f"[AGENT_CONTROLLER._execute]     Traceback: {traceback.format_exc()}")
 
         # 如果没有工具执行成功，标记为失败
         if not thought.observations:
             thought.add_reasoning("所有工具执行失败，尝试降级方案")
-            print(f"[DEBUG] No observations, all tools failed")
+            print(f"[AGENT_CONTROLLER._execute] 所有工具执行失败，无观察结果")
 
     def _observe(self, thought: AgentThought) -> None:
         """Observe 步骤 - 观察和分析结果
@@ -436,16 +484,26 @@ class AgentController:
 
     def _prepare_tool_parameters(self, query: str, query_type: str, context: Dict) -> Dict[str, Any]:
         """准备工具调用参数"""
-        params = {
-            'top_n': context.get('top_n', 3),
-            'limit': context.get('limit', 10)
-        }
+        params = {}
+
+        # 根据查询类型准备不同的参数
+        if query_type == 'hero_recommendation':
+            # 英雄推荐工具需要 top_n
+            params['top_n'] = context.get('top_n', 3)
+        elif query_type == 'meta_analysis':
+            # 版本分析工具需要 limit
+            params['limit'] = context.get('limit', 10)
+        # composition_analysis 不需要额外参数
 
         # 从上下文或 query 中提取英雄信息
         if 'our_heroes' in context:
             params['our_heroes'] = context['our_heroes']
+            print(f"[AGENT_CONTROLLER._prepare_tool_parameters] 从 context 提取 our_heroes: {context['our_heroes']}")
         if 'enemy_heroes' in context:
             params['enemy_heroes'] = context['enemy_heroes']
+            print(f"[AGENT_CONTROLLER._prepare_tool_parameters] 从 context 提取 enemy_heroes: {context['enemy_heroes']}")
+        
+        print(f"[AGENT_CONTROLLER._prepare_tool_parameters] 最终参数: {params}")
 
         return params
 
@@ -476,9 +534,22 @@ class AgentController:
                 if 'recommendations' in obs:
                     merged['recommendations'].extend(obs['recommendations'])
                 merged['data_sources'].append(obs)
+            elif isinstance(obs, list):
+                # 处理直接返回列表的情况（如 analyze_matchups 的返回）
+                print(f"[AGENT_CONTROLLER._merge_observations] 处理列表格式观察结果，包含 {len(obs)} 项")
+                if len(obs) > 0 and isinstance(obs[0], dict):
+                    # 检查是否是英雄推荐格式
+                    if 'hero_name' in obs[0] or 'hero_id' in obs[0]:
+                        merged['recommendations'].extend(obs)
+                        print(f"[AGENT_CONTROLLER._merge_observations] 已添加 {len(obs)} 条英雄推荐")
+                    else:
+                        merged['data_sources'].extend(obs)
+                else:
+                    merged['raw_data'] = obs
             else:
                 merged['raw_data'] = obs
 
+        print(f"[AGENT_CONTROLLER._merge_observations] 最终合并结果: {len(merged['recommendations'])} 条推荐")
         return merged
 
     def _evaluate_result_quality(self, thought: AgentThought) -> float:

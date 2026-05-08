@@ -13,6 +13,7 @@ import uuid
 import threading
 import re
 import queue
+from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -21,6 +22,7 @@ from core.agent_controller import AgentController
 from core.tool_registry import ToolRegistry
 from tools.agent_tools import create_all_tools
 from core.config import AgentConfig, LLMConfig
+from utils.localization import DotaLocalizer
 from utils.llm_client import LLMClient
 from utils.log_config import setup_logging_with_memory, get_logger
 from utils.memory_log_handler import get_memory_handler
@@ -47,30 +49,57 @@ agent_controller = None
 llm_client = None
 cache_warming = False
 cache_ready = False
+localizer = DotaLocalizer()
 
-HERO_PARSE_PROMPT = """你是一个 Dota 2 英雄名称解析器。请从用户输入中提取英雄名称。
+# 日志目录（可配置，便于测试）
+LOG_DIR = Path(__file__).parent.parent / "logs"
 
-支持的中英文英雄名称：
-- 英文名如：pudge, anti-mage, invoker, axe, sven, lion, crystal_maiden, shadow_fiend, natures_prophet
-- 中文名如：帕吉 (爸爸)、幻影刺客 (PA)、祈求者 (Invoker)、斧王、剑圣、恶魔巫师、斯温 (Sven)、军团 (Legion Commander)、黑鸟 (Obsidian Destroyer)、船长 (Kunkka)
+HERO_PARSE_PROMPT = """你是一个 Dota 2 英雄名称解析专家。请从用户输入中准确提取英雄名称。
 
-请从以下用户输入中提取所有英雄名称，返回 JSON 格式：
+## 任务
+从用户输入中识别所有提到的 Dota 2 英雄，并判断他们是己方还是敌方。
+
+## 输出格式
+严格返回以下 JSON 格式，不要包含任何其他内容：
 {{
-    "our_heroes": ["己方英雄列表"],
-    "enemy_heroes": ["敌方英雄列表"]
+    "our_heroes": ["己方英雄英文名称列表"],
+    "enemy_heroes": ["敌方英雄英文名称列表"]
 }}
 
-规则：
-- 如果用户说"敌方"、"enemy"、"克制"、"地方"（typo，通常是敌方）、"敌方有"等，认为是敌方英雄
-- 如果用户说"己方"、"our"、"我们"、"我方有"、"我方"等，认为是己方英雄
-- 如果只说"有"谁，没有明确说是己方还是敌方，默认是敌方英雄
-- 注意："地方"是"敌方"的 typo，应该算作敌方
-- 只返回英雄的**英文名称**（如 pudge, sven），不要中文名
-- 如果没有找到任何英雄，返回空列表
+## 判断规则
+1. **敌方英雄标识词**：敌方、对面、对方、enemy、克制、对面有、敌方有、地方（typo，意为敌方）
+2. **己方英雄标识词**：我方、我们、己方、our、we、我们选了、我们有、我方有
+3. **默认规则**：
+   - 如果用户只说"有"某个英雄，没有明确说明是己方还是敌方，默认为**敌方**
+   - 如果用户说"推荐英雄"、"选什么英雄"等，前面提到的英雄通常是己方已选的
+   - 如果用户说"克制XX"，XX 是敌方英雄
 
-用户输入：{query}
+## 英雄名称处理
+1. **必须转换为英文名称**，使用 Dota 2 官方英文名
+2. 常见英雄映射参考：
+   - 虚空假面 → faceless_void, 帕格纳 → pugna, 沙王 → sand_king
+   - 敌法 → anti-mage, 幻影刺客 → phantom_assassin, 帕吉 → pudge
+   - 斧王 → axe, 剑圣 → juggernaut, 影魔 → shadow_fiend
+   - 祈求者/卡尔 → invoker, 水晶 → crystal_maiden, 莱恩 → lion
+   - 斯温 → sven, 小小 → tiny, 军团 → legion_commander
+   - 小鱼 → slark, 兽王 → beastmaster, 小鹿 → enchantress
+   - 黑鸟 → obsidian_destroyer, 小黑 → drow_ranger
+3. 如果不确定英文名，尽量使用拼音或音译，保持小写，空格用下划线
 
-请只返回 JSON，不要其他内容："""
+## 示例
+用户输入："我方英雄有虚空假面,帕格纳,沙王，推荐我选什么英雄"
+输出：{{"our_heroes": ["faceless_void", "pugna", "sand_king"], "enemy_heroes": []}}
+
+用户输入："对面有帕吉和斧王，选什么克制"
+输出：{{"our_heroes": [], "enemy_heroes": ["pudge", "axe"]}}
+
+用户输入："我们选了影魔，对面有宙斯和水晶"
+输出：{{"our_heroes": ["shadow_fiend"], "enemy_heroes": ["zeus", "crystal_maiden"]}}
+
+## 用户输入
+{query}
+
+请只返回 JSON，不要其他任何内容："""
 
 
 ITEM_PARSE_PROMPT = """你是一个 Dota 2 物品名称解析器。请从用户输入中提取物品名称。
@@ -111,11 +140,20 @@ def get_llm_client():
 
 
 def parse_heroes_with_llm(query):
-    """使用 LLM 从 query 中解析英雄名称"""
+    """使用 LLM 从 query 中解析英雄名称
+    
+    完全依赖 LLM 进行英雄名称解析，不再使用规则解析作为降级方案。
+    
+    Args:
+        query: 用户输入的查询文本
+        
+    Returns:
+        dict: 包含 our_heroes 和 enemy_heroes 的字典
+    """
     client = get_llm_client()
     if client is None:
-        # 没有 LLM 时，使用规则解析
-        return parse_heroes_with_rules(query)
+        print(f"[PARSE_HEROES] LLM 客户端未初始化，返回空结果")
+        return {"our_heroes": [], "enemy_heroes": []}
 
     try:
         messages = [
@@ -124,113 +162,38 @@ def parse_heroes_with_llm(query):
         response = client.chat(messages, max_tokens=512, temperature=0.1)
 
         if "error" in response:
-            print(f"LLM 解析英雄失败：{response['error']}")
-            return parse_heroes_with_rules(query)
+            print(f"[PARSE_HEROES] LLM 解析失败：{response['error']}")
+            return {"our_heroes": [], "enemy_heroes": []}
 
         content = response.get("choices", [{}])[0].get("message", {}).get("content", "")
-
-        json_match = re.search(r'\{[^{}]*\}', content, re.DOTALL)
+        
+        # 提取 JSON 内容（可能包含 markdown 代码块）
+        json_match = re.search(r'```json\s*([\s\S]*?)\s*```', content)
         if json_match:
-            result = json.loads(json_match.group())
-            return {
-                "our_heroes": result.get("our_heroes", []),
-                "enemy_heroes": result.get("enemy_heroes", [])
-            }
+            json_str = json_match.group(1)
+        else:
+            json_match = re.search(r'\{[\s\S]*\}', content, re.DOTALL)
+            json_str = json_match.group() if json_match else content
+
+        result = json.loads(json_str)
+        parsed = {
+            "our_heroes": result.get("our_heroes", []),
+            "enemy_heroes": result.get("enemy_heroes", [])
+        }
+        
+        print(f"[PARSE_HEROES] LLM 解析成功: our={parsed['our_heroes']}, enemy={parsed['enemy_heroes']}")
+        return parsed
+        
+    except json.JSONDecodeError as e:
+        print(f"[PARSE_HEROES] JSON 解析失败: {e}")
+        print(f"[PARSE_HEROES] 原始内容: {content}")
+        return {"our_heroes": [], "enemy_heroes": []}
     except Exception as e:
-        print(f"LLM 解析英雄异常：{e}")
+        print(f"[PARSE_HEROES] LLM 解析异常：{e}")
+        import traceback
+        print(f"[PARSE_HEROES] Traceback: {traceback.format_exc()}")
+        return {"our_heroes": [], "enemy_heroes": []}
 
-    return parse_heroes_with_rules(query)
-
-
-def parse_heroes_with_rules(query):
-    """使用规则从 query 中解析英雄名称（LLM 不可用时的备用方案）"""
-    our_heroes = []
-    enemy_heroes = []
-    
-    # 常见英雄名称映射（中文 -> 英文）
-    hero_map = {
-        '敌法': 'anti-mage',
-        '幻影刺客': 'phantom_assassin',
-        'pa': 'phantom_assassin',
-        '小黑': 'drow_ranger',
-        '黑鸟': 'obsidian_destroyer',
-        'od': 'obsidian_destroyer',
-        '小鹿': 'enchantress',
-        '军团': 'legion_commander',
-        '小鱼': 'slark',
-        '兽': 'beastmaster',
-        '兽王': 'beastmaster',
-        '帕吉': 'pudge',
-        '斧王': 'axe',
-        '祈求者': 'invoker',
-        '卡尔': 'invoker',
-        '剑圣': 'juggernaut',
-        'jugg': 'juggernaut',
-        '水晶': 'crystal_maiden',
-        'cm': 'crystal_maiden',
-        'lion': 'lion',
-        '莱恩': 'lion',
-        '斯温': 'sven',
-        '小小': 'tiny',
-        '影魔': 'shadow_fiend',
-        'sf': 'shadow_fiend',
-    }
-    
-    query_lower = query.lower()
-    
-    # 检测敌方英雄的关键词
-    enemy_keywords = ['敌方', '对面', 'enemy', '克制', '对面有', '敌方有']
-    
-    # 检测己方英雄的关键词
-    our_keywords = ['我方', '我们', '己方', 'our', 'we', '我们选了', '我们有']
-    
-    # 先判断是敌方还是己方
-    is_enemy = False
-    for keyword in enemy_keywords:
-        if keyword in query_lower:
-            is_enemy = True
-            break
-    
-    # 使用更智能的分割方式 - 按逗号、空格分割
-    # 但要保留"我们有"、"对面有"这样的关键词用于判断
-    parts = re.split(r'[，,]', query_lower)
-    
-    current_side = 'enemy' if is_enemy else 'our'
-    
-    for part in parts:
-        part = part.strip()
-        
-        # 检查这部分是否包含侧边关键词
-        for keyword in our_keywords:
-            if keyword in part:
-                current_side = 'our'
-                break
-        for keyword in enemy_keywords:
-            if keyword in part:
-                current_side = 'enemy'
-                break
-        
-        # 提取英雄名称
-        words = part.split()
-        for word in words:
-            word = word.strip()
-            if len(word) < 1 or len(word) > 20:
-                continue
-            
-            # 跳过关键词
-            if word in our_keywords or word in enemy_keywords:
-                continue
-                
-            # 检查是否是英雄名称
-            if word in hero_map:
-                hero = hero_map[word]
-                if current_side == 'our':
-                    our_heroes.append(hero)
-                else:
-                    enemy_heroes.append(hero)
-    
-    print(f"[DEBUG] Rule-based hero parsing: our={our_heroes}, enemy={enemy_heroes}")
-    return {"our_heroes": our_heroes, "enemy_heroes": enemy_heroes}
 
 
 def parse_items_with_llm(query):
@@ -462,7 +425,7 @@ def test_tools():
     
     # 测试英雄解析
     test_query = "我们有敌法，黑鸟，小鹿，对面有军团，小鱼，兽"
-    parsed = parse_heroes_with_rules(test_query)
+    parsed = parse_heroes_with_llm(test_query)
     
     # 测试工具执行
     result = {}
@@ -505,6 +468,14 @@ def chat():
     session_id = data.get('session_id', str(uuid.uuid4()))
     context = data.get('context', {})
 
+    print(f"\n{'='*60}")
+    print(f"[APP.CHAT] 收到聊天请求")
+    print(f"[APP.CHAT] Query: {query}")
+    print(f"[APP.CHAT] Session ID: {session_id}")
+    print(f"[APP.CHAT] Context (from frontend): {context}")
+    print(f"[APP.CHAT] Agent Controller 状态: {'已初始化' if agent_controller else '未初始化'}")
+    print(f"{'='*60}\n")
+
     # 记录请求日志
     app_logger.info_ctx(
         f"收到聊天请求",
@@ -515,6 +486,7 @@ def chat():
     # 如果没有 Agent Controller，回退到旧版实现
     if agent_controller is None:
         app_logger.warning_ctx("Agent Controller 未初始化，使用旧版实现", session_id=session_id)
+        print(f"[APP.CHAT] Agent Controller 未初始化，使用旧版实现")
         return _chat_legacy(query, context, session_id)
 
     agt = get_agent()
@@ -530,23 +502,39 @@ def chat():
         result["success"] = False
         result["error"] = "Query cannot be empty"
         app_logger.warning_ctx("查询为空", session_id=session_id)
+        print(f"[APP.CHAT] 查询为空，返回错误")
         return jsonify(result)
 
     try:
         # 如果 context 中没有英雄信息，尝试从 query 中解析
-        if 'our_heroes' not in context and 'enemy_heroes' not in context:
+        our_heroes = context.get('our_heroes', [])
+        enemy_heroes = context.get('enemy_heroes', [])
+        
+        if not our_heroes and not enemy_heroes:
+            print(f"[APP.CHAT] Context 中无英雄信息（或为空），尝试使用 LLM 解析")
             parsed = parse_heroes_with_llm(query)
+            print(f"[APP.CHAT] LLM 解析结果: {parsed}")
             if parsed['our_heroes'] or parsed['enemy_heroes']:
                 context.update(parsed)
+                print(f"[APP.CHAT] 更新 context: {context}")
                 app_logger.debug_ctx(
                     f"从查询中解析到英雄",
                     session_id=session_id,
                     extra_data={"parsed": parsed}
                 )
+            else:
+                print(f"[APP.CHAT] LLM 解析未找到英雄")
+        else:
+            print(f"[APP.CHAT] Context 已包含英雄信息，跳过解析")
 
         # 使用 Agent Controller 执行 ReAct 循环
+        print(f"\n[APP.CHAT] >>> 调用 AgentController.solve()")
+        print(f"[APP.CHAT]     Query: {query}")
+        print(f"[APP.CHAT]     Context: {context}")
         app_logger.info_ctx("开始执行 ReAct 循环", session_id=session_id)
         controller_result = agent_controller.solve(query, context)
+        print(f"\n[APP.CHAT] <<< AgentController.solve() 返回")
+        print(f"[APP.CHAT]     Result: {controller_result}")
         
         # 整合结果
         result.update({
@@ -561,10 +549,12 @@ def chat():
 
         if controller_result.get("success"):
             answer_data = controller_result.get("answer", {})
+            print(f"[APP.CHAT] 成功，answer_data: {answer_data}")
             if isinstance(answer_data, dict):
                 result["final_answer"] = _format_answer(answer_data)
             else:
                 result["final_answer"] = str(answer_data)
+            print(f"[APP.CHAT] 最终答案: {result['final_answer']}")
             app_logger.info_ctx(
                 f"ReAct 循环完成",
                 session_id=session_id,
@@ -575,6 +565,7 @@ def chat():
             )
         else:
             result["final_answer"] = controller_result.get("error", "处理失败")
+            print(f"[APP.CHAT] 失败，错误: {result['final_answer']}")
             app_logger.error_ctx(
                 f"ReAct 循环失败",
                 session_id=session_id,
@@ -589,11 +580,19 @@ def chat():
         result["success"] = False
         result["error"] = str(e)
         result["final_answer"] = f"处理查询时出错：{str(e)}"
+        print(f"[APP.CHAT] 异常: {str(e)}")
+        import traceback
+        print(f"[APP.CHAT] Traceback: {traceback.format_exc()}")
         app_logger.error_ctx(
             f"处理查询时出错",
             session_id=session_id,
             extra_data={"error": str(e), "traceback": str(__import__('traceback').format_exc())}
         )
+
+    print(f"\n[APP.CHAT] 返回结果:")
+    print(f"[APP.CHAT]   Success: {result['success']}")
+    print(f"[APP.CHAT]   Final Answer: {result.get('final_answer', 'N/A')}")
+    print(f"{'='*60}\n")
 
     return jsonify(result)
 
@@ -602,24 +601,161 @@ def _format_answer(answer_data: dict) -> str:
     """格式化 Agent 答案为文本"""
     formatted = []
     
+    # 检查是否有嵌套的 answer 字段（来自 thought.set_complete）
+    if "answer" in answer_data and isinstance(answer_data["answer"], dict):
+        actual_answer = answer_data["answer"]
+    else:
+        actual_answer = answer_data
+    
     # 处理推荐
-    if "recommendations" in answer_data:
-        recs = answer_data["recommendations"]
+    if "recommendations" in actual_answer:
+        recs = actual_answer["recommendations"]
         if isinstance(recs, list) and len(recs) > 0:
             formatted.append("推荐结果：")
             for i, rec in enumerate(recs[:5], 1):
                 if isinstance(rec, dict):
-                    hero = rec.get("hero_name", rec.get("hero", "Unknown"))
+                    hero_id = rec.get("hero_id")
+                    hero_en = rec.get("hero_name", rec.get("hero", "Unknown"))
+                    
+                    # 尝试获取中文名称
+                    hero_cn = None
+                    if hero_id:
+                        hero_cn = localizer.get_hero_name_cn(hero_id)
+                    if not hero_cn:
+                        # 如果无法通过 ID 获取，尝试通过英文名查找
+                        hero_cn = _get_hero_cn_by_name(hero_en)
+                    
+                    hero_display = hero_cn if hero_cn else hero_en
+                    
                     score = rec.get("score", 0)
                     reasons = rec.get("reasons", rec.get("reason", []))
                     reason_text = "; ".join(reasons[:2]) if isinstance(reasons, list) else str(reasons)
-                    formatted.append(f"{i}. {hero} (指数：{score:.2f}) - {reason_text}")
+                    formatted.append(f"{i}. {hero_display} (指数：{score:.2f}) - {reason_text}")
     
     # 处理答案
     if "answer" in answer_data:
         formatted.append(f"\n答案：{answer_data['answer']}")
     
     return "\n".join(formatted) if formatted else str(answer_data)
+
+
+def _get_hero_cn_by_name(hero_en: str) -> Optional[str]:
+    """通过英文名称获取中文名称"""
+    if not hero_en or hero_en == "Unknown":
+        return None
+    
+    hero_en_lower = hero_en.lower()
+    
+    # 常见英雄中英文映射
+    hero_map = {
+        'anti-mage': '敌法师',
+        'axe': '斧王',
+        'bane': '祸乱之源',
+        'bloodseeker': '嗜血狂魔',
+        'crystal maiden': '水晶室女',
+        'drow ranger': '卓尔游侠',
+        'earthshaker': '撼地者',
+        'juggernaut': '主宰',
+        'mirana': '米拉娜',
+        'morphling': '变体精灵',
+        'nevermore': '影魔',
+        'phantom lancer': '幻影长矛手',
+        'phantom assassin': '幻影刺客',
+        'pudge': '帕吉',
+        'pugna': '帕格纳',
+        'razor': '剃刀',
+        'sand king': '沙王',
+        'shadow fiend': '影魔',
+        'shadow shaman': '暗影萨满',
+        'slardar': '斯拉达',
+        'storm spirit': '风暴之灵',
+        'sven': '斯温',
+        'tiny': '小小',
+        'vengeful spirit': '复仇之魂',
+        'windranger': '风行者',
+        'zeus': '宙斯',
+        'kunkka': '昆卡',
+        'faceless void': '虚空假面',
+        'lion': '莱恩',
+        'invoker': '祈求者',
+        'templar assassin': '圣堂刺客',
+        'chaos knight': '混沌骑士',
+        'spirit breaker': '裂魂人',
+        'rubick': '拉比克',
+        'legion commander': '军团指挥官',
+        'enchantress': '魅惑魔女',
+        'beastmaster': '兽王',
+        'obsidian destroyer': '殁境神蚀者',
+        'slark': '斯拉克',
+        'dazzle': '戴泽',
+        'witch doctor': '巫医',
+        'ogre magi': '食人魔魔法师',
+        'wraith king': '冥魂大帝',
+        'lich': '巫妖',
+        'disruptor': '干扰者',
+        'keeper of the light': '光之守卫',
+        'tinker': '修补匠',
+        'nature\'s prophet': '自然之兆',
+        'lesser night stalker': '暗夜魔王',
+        'broodmother': '育母蜘蛛',
+        'bounty hunter': '赏金猎人',
+        'weaver': '编织者',
+        'jakiro': '杰奇洛',
+        'batrider': '蝙蝠骑士',
+        'chen': '陈',
+        'silencer': '沉默术士',
+        'outworld destroyer': '殁境神蚀者',
+        'doom': '末日使者',
+        'ancient apparition': '远古冰魄',
+        'ursa': '熊战士',
+        'gyrocopter': '矮人直升机',
+        'alchemist': '炼金术士',
+        'huskar': '哈斯卡',
+        'night stalker': '暗夜魔王',
+        'brood mother': '育母蜘蛛',
+        'dragon knight': '龙骑士',
+        'clockwerk': '发条技师',
+        'death prophet': '死亡先知',
+        'phantom assassin': '幻影刺客',
+        'puck': '帕克',
+        'queen of pain': '痛苦女王',
+        'venomancer': '剧毒术士',
+        'faceless': '虚空假面',
+        'skeleton king': '冥魂大帝',
+        'furion': '自然之兆',
+        'troll warlord': '巨魔战将',
+        'centaur warrunner': '半人马战行者',
+        'magnataur': '马格纳斯',
+        'shredder': '伐木机',
+        'bristleback': '钢背兽',
+        'tusk': '巨牙海民',
+        'skywrath mage': '天怒法师',
+        'abaddon': '亚巴顿',
+        'elder titan': '上古巨神',
+        'treant protector': '树精卫士',
+        'earth spirit': '大地之灵',
+        'ember spirit': '灰烬之灵',
+        'fire remnant': '火之残灵',
+        'terrorblade': '恐怖利刃',
+        'phoenix': '凤凰',
+        'oracle': '神谕者',
+        'winter wyvern': '寒冬飞龙',
+        'arc warden': '天穹守望者',
+        'monkey king': '齐天大圣',
+        'dark willow': '邪影芳灵',
+        'pangolier': '石鳞剑士',
+        'grimstroke': '天涯墨客',
+        'mars': '玛尔斯',
+        'snapfire': '电炎绝手',
+        'void spirit': '虚无之灵',
+        'holysmith': '破晓辰星',
+        'dawnbreaker': '破晓辰星',
+        'marci': '玛西',
+        'primal beast': '兽',
+        'muerta': '琼英碧灵',
+    }
+    
+    return hero_map.get(hero_en_lower)
 
 
 def _chat_legacy(query, context, session_id):
@@ -905,12 +1041,11 @@ def get_log_files():
     from pathlib import Path
     import re
 
-    log_dir = Path(__file__).parent.parent / "logs"
     files = []
 
-    if log_dir.exists():
+    if LOG_DIR.exists():
         # 遍历日期文件夹
-        for date_dir in sorted(log_dir.iterdir()):
+        for date_dir in sorted(LOG_DIR.iterdir()):
             if not date_dir.is_dir():
                 continue
             if not re.match(r'\d{4}-\d{2}-\d{2}', date_dir.name):
@@ -927,7 +1062,7 @@ def get_log_files():
                         "name": log_file.name,
                         "size": stat.st_size,
                         "modified": stat.st_mtime,
-                        "path": str(log_file.relative_to(log_dir)),
+                        "path": str(log_file.relative_to(LOG_DIR)),
                         "date": date_dir.name,
                         "part": part_dir.name
                     })
@@ -940,12 +1075,11 @@ def get_log_file_content(filename):
     """获取日志文件内容"""
     from pathlib import Path
 
-    log_dir = Path(__file__).parent.parent / "logs"
-    file_path = log_dir / filename
+    file_path = LOG_DIR / filename
 
     # 安全检查：确保文件在日志目录内
     try:
-        file_path.relative_to(log_dir)
+        file_path.relative_to(LOG_DIR)
     except ValueError:
         return jsonify({"success": False, "error": "Invalid path"}), 403
 
@@ -979,6 +1113,77 @@ def clear_logs():
     memory_handler.clear(session_id)
     app_logger.info_ctx("日志已清空", session_id=session_id)
     return jsonify({"success": True})
+
+
+@app.route('/api/generate_hero_query', methods=['POST'])
+def generate_hero_query():
+    """随机生成英雄查询文本"""
+    import random
+    
+    try:
+        # 读取英雄数据
+        heroes_file = Path(__file__).parent.parent / 'data' / 'heroes_cn.json'
+        
+        if not heroes_file.exists():
+            return jsonify({
+                "success": False,
+                "error": "英雄数据文件不存在"
+            }), 404
+        
+        with open(heroes_file, 'r', encoding='utf-8') as f:
+            heroes_data = json.load(f)
+        
+        # 提取所有英雄中文名
+        all_heroes = [info.get('cn', '') for info in heroes_data.values() if info.get('cn')]
+        
+        if len(all_heroes) < 9:  # 至少需要9个英雄
+            return jsonify({
+                "success": False,
+                "error": "英雄数据不足"
+            }), 500
+        
+        # 随机选择我方英雄数量（0-4个）
+        our_count = random.randint(0, 4)
+        
+        # 随机选择敌方英雄数量（0-5个）
+        enemy_count = random.randint(0, 5)
+        
+        # 确保总数不超过英雄总数
+        total_needed = our_count + enemy_count
+        if total_needed > len(all_heroes):
+            total_needed = len(all_heroes)
+            # 重新分配
+            our_count = random.randint(0, min(4, total_needed))
+            enemy_count = total_needed - our_count
+        
+        # 随机选择英雄（保证不重复）
+        selected_heroes = random.sample(all_heroes, total_needed)
+        
+        # 分配我方和敌方
+        our_heroes = selected_heroes[:our_count]
+        enemy_heroes = selected_heroes[our_count:]
+        
+        # 生成查询文本
+        parts = []
+        if our_heroes:
+            parts.append(f"我方英雄有{','.join(our_heroes)}")
+        if enemy_heroes:
+            parts.append(f"敌方英雄有{','.join(enemy_heroes)}")
+        
+        query = '，'.join(parts) + '，推荐我选什么英雄，并简要给出理由'
+        
+        return jsonify({
+            "success": True,
+            "query": query,
+            "our_heroes": our_heroes,
+            "enemy_heroes": enemy_heroes
+        })
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
 
 
 if __name__ == '__main__':

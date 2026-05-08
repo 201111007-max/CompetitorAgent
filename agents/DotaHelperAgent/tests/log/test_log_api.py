@@ -135,8 +135,8 @@ class TestLogAPI:
         test_content = "Test log line 1\nTest log line 2\nTest log line 3"
         test_file.write_text(test_content, encoding='utf-8')
 
-        # 使用环境变量传递日志目录
-        with patch('web.app.app.config.LOG_DIR', Path(temp_log_dir)):
+        # 使用 patch 替换 LOG_DIR 变量
+        with patch('web.app.LOG_DIR', Path(temp_log_dir)):
             response = client.get(f'/api/logs/files/{test_date}/part-1/test.log')
             assert response.status_code == 200
 
@@ -154,8 +154,8 @@ class TestLogAPI:
         lines = [f"Line {i}" for i in range(1, 21)]
         test_file.write_text('\n'.join(lines), encoding='utf-8')
 
-        # 使用环境变量传递日志目录
-        with patch('web.app.app.config.LOG_DIR', Path(temp_log_dir)):
+        # 使用 patch 替换 LOG_DIR 变量
+        with patch('web.app.LOG_DIR', Path(temp_log_dir)):
             response = client.get(f'/api/logs/files/{test_date}/part-1/test.log?tail=5')
             assert response.status_code == 200
 
@@ -212,8 +212,14 @@ class TestLogAPI:
         # Content-Type 应该包含 text/event-stream
         assert 'text/event-stream' in response.content_type
 
-        # 读取部分数据验证 SSE 格式
-        data = response.data.decode('utf-8')
+        # 读取部分数据验证 SSE 格式（避免无限等待）
+        data_chunks = []
+        for i, chunk in enumerate(response.response):
+            if i >= 3:  # 只读取3个chunk就停止
+                break
+            data_chunks.append(chunk.decode('utf-8'))
+        
+        data = ''.join(data_chunks)
         # SSE 格式应该以 "data:" 开头
         if data.strip():
             lines = data.strip().split('\n')

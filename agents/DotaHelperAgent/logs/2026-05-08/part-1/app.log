@@ -1,0 +1,1212 @@
+2026-05-08 20:11:59,968 | INFO     | web_app | LLM client initialized successfully
+2026-05-08 20:11:59,976 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:11:59,976 | WARNING  | web_app | Agent Controller 未初始化，使用旧版实现
+2026-05-08 20:12:00,018 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:12:13,055 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:12:13,056 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:12:13,059 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:12:13,914 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:12:13,914 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:12:13,917 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:12:13,917 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:12:13,918 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:12:14,025 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:12:15,063 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:12:15,063 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:12:15,066 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:12:15,927 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:12:15,927 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:12:15,934 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:12:16,952 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:12:16,952 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:12:17,295 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:12:17,296 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:12:17,300 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:12:17,303 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:12:18,642 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:12:18,647 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:12:18,648 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:12:19,944 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:12:19,951 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:12:19,952 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:12:20,923 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:12:20,928 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:12:20,929 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:12:21,933 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:12:21,938 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:12:21,942 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:12:22,661 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:12:22,665 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:12:22,668 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:12:23,361 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:12:23,364 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:12:23,367 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:12:24,189 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:12:24,193 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:12:24,194 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:12:24,889 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:12:24,892 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:12:24,895 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:12:24,896 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:12:24,901 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:12:24,908 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:12:25,757 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:12:25,761 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:12:25,764 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:12:26,457 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:12:26,461 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:12:26,462 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:12:27,154 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:12:27,158 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:12:27,159 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:12:27,836 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:12:27,840 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:12:27,841 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:12:28,532 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:12:28,536 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:12:28,542 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:12:29,233 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:12:29,236 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:12:29,237 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:12:29,808 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:12:29,811 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:12:29,814 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:12:30,648 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:12:30,651 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:12:31,069 | INFO     | web_app | 日志已清空
+2026-05-08 20:12:31,071 | INFO     | web_app | 日志已清空
+2026-05-08 20:20:01,661 | INFO     | web_app | LLM client initialized successfully
+2026-05-08 20:20:01,667 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:20:01,669 | WARNING  | web_app | Agent Controller 未初始化，使用旧版实现
+2026-05-08 20:20:01,680 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:20:03,759 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:20:03,759 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:20:03,762 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:20:04,561 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:20:04,561 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:20:04,564 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:20:04,564 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:20:04,565 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:20:04,641 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:20:05,588 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:20:05,588 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:20:05,591 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:20:06,579 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:20:06,579 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:20:06,585 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:20:07,493 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:20:07,493 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:20:07,796 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:20:07,797 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:20:07,801 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:20:07,804 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:20:08,927 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:20:08,933 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:20:08,936 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:20:10,065 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:20:10,073 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:20:10,076 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:20:10,943 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:20:10,951 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:20:10,954 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:20:11,988 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:20:11,996 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:20:12,001 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:20:12,738 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:20:12,743 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:20:12,746 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:20:13,481 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:20:13,486 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:20:13,489 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:20:14,367 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:20:14,372 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:20:14,373 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:20:15,111 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:20:15,117 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:20:15,120 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:20:15,121 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:20:15,128 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:20:15,136 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:20:15,981 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:20:15,985 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:20:15,989 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:20:16,701 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:20:16,706 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:20:16,707 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:20:17,450 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:20:17,455 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:20:17,456 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:20:18,179 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:20:18,183 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:20:18,184 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:20:18,924 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:20:18,928 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:20:18,935 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:20:19,656 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:20:19,660 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:20:19,661 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:20:20,290 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:20:20,294 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:20:20,297 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:20:21,144 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:20:21,148 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:20:21,510 | INFO     | web_app | 日志已清空
+2026-05-08 20:20:21,512 | INFO     | web_app | 日志已清空
+2026-05-08 20:20:26,582 | INFO     | web_app | 日志已清空
+2026-05-08 20:20:26,600 | INFO     | test | info message
+2026-05-08 20:20:26,600 | WARNING  | test | warning message
+2026-05-08 20:20:26,600 | ERROR    | test | error message
+2026-05-08 20:29:13,286 | INFO     | web_app | LLM client initialized successfully
+2026-05-08 20:29:13,293 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:29:13,294 | WARNING  | web_app | Agent Controller 未初始化，使用旧版实现
+2026-05-08 20:29:13,304 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:29:14,484 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:29:14,484 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:29:14,487 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:29:15,199 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:29:15,199 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:29:15,202 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:29:15,202 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:29:15,202 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:29:15,281 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:29:16,132 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:29:16,132 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:29:16,135 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:29:16,850 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:29:16,850 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:29:16,857 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:29:17,691 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:29:17,691 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:29:18,004 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:29:18,005 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:29:18,009 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:29:18,013 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:29:19,141 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:29:19,149 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:29:19,151 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:29:20,277 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:29:20,285 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:29:20,287 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:29:21,113 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:29:21,120 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:29:21,121 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:29:22,094 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:29:22,103 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:29:22,107 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:29:22,809 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:29:22,813 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:29:22,817 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:29:23,527 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:29:23,531 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:29:23,535 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:29:24,372 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:29:24,376 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:29:24,378 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:29:25,102 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:29:25,107 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:29:25,112 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:29:25,112 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:29:25,121 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:29:25,130 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:29:25,972 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:29:25,977 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:29:25,980 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:29:26,686 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:29:26,691 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:29:26,692 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:29:27,399 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:29:27,404 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:29:27,405 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:29:28,114 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:29:28,119 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:29:28,121 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:29:28,830 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:29:28,835 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:29:28,842 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:29:29,546 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:29:29,550 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:29:29,552 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:29:30,120 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:29:30,125 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:29:30,128 | INFO     | web_app | 收到聊天请求
+2026-05-08 20:29:30,975 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 20:29:30,980 | INFO     | web_app | ReAct 循环完成
+2026-05-08 20:29:31,027 | INFO     | web_app | 日志已清空
+2026-05-08 20:29:31,029 | INFO     | web_app | 日志已清空
+2026-05-08 20:29:36,082 | INFO     | web_app | 日志已清空
+2026-05-08 20:29:36,096 | INFO     | test | info message
+2026-05-08 20:29:36,096 | WARNING  | test | warning message
+2026-05-08 20:29:36,097 | ERROR    | test | error message
+2026-05-08 20:41:15,793 | INFO     | werkzeug | [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.5.221:5000
+2026-05-08 20:41:15,794 | INFO     | werkzeug | [33mPress CTRL+C to quit[0m
+2026-05-08 20:41:15,806 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 20:41:16,653 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 20:41:16,661 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 20:41:27,612 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 20:41:27] "[36mGET /web/index.html HTTP/1.1[0m" 304 -
+2026-05-08 20:41:27,802 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 20:41:27] "GET /api/logs?session_id=sess_at7bw6xmt&limit=100 HTTP/1.1" 200 -
+2026-05-08 20:41:28,049 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 20:41:28] "[33mGET /@vite/client HTTP/1.1[0m" 404 -
+2026-05-08 20:41:28,963 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 20:41:28] "GET /api/logs/stream?session_id=sess_at7bw6xmt HTTP/1.1" 200 -
+2026-05-08 20:57:49,593 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\test_log_config.py', reloading
+2026-05-08 20:57:49,594 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\item_recommender.py', reloading
+2026-05-08 20:57:49,594 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\hybrid_base.py', reloading
+2026-05-08 20:57:49,595 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\test_memory_log_handler.py', reloading
+2026-05-08 20:57:49,749 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\__init__.py', reloading
+2026-05-08 20:57:49,749 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\__init__.py', reloading
+2026-05-08 20:57:49,750 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\__init__.py', reloading
+2026-05-08 20:57:49,751 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\__init__.py', reloading
+2026-05-08 20:57:49,751 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\__init__.py', reloading
+2026-05-08 20:57:49,838 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 20:57:49,850 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\test_log_api.py', reloading
+2026-05-08 20:57:49,851 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\test_log_integration.py', reloading
+2026-05-08 20:57:50,287 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 20:57:51,193 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 20:57:51,200 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:02:25,861 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:02:25,862 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:02:27,596 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:02:28,628 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:02:28,632 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:04:37,808 | INFO     | werkzeug | [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.5.221:5000
+2026-05-08 21:04:37,808 | INFO     | werkzeug | [33mPress CTRL+C to quit[0m
+2026-05-08 21:04:37,815 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:04:38,672 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:04:38,676 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:04:46,208 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:04:46] "GET /web/index.html HTTP/1.1" 200 -
+2026-05-08 21:04:46,394 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:04:46] "GET /api/logs?session_id=sess_qnckhrokh&limit=100 HTTP/1.1" 200 -
+2026-05-08 21:04:46,614 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:04:46] "[33mGET /@vite/client HTTP/1.1[0m" 404 -
+2026-05-08 21:04:47,558 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:04:47] "GET /api/logs/stream?session_id=sess_qnckhrokh HTTP/1.1" 200 -
+2026-05-08 21:04:54,744 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:04:54] "POST /api/generate_hero_query HTTP/1.1" 200 -
+2026-05-08 21:05:00,516 | INFO     | web_app | 收到聊天请求
+2026-05-08 21:05:00,517 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 21:05:00,523 | INFO     | web_app | ReAct 循环完成
+2026-05-08 21:05:00,524 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:05:00] "POST /api/chat HTTP/1.1" 200 -
+2026-05-08 21:05:07,731 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:05:07] "POST /api/generate_hero_query HTTP/1.1" 200 -
+2026-05-08 21:05:20,602 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:05:20] "GET /api/logs/files HTTP/1.1" 200 -
+2026-05-08 21:05:37,801 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:05:37] "POST /api/generate_hero_query HTTP/1.1" 200 -
+2026-05-08 21:07:29,931 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\hero_analyzer.py', reloading
+2026-05-08 21:07:29,931 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\skill_builder.py', reloading
+2026-05-08 21:07:29,932 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\cache\\cache_manager.py', reloading
+2026-05-08 21:07:29,932 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\cache\\__init__.py', reloading
+2026-05-08 21:07:29,933 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\agent.py', reloading
+2026-05-08 21:07:29,933 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\agent_controller.py', reloading
+2026-05-08 21:07:29,933 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\config.py', reloading
+2026-05-08 21:07:29,934 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\react_agent.py', reloading
+2026-05-08 21:07:29,934 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\tool_registry.py', reloading
+2026-05-08 21:07:29,934 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\docs\\process_md\\test_log_integration.py', reloading
+2026-05-08 21:07:29,940 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\memory\\memory.py', reloading
+2026-05-08 21:07:29,940 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\memory\\__init__.py', reloading
+2026-05-08 21:07:29,941 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\strategies\\score_strategies.py', reloading
+2026-05-08 21:07:29,941 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\strategies\\__init__.py', reloading
+2026-05-08 21:07:29,948 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tools\\agent_tools.py', reloading
+2026-05-08 21:07:29,949 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tools\\base.py', reloading
+2026-05-08 21:07:29,949 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tools\\build_tools.py', reloading
+2026-05-08 21:07:29,950 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tools\\hero_tools.py', reloading
+2026-05-08 21:07:29,950 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tools\\__init__.py', reloading
+2026-05-08 21:07:29,950 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\utils\\api_client.py', reloading
+2026-05-08 21:07:29,951 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\utils\\llm_client.py', reloading
+2026-05-08 21:07:29,951 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\utils\\localization.py', reloading
+2026-05-08 21:07:29,951 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\utils\\log_config.py', reloading
+2026-05-08 21:07:29,952 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\utils\\memory_log_handler.py', reloading
+2026-05-08 21:07:29,952 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\utils\\__init__.py', reloading
+2026-05-08 21:07:31,242 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:07:32,151 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:07:32,154 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:07:35,569 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:07:35] "GET /api/logs/stream?session_id=sess_qnckhrokh HTTP/1.1" 200 -
+2026-05-08 21:07:35,570 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:07:35] "GET /api/logs/stream?session_id=sess_qnckhrokh HTTP/1.1" 200 -
+2026-05-08 21:08:35,579 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\examples\\reflection_demo.py', reloading
+2026-05-08 21:08:35,580 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\reflection_evaluator.py', reloading
+2026-05-08 21:08:35,581 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\run_tests.py', reloading
+2026-05-08 21:08:35,582 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\run_api_e2e_tests.py', reloading
+2026-05-08 21:08:35,582 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\integration\\__init__.py', reloading
+2026-05-08 21:08:35,583 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\unit\\__init__.py', reloading
+2026-05-08 21:08:35,583 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\e2e\\__init__.py', reloading
+2026-05-08 21:08:35,584 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\core\\__init__.py', reloading
+2026-05-08 21:08:35,584 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\api\\__init__.py', reloading
+2026-05-08 21:08:35,585 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\api\\test_web_api.py', reloading
+2026-05-08 21:08:35,585 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\e2e\\test_e2e_workflow.py', reloading
+2026-05-08 21:08:35,586 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\conftest.py', reloading
+2026-05-08 21:08:35,586 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\core\\test_agent_architecture.py', reloading
+2026-05-08 21:08:35,586 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\core\\test_agent.py', reloading
+2026-05-08 21:08:35,587 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\core\\test_analyzers.py', reloading
+2026-05-08 21:08:35,587 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\api\\test_api_client.py', reloading
+2026-05-08 21:08:35,587 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\core\\test_strategies.py', reloading
+2026-05-08 21:08:35,587 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\core\\test_react.py', reloading
+2026-05-08 21:08:35,588 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\hybrid_hero_analyzer.py', reloading
+2026-05-08 21:08:35,588 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\unit\\test_cache.py', reloading
+2026-05-08 21:08:35,589 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\unit\\test_config.py', reloading
+2026-05-08 21:08:35,589 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\examples\\usage_examples.py', reloading
+2026-05-08 21:08:36,720 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:08:37,573 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:08:37,576 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:08:41,050 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:08:41] "GET /api/logs/stream?session_id=sess_qnckhrokh HTTP/1.1" 200 -
+2026-05-08 21:08:41,050 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:08:41] "GET /api/logs/stream?session_id=sess_qnckhrokh HTTP/1.1" 200 -
+2026-05-08 21:08:41,051 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:08:41] "GET /api/logs/stream?session_id=sess_qnckhrokh HTTP/1.1" 200 -
+2026-05-08 21:08:41,051 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:08:41] "GET /api/logs/stream?session_id=sess_qnckhrokh HTTP/1.1" 200 -
+2026-05-08 21:09:38,840 | INFO     | web_app | 收到聊天请求
+2026-05-08 21:09:38,842 | INFO     | web_app | LLM client initialized successfully
+2026-05-08 21:09:40,179 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 21:09:40,193 | INFO     | web_app | ReAct 循环完成
+2026-05-08 21:09:40,194 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:09:40] "POST /api/chat HTTP/1.1" 200 -
+2026-05-08 21:10:27,284 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\agent_controller.py', reloading
+2026-05-08 21:10:27,284 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\agent_controller.py', reloading
+2026-05-08 21:10:28,556 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:10:29,451 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:10:29,455 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:10:32,877 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:10:32] "GET /api/logs/stream?session_id=sess_qnckhrokh HTTP/1.1" 200 -
+2026-05-08 21:10:32,877 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:10:32] "GET /api/logs/stream?session_id=sess_qnckhrokh HTTP/1.1" 200 -
+2026-05-08 21:10:32,878 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:10:32] "GET /api/logs/stream?session_id=sess_qnckhrokh HTTP/1.1" 200 -
+2026-05-08 21:10:32,878 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:10:32] "GET /api/logs/stream?session_id=sess_qnckhrokh HTTP/1.1" 200 -
+2026-05-08 21:10:32,878 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:10:32] "GET /api/logs/stream?session_id=sess_qnckhrokh HTTP/1.1" 200 -
+2026-05-08 21:10:32,878 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:10:32] "GET /api/logs/stream?session_id=sess_qnckhrokh HTTP/1.1" 200 -
+2026-05-08 21:10:40,096 | INFO     | web_app | 收到聊天请求
+2026-05-08 21:10:40,098 | INFO     | web_app | LLM client initialized successfully
+2026-05-08 21:10:40,974 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 21:10:41,000 | INFO     | web_app | ReAct 循环完成
+2026-05-08 21:10:41,001 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:10:41] "POST /api/chat HTTP/1.1" 200 -
+2026-05-08 21:11:15,651 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\agent_controller.py', reloading
+2026-05-08 21:11:15,651 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\agent_controller.py', reloading
+2026-05-08 21:11:16,896 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:11:17,821 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:11:17,825 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:11:18,851 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:11:18] "GET /api/logs/stream?session_id=sess_qnckhrokh HTTP/1.1" 200 -
+2026-05-08 21:11:18,851 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:11:18] "GET /api/logs/stream?session_id=sess_qnckhrokh HTTP/1.1" 200 -
+2026-05-08 21:11:21,210 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:11:21] "GET /api/logs/stream?session_id=sess_qnckhrokh HTTP/1.1" 200 -
+2026-05-08 21:11:21,210 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:11:21] "GET /api/logs/stream?session_id=sess_qnckhrokh HTTP/1.1" 200 -
+2026-05-08 21:11:21,210 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:11:21] "GET /api/logs/stream?session_id=sess_qnckhrokh HTTP/1.1" 200 -
+2026-05-08 21:11:21,210 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:11:21] "GET /api/logs/stream?session_id=sess_qnckhrokh HTTP/1.1" 200 -
+2026-05-08 21:12:03,863 | INFO     | web_app | 收到聊天请求
+2026-05-08 21:12:03,864 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 21:12:03,871 | INFO     | web_app | ReAct 循环完成
+2026-05-08 21:12:03,872 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:12:03] "POST /api/chat HTTP/1.1" 200 -
+2026-05-08 21:12:18,815 | INFO     | web_app | 收到聊天请求
+2026-05-08 21:12:18,816 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 21:12:18,822 | INFO     | web_app | ReAct 循环完成
+2026-05-08 21:12:18,823 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:12:18] "POST /api/chat HTTP/1.1" 200 -
+2026-05-08 21:13:36,682 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\agent_controller.py', reloading
+2026-05-08 21:13:36,682 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\agent_controller.py', reloading
+2026-05-08 21:13:36,683 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\agent_controller.py', reloading
+2026-05-08 21:13:38,130 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:13:39,101 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:13:39,106 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:16:56,400 | INFO     | werkzeug | [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.5.221:5000
+2026-05-08 21:16:56,412 | INFO     | werkzeug | [33mPress CTRL+C to quit[0m
+2026-05-08 21:16:56,422 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:16:57,383 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:16:57,387 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:17:03,825 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:17:03] "[36mGET /web/index.html HTTP/1.1[0m" 304 -
+2026-05-08 21:17:04,004 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:17:04] "GET / HTTP/1.1" 200 -
+2026-05-08 21:17:04,159 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:17:04] "GET /api/logs?session_id=sess_odot5r9h2&limit=100 HTTP/1.1" 200 -
+2026-05-08 21:17:04,221 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:17:04] "[33mGET /@vite/client HTTP/1.1[0m" 404 -
+2026-05-08 21:17:05,185 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:17:05] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:17:17,127 | INFO     | web_app | 收到聊天请求
+2026-05-08 21:17:17,128 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 21:17:17,135 | INFO     | web_app | ReAct 循环完成
+2026-05-08 21:17:17,136 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:17:17] "POST /api/chat HTTP/1.1" 200 -
+2026-05-08 21:18:53,054 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\agent_controller.py', reloading
+2026-05-08 21:18:53,055 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\agent_controller.py', reloading
+2026-05-08 21:18:53,055 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\agent_controller.py', reloading
+2026-05-08 21:18:53,056 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\agent_controller.py', reloading
+2026-05-08 21:18:53,871 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:18:54,414 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:18:55,136 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:18:55,143 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:18:55,639 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:18:55,647 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:18:58,187 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:18:58] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:18:58,188 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:18:58] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:19:07,483 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\agent_controller.py', reloading
+2026-05-08 21:19:07,485 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\agent_controller.py', reloading
+2026-05-08 21:19:07,485 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\agent_controller.py', reloading
+2026-05-08 21:19:08,782 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:19:09,382 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:19:10,213 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:19:10,217 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:19:10,669 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:19:10,675 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:19:13,688 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:19:13] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:19:13,703 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:19:13] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:19:13,703 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:19:13] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:19:13,703 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:19:13] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:19:32,567 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\agent_controller.py', reloading
+2026-05-08 21:19:32,567 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\agent_controller.py', reloading
+2026-05-08 21:19:32,570 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\agent_controller.py', reloading
+2026-05-08 21:19:32,570 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\agent_controller.py', reloading
+2026-05-08 21:19:32,930 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:19:33,479 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:19:34,318 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:19:34,325 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:19:34,781 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:19:34,791 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:19:37,265 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:19:37] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:19:37,265 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:19:37] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:19:37,265 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:19:37] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:19:37,265 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:19:37] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:19:37,265 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:19:37] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:19:37,266 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:19:37] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:19:47,748 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\agent_controller.py', reloading
+2026-05-08 21:19:47,748 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\agent_controller.py', reloading
+2026-05-08 21:19:47,749 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\agent_controller.py', reloading
+2026-05-08 21:19:47,749 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\agent_controller.py', reloading
+2026-05-08 21:19:48,932 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:19:49,528 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:19:49,965 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:19:49,971 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:19:50,497 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:19:50,504 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:19:51,532 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:19:51] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:19:51,532 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:19:51] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:19:53,846 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:19:53] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:19:53,861 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:19:53] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:19:53,861 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:19:53] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:19:53,861 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:19:53] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:20:42,385 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:20:42,385 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:20:42,387 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:20:42,387 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:20:43,019 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:20:43,448 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:20:44,214 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:20:44,219 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:20:44,677 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:20:44,682 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:20:45,252 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:20:45] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:20:45,252 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:20:45] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:20:45,252 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:20:45] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:20:45,253 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:20:45] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:20:45,253 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:20:45] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:20:45,253 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:20:45] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:21:17,626 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\hero_analyzer.py', reloading
+2026-05-08 21:21:17,626 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\hero_analyzer.py', reloading
+2026-05-08 21:21:17,627 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\hero_analyzer.py', reloading
+2026-05-08 21:21:17,627 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\hero_analyzer.py', reloading
+2026-05-08 21:21:18,080 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:21:18,572 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:21:19,149 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:21:19,153 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:21:19,593 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:21:19,599 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:21:20,625 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:21:20] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:21:20,625 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:21:20] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:21:20,625 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:21:20] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:21:20,625 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:21:20] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:21:20,625 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:21:20] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:21:20,625 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:21:20] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:21:33,654 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\hero_analyzer.py', reloading
+2026-05-08 21:21:33,655 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\hero_analyzer.py', reloading
+2026-05-08 21:21:33,655 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\hero_analyzer.py', reloading
+2026-05-08 21:21:33,655 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\hero_analyzer.py', reloading
+2026-05-08 21:21:33,656 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\hero_analyzer.py', reloading
+2026-05-08 21:21:34,827 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:21:35,310 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:21:35,878 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:21:35,884 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:21:36,436 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:21:36,441 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:21:36,911 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:21:36] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:21:36,911 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:21:36] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:21:36,912 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:21:36] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:21:36,912 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:21:36] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:21:36,912 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:21:36] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:21:36,912 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:21:36] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:21:56,458 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\tool_registry.py', reloading
+2026-05-08 21:21:56,459 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\tool_registry.py', reloading
+2026-05-08 21:21:56,459 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\tool_registry.py', reloading
+2026-05-08 21:21:56,459 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\tool_registry.py', reloading
+2026-05-08 21:21:56,616 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:21:57,085 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:21:57,603 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:21:57,607 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:21:58,099 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:21:58,103 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:21:59,132 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:21:59] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:21:59,132 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:21:59] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:21:59,132 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:21:59] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:21:59,133 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:21:59] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:21:59,133 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:21:59] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:21:59,133 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:21:59] "GET /api/logs/stream?session_id=sess_odot5r9h2 HTTP/1.1" 200 -
+2026-05-08 21:22:14,678 | INFO     | werkzeug | [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.5.221:5000
+2026-05-08 21:22:14,679 | INFO     | werkzeug | [33mPress CTRL+C to quit[0m
+2026-05-08 21:22:14,685 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:22:15,675 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:22:15,680 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:22:35,213 | INFO     | werkzeug |  * Detected change in 'D:\\Anaconda3\\envs\\verl_env\\Lib\\dataclasses.py', reloading
+2026-05-08 21:22:35,213 | INFO     | werkzeug |  * Detected change in 'D:\\Anaconda3\\envs\\verl_env\\Lib\\dataclasses.py', reloading
+2026-05-08 21:22:35,891 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:22:36,487 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:22:37,138 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:22:37,142 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:22:37,726 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:22:37,731 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:22:39,129 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:22:39] "[36mGET / HTTP/1.1[0m" 304 -
+2026-05-08 21:22:39,305 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:22:39] "GET /api/logs?session_id=sess_fi9rg182n&limit=100 HTTP/1.1" 200 -
+2026-05-08 21:22:39,529 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:22:39] "[33mGET /@vite/client HTTP/1.1[0m" 404 -
+2026-05-08 21:22:40,493 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:22:40] "GET /api/logs/stream?session_id=sess_fi9rg182n HTTP/1.1" 200 -
+2026-05-08 21:22:42,115 | INFO     | web_app | 收到聊天请求
+2026-05-08 21:22:42,115 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 21:22:42,138 | INFO     | web_app | ReAct 循环完成
+2026-05-08 21:22:42,139 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:22:42] "POST /api/chat HTTP/1.1" 200 -
+2026-05-08 21:23:42,132 | INFO     | web_app | 收到聊天请求
+2026-05-08 21:23:42,132 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 21:23:42,150 | INFO     | web_app | ReAct 循环完成
+2026-05-08 21:23:42,151 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:23:42] "POST /api/chat HTTP/1.1" 200 -
+2026-05-08 21:24:14,029 | INFO     | werkzeug |  * Detected change in 'D:\\Anaconda3\\Scripts\\conda-script.py', reloading
+2026-05-08 21:24:14,029 | INFO     | werkzeug |  * Detected change in 'D:\\Anaconda3\\Scripts\\conda-script.py', reloading
+2026-05-08 21:24:15,059 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:24:15,602 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:24:16,052 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:24:16,058 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:24:16,635 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:24:16,639 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:24:19,920 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:24:19] "GET /api/logs/stream?session_id=sess_fi9rg182n HTTP/1.1" 200 -
+2026-05-08 21:24:19,920 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:24:19] "GET /api/logs/stream?session_id=sess_fi9rg182n HTTP/1.1" 200 -
+2026-05-08 21:24:45,741 | INFO     | web_app | 收到聊天请求
+2026-05-08 21:24:45,742 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 21:24:45,763 | INFO     | web_app | ReAct 循环完成
+2026-05-08 21:24:45,765 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:24:45] "POST /api/chat HTTP/1.1" 200 -
+2026-05-08 21:25:22,662 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\agent_controller.py', reloading
+2026-05-08 21:25:22,663 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\agent_controller.py', reloading
+2026-05-08 21:25:22,663 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\agent_controller.py', reloading
+2026-05-08 21:25:22,663 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\agent_controller.py', reloading
+2026-05-08 21:25:23,240 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:25:23,609 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:25:24,176 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:25:24,181 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:25:24,489 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:25:24,493 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:25:27,564 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:25:27] "GET /api/logs/stream?session_id=sess_fi9rg182n HTTP/1.1" 200 -
+2026-05-08 21:25:27,564 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:25:27] "GET /api/logs/stream?session_id=sess_fi9rg182n HTTP/1.1" 200 -
+2026-05-08 21:25:27,564 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:25:27] "GET /api/logs/stream?session_id=sess_fi9rg182n HTTP/1.1" 200 -
+2026-05-08 21:25:27,564 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:25:27] "GET /api/logs/stream?session_id=sess_fi9rg182n HTTP/1.1" 200 -
+2026-05-08 21:25:41,396 | INFO     | web_app | 收到聊天请求
+2026-05-08 21:25:41,398 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 21:25:41,421 | INFO     | web_app | ReAct 循环完成
+2026-05-08 21:25:41,423 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:25:41] "POST /api/chat HTTP/1.1" 200 -
+2026-05-08 21:26:04,907 | INFO     | web_app | 收到聊天请求
+2026-05-08 21:26:04,908 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 21:26:04,916 | INFO     | web_app | ReAct 循环完成
+2026-05-08 21:26:04,918 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:26:04] "POST /api/chat HTTP/1.1" 200 -
+2026-05-08 21:26:21,547 | INFO     | web_app | 收到聊天请求
+2026-05-08 21:26:21,549 | INFO     | web_app | LLM client initialized successfully
+2026-05-08 21:26:23,305 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 21:29:42,280 | INFO     | web_app | ReAct 循环完成
+2026-05-08 21:29:42,281 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:29:42] "POST /api/chat HTTP/1.1" 200 -
+2026-05-08 21:30:08,299 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:30:08,299 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:30:08,305 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:30:08,889 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:30:09,178 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:30:09,976 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:30:09,980 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:30:10,218 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:30:10,222 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:30:13,220 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:30:13] "GET /api/logs/stream?session_id=sess_fi9rg182n HTTP/1.1" 200 -
+2026-05-08 21:30:13,220 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:30:13] "GET /api/logs/stream?session_id=sess_fi9rg182n HTTP/1.1" 200 -
+2026-05-08 21:30:13,220 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:30:13] "GET /api/logs/stream?session_id=sess_fi9rg182n HTTP/1.1" 200 -
+2026-05-08 21:30:13,220 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:30:13] "GET /api/logs/stream?session_id=sess_fi9rg182n HTTP/1.1" 200 -
+2026-05-08 21:30:13,220 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:30:13] "GET /api/logs/stream?session_id=sess_fi9rg182n HTTP/1.1" 200 -
+2026-05-08 21:30:13,220 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:30:13] "GET /api/logs/stream?session_id=sess_fi9rg182n HTTP/1.1" 200 -
+2026-05-08 21:30:39,225 | INFO     | web_app | 收到聊天请求
+2026-05-08 21:30:39,228 | INFO     | web_app | LLM client initialized successfully
+2026-05-08 21:30:41,298 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 21:30:49,033 | INFO     | web_app | ReAct 循环完成
+2026-05-08 21:30:49,035 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:30:49] "POST /api/chat HTTP/1.1" 200 -
+2026-05-08 21:31:39,453 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\agent_controller.py', reloading
+2026-05-08 21:31:39,454 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\agent_controller.py', reloading
+2026-05-08 21:31:39,458 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\agent_controller.py', reloading
+2026-05-08 21:31:40,295 | INFO     | werkzeug |  * Detected change in 'D:\\Anaconda3\\Lib\\threading.py', reloading
+2026-05-08 21:31:40,814 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:31:41,049 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:31:42,065 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:31:42,072 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:31:42,297 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:31:42,301 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:31:49,997 | INFO     | web_app | 收到聊天请求
+2026-05-08 21:31:50,000 | INFO     | web_app | LLM client initialized successfully
+2026-05-08 21:31:52,360 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 21:31:53,293 | INFO     | web_app | ReAct 循环完成
+2026-05-08 21:31:53,295 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:31:53] "POST /api/chat HTTP/1.1" 200 -
+2026-05-08 21:32:13,460 | INFO     | web_app | 收到聊天请求
+2026-05-08 21:32:15,077 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 21:32:15,086 | INFO     | web_app | ReAct 循环完成
+2026-05-08 21:32:15,088 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:32:15] "POST /api/chat HTTP/1.1" 200 -
+2026-05-08 21:32:46,639 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\test_debug.py', reloading
+2026-05-08 21:32:46,756 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\test_debug.py', reloading
+2026-05-08 21:32:46,756 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\test_debug.py', reloading
+2026-05-08 21:32:46,757 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\test_debug.py', reloading
+2026-05-08 21:32:46,757 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\test_debug.py', reloading
+2026-05-08 21:32:46,758 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\test_debug.py', reloading
+2026-05-08 21:32:46,758 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\test_debug.py', reloading
+2026-05-08 21:32:47,414 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\skill_builder.py', reloading
+2026-05-08 21:32:47,674 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:32:47,933 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:32:49,082 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:32:49,086 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:32:49,318 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:32:49,324 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:33:02,168 | INFO     | web_app | 收到聊天请求
+2026-05-08 21:33:02,171 | INFO     | web_app | LLM client initialized successfully
+2026-05-08 21:33:04,835 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 21:33:05,821 | INFO     | web_app | ReAct 循环完成
+2026-05-08 21:33:05,824 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:33:05] "POST /api/chat HTTP/1.1" 200 -
+2026-05-08 21:33:58,592 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:33:58,592 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:33:58,593 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:33:58,593 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:33:59,678 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:33:59,979 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:34:00,647 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:34:00,651 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:34:00,924 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:34:00,928 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:34:12,177 | INFO     | web_app | 收到聊天请求
+2026-05-08 21:34:12,180 | INFO     | web_app | LLM client initialized successfully
+2026-05-08 21:34:13,811 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 21:34:14,695 | INFO     | web_app | ReAct 循环完成
+2026-05-08 21:34:14,697 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:34:14] "POST /api/chat HTTP/1.1" 200 -
+2026-05-08 21:34:32,596 | INFO     | web_app | 收到聊天请求
+2026-05-08 21:34:33,810 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 21:34:33,822 | INFO     | web_app | ReAct 循环完成
+2026-05-08 21:34:33,823 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:34:33] "POST /api/chat HTTP/1.1" 200 -
+2026-05-08 21:35:09,609 | INFO     | web_app | 收到聊天请求
+2026-05-08 21:35:11,309 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 21:35:11,322 | INFO     | web_app | ReAct 循环完成
+2026-05-08 21:35:11,323 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:35:11] "POST /api/chat HTTP/1.1" 200 -
+2026-05-08 21:35:29,619 | INFO     | web_app | 收到聊天请求
+2026-05-08 21:35:31,600 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 21:35:33,307 | INFO     | web_app | ReAct 循环完成
+2026-05-08 21:35:33,309 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:35:33] "POST /api/chat HTTP/1.1" 200 -
+2026-05-08 21:36:00,382 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\test_format.py', reloading
+2026-05-08 21:36:00,382 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\test_format.py', reloading
+2026-05-08 21:36:00,491 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\test_format.py', reloading
+2026-05-08 21:36:00,491 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\test_format.py', reloading
+2026-05-08 21:36:00,492 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\test_format.py', reloading
+2026-05-08 21:36:00,492 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\test_format.py', reloading
+2026-05-08 21:36:01,007 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\config.py', reloading
+2026-05-08 21:36:01,008 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\memory\\memory.py', reloading
+2026-05-08 21:36:01,009 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tools\\agent_tools.py', reloading
+2026-05-08 21:36:01,018 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\__init__.py', reloading
+2026-05-08 21:36:01,019 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\react_agent.py', reloading
+2026-05-08 21:36:01,752 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:36:01,983 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:36:02,764 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:36:02,768 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:36:02,987 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:36:02,991 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:36:27,309 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\agent.py', reloading
+2026-05-08 21:36:27,309 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\agent.py', reloading
+2026-05-08 21:36:27,997 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:36:28,179 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:36:29,002 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:36:29,006 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:36:29,166 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:36:29,170 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:36:54,963 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:36:54,963 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:36:54,963 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:36:54,963 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:36:55,229 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:36:55,474 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:36:56,316 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:36:56,321 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:36:56,506 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:36:56,511 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:37:06,475 | INFO     | web_app | 收到聊天请求
+2026-05-08 21:37:06,478 | INFO     | web_app | LLM client initialized successfully
+2026-05-08 21:37:08,536 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 21:37:09,456 | INFO     | web_app | ReAct 循环完成
+2026-05-08 21:37:09,458 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:37:09] "POST /api/chat HTTP/1.1" 200 -
+2026-05-08 21:37:28,079 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:37:28,079 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:37:28,079 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:37:28,079 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:37:28,611 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:37:28,847 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:37:29,525 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:37:29,530 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:37:29,786 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:37:29,791 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:37:51,779 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\test_debug.py', reloading
+2026-05-08 21:37:51,817 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\test_format.py', reloading
+2026-05-08 21:37:51,817 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\test_format.py', reloading
+2026-05-08 21:37:52,023 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:37:52,787 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:37:53,168 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:37:53,174 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:37:54,001 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:37:54,006 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:37:58,305 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:37:58] "[36mGET / HTTP/1.1[0m" 304 -
+2026-05-08 21:37:58,483 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:37:58] "GET /api/logs?session_id=sess_kvqwl12t1&limit=100 HTTP/1.1" 200 -
+2026-05-08 21:37:58,728 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:37:58] "[33mGET /@vite/client HTTP/1.1[0m" 404 -
+2026-05-08 21:37:59,643 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:37:59] "GET /api/logs/stream?session_id=sess_kvqwl12t1 HTTP/1.1" 200 -
+2026-05-08 21:38:04,200 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:38:04] "POST /api/generate_hero_query HTTP/1.1" 200 -
+2026-05-08 21:38:52,500 | INFO     | werkzeug | [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.5.221:5000
+2026-05-08 21:38:52,501 | INFO     | werkzeug | [33mPress CTRL+C to quit[0m
+2026-05-08 21:38:52,507 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:38:53,431 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:38:53,440 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:39:00,376 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:39:00] "[36mGET / HTTP/1.1[0m" 304 -
+2026-05-08 21:39:00,621 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:39:00] "GET /api/logs?session_id=sess_a1rcmg7j2&limit=100 HTTP/1.1" 200 -
+2026-05-08 21:39:00,789 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:39:00] "[33mGET /@vite/client HTTP/1.1[0m" 404 -
+2026-05-08 21:39:01,714 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:39:01] "GET /api/logs/stream?session_id=sess_a1rcmg7j2 HTTP/1.1" 200 -
+2026-05-08 21:39:06,897 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:39:06] "POST /api/generate_hero_query HTTP/1.1" 200 -
+2026-05-08 21:39:10,040 | INFO     | web_app | 收到聊天请求
+2026-05-08 21:39:10,042 | INFO     | web_app | LLM client initialized successfully
+2026-05-08 21:39:11,682 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 21:39:11,693 | INFO     | web_app | ReAct 循环完成
+2026-05-08 21:39:11,694 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:39:11] "POST /api/chat HTTP/1.1" 200 -
+2026-05-08 21:40:27,194 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:40:27,195 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:40:27,195 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:40:27,196 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:40:27,196 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:40:28,204 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:40:28,302 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:40:28,468 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:40:29,211 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:40:29,215 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:40:29,293 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:40:29,299 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:40:29,479 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:40:29,484 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:40:32,617 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:40:32] "GET /api/logs/stream?session_id=sess_a1rcmg7j2 HTTP/1.1" 200 -
+2026-05-08 21:40:32,618 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:40:32] "GET /api/logs/stream?session_id=sess_a1rcmg7j2 HTTP/1.1" 200 -
+2026-05-08 21:40:36,799 | INFO     | werkzeug | [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.5.221:5000
+2026-05-08 21:40:36,799 | INFO     | werkzeug | [33mPress CTRL+C to quit[0m
+2026-05-08 21:40:36,805 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:40:37,653 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:40:37,657 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:41:09,959 | INFO     | web_app | 收到聊天请求
+2026-05-08 21:41:09,962 | INFO     | web_app | LLM client initialized successfully
+2026-05-08 21:41:11,281 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 21:41:11,292 | INFO     | web_app | ReAct 循环完成
+2026-05-08 21:41:11,294 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:41:11] "POST /api/chat HTTP/1.1" 200 -
+2026-05-08 21:41:23,646 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:41:23] "[36mGET / HTTP/1.1[0m" 304 -
+2026-05-08 21:41:23,828 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:41:23] "GET /api/logs?session_id=sess_l2jgobjk6&limit=100 HTTP/1.1" 200 -
+2026-05-08 21:41:24,045 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:41:24] "[33mGET /@vite/client HTTP/1.1[0m" 404 -
+2026-05-08 21:41:24,984 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:41:24] "GET /api/logs/stream?session_id=sess_l2jgobjk6 HTTP/1.1" 200 -
+2026-05-08 21:41:31,240 | INFO     | web_app | 收到聊天请求
+2026-05-08 21:41:32,635 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 21:41:32,646 | INFO     | web_app | ReAct 循环完成
+2026-05-08 21:41:32,649 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:41:32] "POST /api/chat HTTP/1.1" 200 -
+2026-05-08 21:47:25,851 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:47:25,851 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:47:25,851 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:47:25,851 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:47:25,852 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:47:25,852 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:47:26,000 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:47:26,320 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:47:27,094 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:47:27,099 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:47:27,143 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:47:27,342 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:47:27,347 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:47:28,025 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:47:28,028 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:47:48,383 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:47:48,383 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:47:48,383 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:47:48,383 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:47:48,383 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:47:48,384 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:47:48,384 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:47:48,384 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:47:48,586 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:47:49,235 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:47:49,329 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:47:49,568 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:47:49,575 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:47:50,231 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:47:50,235 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:47:50,295 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:47:50,299 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:48:18,253 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:48:18,253 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:48:18,253 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:48:18,253 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:48:18,254 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:48:18,254 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:48:18,254 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:48:18,254 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:48:18,254 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:48:18,491 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:48:18,660 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:48:18,848 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:48:19,585 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:48:19,591 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:48:19,709 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:48:19,713 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:48:19,879 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:48:19,883 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:48:44,551 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:48:44,551 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:48:44,551 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:48:44,551 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:48:44,551 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:48:44,552 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:48:44,552 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 21:48:44,817 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:48:44,980 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:48:45,133 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:48:45,987 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:48:45,991 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:48:46,084 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:48:46,090 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:48:46,160 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:48:46,164 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:48:52,236 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\docs\\process_md\\test_log_integration.py', reloading
+2026-05-08 21:48:52,236 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\docs\\process_md\\test_log_integration.py', reloading
+2026-05-08 21:48:52,236 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\docs\\process_md\\test_log_integration.py', reloading
+2026-05-08 21:48:52,240 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\__init__.py', reloading
+2026-05-08 21:48:52,252 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\__init__.py', reloading
+2026-05-08 21:48:52,252 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\__init__.py', reloading
+2026-05-08 21:48:54,065 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:48:54,166 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:48:54,263 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:48:55,094 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:48:55,098 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:48:55,180 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:48:55,183 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:48:55,250 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:48:55,254 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:49:09,619 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\api\\test_web_api.py', reloading
+2026-05-08 21:49:09,619 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\api\\test_web_api.py', reloading
+2026-05-08 21:49:09,619 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\api\\test_web_api.py', reloading
+2026-05-08 21:49:09,619 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\api\\test_web_api.py', reloading
+2026-05-08 21:49:09,619 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\api\\test_web_api.py', reloading
+2026-05-08 21:49:10,215 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:49:10,328 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:49:10,391 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:49:11,235 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:49:11,239 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:49:11,377 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:49:11,381 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:49:11,425 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:49:11,429 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:49:38,173 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\api\\test_web_api.py', reloading
+2026-05-08 21:49:38,173 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\api\\test_web_api.py', reloading
+2026-05-08 21:49:38,173 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\api\\test_web_api.py', reloading
+2026-05-08 21:49:38,175 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\api\\test_web_api.py', reloading
+2026-05-08 21:49:38,175 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\api\\test_web_api.py', reloading
+2026-05-08 21:49:38,176 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\api\\test_web_api.py', reloading
+2026-05-08 21:49:38,481 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:49:38,631 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:49:38,677 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:49:39,494 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:49:39,498 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:49:39,622 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:49:39,627 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:49:39,697 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:49:39,702 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:49:55,753 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\api\\test_web_api.py', reloading
+2026-05-08 21:49:55,754 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\api\\test_web_api.py', reloading
+2026-05-08 21:49:55,754 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\api\\test_web_api.py', reloading
+2026-05-08 21:49:55,754 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\api\\test_web_api.py', reloading
+2026-05-08 21:49:55,754 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\api\\test_web_api.py', reloading
+2026-05-08 21:49:55,754 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\api\\test_web_api.py', reloading
+2026-05-08 21:49:55,895 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:49:56,677 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:49:56,804 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:49:56,830 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:49:56,835 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:49:57,648 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:49:57,652 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:49:57,753 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:49:57,757 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:50:16,223 | INFO     | werkzeug | [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.5.221:5000
+2026-05-08 21:50:16,224 | INFO     | werkzeug | [33mPress CTRL+C to quit[0m
+2026-05-08 21:50:16,232 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:50:17,151 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:50:17,155 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:50:37,254 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:50:37] "[31m[1mPOST /api/chat HTTP/1.1[0m" 400 -
+2026-05-08 21:50:51,488 | INFO     | web_app | 收到聊天请求
+2026-05-08 21:50:51,490 | INFO     | web_app | LLM client initialized successfully
+2026-05-08 21:50:53,483 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 21:50:53,495 | INFO     | web_app | ReAct 循环完成
+2026-05-08 21:50:53,496 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:50:53] "POST /api/chat HTTP/1.1" 200 -
+2026-05-08 21:52:33,196 | INFO     | werkzeug | [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.5.221:5000
+2026-05-08 21:52:33,196 | INFO     | werkzeug | [33mPress CTRL+C to quit[0m
+2026-05-08 21:52:33,202 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:52:34,061 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:52:34,065 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:52:46,612 | INFO     | web_app | 收到聊天请求
+2026-05-08 21:52:48,093 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 21:52:48,102 | INFO     | web_app | ReAct 循环完成
+2026-05-08 21:52:48,103 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:52:48] "POST /api/chat HTTP/1.1" 200 -
+2026-05-08 21:53:44,160 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\utils\\api_client.py', reloading
+2026-05-08 21:53:44,160 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\utils\\api_client.py', reloading
+2026-05-08 21:53:44,161 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\utils\\api_client.py', reloading
+2026-05-08 21:53:44,161 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\utils\\api_client.py', reloading
+2026-05-08 21:53:45,679 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:53:45,834 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:53:46,668 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:53:46,672 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:53:46,792 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:53:46,796 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:53:51,875 | INFO     | werkzeug | [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.5.221:5000
+2026-05-08 21:53:51,876 | INFO     | werkzeug | [33mPress CTRL+C to quit[0m
+2026-05-08 21:53:51,882 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:53:52,755 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:53:52,759 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:54:04,605 | INFO     | web_app | 收到聊天请求
+2026-05-08 21:54:04,608 | INFO     | web_app | LLM client initialized successfully
+2026-05-08 21:54:05,771 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 21:54:05,782 | INFO     | web_app | ReAct 循环完成
+2026-05-08 21:54:05,783 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:54:05] "POST /api/chat HTTP/1.1" 200 -
+2026-05-08 21:54:49,300 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\test_log_integration.py', reloading
+2026-05-08 21:54:49,300 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\test_log_integration.py', reloading
+2026-05-08 21:54:49,301 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\test_log_integration.py', reloading
+2026-05-08 21:54:50,238 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:54:50,287 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:54:50,375 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:54:51,288 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:54:51,292 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:54:51,319 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:54:51,323 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:54:51,360 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:54:51,365 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:57:20,587 | INFO     | werkzeug | [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.5.221:5000
+2026-05-08 21:57:20,588 | INFO     | werkzeug | [33mPress CTRL+C to quit[0m
+2026-05-08 21:57:20,594 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:57:21,511 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:57:21,516 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:57:36,749 | INFO     | web_app | 收到聊天请求
+2026-05-08 21:57:36,753 | INFO     | web_app | LLM client initialized successfully
+2026-05-08 21:57:38,269 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 21:57:39,393 | INFO     | web_app | ReAct 循环完成
+2026-05-08 21:57:39,395 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:57:39] "POST /api/chat HTTP/1.1" 200 -
+2026-05-08 21:58:46,256 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\hero_analyzer.py', reloading
+2026-05-08 21:58:46,257 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\hero_analyzer.py', reloading
+2026-05-08 21:58:46,257 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\hero_analyzer.py', reloading
+2026-05-08 21:58:46,257 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\hero_analyzer.py', reloading
+2026-05-08 21:58:47,461 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:58:47,514 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:58:48,499 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:58:48,505 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:58:48,526 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:58:48,532 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:59:04,524 | INFO     | werkzeug | [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.5.221:5000
+2026-05-08 21:59:04,525 | INFO     | werkzeug | [33mPress CTRL+C to quit[0m
+2026-05-08 21:59:04,530 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:59:05,403 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:59:05,407 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 21:59:19,129 | INFO     | web_app | 收到聊天请求
+2026-05-08 21:59:19,131 | INFO     | web_app | LLM client initialized successfully
+2026-05-08 21:59:20,820 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 21:59:20,826 | INFO     | web_app | ReAct 循环完成
+2026-05-08 21:59:20,827 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 21:59:20] "POST /api/chat HTTP/1.1" 200 -
+2026-05-08 21:59:35,087 | INFO     | werkzeug | [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.5.221:5000
+2026-05-08 21:59:35,088 | INFO     | werkzeug | [33mPress CTRL+C to quit[0m
+2026-05-08 21:59:35,094 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 21:59:36,002 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 21:59:36,006 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 22:00:10,961 | INFO     | werkzeug | [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.5.221:5000
+2026-05-08 22:00:10,962 | INFO     | werkzeug | [33mPress CTRL+C to quit[0m
+2026-05-08 22:00:10,968 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 22:00:11,816 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 22:00:11,820 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 22:01:22,746 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\test_log_config.py', reloading
+2026-05-08 22:01:22,897 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 22:01:23,485 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 22:01:23,862 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 22:01:23,870 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 22:01:23,960 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 22:01:24,440 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 22:01:24,444 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 22:01:24,848 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 22:01:24,853 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 22:01:29,777 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\test_memory_log_handler.py', reloading
+2026-05-08 22:01:29,777 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\test_memory_log_handler.py', reloading
+2026-05-08 22:01:29,777 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\test_memory_log_handler.py', reloading
+2026-05-08 22:01:29,777 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\test_log_api.py', reloading
+2026-05-08 22:01:29,778 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\test_log_api.py', reloading
+2026-05-08 22:01:29,778 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\log\\test_log_api.py', reloading
+2026-05-08 22:01:29,780 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\hybrid_base.py', reloading
+2026-05-08 22:01:29,780 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\hybrid_base.py', reloading
+2026-05-08 22:01:29,780 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\hybrid_base.py', reloading
+2026-05-08 22:01:29,806 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\item_recommender.py', reloading
+2026-05-08 22:01:29,806 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\item_recommender.py', reloading
+2026-05-08 22:01:29,806 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\item_recommender.py', reloading
+2026-05-08 22:01:30,935 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 22:01:30,939 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 22:01:31,539 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 22:01:32,065 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 22:01:32,070 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 22:01:32,073 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 22:01:32,079 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 22:01:32,543 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 22:01:32,547 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 22:01:45,273 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 22:01:45] "[36mGET / HTTP/1.1[0m" 304 -
+2026-05-08 22:01:45,444 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 22:01:45] "GET /api/logs?session_id=sess_2zlezliln&limit=100 HTTP/1.1" 200 -
+2026-05-08 22:01:45,661 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 22:01:45] "[33mGET /@vite/client HTTP/1.1[0m" 404 -
+2026-05-08 22:01:46,623 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 22:01:46] "GET /api/logs/stream?session_id=sess_2zlezliln HTTP/1.1" 200 -
+2026-05-08 22:01:48,195 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 22:01:48] "POST /api/generate_hero_query HTTP/1.1" 200 -
+2026-05-08 22:01:51,188 | INFO     | web_app | 收到聊天请求
+2026-05-08 22:01:51,189 | INFO     | web_app | LLM client initialized successfully
+2026-05-08 22:01:52,917 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 22:05:23,856 | INFO     | web_app | ReAct 循环完成
+2026-05-08 22:05:23,857 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 22:05:23] "POST /api/chat HTTP/1.1" 200 -
+2026-05-08 22:09:42,892 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 22:09:42,893 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 22:09:42,894 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 22:09:42,895 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 22:09:44,405 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 22:09:44,406 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 22:09:45,406 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 22:09:45,407 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 22:09:45,411 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 22:09:45,411 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 22:09:48,738 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 22:09:48] "GET /api/logs/stream?session_id=sess_2zlezliln HTTP/1.1" 200 -
+2026-05-08 22:09:48,738 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 22:09:48] "GET /api/logs/stream?session_id=sess_2zlezliln HTTP/1.1" 200 -
+2026-05-08 22:09:49,641 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 22:09:49,643 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 22:09:49,643 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 22:09:51,492 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 22:09:51,497 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 22:09:52,565 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 22:09:52,566 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 22:09:52,570 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 22:09:52,570 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 22:10:02,158 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\reflection_evaluator.py', reloading
+2026-05-08 22:10:02,158 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\core\\reflection_evaluator.py', reloading
+2026-05-08 22:10:02,162 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\hybrid_hero_analyzer.py', reloading
+2026-05-08 22:10:02,162 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\hybrid_hero_analyzer.py', reloading
+2026-05-08 22:10:02,164 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\examples\\reflection_demo.py', reloading
+2026-05-08 22:10:02,165 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\examples\\reflection_demo.py', reloading
+2026-05-08 22:10:02,172 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\examples\\usage_examples.py', reloading
+2026-05-08 22:10:02,172 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\examples\\usage_examples.py', reloading
+2026-05-08 22:10:02,176 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\conftest.py', reloading
+2026-05-08 22:10:02,180 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\conftest.py', reloading
+2026-05-08 22:10:02,180 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\run_api_e2e_tests.py', reloading
+2026-05-08 22:10:02,186 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\run_api_e2e_tests.py', reloading
+2026-05-08 22:10:02,188 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\run_tests.py', reloading
+2026-05-08 22:10:02,189 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\run_tests.py', reloading
+2026-05-08 22:10:02,190 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\api\\__init__.py', reloading
+2026-05-08 22:10:02,192 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\api\\__init__.py', reloading
+2026-05-08 22:10:02,195 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\api\\test_api_client.py', reloading
+2026-05-08 22:10:02,195 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\api\\test_api_client.py', reloading
+2026-05-08 22:10:02,196 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\core\\__init__.py', reloading
+2026-05-08 22:10:02,197 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\core\\__init__.py', reloading
+2026-05-08 22:10:02,197 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\core\\test_agent.py', reloading
+2026-05-08 22:10:02,198 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\core\\test_agent.py', reloading
+2026-05-08 22:10:02,198 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\core\\test_agent_architecture.py', reloading
+2026-05-08 22:10:02,199 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\core\\test_agent_architecture.py', reloading
+2026-05-08 22:10:02,199 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\core\\test_analyzers.py', reloading
+2026-05-08 22:10:02,200 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\core\\test_analyzers.py', reloading
+2026-05-08 22:10:02,201 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\core\\test_react.py', reloading
+2026-05-08 22:10:02,204 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\core\\test_react.py', reloading
+2026-05-08 22:10:02,204 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\core\\test_strategies.py', reloading
+2026-05-08 22:10:02,205 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\core\\test_strategies.py', reloading
+2026-05-08 22:10:02,206 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\e2e\\__init__.py', reloading
+2026-05-08 22:10:02,206 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\e2e\\__init__.py', reloading
+2026-05-08 22:10:02,206 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\e2e\\test_e2e_workflow.py', reloading
+2026-05-08 22:10:02,207 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\e2e\\test_e2e_workflow.py', reloading
+2026-05-08 22:10:02,207 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\integration\\__init__.py', reloading
+2026-05-08 22:10:02,208 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\integration\\__init__.py', reloading
+2026-05-08 22:10:02,211 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\unit\\__init__.py', reloading
+2026-05-08 22:10:02,212 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\unit\\__init__.py', reloading
+2026-05-08 22:10:02,212 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\unit\\test_cache.py', reloading
+2026-05-08 22:10:02,213 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\unit\\test_cache.py', reloading
+2026-05-08 22:10:02,213 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\unit\\test_config.py', reloading
+2026-05-08 22:10:02,213 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\tests\\unit\\test_config.py', reloading
+2026-05-08 22:10:02,749 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 22:10:02,762 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 22:10:03,808 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 22:10:03,814 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 22:10:03,819 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 22:10:03,825 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 22:10:37,796 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 22:10:37,797 | INFO     | werkzeug |  * Detected change in 'd:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 22:10:37,797 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\web\\app.py', reloading
+2026-05-08 22:10:38,184 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 22:10:38,209 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 22:11:29,055 | INFO     | werkzeug | [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.5.221:5000
+2026-05-08 22:11:29,056 | INFO     | werkzeug | [33mPress CTRL+C to quit[0m
+2026-05-08 22:11:29,062 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 22:11:29,949 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 22:11:29,953 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 22:11:54,973 | INFO     | web_app | 收到聊天请求
+2026-05-08 22:11:54,976 | INFO     | web_app | LLM client initialized successfully
+2026-05-08 22:11:57,850 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 22:12:17,166 | INFO     | web_app | ReAct 循环完成
+2026-05-08 22:12:17,167 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 22:12:17] "POST /api/chat HTTP/1.1" 200 -
+2026-05-08 22:12:40,882 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\hero_analyzer.py', reloading
+2026-05-08 22:12:40,883 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\hero_analyzer.py', reloading
+2026-05-08 22:12:41,598 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 22:12:42,611 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 22:12:42,615 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 22:12:51,620 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\hero_analyzer.py', reloading
+2026-05-08 22:12:51,620 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\hero_analyzer.py', reloading
+2026-05-08 22:12:52,693 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 22:12:53,570 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 22:12:53,574 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 22:13:05,848 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\hero_analyzer.py', reloading
+2026-05-08 22:13:05,849 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\hero_analyzer.py', reloading
+2026-05-08 22:13:06,678 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 22:13:07,618 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 22:13:07,622 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 22:13:21,921 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\hero_analyzer.py', reloading
+2026-05-08 22:13:21,922 | INFO     | werkzeug |  * Detected change in 'D:\\trae_projects\\first-agent\\agents\\DotaHelperAgent\\analyzers\\hero_analyzer.py', reloading
+2026-05-08 22:13:22,753 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 22:13:23,713 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 22:13:23,717 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 22:13:40,026 | INFO     | werkzeug | [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.5.221:5000
+2026-05-08 22:13:40,027 | INFO     | werkzeug | [33mPress CTRL+C to quit[0m
+2026-05-08 22:13:40,033 | INFO     | werkzeug |  * Restarting with watchdog (windowsapi)
+2026-05-08 22:13:40,992 | WARNING  | werkzeug |  * Debugger is active!
+2026-05-08 22:13:40,997 | INFO     | werkzeug |  * Debugger PIN: 108-400-749
+2026-05-08 22:13:55,522 | INFO     | web_app | 收到聊天请求
+2026-05-08 22:13:55,525 | INFO     | web_app | LLM client initialized successfully
+2026-05-08 22:13:58,514 | INFO     | web_app | 开始执行 ReAct 循环
+2026-05-08 22:14:03,063 | INFO     | web_app | ReAct 循环完成
+2026-05-08 22:14:03,064 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 22:14:03] "POST /api/chat HTTP/1.1" 200 -
+2026-05-08 22:14:44,150 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 22:14:44] "[36mGET / HTTP/1.1[0m" 304 -
+2026-05-08 22:14:44,339 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 22:14:44] "[36mGET / HTTP/1.1[0m" 304 -
+2026-05-08 22:14:44,508 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 22:14:44] "GET /api/logs?session_id=sess_u7g37exsj&limit=100 HTTP/1.1" 200 -
+2026-05-08 22:14:44,615 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 22:14:44] "[33mGET /@vite/client HTTP/1.1[0m" 404 -
+2026-05-08 22:14:45,624 | INFO     | werkzeug | 127.0.0.1 - - [08/May/2026 22:14:45] "GET /api/logs/stream?session_id=sess_u7g37exsj HTTP/1.1" 200 -

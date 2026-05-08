@@ -435,6 +435,192 @@
             box-shadow: 0 4px 12px rgba(233, 69, 96, 0.4);
             z-index: 100;
         }
+
+        /* 英雄选择器侧边栏 */
+        .hero-sidebar {
+            width: 350px;
+            background: rgba(0, 0, 0, 0.3);
+            border-left: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+        }
+
+        .hero-sidebar-header {
+            padding: 12px 16px;
+            background: rgba(0, 0, 0, 0.2);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .hero-sidebar-header h3 {
+            margin: 0;
+            font-size: 14px;
+            color: #fff;
+        }
+
+        .hero-close-btn {
+            background: none;
+            border: none;
+            color: #fff;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        .generate-section {
+            padding: 20px 16px;
+            text-align: center;
+        }
+
+        .generate-btn {
+            width: 100%;
+            padding: 16px;
+            background: linear-gradient(135deg, #e94560 0%, #ff6b6b 100%);
+            border: none;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .generate-btn:hover {
+            transform: scale(1.02);
+            box-shadow: 0 4px 12px rgba(233, 69, 96, 0.4);
+        }
+
+        .generate-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .hint-text {
+            font-size: 12px;
+            color: #888;
+            margin-top: 8px;
+            margin-bottom: 0;
+        }
+
+        .result-section {
+            padding: 12px 16px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .result-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .result-header span {
+            font-size: 13px;
+            color: #fff;
+        }
+
+        .copy-btn {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            padding: 4px 12px;
+            border-radius: 4px;
+            color: #fff;
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        .copy-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .result-content {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 13px;
+            line-height: 1.6;
+            color: #fff;
+            word-break: break-all;
+            min-height: 60px;
+        }
+
+        .history-section {
+            padding: 12px 16px;
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .section-header span {
+            font-size: 13px;
+            color: #fff;
+        }
+
+        .clear-btn {
+            background: none;
+            border: none;
+            color: #888;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .clear-btn:hover {
+            color: #fff;
+        }
+
+        .history-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .history-item {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 10px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .history-item:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .history-item .time {
+            font-size: 10px;
+            color: #888;
+            margin-bottom: 4px;
+        }
+
+        .history-item .content {
+            font-size: 12px;
+            color: #ccc;
+            line-height: 1.4;
+        }
+
+        /* 英雄选择器切换按钮 */
+        .hero-sidebar-toggle {
+            position: fixed;
+            right: 20px;
+            bottom: 150px;
+            padding: 10px 16px;
+            background: linear-gradient(135deg, #00b894 0%, #00cec9 100%);
+            border: none;
+            border-radius: 24px;
+            color: white;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(0, 184, 148, 0.4);
+            z-index: 100;
+        }
     </style>
 </head>
 <body>
@@ -511,11 +697,50 @@
                 </div>
             </div>
         </div>
+
+        <!-- 英雄选择器侧边栏 -->
+        <div class="hero-sidebar" id="heroSidebar" style="display: none;">
+            <div class="hero-sidebar-header">
+                <h3>🎮 英雄选择器</h3>
+                <button onclick="toggleHeroSidebar()" class="hero-close-btn">✕</button>
+            </div>
+
+            <!-- 生成按钮 -->
+            <div class="generate-section">
+                <button onclick="generateHeroQuery()" class="generate-btn" id="generateBtn">
+                    ✨ 一键生成英雄推荐查询
+                </button>
+                <p class="hint-text">随机生成我方和敌方英雄，自动生成查询文本</p>
+            </div>
+
+            <!-- 生成结果区 -->
+            <div class="result-section" id="resultSection" style="display: none;">
+                <div class="result-header">
+                    <span>生成结果</span>
+                    <button onclick="copyResult()" class="copy-btn" id="copyBtn">📋 复制</button>
+                </div>
+                <div class="result-content" id="resultContent"></div>
+            </div>
+
+            <!-- 历史记录区 -->
+            <div class="history-section">
+                <div class="section-header">
+                    <span>历史记录</span>
+                    <button onclick="clearHistory()" class="clear-btn">🗑️ 清空</button>
+                </div>
+                <div class="history-list" id="historyList"></div>
+            </div>
+        </div>
     </div>
 
     <!-- 侧边栏切换按钮 -->
     <button class="sidebar-toggle" id="sidebarToggle" onclick="toggleSidebar()">
         📋 日志
+    </button>
+
+    <!-- 英雄选择器切换按钮 -->
+    <button class="hero-sidebar-toggle" id="heroSidebarToggle" onclick="toggleHeroSidebar()">
+        🎮 英雄
     </button>
 
     <script>
@@ -842,10 +1067,151 @@
             return div.innerHTML;
         }
 
+        // === 英雄选择器功能 ===
+        let heroHistory = [];
+        let heroSidebarVisible = false;
+
+        // 生成英雄查询文本
+        async function generateHeroQuery() {
+            const btn = document.getElementById('generateBtn');
+            const resultSection = document.getElementById('resultSection');
+            const resultContent = document.getElementById('resultContent');
+            
+            // 禁用按钮，显示加载状态
+            btn.disabled = true;
+            btn.textContent = '⏳ 生成中...';
+            
+            try {
+                const response = await fetch('/api/generate_hero_query', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    // 显示结果
+                    resultContent.textContent = data.query;
+                    resultSection.style.display = 'block';
+                    
+                    // 保存到历史记录
+                    saveToHistory(data.query);
+                } else {
+                    alert('生成失败：' + (data.error || '未知错误'));
+                }
+            } catch (error) {
+                console.error('Failed to generate query:', error);
+                alert('生成失败：' + error.message);
+            } finally {
+                // 恢复按钮状态
+                btn.disabled = false;
+                btn.textContent = '✨ 一键生成英雄推荐查询';
+            }
+        }
+
+        // 复制结果
+        function copyResult() {
+            const content = document.getElementById('resultContent').textContent;
+            navigator.clipboard.writeText(content).then(() => {
+                const btn = document.getElementById('copyBtn');
+                btn.textContent = '✅ 已复制';
+                setTimeout(() => {
+                    btn.textContent = '📋 复制';
+                }, 2000);
+            }).catch(err => {
+                console.error('复制失败:', err);
+                alert('复制失败');
+            });
+        }
+
+        // 保存到历史记录
+        function saveToHistory(query) {
+            const record = {
+                id: Date.now(),
+                time: new Date().toLocaleString(),
+                query: query
+            };
+            
+            heroHistory.unshift(record);
+            
+            // 最多保留50条
+            if (heroHistory.length > 50) {
+                heroHistory = heroHistory.slice(0, 50);
+            }
+            
+            // 保存到 localStorage
+            localStorage.setItem('heroGenHistory', JSON.stringify(heroHistory));
+            
+            renderHistory();
+        }
+
+        // 加载历史记录
+        function loadHistory() {
+            const saved = localStorage.getItem('heroGenHistory');
+            if (saved) {
+                try {
+                    heroHistory = JSON.parse(saved);
+                    renderHistory();
+                } catch (e) {
+                    heroHistory = [];
+                }
+            }
+        }
+
+        // 渲染历史记录
+        function renderHistory() {
+            const container = document.getElementById('historyList');
+            if (heroHistory.length === 0) {
+                container.innerHTML = '<p style="color: #888; text-align: center; font-size: 12px;">暂无历史记录</p>';
+                return;
+            }
+            
+            container.innerHTML = heroHistory.map(item => `
+                <div class="history-item" onclick="loadHistoryItem(${item.id})">
+                    <div class="time">${item.time}</div>
+                    <div class="content">${item.query}</div>
+                </div>
+            `).join('');
+        }
+
+        // 加载历史记录项
+        function loadHistoryItem(id) {
+            const item = heroHistory.find(h => h.id === id);
+            if (!item) return;
+            
+            document.getElementById('resultContent').textContent = item.query;
+            document.getElementById('resultSection').style.display = 'block';
+        }
+
+        // 清空历史记录
+        function clearHistory() {
+            if (confirm('确定要清空所有历史记录吗？')) {
+                heroHistory = [];
+                localStorage.removeItem('heroGenHistory');
+                renderHistory();
+            }
+        }
+
+        // 切换英雄侧边栏
+        function toggleHeroSidebar() {
+            const sidebar = document.getElementById('heroSidebar');
+            const toggle = document.getElementById('heroSidebarToggle');
+            heroSidebarVisible = !heroSidebarVisible;
+            
+            if (heroSidebarVisible) {
+                sidebar.style.display = 'flex';
+                toggle.style.display = 'none';
+            } else {
+                sidebar.style.display = 'none';
+                toggle.style.display = 'block';
+            }
+        }
+
         // 页面加载时初始化
         document.addEventListener('DOMContentLoaded', () => {
             initLogStream();
             loadHistoryLogs();
+            loadHistory();
         });
     </script>
 </body>
