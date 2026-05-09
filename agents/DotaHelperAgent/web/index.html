@@ -106,6 +106,125 @@
             font-size: 14px;
         }
 
+        .thinking-steps {
+            margin-bottom: 12px;
+            border-left: 2px solid rgba(233, 69, 96, 0.3);
+            padding-left: 12px;
+        }
+
+        .thinking-step {
+            margin-bottom: 8px;
+            animation: stepFadeIn 0.3s ease;
+        }
+
+        @keyframes stepFadeIn {
+            from { opacity: 0; transform: translateX(-10px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        .thinking-step-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 10px;
+            background: rgba(233, 69, 96, 0.1);
+            border-radius: 6px;
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.2s;
+        }
+
+        .thinking-step-header:hover {
+            background: rgba(233, 69, 96, 0.2);
+        }
+
+        .thinking-step-icon {
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+        }
+
+        .thinking-step-title {
+            flex: 1;
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.7);
+        }
+
+        .thinking-step-toggle {
+            font-size: 10px;
+            color: rgba(255, 255, 255, 0.5);
+            transition: transform 0.2s;
+        }
+
+        .thinking-step.collapsed .thinking-step-toggle {
+            transform: rotate(-90deg);
+        }
+
+        .thinking-step-content {
+            padding: 8px 10px;
+            font-size: 12px;
+            line-height: 1.6;
+            color: rgba(255, 255, 255, 0.8);
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 4px;
+            margin-top: 4px;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .thinking-step.collapsed .thinking-step-content {
+            display: none;
+        }
+
+        .thinking-step.thinking .thinking-step-icon {
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .thinking-step.thinking .thinking-step-title {
+            color: #ffe66d;
+        }
+
+        .typing-indicator {
+            display: inline-flex;
+            gap: 4px;
+            padding: 8px 12px;
+        }
+
+        .typing-indicator span {
+            width: 6px;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.5);
+            border-radius: 50%;
+            animation: typing 1.4s infinite;
+        }
+
+        .typing-indicator span:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .typing-indicator span:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+
+        @keyframes typing {
+            0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
+            30% { transform: translateY(-8px); opacity: 1; }
+        }
+
+        .answer-divider {
+            height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(233, 69, 96, 0.5), transparent);
+            margin: 12px 0;
+        }
+
         .input-area {
             padding: 16px 20px;
             background: rgba(0, 0, 0, 0.2);
@@ -821,6 +940,232 @@
             statusDot.className = 'status-dot' + (streaming ? ' streaming' : '');
         }
 
+        function createStreamingMessage() {
+            const empty = document.getElementById('emptyState');
+            if (empty) empty.remove();
+
+            const msg = document.createElement('div');
+            msg.className = 'message assistant';
+            msg.id = 'streaming-message-' + Date.now();
+            
+            const content = document.createElement('div');
+            content.className = 'content';
+            
+            const thinkingSteps = document.createElement('div');
+            thinkingSteps.className = 'thinking-steps';
+            thinkingSteps.id = 'thinking-steps-' + msg.id;
+            
+            const typingIndicator = document.createElement('div');
+            typingIndicator.className = 'typing-indicator';
+            typingIndicator.id = 'typing-indicator-' + msg.id;
+            typingIndicator.innerHTML = '<span></span><span></span><span></span>';
+            
+            content.appendChild(thinkingSteps);
+            content.appendChild(typingIndicator);
+            msg.appendChild(content);
+            
+            chatArea.appendChild(msg);
+            chatArea.scrollTop = chatArea.scrollHeight;
+            
+            return msg;
+        }
+
+        function addThinkingStep(msgElement, stepType, content, isComplete = false) {
+            const stepsContainer = msgElement.querySelector('.thinking-steps');
+            
+            const prevThinking = stepsContainer.querySelector('.thinking-step.thinking');
+            if (prevThinking) {
+                prevThinking.classList.remove('thinking');
+            }
+            
+            const step = document.createElement('div');
+            step.className = 'thinking-step' + (isComplete ? '' : ' thinking');
+            
+            const stepIcons = {
+                'think': '💭',
+                'plan': '📋',
+                'action': '⚡',
+                'observation': '👁️',
+                'reflect': '🤔',
+                'synthesize': '✨'
+            };
+            
+            const stepTitles = {
+                'think': '思考中...',
+                'plan': '制定计划',
+                'action': '执行工具',
+                'observation': '观察结果',
+                'reflect': '反思',
+                'synthesize': '生成答案'
+            };
+            
+            const icon = stepIcons[stepType] || '💡';
+            const title = stepTitles[stepType] || stepType;
+            
+            step.innerHTML = `
+                <div class="thinking-step-header" onclick="toggleStep(this.parentElement)">
+                    <div class="thinking-step-icon">${icon}</div>
+                    <div class="thinking-step-title">${title}</div>
+                    <div class="thinking-step-toggle">▼</div>
+                </div>
+                <div class="thinking-step-content">${escapeHtml(content)}</div>
+            `;
+            
+            stepsContainer.appendChild(step);
+            chatArea.scrollTop = chatArea.scrollHeight;
+            
+            return step;
+        }
+
+        function toggleStep(stepElement) {
+            stepElement.classList.toggle('collapsed');
+        }
+
+        function removeTypingIndicator(msgElement) {
+            const indicator = msgElement.querySelector('[id^="typing-indicator-"]');
+            if (indicator) indicator.remove();
+        }
+
+        function addAnswerContent(msgElement, answer) {
+            const content = msgElement.querySelector('.content');
+            
+            const divider = document.createElement('div');
+            divider.className = 'answer-divider';
+            
+            const answerDiv = document.createElement('div');
+            answerDiv.className = 'final-answer';
+            answerDiv.style.marginTop = '12px';
+            answerDiv.innerHTML = typeof answer === 'string' ? answer.replace(/\n/g, '<br>') : `<pre>${escapeHtml(JSON.stringify(answer, null, 2))}</pre>`;
+            
+            content.appendChild(divider);
+            content.appendChild(answerDiv);
+            chatArea.scrollTop = chatArea.scrollHeight;
+        }
+
+        async function sendMessageStream() {
+            const query = queryInput.value.trim();
+            if (!query) return;
+
+            if (isStreaming) return;
+
+            isStreaming = true;
+            updateStatus('思考中...', true);
+            sendBtn.disabled = true;
+            addMessage('user', query, new Date().toLocaleTimeString());
+            queryInput.value = '';
+
+            const msgElement = createStreamingMessage();
+            const context = parseHeroesFromQuery(query);
+
+            try {
+                const response = await fetch('/api/chat/stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        query: query,
+                        session_id: sessionId,
+                        context: context
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || '';
+
+                    for (const line of lines) {
+                        if (line.startsWith('event:')) {
+                            const eventType = line.slice(6).trim();
+                        } else if (line.startsWith('data:')) {
+                            const dataStr = line.slice(5).trim();
+                            try {
+                                const data = JSON.parse(dataStr);
+                                handleStreamEvent(msgElement, data);
+                            } catch (e) {
+                                console.error('Failed to parse SSE data:', e);
+                            }
+                        }
+                    }
+                }
+
+            } catch (error) {
+                console.error('Stream error:', error);
+                removeTypingIndicator(msgElement);
+                addAnswerContent(msgElement, `❌ 错误: ${error.message}`);
+            } finally {
+                isStreaming = false;
+                updateStatus('就绪');
+                sendBtn.disabled = false;
+                queryInput.focus();
+            }
+        }
+
+        function handleStreamEvent(msgElement, data) {
+            const eventType = data.step || 'unknown';
+            
+            switch (eventType) {
+                case 'think':
+                    addThinkingStep(msgElement, 'think', data.content || '分析用户查询...');
+                    break;
+                    
+                case 'plan':
+                    addThinkingStep(msgElement, 'plan', 
+                        Array.isArray(data.actions) ? 
+                        data.actions.map(a => `• ${a.tool || a.purpose}`).join('\n') : 
+                        '制定执行计划...');
+                    break;
+                    
+                case 'action':
+                    const toolName = data.tool || data.tool_name || '未知工具';
+                    const status = data.status || '执行中';
+                    addThinkingStep(msgElement, 'action', 
+                        `工具: ${toolName}\n状态: ${status}`);
+                    break;
+                    
+                case 'observation':
+                    const result = data.result;
+                    addThinkingStep(msgElement, 'observation', 
+                        typeof result === 'string' ? result : String(result));
+                    break;
+                    
+                case 'reflect':
+                    addThinkingStep(msgElement, 'reflect', data.content || '反思中...');
+                    break;
+                    
+                case 'synthesize':
+                    removeTypingIndicator(msgElement);
+                    const answer = data.answer || data.content;
+                    if (answer) {
+                        addAnswerContent(msgElement, 
+                            typeof answer === 'string' ? answer : JSON.stringify(answer, null, 2));
+                    }
+                    break;
+                    
+                case 'complete':
+                    removeTypingIndicator(msgElement);
+                    const totalTime = data.total_time || 0;
+                    const turns = data.turns || 0;
+                    updateStatus(`完成 (耗时: ${totalTime}s, 轮次: ${turns})`);
+                    break;
+                    
+                case 'error':
+                    removeTypingIndicator(msgElement);
+                    addAnswerContent(msgElement, `❌ 错误: ${data.error || '未知错误'}`);
+                    break;
+            }
+        }
+
         async function sendMessage() {
             const query = queryInput.value.trim();
             if (!query) return;
@@ -863,8 +1208,13 @@
 
         queryInput.addEventListener('keypress', function(e) {
             if (e.key === 'Enter') {
-                sendMessage();
+                sendMessageStream();
             }
+        });
+
+        sendBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            sendMessageStream();
         });
 
         // === 日志功能 ===

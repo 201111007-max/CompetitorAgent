@@ -40,3 +40,20 @@ dmypy.json
 *.swp
 *.swo
 *~
+
+# Logs
+*.log
+logs/
+*.json.log
+
+# Cache databases
+*.db
+!*.sqlite3
+
+# Test memory
+test_memory/
+test_prefix/
+
+# OS files
+.DS_Store
+Thumbs.db

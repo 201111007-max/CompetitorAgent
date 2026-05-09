@@ -17,6 +17,7 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
 from core.tool_registry import ToolRegistry
+from core.llm_tool_selector import LLMToolSelector
 from memory.memory import AgentMemory
 from tools.base import ToolResult, ToolStatus
 
@@ -132,6 +133,7 @@ class AgentController:
     def __init__(
         self,
         tool_registry: ToolRegistry,
+        llm_client,
         memory: Optional[AgentMemory] = None,
         max_turns: int = 5,
         enable_reflection: bool = True,
@@ -141,17 +143,23 @@ class AgentController:
 
         Args:
             tool_registry: 工具注册表
+            llm_client: LLM 客户端（用于智能工具选择）
             memory: 记忆系统（可选）
             max_turns: 最大循环轮数
             enable_reflection: 是否启用反思
             enable_memory: 是否启用记忆系统
         """
         self.tool_registry = tool_registry
+        self.llm_client = llm_client
         self.memory = memory
         self.max_turns = max_turns
         self.enable_reflection = enable_reflection
         self.enable_memory = enable_memory and memory is not None
         self.current_thought: Optional[AgentThought] = None
+        
+        # 初始化 LLM 工具选择器
+        self.tool_selector = LLMToolSelector(llm_client, tool_registry)
+        print(f"[AGENT_CONTROLLER] LLM 工具选择器已初始化")
 
     def solve(self, query: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """执行完整的 ReAct 循环解决问题
@@ -243,17 +251,31 @@ class AgentController:
     def _think(self, thought: AgentThought) -> None:
         """Think 步骤 - 理解问题和意图
 
-        分析用户查询，确定查询类型和所需信息
+        使用 LLM 智能分析用户查询，选择合适的工具并提取参数
         """
         thought.state = AgentState.THINKING
-        query = thought.query.lower()
 
         # 理解查询意图
         thought.add_reasoning(f"分析用户查询：{thought.query}")
 
-        # 检测查询类型
-        query_type = self._detect_query_type(query)
-        thought.add_reasoning(f"查询类型：{query_type}")
+        # 使用 LLM 智能选择工具
+        try:
+            print(f"[AGENT_CONTROLLER._think] 调用 LLM 工具选择器...")
+            tool_plan = self.tool_selector.select_tools(
+                query=thought.query,
+                context=thought.context
+            )
+            thought.context['tool_plan'] = tool_plan
+            thought.add_reasoning(f"LLM 选择工具：{[t.tool_name for t in tool_plan.tools]}")
+            thought.add_reasoning(f"选择理由：{tool_plan.reasoning}")
+            print(f"[AGENT_CONTROLLER._think] LLM 工具选择完成")
+            print(f"[AGENT_CONTROLLER._think] 选择工具: {[t.tool_name for t in tool_plan.tools]}")
+            print(f"[AGENT_CONTROLLER._think] 选择理由: {tool_plan.reasoning}")
+        except Exception as e:
+            error_msg = f"LLM 工具选择失败：{str(e)}"
+            print(f"[AGENT_CONTROLLER._think] {error_msg}")
+            thought.set_failed(error_msg)
+            return
 
         # 从记忆中检索相关上下文（如果启用）
         if self.enable_memory:
@@ -262,61 +284,56 @@ class AgentController:
                 thought.add_reasoning(f"从记忆中检索到 {len(relevant_context)} 条相关上下文")
                 thought.context['memory_context'] = relevant_context
 
-        # 检查是否有足够的信息继续
-        if not query_type or query_type == 'unknown':
-            thought.add_reasoning("无法识别查询类型，需要更多信息")
-
     def _plan(self, thought: AgentThought) -> None:
         """Plan 步骤 - 制定行动计划
 
-        根据查询类型和可用工具，制定执行计划
+        使用 LLM 生成的工具计划，制定执行方案
         """
         thought.state = AgentState.PLANNING
 
-        query = thought.query.lower()
-        query_type = self._detect_query_type(query)
-        
-        print(f"[AGENT_CONTROLLER._plan] Query Type: {query_type}")
+        # 获取 LLM 生成的工具计划
+        tool_plan = thought.context.get('tool_plan')
+        if not tool_plan:
+            error_msg = "工具计划缺失，无法制定执行计划"
+            print(f"[AGENT_CONTROLLER._plan] {error_msg}")
+            thought.set_failed(error_msg)
+            return
 
-        # 根据查询类型选择工具
-        available_tools = self._select_tools_for_query(query_type, thought.context)
-        
-        print(f"[AGENT_CONTROLLER._plan] Available Tools: {available_tools}")
-        print(f"[AGENT_CONTROLLER._plan] Context: {thought.context}")
+        # 设置计划执行的工具
+        planned_tools = [t.tool_name for t in tool_plan.tools]
+        thought.context['planned_tools'] = planned_tools
 
-        if not available_tools:
-            thought.add_reasoning("没有找到合适的工具，尝试使用通用方法")
-            print(f"[AGENT_CONTROLLER._plan] No tools found, using fallback")
-            available_tools = self.tool_registry.list_tools()
+        # 保存每个工具对应的参数
+        thought.context['tool_params'] = {
+            t.tool_name: t.parameters for t in tool_plan.tools
+        }
 
-        thought.add_reasoning(f"计划使用工具：{available_tools}")
-        print(f"[AGENT_CONTROLLER._plan] Final planned tools: {available_tools}")
-
-        # 制定行动顺序
-        thought.context['planned_tools'] = available_tools
-        thought.context['query_type'] = query_type
+        thought.add_reasoning(f"计划执行工具：{planned_tools}")
+        print(f"[AGENT_CONTROLLER._plan] 计划执行工具: {planned_tools}")
+        print(f"[AGENT_CONTROLLER._plan] 工具参数:")
+        for tool_name, params in thought.context['tool_params'].items():
+            print(f"[AGENT_CONTROLLER._plan]   {tool_name}: {params}")
 
     def _execute(self, thought: AgentThought) -> None:
         """Execute 步骤 - 执行工具调用
 
-        根据计划调用相应的工具
+        使用 LLM 提取的参数执行工具调用
         """
         thought.state = AgentState.ACTING
 
         planned_tools = thought.context.get('planned_tools', [])
-        query_type = thought.context.get('query_type', 'unknown')
+        tool_params = thought.context.get('tool_params', {})
 
-        # 准备工具调用参数
-        params = self._prepare_tool_parameters(thought.query, query_type, thought.context)
-
-        print(f"[AGENT_CONTROLLER._execute] Planned Tools: {planned_tools}")
-        print(f"[AGENT_CONTROLLER._execute] Query Type: {query_type}")
-        print(f"[AGENT_CONTROLLER._execute] Tool Parameters: {params}")
-        print(f"[AGENT_CONTROLLER._execute] our_heroes: {params.get('our_heroes', [])}")
-        print(f"[AGENT_CONTROLLER._execute] enemy_heroes: {params.get('enemy_heroes', [])}")
+        print(f"[AGENT_CONTROLLER._execute] 计划执行工具: {planned_tools}")
+        print(f"[AGENT_CONTROLLER._execute] 工具参数:")
+        for tool_name, params in tool_params.items():
+            print(f"[AGENT_CONTROLLER._execute]   {tool_name}: {params}")
 
         # 执行工具调用
         for tool_name in planned_tools:
+            # 使用 LLM 提取的参数
+            params = tool_params.get(tool_name, {})
+
             tool = self.tool_registry.get(tool_name)
             if tool:
                 try:
@@ -352,7 +369,7 @@ class AgentController:
 
         # 如果没有工具执行成功，标记为失败
         if not thought.observations:
-            thought.add_reasoning("所有工具执行失败，尝试降级方案")
+            thought.add_reasoning("所有工具执行失败")
             print(f"[AGENT_CONTROLLER._execute] 所有工具执行失败，无观察结果")
 
     def _observe(self, thought: AgentThought) -> None:
@@ -447,65 +464,6 @@ class AgentController:
             self._save_to_memory(thought)
 
         return response
-
-    def _detect_query_type(self, query: str) -> str:
-        """检测查询类型"""
-        if any(kw in query for kw in ['克制', 'counter', '推荐', '选什么英雄', '什么英雄']):
-            return 'hero_recommendation'
-        elif any(kw in query for kw in ['出装', '装备', 'item', 'build']):
-            return 'item_recommendation'
-        elif any(kw in query for kw in ['技能', '加点', 'skill', 'ability']):
-            return 'skill_recommendation'
-        elif any(kw in query for kw in ['阵容', 'composition', 'balance']):
-            return 'composition_analysis'
-        elif any(kw in query for kw in ['版本', 'meta', '强势']):
-            return 'meta_analysis'
-        else:
-            return 'unknown'
-
-    def _select_tools_for_query(self, query_type: str, context: Dict) -> List[str]:
-        """根据查询类型选择工具"""
-        tool_mapping = {
-            'hero_recommendation': ['analyze_counter_picks', 'analyze_composition'],
-            'item_recommendation': ['recommend_items'],
-            'skill_recommendation': ['recommend_skills'],
-            'composition_analysis': ['analyze_composition'],
-            'meta_analysis': ['get_meta_heroes']
-        }
-
-        tools = tool_mapping.get(query_type, [])
-        # 过滤出实际可用的工具
-        available_tools = []
-        for tool_name in tools:
-            if self.tool_registry.get(tool_name):
-                available_tools.append(tool_name)
-
-        return available_tools
-
-    def _prepare_tool_parameters(self, query: str, query_type: str, context: Dict) -> Dict[str, Any]:
-        """准备工具调用参数"""
-        params = {}
-
-        # 根据查询类型准备不同的参数
-        if query_type == 'hero_recommendation':
-            # 英雄推荐工具需要 top_n
-            params['top_n'] = context.get('top_n', 3)
-        elif query_type == 'meta_analysis':
-            # 版本分析工具需要 limit
-            params['limit'] = context.get('limit', 10)
-        # composition_analysis 不需要额外参数
-
-        # 从上下文或 query 中提取英雄信息
-        if 'our_heroes' in context:
-            params['our_heroes'] = context['our_heroes']
-            print(f"[AGENT_CONTROLLER._prepare_tool_parameters] 从 context 提取 our_heroes: {context['our_heroes']}")
-        if 'enemy_heroes' in context:
-            params['enemy_heroes'] = context['enemy_heroes']
-            print(f"[AGENT_CONTROLLER._prepare_tool_parameters] 从 context 提取 enemy_heroes: {context['enemy_heroes']}")
-        
-        print(f"[AGENT_CONTROLLER._prepare_tool_parameters] 最终参数: {params}")
-
-        return params
 
     def _has_sufficient_data(self, thought: AgentThought) -> bool:
         """检查是否已收集足够数据"""

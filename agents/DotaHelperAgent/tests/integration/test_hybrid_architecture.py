@@ -1,15 +1,12 @@
-"""测试混合模式架构"""
+"""测试混合模式架构 - 集成测试
 
-import sys
-import os
+测试混合模式（LLM + 数据驱动）的分析器功能
+"""
 
-# 添加项目路径
-sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
-
-from agents.DotaHelperAgent.utils.api_client import OpenDotaClient
-from agents.DotaHelperAgent.analyzers.item_recommender import HybridItemRecommender
-from agents.DotaHelperAgent.analyzers.skill_builder import HybridSkillBuilder
-from agents.DotaHelperAgent.analyzers.hero_analyzer import HeroAnalyzer
+from utils.api_client import OpenDotaClient
+from analyzers.item_recommender import HybridItemRecommender
+from analyzers.skill_builder import HybridSkillBuilder
+from analyzers.hero_analyzer import HeroAnalyzer
 
 
 def test_item_recommender():

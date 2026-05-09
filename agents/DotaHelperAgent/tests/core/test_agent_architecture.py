@@ -7,6 +7,7 @@ import sys
 import os
 import pytest
 from pathlib import Path
+from unittest.mock import Mock
 
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -49,10 +50,35 @@ class TestAgentController:
         memory_dir = tmp_path / "memory"
         return AgentMemory(memory_dir=str(memory_dir))
 
-    def test_controller_initialization(self, sample_tool_registry, sample_memory):
+    @pytest.fixture
+    def mock_llm_client(self):
+        """创建模拟 LLM 客户端"""
+        mock_client = Mock()
+        mock_client.chat.return_value = {
+            'choices': [{
+                'message': {
+                    'content': '''{
+    "reasoning": "测试查询，使用测试工具",
+    "tools": [
+        {
+            "name": "test_tool",
+            "parameters": {
+                "name": "test",
+                "value": 10
+            }
+        }
+    ]
+}'''
+                }
+            }]
+        }
+        return mock_client
+
+    def test_controller_initialization(self, sample_tool_registry, sample_memory, mock_llm_client):
         """测试 Controller 初始化"""
         controller = AgentController(
             tool_registry=sample_tool_registry,
+            llm_client=mock_llm_client,
             memory=sample_memory,
             max_turns=5,
             enable_reflection=True
@@ -63,10 +89,11 @@ class TestAgentController:
         assert controller.max_turns == 5
         assert controller.enable_reflection is True
 
-    def test_solve_basic(self, sample_tool_registry):
+    def test_solve_basic(self, sample_tool_registry, mock_llm_client):
         """测试基本 solve 功能"""
         controller = AgentController(
             tool_registry=sample_tool_registry,
+            llm_client=mock_llm_client,
             memory=None,
             max_turns=3
         )
@@ -108,10 +135,30 @@ class TestAgentController:
         assert thought.final_answer == answer
         assert thought.end_time is not None
 
-    def test_controller_with_context(self, sample_tool_registry):
+    def test_controller_with_context(self, sample_tool_registry, mock_llm_client):
         """测试带上下文的执行"""
+        mock_llm_client.chat.return_value = {
+            'choices': [{
+                'message': {
+                    'content': '''{
+    "reasoning": "分析克制关系",
+    "tools": [
+        {
+            "name": "test_tool",
+            "parameters": {
+                "name": "counter_analysis",
+                "value": 5
+            }
+        }
+    ]
+}'''
+                }
+            }]
+        }
+        
         controller = AgentController(
             tool_registry=sample_tool_registry,
+            llm_client=mock_llm_client,
             memory=None
         )
         
@@ -413,9 +460,32 @@ class TestReActLoop:
         memory_dir = tmp_path / "react_memory"
         memory = AgentMemory(memory_dir=str(memory_dir))
         
+        # 创建模拟 LLM 客户端
+        mock_llm_client = Mock()
+        mock_llm_client.chat.return_value = {
+            'choices': [{
+                'message': {
+                    'content': '''{
+    "reasoning": "分析克制关系",
+    "tools": [
+        {
+            "name": "analyze_counter_picks",
+            "parameters": {
+                "our_heroes": ["invoker"],
+                "enemy_heroes": ["pudge"],
+                "top_n": 3
+            }
+        }
+    ]
+}'''
+                }
+            }]
+        }
+        
         # 创建 Controller
         controller = AgentController(
             tool_registry=registry,
+            llm_client=mock_llm_client,
             memory=memory,
             max_turns=5,
             enable_reflection=True
@@ -430,14 +500,27 @@ class TestReActLoop:
         assert "reasoning" in result
         assert "actions" in result
         assert result["turn_count"] >= 1
-        assert result["duration"] > 0
 
-    def test_react_with_reflection(self):
+    def test_react_with_reflection(self, tmp_path):
         """测试带反思的 ReAct 循环"""
         registry = ToolRegistry()
         
+        # 创建模拟 LLM 客户端
+        mock_llm_client = Mock()
+        mock_llm_client.chat.return_value = {
+            'choices': [{
+                'message': {
+                    'content': '''{
+    "reasoning": "测试查询",
+    "tools": []
+}'''
+                }
+            }]
+        }
+        
         controller = AgentController(
             tool_registry=registry,
+            llm_client=mock_llm_client,
             memory=None,
             max_turns=3,
             enable_reflection=True

@@ -316,9 +316,16 @@ def initialize_agent_controller():
         registry.register_batch(tools)
         print(f"[OK] 已注册 {len(registry)} 个 Agent Tools")
         
+        # 获取 LLM 客户端
+        llm_client = get_llm_client()
+        if llm_client is None:
+            print("[ERROR] LLM 客户端未初始化，无法使用智能工具选择")
+            raise Exception("LLM 客户端未初始化")
+        
         # 创建 Agent Controller
         agent_controller = AgentController(
             tool_registry=registry,
+            llm_client=llm_client,
             memory=agent.memory,
             max_turns=5,
             enable_reflection=True,
@@ -597,6 +604,187 @@ def chat():
     return jsonify(result)
 
 
+def _format_answer_for_stream(answer_data) -> str:
+    """格式化 Agent 答案为简洁文本（用于流式输出）
+    
+    去除所有JSON结构、形参、工具调用细节等，只保留用户关心的文字内容
+    """
+    if isinstance(answer_data, str):
+        return answer_data
+    
+    # 处理列表数据（直接是英雄推荐列表）
+    if isinstance(answer_data, list) and len(answer_data) > 0:
+        formatted = []
+        formatted.append("🎯 推荐结果：")
+        for i, rec in enumerate(answer_data[:5], 1):
+            if isinstance(rec, dict):
+                hero_id = rec.get("hero_id")
+                hero_en = rec.get("hero_name", rec.get("hero", "Unknown"))
+                
+                # 尝试获取中文名称
+                hero_cn = None
+                if hero_id:
+                    hero_cn = localizer.get_hero_name_cn(hero_id)
+                if not hero_cn:
+                    hero_cn = _get_hero_cn_by_name(hero_en)
+                
+                hero_display = hero_cn if hero_cn else hero_en
+                
+                score = rec.get("score", 0)
+                reasons = rec.get("reasons", rec.get("reason", []))
+                reason_text = "; ".join(reasons[:2]) if isinstance(reasons, list) else str(reasons)
+                formatted.append(f"{i}. {hero_display} (指数：{score:.2f}) - {reason_text}")
+        return "\n".join(formatted)
+    
+    if not isinstance(answer_data, dict):
+        return str(answer_data)
+    
+    # 检查是否有嵌套的 answer 字段
+    if "answer" in answer_data and isinstance(answer_data["answer"], dict):
+        actual_answer = answer_data["answer"]
+    else:
+        actual_answer = answer_data
+    
+    # 处理英雄推荐
+    if "recommendations" in actual_answer:
+        recs = actual_answer["recommendations"]
+        if isinstance(recs, list) and len(recs) > 0:
+            formatted = []
+            formatted.append("🎯 推荐结果：")
+            for i, rec in enumerate(recs[:5], 1):
+                if isinstance(rec, dict):
+                    hero_id = rec.get("hero_id")
+                    hero_en = rec.get("hero_name", rec.get("hero", "Unknown"))
+                    
+                    # 尝试获取中文名称
+                    hero_cn = None
+                    if hero_id:
+                        hero_cn = localizer.get_hero_name_cn(hero_id)
+                    if not hero_cn:
+                        hero_cn = _get_hero_cn_by_name(hero_en)
+                    
+                    hero_display = hero_cn if hero_cn else hero_en
+                    
+                    score = rec.get("score", 0)
+                    reasons = rec.get("reasons", rec.get("reason", []))
+                    reason_text = "; ".join(reasons[:2]) if isinstance(reasons, list) else str(reasons)
+                    formatted.append(f"{i}. {hero_display} (指数：{score:.2f}) - {reason_text}")
+            return "\n".join(formatted)
+    
+    # 处理出装推荐
+    if "items" in actual_answer:
+        items = actual_answer["items"]
+        if isinstance(items, dict):
+            formatted = ["🎒 出装推荐："]
+            for stage, item_list in items.items():
+                formatted.append(f"\n【{stage}】")
+                if isinstance(item_list, list):
+                    for item in item_list[:5]:
+                        formatted.append(f"• {item}")
+            return "\n".join(formatted)
+    
+    # 处理技能加点
+    if "skills" in actual_answer:
+        skills = actual_answer["skills"]
+        if isinstance(skills, dict):
+            formatted = ["📚 技能加点推荐："]
+            if "order" in skills:
+                formatted.append(f"加点顺序：{skills['order']}")
+            if "primary" in skills:
+                formatted.append(f"主加：{skills['primary']}")
+            return "\n".join(formatted)
+    
+    # 处理纯文本答案
+    if "answer" in actual_answer and isinstance(actual_answer["answer"], str):
+        return actual_answer["answer"]
+    
+    # 兜底：尝试提取关键信息
+    if "content" in actual_answer:
+        return str(actual_answer["content"])
+    
+    # 最后的兜底
+    return str(actual_answer)
+
+
+def _format_observation(result, tool_name: str) -> str:
+    """格式化工具执行结果为简洁文本（用于流式展示）
+    
+    去除所有JSON结构、技术参数等，只保留用户能看懂的信息
+    """
+    if result is None:
+        return "无结果"
+    
+    # 获取工具返回的数据
+    data = result.data if hasattr(result, 'data') else result
+    
+    if data is None:
+        return "无结果"
+    
+    # 根据工具类型格式化
+    if tool_name == 'analyze_counter_picks':
+        if isinstance(data, list) and len(data) > 0:
+            formatted = []
+            for i, rec in enumerate(data[:5], 1):
+                if isinstance(rec, dict):
+                    hero_name = rec.get("hero_name", "未知")
+                    # 尝试获取中文名
+                    hero_id = rec.get("hero_id")
+                    if hero_id:
+                        hero_cn = localizer.get_hero_name_cn(hero_id)
+                        if hero_cn:
+                            hero_name = hero_cn
+                    
+                    reasons = rec.get("reasons", [])
+                    reason_text = "; ".join(reasons[:2]) if reasons else "强力推荐"
+                    formatted.append(f"{i}. {hero_name} - {reason_text}")
+            return "推荐英雄：\n" + "\n".join(formatted)
+        return "暂无推荐"
+    
+    elif tool_name == 'recommend_items':
+        if isinstance(data, dict):
+            formatted = []
+            for stage, items in data.items():
+                formatted.append(f"【{stage}】")
+                if isinstance(items, list):
+                    for item in items[:5]:
+                        formatted.append(f"• {item}")
+            return "\n".join(formatted)
+        return "暂无出装推荐"
+    
+    elif tool_name == 'recommend_skills':
+        if isinstance(data, dict):
+            formatted = []
+            if "primary" in data:
+                formatted.append(f"主加：{data['primary']}")
+            if "order" in data:
+                formatted.append(f"顺序：{data['order']}")
+            return "\n".join(formatted) if formatted else "暂无技能推荐"
+        return "暂无技能推荐"
+    
+    elif tool_name == 'get_hero_info':
+        if isinstance(data, dict):
+            return f"英雄：{data.get('name', '未知')}\n定位：{data.get('roles', '未知')}"
+        return "暂无英雄信息"
+    
+    # 兜底：如果是列表或字典，提取关键信息
+    if isinstance(data, list):
+        if len(data) == 0:
+            return "无结果"
+        # 如果是简单列表，直接显示
+        if all(isinstance(item, (str, int, float)) for item in data):
+            return ", ".join(str(item) for item in data[:10])
+        return f"包含 {len(data)} 项结果"
+    
+    if isinstance(data, dict):
+        # 尝试提取关键信息
+        for key in ['name', 'hero_name', 'title', 'result']:
+            if key in data:
+                return str(data[key])
+        return f"包含 {len(data)} 个字段"
+    
+    return str(data)
+
+
 def _format_answer(answer_data: dict) -> str:
     """格式化 Agent 答案为文本"""
     formatted = []
@@ -865,37 +1053,146 @@ def chat_stream():
             return
 
         try:
-            # 使用 Agent Controller 执行
-            controller_result = agent_controller.solve(query, context)
-            
-            # 流式输出思考过程
-            for reasoning in controller_result.get('reasoning', []):
-                yield f"event: think\ndata: {json.dumps({'step': 'think', 'content': reasoning})}\n\n"
-            
-            # 流式输出行动
-            for action in controller_result.get('actions', []):
-                yield f"event: action\ndata: {json.dumps({'step': 'action', 'tool': action.get('tool_name')})}\n\n"
-            
-            # 流式输出反思
-            for reflection in controller_result.get('reflections', []):
-                yield f"event: reflect\ndata: {json.dumps({'step': 'reflect', 'content': reflection})}\n\n"
-            
-            # 输出最终答案
-            if controller_result.get('success'):
-                answer = controller_result.get('answer', {})
-                yield f"event: synthesize\ndata: {json.dumps({'step': 'synthesize', 'answer': answer})}\n\n"
-            else:
-                error = controller_result.get('error', '处理失败')
-                yield f"event: error\ndata: {json.dumps({'error': error})}\n\n"
-
-            total_time = time.time() - start_time
-            yield f"event: complete\ndata: {json.dumps({'timestamp': int(time.time()), 'total_time': round(total_time, 2), 'turns': controller_result.get('turn_count', 0)})}\n\n"
+            # 使用流式执行
+            yield from _execute_streaming(agent_controller, query, context, start_time)
 
         except Exception as e:
             yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
             yield f"event: complete\ndata: {json.dumps({'timestamp': int(time.time()), 'total_time': time.time() - start_time})}\n\n"
 
-    return Response(generate(), mimetype='text/event-stream')
+    return Response(generate(), mimetype='text/event-stream', headers={
+        'Cache-Control': 'no-cache',
+        'X-Accel-Buffering': 'no'
+    })
+
+
+def _execute_streaming(controller, query: str, context: dict, start_time: float):
+    """真正的流式执行 ReAct 循环"""
+    from core.agent_controller import AgentThought, AgentState
+    
+    thought = AgentThought(query=query, context=context or {})
+    controller.current_thought = thought
+
+    try:
+        for turn in range(controller.max_turns):
+            thought.increment_turn()
+
+            # 1. Think - 理解问题
+            thought.state = AgentState.THINKING
+            thought.add_reasoning(f"分析用户查询：{thought.query}")
+            yield f"event: think\ndata: {json.dumps({'step': 'think', 'content': f'分析用户查询：{thought.query}'})}\n\n"
+            
+            if thought.state == AgentState.FAILED:
+                break
+
+            # 使用 LLM 智能选择工具
+            try:
+                tool_plan = controller.tool_selector.select_tools(
+                    query=thought.query,
+                    context=thought.context
+                )
+                thought.context['tool_plan'] = tool_plan
+                thought.add_reasoning(f"LLM 选择工具：{[t.tool_name for t in tool_plan.tools]}")
+                thought.add_reasoning(f"选择理由：{tool_plan.reasoning}")
+                
+                yield f"event: think\ndata: {json.dumps({'step': 'think', 'content': f'选择工具: {", ".join([t.tool_name for t in tool_plan.tools])}\n理由: {tool_plan.reasoning}'})}\n\n"
+            except Exception as e:
+                error_msg = f"LLM 工具选择失败：{str(e)}"
+                thought.set_failed(error_msg)
+                yield f"event: error\ndata: {json.dumps({'error': error_msg})}\n\n"
+                break
+
+            # 2. Plan - 制定计划
+            thought.state = AgentState.PLANNING
+            tool_plan = thought.context.get('tool_plan')
+            if not tool_plan:
+                thought.set_failed("工具计划缺失")
+                break
+
+            planned_tools = [t.tool_name for t in tool_plan.tools]
+            thought.context['planned_tools'] = planned_tools
+            thought.context['tool_params'] = {t.tool_name: t.parameters for t in tool_plan.tools}
+            
+            thought.add_reasoning(f"计划执行工具：{planned_tools}")
+            yield f"event: plan\ndata: {json.dumps({'step': 'plan', 'actions': [{'tool': t} for t in planned_tools]})}\n\n"
+
+            # 3. Execute - 执行行动
+            thought.state = AgentState.ACTING
+            
+            for tool_name in planned_tools:
+                tool = controller.tool_registry.get(tool_name)
+                if not tool:
+                    thought.add_reasoning(f"工具 {tool_name} 不存在")
+                    continue
+
+                params = thought.context.get('tool_params', {}).get(tool_name, {})
+                thought.add_reasoning(f"执行工具：{tool_name}")
+                yield f"event: action\ndata: {json.dumps({'step': 'action', 'tool': tool_name, 'status': '执行中'})}\n\n"
+
+                try:
+                    result = tool.execute(**params)
+                    thought.add_action(tool_name, params, result)
+                    
+                    # 格式化观察结果，去除冗余信息
+                    formatted_obs = _format_observation(result, tool_name)
+                    yield f"event: observation\ndata: {json.dumps({'step': 'observation', 'tool': tool_name, 'result': formatted_obs})}\n\n"
+                except Exception as e:
+                    error_msg = f"工具执行失败：{str(e)}"
+                    thought.add_reasoning(error_msg)
+                    yield f"event: error\ndata: {json.dumps({'error': error_msg})}\n\n"
+
+            # 4. Observe - 观察结果
+            thought.state = AgentState.OBSERVING
+            thought.add_reasoning(f"收集到 {len(thought.actions_taken)} 条观察结果")
+
+            # 5. Reflect - 反思
+            if controller.enable_reflection:
+                thought.state = AgentState.REFLECTING
+                has_result = len(thought.actions_taken) > 0 and any(a.get('result') for a in thought.actions_taken)
+                
+                if has_result:
+                    thought.add_reasoning("已收集到足够的信息，准备生成答案")
+                    # 提取ToolResult中的data字段，而不是整个对象
+                    last_result = thought.actions_taken[-1].get('result')
+                    result_data = last_result.data if hasattr(last_result, 'data') else last_result
+                    thought.set_complete(result_data)
+                else:
+                    thought.add_reasoning("信息不足，需要继续收集")
+
+                if thought.reflections:
+                    yield f"event: reflect\ndata: {json.dumps({'step': 'reflect', 'content': thought.reflections[-1]})}\n\n"
+
+            # 检查是否完成
+            if thought.state == AgentState.COMPLETE:
+                break
+
+            if controller._should_finalize(thought):
+                controller._finalize(thought)
+                break
+
+        # 强制结束
+        if thought.state not in [AgentState.COMPLETE, AgentState.FAILED]:
+            controller._finalize(thought)
+
+        # 输出最终答案
+        if thought.state == AgentState.COMPLETE:
+            answer = thought.final_answer or {}
+            formatted_answer = _format_answer_for_stream(answer)
+            yield f"event: synthesize\ndata: {json.dumps({'step': 'synthesize', 'answer': formatted_answer})}\n\n"
+        else:
+            error = thought.error or '处理失败'
+            yield f"event: error\ndata: {json.dumps({'error': error})}\n\n"
+
+        total_time = time.time() - start_time
+        yield f"event: complete\ndata: {json.dumps({'timestamp': int(time.time()), 'total_time': round(total_time, 2), 'turns': thought.turn_count})}\n\n"
+
+    except Exception as e:
+        import traceback
+        print(f"[STREAM] 异常: {str(e)}")
+        print(f"[STREAM] Traceback: {traceback.format_exc()}")
+        thought.set_failed(str(e))
+        yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+        yield f"event: complete\ndata: {json.dumps({'timestamp': int(time.time()), 'total_time': time.time() - start_time})}\n\n"
 
 
 def _generate_stream_legacy(query, context, start_time):
