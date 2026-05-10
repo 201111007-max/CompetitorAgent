@@ -11,9 +11,11 @@ import time
 try:
     from ..cache.cache_manager import CacheManager
     from ..core.config import AgentConfig, RateLimitConfig, CacheConfig
+    from ..utils.localization import DotaLocalizer
 except ImportError:
     from cache.cache_manager import CacheManager
     from core.config import AgentConfig, RateLimitConfig, CacheConfig
+    from utils.localization import DotaLocalizer
 
 
 class OpenDotaClient:
@@ -77,6 +79,9 @@ class OpenDotaClient:
 
         # 英雄列表内存缓存（常用数据）
         self._heroes_cache: Optional[List[Dict]] = None
+        
+        # 本地化工具实例
+        self._localizer = DotaLocalizer()
 
     def _make_request(self, endpoint: str, params: Optional[Dict] = None) -> Any:
         """发送 API 请求（带速率限制）"""
@@ -112,7 +117,27 @@ class OpenDotaClient:
         if cached:
             self._heroes_cache = cached
             return cached
-
+        
+        # 尝试从本地 JSON 文件加载（作为备用数据源）
+        try:
+            import json
+            from pathlib import Path
+            heroes_file = Path(__file__).parent.parent / "cache" / "heroes_list.json"
+            if heroes_file.exists():
+                with open(heroes_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    if isinstance(data, dict) and '_data' in data:
+                        heroes = data['_data']
+                    else:
+                        heroes = data
+                    if heroes and len(heroes) > 10:
+                        self._heroes_cache = heroes
+                        if use_cache:
+                            self.cache.set(cache_key, heroes)
+                        return heroes
+        except Exception as e:
+            print(f"从本地文件加载英雄列表失败: {e}")
+        
         # API 请求
         heroes = self._make_request("/heroes")
         if heroes:
@@ -230,7 +255,7 @@ class OpenDotaClient:
         """将英雄名称转换为 ID
         
         Args:
-            hero_name: 英雄名称（支持 localized_name、内部名称、下划线格式等）
+            hero_name: 英雄名称（支持中文名、localized_name、内部名称、下划线格式等）
             
         Returns:
             英雄 ID，未找到返回 None
@@ -238,30 +263,36 @@ class OpenDotaClient:
         heroes = self.get_heroes()
         hero_name_lower = hero_name.lower().strip()
         
+        # 1. 优先尝试中文名称匹配
+        for hero_id_str, name_data in self._localizer._heroes_cn.items():
+            if name_data.get('cn') == hero_name or name_data.get('cn').lower() == hero_name_lower:
+                hero_id = int(hero_id_str)
+                return hero_id
+        
         for hero in heroes:
-            # 1. 匹配 localized_name（显示名称，如 "Faceless Void"）
+            # 2. 匹配 localized_name（显示名称，如 "Faceless Void"）
             if hero.get("localized_name", "").lower() == hero_name_lower:
                 return hero["id"]
             
-            # 2. 匹配内部名称（如 "npc_dota_hero_faceless_void"）
+            # 3. 匹配内部名称（如 "npc_dota_hero_faceless_void"）
             if hero.get("name", "").lower() == hero_name_lower:
                 return hero["id"]
             
-            # 3. 匹配去掉 "npc_dota_hero_" 前缀的名称（如 "faceless_void"）
+            # 4. 匹配去掉 "npc_dota_hero_" 前缀的名称（如 "faceless_void"）
             internal_name = hero.get("name", "").lower().replace("npc_dota_hero_", "")
             if internal_name == hero_name_lower:
                 return hero["id"]
             
-            # 4. 匹配空格替换为下划线的 localized_name（如 "faceless_void" 匹配 "Faceless Void"）
+            # 5. 匹配空格替换为下划线的 localized_name（如 "faceless_void" 匹配 "Faceless Void"）
             localized_lower = hero.get("localized_name", "").lower()
             if localized_lower.replace(" ", "_") == hero_name_lower:
                 return hero["id"]
             
-            # 5. 匹配去掉连字符的名称（如 "anti-mage" 匹配 "antimage"）
+            # 6. 匹配去掉连字符的名称（如 "anti-mage" 匹配 "antimage"）
             if hero_name_lower.replace("-", "").replace("_", "") == internal_name.replace("-", "").replace("_", ""):
                 return hero["id"]
             
-            # 6. 模糊匹配：检查 hero_name 是否是内部名称的一部分
+            # 7. 模糊匹配：检查 hero_name 是否是内部名称的一部分
             if hero_name_lower in internal_name or internal_name in hero_name_lower:
                 return hero["id"]
         

@@ -47,6 +47,10 @@ class LLMToolSelector:
 
 {context_info}
 
+## 对话历史
+
+{conversation_history}
+
 ## 用户查询
 
 {query}
@@ -55,7 +59,7 @@ class LLMToolSelector:
 
 请分析用户查询，完成以下任务：
 
-1. 理解用户的真实意图
+1. 理解用户的真实意图（考虑对话历史）
 2. 选择合适的工具（可以选多个，按执行顺序排列）
 3. 从查询和上下文中提取每个工具需要的参数
 
@@ -84,7 +88,8 @@ class LLMToolSelector:
 2. 参数值必须从用户查询和上下文中提取，不要编造
 3. 如果某个参数无法提取，可以设置为 null 或使用默认值
 4. 工具按顺序执行，请合理安排顺序
-5. 必须返回有效的 JSON，不要添加额外内容"""
+5. 必须返回有效的 JSON，不要添加额外内容
+6. 如果有对话历史，请考虑上下文连贯性"""
 
     def __init__(self, llm_client: LLMClient, tool_registry: ToolRegistry):
         """初始化 LLM 工具选择器
@@ -122,14 +127,19 @@ class LLMToolSelector:
         context_info = self._format_context(context)
         print(f"[LLMToolSelector] 上下文信息: {context_info}")
 
-        # 3. 构造 Prompt
+        # 3. 构造对话历史
+        conversation_history = self._format_conversation_history(context)
+        print(f"[LLMToolSelector] 对话历史: {'有' if conversation_history != '无对话历史' else '无'}")
+
+        # 4. 构造 Prompt
         prompt = self.TOOL_SELECTION_PROMPT.format(
             tools_description=tools_desc,
             context_info=context_info,
+            conversation_history=conversation_history,
             query=query
         )
 
-        # 4. 调用 LLM
+        # 5. 调用 LLM
         print(f"[LLMToolSelector] 调用 LLM 进行工具选择...")
         response = self.llm.chat(
             messages=[{"role": "user", "content": prompt}],
@@ -137,13 +147,13 @@ class LLMToolSelector:
             max_tokens=1024
         )
 
-        # 5. 检查 LLM 响应
+        # 6. 检查 LLM 响应
         if "error" in response:
             error_msg = response.get("error", "未知错误")
             print(f"[LLMToolSelector] LLM 返回错误: {error_msg}")
             raise Exception(f"LLM 工具选择失败：{error_msg}")
 
-        # 6. 解析 LLM 返回内容
+        # 7. 解析 LLM 返回内容
         try:
             content = response['choices'][0]['message']['content']
             print(f"[LLMToolSelector] LLM 原始响应:\n{content}")
@@ -151,7 +161,7 @@ class LLMToolSelector:
             print(f"[LLMToolSelector] LLM 响应格式异常: {e}")
             raise Exception(f"LLM 响应格式异常：{e}")
 
-        # 7. 解析 JSON
+        # 8. 解析 JSON
         plan = self._parse_plan(content)
         print(f"[LLMToolSelector] 解析后的工具计划:")
         print(f"[LLMToolSelector]   Reasoning: {plan.reasoning}")
@@ -159,7 +169,7 @@ class LLMToolSelector:
         for tool_call in plan.tools:
             print(f"[LLMToolSelector]   - {tool_call.tool_name}: {tool_call.parameters}")
 
-        # 8. 验证工具计划
+        # 9. 验证工具计划
         self._validate_plan(plan)
         print(f"[LLMToolSelector] 工具计划验证通过")
 
@@ -208,12 +218,34 @@ class LLMToolSelector:
         for key, value in context.items():
             if key == 'memory_context':
                 context_parts.append(f"历史对话记忆：{value}")
-            elif key in ['our_heroes', 'enemy_heroes']:
+            elif key == 'conversation_history':
+                continue
+            elif key in ['our_heroes', 'enemy_heroes', 'current_heroes', 'current_topic', 'inferred_intent', 'entities', 'entity_history', 'turn_count']:
                 context_parts.append(f"{key}: {value}")
             else:
                 context_parts.append(f"{key}: {value}")
 
         return "\n".join(context_parts) if context_parts else "无额外上下文"
+
+    def _format_conversation_history(self, context: Optional[Dict[str, Any]]) -> str:
+        """格式化对话历史"""
+        if not context or 'conversation_history' not in context:
+            return "无对话历史"
+
+        history = context['conversation_history']
+        if not history or len(history) == 0:
+            return "无对话历史"
+
+        history_parts = []
+        for msg in history[-10:]:
+            if not isinstance(msg, dict):
+                continue
+            role = msg.get("role", "unknown")
+            content = msg.get("content", "")
+            role_label = "用户" if role == "user" else "助手"
+            history_parts.append(f"{role_label}: {content}")
+
+        return "\n".join(history_parts) if history_parts else "无对话历史"
 
     def _parse_plan(self, content: str) -> ToolCallPlan:
         """解析 LLM 返回的工具计划

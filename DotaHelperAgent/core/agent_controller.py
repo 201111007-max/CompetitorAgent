@@ -18,6 +18,8 @@ if str(project_root) not in sys.path:
 
 from core.tool_registry import ToolRegistry
 from core.llm_tool_selector import LLMToolSelector
+from core.conversation_manager import ConversationManager, Message, MessageRole
+from core.context_augmenter import ContextAugmenter
 from memory.memory import AgentMemory
 from tools.base import ToolResult, ToolStatus
 
@@ -135,6 +137,7 @@ class AgentController:
         tool_registry: ToolRegistry,
         llm_client,
         memory: Optional[AgentMemory] = None,
+        conversation_manager: Optional[ConversationManager] = None,
         max_turns: int = 5,
         enable_reflection: bool = True,
         enable_memory: bool = True
@@ -145,6 +148,7 @@ class AgentController:
             tool_registry: 工具注册表
             llm_client: LLM 客户端（用于智能工具选择）
             memory: 记忆系统（可选）
+            conversation_manager: 会话管理器（可选）
             max_turns: 最大循环轮数
             enable_reflection: 是否启用反思
             enable_memory: 是否启用记忆系统
@@ -152,6 +156,7 @@ class AgentController:
         self.tool_registry = tool_registry
         self.llm_client = llm_client
         self.memory = memory
+        self.conversation_manager = conversation_manager
         self.max_turns = max_turns
         self.enable_reflection = enable_reflection
         self.enable_memory = enable_memory and memory is not None
@@ -160,13 +165,26 @@ class AgentController:
         # 初始化 LLM 工具选择器
         self.tool_selector = LLMToolSelector(llm_client, tool_registry)
         print(f"[AGENT_CONTROLLER] LLM 工具选择器已初始化")
+        
+        # 初始化上下文增强器
+        self.context_augmenter = ContextAugmenter(llm_client)
+        print(f"[AGENT_CONTROLLER] 上下文增强器已初始化")
+        
+        # 加载已知英雄列表到上下文增强器
+        self._load_known_heroes_to_augmenter()
 
-    def solve(self, query: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def solve(
+        self, 
+        query: str, 
+        context: Optional[Dict[str, Any]] = None,
+        session_id: Optional[str] = None
+    ) -> Dict[str, Any]:
         """执行完整的 ReAct 循环解决问题
 
         Args:
             query: 用户查询
             context: 额外上下文信息
+            session_id: 会话 ID（可选，用于多轮对话）
 
         Returns:
             包含最终答案和相关元数据的字典
@@ -174,8 +192,32 @@ class AgentController:
         print(f"\n{'='*60}")
         print(f"[AGENT_CONTROLLER] 开始处理查询")
         print(f"[AGENT_CONTROLLER] Query: {query}")
+        print(f"[AGENT_CONTROLLER] Session ID: {session_id}")
         print(f"[AGENT_CONTROLLER] Context: {context}")
         print(f"{'='*60}\n")
+        
+        original_query = query
+        augmented_context = {}
+        
+        if session_id and self.conversation_manager:
+            session = self.conversation_manager.get_or_create_session(session_id)
+            
+            augmented = self.context_augmenter.augment_query(query, session)
+            
+            query = augmented["augmented_query"]
+            augmented_context = augmented["context"]
+            
+            if context:
+                context = self._deep_merge_contexts(context, augmented_context)
+            else:
+                context = augmented_context
+            
+            print(f"[AGENT_CONTROLLER] 上下文增强:")
+            print(f"[AGENT_CONTROLLER]   原始查询: {original_query}")
+            print(f"[AGENT_CONTROLLER]   增强查询: {query}")
+            print(f"[AGENT_CONTROLLER]   推断意图: {augmented.get('inferred_intent')}")
+            print(f"[AGENT_CONTROLLER]   当前英雄: {augmented_context.get('current_heroes')}")
+            print(f"[AGENT_CONTROLLER]   当前话题: {augmented_context.get('current_topic')}")
         
         thought = AgentThought(query=query, context=context or {})
         self.current_thought = thought
@@ -232,6 +274,10 @@ class AgentController:
                 self._finalize(thought)
 
             response = self._build_response(thought)
+            
+            if session_id and self.conversation_manager:
+                self._save_conversation_history(session_id, original_query, response, augmented_context)
+            
             print(f"\n[AGENT_CONTROLLER] 最终响应:")
             print(f"[AGENT_CONTROLLER]   State: {response.get('state')}")
             print(f"[AGENT_CONTROLLER]   Success: {response.get('success')}")
@@ -246,6 +292,16 @@ class AgentController:
             import traceback
             print(f"[AGENT_CONTROLLER] Traceback: {traceback.format_exc()}")
             thought.set_failed(str(e))
+            
+            if session_id and self.conversation_manager:
+                error_response = {
+                    "success": False,
+                    "error": str(e),
+                    "state": AgentState.FAILED.value,
+                    "turn_count": thought.turn_count
+                }
+                self._save_conversation_history(session_id, original_query, error_response, augmented_context)
+            
             return self._build_response(thought)
 
     def _think(self, thought: AgentThought) -> None:
@@ -313,6 +369,11 @@ class AgentController:
         print(f"[AGENT_CONTROLLER._plan] 工具参数:")
         for tool_name, params in thought.context['tool_params'].items():
             print(f"[AGENT_CONTROLLER._plan]   {tool_name}: {params}")
+
+        # 如果 LLM 返回空工具列表，说明不需要调用工具，直接用 LLM 回答
+        if not planned_tools:
+            print(f"[AGENT_CONTROLLER._plan] 空工具列表，标记为直接回答模式")
+            thought.context['direct_answer_mode'] = True
 
     def _execute(self, thought: AgentThought) -> None:
         """Execute 步骤 - 执行工具调用
@@ -414,7 +475,28 @@ class AgentController:
 
         综合所有观察和推理，形成最终答案
         """
-        if thought.observations:
+        # 直接回答模式：不需要调用工具，直接用 LLM 回答用户问题
+        if thought.context.get('direct_answer_mode'):
+            print(f"[AGENT_CONTROLLER._synthesize] 直接回答模式，使用 LLM 生成答案")
+            try:
+                llm_response = self._generate_direct_answer(thought.query, thought)
+                thought.set_complete({
+                    "answer": {"message": llm_response},
+                    "reasoning": thought.reasoning_steps,
+                    "actions": thought.actions_taken,
+                    "confidence": 0.8,
+                    "source": "llm_direct"
+                })
+            except Exception as e:
+                print(f"[AGENT_CONTROLLER._synthesize] LLM 直接回答失败: {e}")
+                thought.set_complete({
+                    "answer": {"message": f"抱歉，我无法回答这个问题：{str(e)}"},
+                    "reasoning": thought.reasoning_steps,
+                    "actions": thought.actions_taken,
+                    "confidence": 0.0,
+                    "source": "error"
+                })
+        elif thought.observations:
             # 合并所有观察结果
             final_data = self._merge_observations(thought.observations)
             thought.set_complete({
@@ -430,6 +512,38 @@ class AgentController:
                 "actions": thought.actions_taken,
                 "confidence": 0.0
             })
+
+    def _generate_direct_answer(self, query: str, thought: AgentThought) -> str:
+        """使用 LLM 直接回答用户问题（不需要工具调用）
+
+        Args:
+            query: 用户查询
+            thought: 当前思考状态
+
+        Returns:
+            str: LLM 生成的答案
+        """
+        system_prompt = """你是一个 Dota 2 游戏助手。请根据用户的问题直接回答，不需要调用工具。
+回答要求：
+1. 简洁明了，直接回答问题
+2. 如果涉及游戏知识，给出合理的解释
+3. 如果不确定，诚实地说明"""
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": query}
+        ]
+
+        response = self.llm_client.chat(
+            messages=messages,
+            temperature=0.7,
+            max_tokens=1024
+        )
+
+        if "error" in response:
+            raise Exception(response["error"])
+
+        return response['choices'][0]['message']['content']
 
     def _finalize(self, thought: AgentThought) -> None:
         """Finalize 步骤 - 强制结束
@@ -557,8 +671,127 @@ class AgentController:
         except Exception as e:
             thought.add_reasoning(f"保存到记忆失败：{str(e)}")
 
+    def _save_conversation_history(
+        self,
+        session_id: str,
+        original_query: str,
+        response: Dict[str, Any],
+        augmented_context: Dict[str, Any]
+    ) -> None:
+        """保存对话历史到会话管理器
+
+        Args:
+            session_id: 会话 ID
+            original_query: 原始查询
+            response: Agent 响应
+            augmented_context: 增强上下文
+        """
+        try:
+            user_message = Message(
+                role=MessageRole.USER.value,
+                content=original_query,
+                metadata={
+                    "entities": augmented_context.get("entities", []),
+                    "inferred_intent": augmented_context.get("inferred_intent", "general")
+                }
+            )
+            self.conversation_manager.add_message(session_id, user_message)
+
+            answer_content = ""
+            if response.get("success"):
+                answer_data = response.get("answer", {})
+                if isinstance(answer_data, dict):
+                    answer_content = str(answer_data.get("answer", answer_data))
+                else:
+                    answer_content = str(answer_data)
+            else:
+                answer_content = response.get("error", "处理失败")
+
+            assistant_message = Message(
+                role=MessageRole.ASSISTANT.value,
+                content=answer_content,
+                metadata={
+                    "state": response.get("state"),
+                    "turn_count": response.get("turn_count"),
+                    "success": response.get("success", False)
+                }
+            )
+            self.conversation_manager.add_message(session_id, assistant_message)
+
+            current_heroes = augmented_context.get("current_heroes", {})
+            if current_heroes.get("our") or current_heroes.get("enemy"):
+                self.conversation_manager.update_context_state(
+                    session_id, "current_heroes", current_heroes
+                )
+
+            inferred_intent = augmented_context.get("inferred_intent", "general")
+            topic_map = {
+                "recommend_heroes": "counter",
+                "recommend_items": "items",
+                "recommend_skills": "skills"
+            }
+            new_topic = topic_map.get(inferred_intent, "general")
+            self.conversation_manager.update_context_state(
+                session_id, "current_topic", new_topic
+            )
+
+        except Exception as e:
+            print(f"[AGENT_CONTROLLER] 保存对话历史失败：{str(e)}")
+
+    def _load_known_heroes_to_augmenter(self) -> None:
+        """加载已知英雄列表到上下文增强器"""
+        try:
+            from utils.api_client import OpenDotaClient
+            client = OpenDotaClient()
+            heroes = client.get_heroes()
+            if heroes:
+                hero_names = []
+                for hero in heroes:
+                    name = hero.get("name", "").replace("npc_dota_hero_", "")
+                    localized_name = hero.get("localized_name", "")
+                    if name:
+                        hero_names.append(name)
+                    if localized_name:
+                        hero_names.append(localized_name)
+                
+                self.context_augmenter.load_known_heroes(hero_names)
+                print(f"[AGENT_CONTROLLER] 已加载 {len(hero_names)} 个英雄名称到上下文增强器")
+            else:
+                print(f"[AGENT_CONTROLLER] 未能获取英雄列表，使用默认实体提取")
+        except Exception as e:
+            print(f"[AGENT_CONTROLLER] 加载英雄列表失败: {e}")
+
+    def _deep_merge_contexts(
+        self,
+        base_context: Dict[str, Any],
+        override_context: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """深度合并两个上下文字典
+
+        Args:
+            base_context: 基础上下文
+            override_context: 覆盖上下文
+
+        Returns:
+            Dict: 合并后的上下文
+        """
+        merged = base_context.copy()
+        
+        for key, value in override_context.items():
+            if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
+                merged[key] = self._deep_merge_contexts(merged[key], value)
+            else:
+                merged[key] = value
+        
+        return merged
+
     def _should_finalize(self, thought: AgentThought) -> bool:
         """判断是否应该结束循环"""
+        # 直接回答模式：不需要工具调用，直接结束
+        if thought.context.get('direct_answer_mode'):
+            print(f"[AGENT_CONTROLLER._should_finalize] 直接回答模式，提前结束循环")
+            return True
+        
         # 如果已经收集了足够的观察结果
         if len(thought.observations) >= 3:
             return True

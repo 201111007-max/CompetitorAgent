@@ -298,6 +298,22 @@ class HeroAnalyzer:
         counters.sort(key=lambda x: x["score"], reverse=True)
         return counters[:top_n]
     
+    def analyze_composition(
+        self,
+        our_heroes: List[str],
+        enemy_heroes: List[str]
+    ) -> Dict[str, Any]:
+        """分析阵容（analyze_composition 别名方法，用于 Tool 调用）
+        
+        Args:
+            our_heroes: 己方英雄列表
+            enemy_heroes: 敌方英雄列表
+            
+        Returns:
+            阵容分析结果
+        """
+        return self.analyze_team_composition(our_heroes, enemy_heroes)
+    
     def analyze_team_composition(
         self,
         our_heroes: List[str],

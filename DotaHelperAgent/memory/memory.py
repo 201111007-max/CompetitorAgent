@@ -138,6 +138,48 @@ class AgentMemory:
             conn.commit()
             conn.close()
 
+    def store(
+        self,
+        key: str,
+        value: Any,
+        memory_type: str = "short",
+        tags: Optional[List[str]] = None
+    ) -> bool:
+        """存储记忆（remember 的别名方法）
+
+        Args:
+            key: 记忆键
+            value: 记忆值
+            memory_type: 记忆类型 ("short", "long", "episodic")
+            tags: 标签列表
+
+        Returns:
+            bool: 是否成功
+        """
+        return self.remember(key, value, memory_type, tags)
+    
+    def store_episodic(
+        self,
+        event_type: str,
+        content: Any,
+        context: Optional[Dict[str, Any]] = None,
+        sentiment: Optional[str] = None,
+        outcome: Optional[str] = None
+    ) -> bool:
+        """存储情景记忆（record_episode 的别名方法）
+
+        Args:
+            event_type: 事件类型
+            content: 事件内容
+            context: 上下文信息
+            sentiment: 情感倾向
+            outcome: 结果
+
+        Returns:
+            bool: 是否成功
+        """
+        return self.record_episode(event_type, content, context, sentiment, outcome)
+    
     def remember(
         self,
         key: str,

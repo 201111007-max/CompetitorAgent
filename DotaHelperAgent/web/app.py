@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from core.agent import DotaHelperAgent
 from core.agent_controller import AgentController
 from core.tool_registry import ToolRegistry
+from core.conversation_manager import ConversationManager
 from tools.agent_tools import create_all_tools
 from core.config import AgentConfig, LLMConfig
 from utils.localization import DotaLocalizer
@@ -47,6 +48,7 @@ WEB_DIR = Path(__file__).parent
 agent = None
 agent_controller = None
 llm_client = None
+conversation_manager = None
 cache_warming = False
 cache_ready = False
 localizer = DotaLocalizer()
@@ -84,6 +86,8 @@ HERO_PARSE_PROMPT = """你是一个 Dota 2 英雄名称解析专家。请从用�
    - 斯温 → sven, 小小 → tiny, 军团 → legion_commander
    - 小鱼 → slark, 兽王 → beastmaster, 小鹿 → enchantress
    - 黑鸟 → obsidian_destroyer, 小黑 → drow_ranger
+   - 司夜刺客 → nyx_assassin, 风暴之灵 → storm_spirit, 马格纳斯 → magnus
+   - 斯拉克 → slark, 暗夜魔王 → night_stalker, 风行者 → windranger
 3. 如果不确定英文名，尽量使用拼音或音译，保持小写，空格用下划线
 
 ## 示例
@@ -285,7 +289,7 @@ def warm_cache():
 
 def initialize_agent_controller():
     """初始化 Agent 和 Agent Controller"""
-    global agent, agent_controller
+    global agent, agent_controller, conversation_manager
     
     if agent_controller is not None:
         return agent_controller
@@ -293,6 +297,15 @@ def initialize_agent_controller():
     try:
         # 加载配置
         config = AgentConfig()
+        
+        # 创建会话管理器
+        conversation_manager = ConversationManager(
+            storage_dir="memory",
+            session_ttl=1800,
+            max_turns=20,
+            max_context_turns=5
+        )
+        print(f"[OK] ConversationManager 初始化完成")
         
         # 创建 DotaHelperAgent（带 Memory 支持）
         agent = DotaHelperAgent(
@@ -327,6 +340,7 @@ def initialize_agent_controller():
             tool_registry=registry,
             llm_client=llm_client,
             memory=agent.memory,
+            conversation_manager=conversation_manager,
             max_turns=5,
             enable_reflection=True,
             enable_memory=True
@@ -411,14 +425,55 @@ def health_check():
     llm_enabled = get_llm_client() is not None
     controller_ready = agent_controller is not None
     memory_stats = agent.get_memory_stats() if agent else {}
+    conversation_stats = conversation_manager.get_stats() if conversation_manager else {}
     
     return jsonify({
         "status": "ok",
         "service": "DotaHelperAgent",
         "llm_enabled": llm_enabled,
         "agent_controller_ready": controller_ready,
-        "memory": memory_stats
+        "memory": memory_stats,
+        "conversation": conversation_stats
     })
+
+
+@app.route('/api/conversation/stats', methods=['GET'])
+def conversation_stats():
+    """获取会话统计信息"""
+    if conversation_manager is None:
+        return jsonify({"error": "ConversationManager not initialized"})
+    
+    return jsonify(conversation_manager.get_stats())
+
+
+@app.route('/api/conversation/<session_id>', methods=['GET'])
+def get_conversation(session_id):
+    """获取会话历史"""
+    if conversation_manager is None:
+        return jsonify({"error": "ConversationManager not initialized"})
+    
+    try:
+        session = conversation_manager.get_session(session_id)
+        if session is None:
+            return jsonify({"error": "Session not found"}), 404
+        
+        messages = []
+        for msg in session.messages:
+            try:
+                messages.append(msg.to_dict())
+            except Exception as e:
+                print(f"[APP] 序列化消息失败: {e}")
+                messages.append({"role": "unknown", "content": "[序列化失败]", "timestamp": 0})
+        
+        return jsonify({
+            "session_id": session_id,
+            "turn_count": session.turn_count,
+            "messages": messages,
+            "context_state": session.context_state
+        })
+    except Exception as e:
+        print(f"[APP] 获取会话失败: {e}")
+        return jsonify({"error": f"Failed to get conversation: {str(e)}"}), 500
 
 
 @app.route('/api/test_tools', methods=['GET'])
@@ -538,8 +593,9 @@ def chat():
         print(f"\n[APP.CHAT] >>> 调用 AgentController.solve()")
         print(f"[APP.CHAT]     Query: {query}")
         print(f"[APP.CHAT]     Context: {context}")
+        print(f"[APP.CHAT]     Session ID: {session_id}")
         app_logger.info_ctx("开始执行 ReAct 循环", session_id=session_id)
-        controller_result = agent_controller.solve(query, context)
+        controller_result = agent_controller.solve(query, context, session_id)
         print(f"\n[APP.CHAT] <<< AgentController.solve() 返回")
         print(f"[APP.CHAT]     Result: {controller_result}")
         
@@ -820,9 +876,16 @@ def _format_answer(answer_data: dict) -> str:
                     reason_text = "; ".join(reasons[:2]) if isinstance(reasons, list) else str(reasons)
                     formatted.append(f"{i}. {hero_display} (指数：{score:.2f}) - {reason_text}")
     
-    # 处理答案
+    # 处理答案：如果是 dict 类型，不直接输出原始字典字符串
     if "answer" in answer_data:
-        formatted.append(f"\n答案：{answer_data['answer']}")
+        ans = answer_data['answer']
+        if isinstance(ans, dict):
+            # 已经通过 recommendations 处理过了，不再重复输出
+            pass
+        elif isinstance(ans, str):
+            formatted.append(f"\n答案：{ans}")
+        else:
+            formatted.append(f"\n答案：{ans}")
     
     return "\n".join(formatted) if formatted else str(answer_data)
 
@@ -1156,7 +1219,13 @@ def _execute_streaming(controller, query: str, context: dict, start_time: float)
                     thought.add_reasoning("已收集到足够的信息，准备生成答案")
                     # 提取ToolResult中的data字段，而不是整个对象
                     last_result = thought.actions_taken[-1].get('result')
-                    result_data = last_result.data if hasattr(last_result, 'data') else last_result
+                    # last_result 可能是 ToolResult 对象或字典（来自 to_dict()）
+                    if hasattr(last_result, 'data'):
+                        result_data = last_result.data
+                    elif isinstance(last_result, dict):
+                        result_data = last_result.get('data', last_result)
+                    else:
+                        result_data = last_result
                     thought.set_complete(result_data)
                 else:
                     thought.add_reasoning("信息不足，需要继续收集")
