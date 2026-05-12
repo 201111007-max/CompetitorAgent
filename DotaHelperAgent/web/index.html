@@ -302,6 +302,27 @@
             animation: pulse 1s infinite;
         }
 
+        .trace-id {
+            margin-left: auto;
+            font-size: 10px;
+            color: rgba(255, 255, 255, 0.4);
+            font-family: 'Courier New', monospace;
+            background: rgba(0, 0, 0, 0.2);
+            padding: 2px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .trace-id:hover {
+            color: rgba(255, 255, 255, 0.7);
+            background: rgba(0, 0, 0, 0.3);
+        }
+
+        .trace-id:empty {
+            display: none;
+        }
+
         @keyframes pulse {
             0%, 100% { opacity: 1; }
             50% { opacity: 0.5; }
@@ -769,6 +790,7 @@
                 <div class="status-bar">
                     <div class="status-dot" id="statusDot"></div>
                     <span id="statusText">就绪</span>
+                    <span class="trace-id" id="traceIdDisplay" title="点击复制 Trace ID"></span>
                 </div>
             </div>
         </div>
@@ -865,6 +887,7 @@
     <script>
         let isStreaming = false;
         let sessionId = generateSessionId();
+        let currentTraceId = null;  // 当前请求的 Trace ID
         let logEventSource = null;
         let currentFilter = { level: 'all', component: 'all' };
         let activeTab = 'live';
@@ -874,11 +897,30 @@
         const sendBtn = document.getElementById('sendBtn');
         const statusDot = document.getElementById('statusDot');
         const statusText = document.getElementById('statusText');
+        const traceIdDisplay = document.getElementById('traceIdDisplay');
         const logSidebar = document.getElementById('logSidebar');
         const sidebarToggle = document.getElementById('sidebarToggle');
 
+        // Trace ID 显示点击复制功能
+        traceIdDisplay.addEventListener('click', function() {
+            if (currentTraceId) {
+                navigator.clipboard.writeText(currentTraceId).then(() => {
+                    const originalText = traceIdDisplay.textContent;
+                    traceIdDisplay.textContent = '已复制!';
+                    setTimeout(() => {
+                        traceIdDisplay.textContent = originalText;
+                    }, 1000);
+                });
+            }
+        });
+
         function generateSessionId() {
             return 'sess_' + Math.random().toString(36).substr(2, 9);
+        }
+
+        function generateTraceId() {
+            // 生成 UUID v4 格式的 Trace ID
+            return 'trace_' + crypto.randomUUID().replace(/-/g, '').substring(0, 16);
         }
 
         function parseHeroesFromQuery(query) {
@@ -987,7 +1029,14 @@
                 'action': '⚡',
                 'observation': '👁️',
                 'reflect': '🤔',
-                'synthesize': '✨'
+                'synthesize': '✨',
+                'goal_decomposition': '🎯',
+                'goal_decomposition_result': '📊',
+                'goal_execution': '🚀',
+                'sub_goal_start': '▶️',
+                'sub_goal_complete': '✅',
+                'sub_goal_failed': '❌',
+                'merge_results': '🔗'
             };
             
             const stepTitles = {
@@ -996,7 +1045,14 @@
                 'action': '执行工具',
                 'observation': '观察结果',
                 'reflect': '反思',
-                'synthesize': '生成答案'
+                'synthesize': '生成答案',
+                'goal_decomposition': '目标分解',
+                'goal_decomposition_result': '分解结果',
+                'goal_execution': '执行子目标',
+                'sub_goal_start': '子目标开始',
+                'sub_goal_complete': '子目标完成',
+                'sub_goal_failed': '子目标失败',
+                'merge_results': '合并结果'
             };
             
             const icon = stepIcons[stepType] || '💡';
@@ -1054,16 +1110,26 @@
             addMessage('user', query, new Date().toLocaleTimeString());
             queryInput.value = '';
 
+            // 生成新的 Trace ID 用于本次请求
+            currentTraceId = generateTraceId();
+            traceIdDisplay.textContent = `Trace: ${currentTraceId}`;
+            console.log(`[Trace] Request started: ${currentTraceId}`);
+
             const msgElement = createStreamingMessage();
             const context = parseHeroesFromQuery(query);
 
             try {
                 const response = await fetch('/api/chat/stream', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'X-Trace-ID': currentTraceId,
+                        'X-Session-ID': sessionId
+                    },
                     body: JSON.stringify({
                         query: query,
                         session_id: sessionId,
+                        trace_id: currentTraceId,
                         context: context
                     })
                 });
@@ -1108,6 +1174,12 @@
                 updateStatus('就绪');
                 sendBtn.disabled = false;
                 queryInput.focus();
+                
+                // 记录 Trace ID 到控制台，方便调试
+                if (currentTraceId) {
+                    console.log(`[Trace] Request completed: ${currentTraceId}`);
+                    console.log(`[Trace] View logs: /api/trace/${currentTraceId}`);
+                }
             }
         }
 
@@ -1143,12 +1215,56 @@
                     addThinkingStep(msgElement, 'reflect', data.content || '反思中...');
                     break;
                     
+                case 'goal_decomposition':
+                    addThinkingStep(msgElement, 'goal_decomposition', data.status || '开始目标分解...');
+                    break;
+                    
+                case 'goal_decomposition_result':
+                    const mainGoal = data.main_goal || '未知';
+                    const subGoals = data.sub_goals || [];
+                    const subGoalsText = subGoals.map(sg => 
+                        `• [${sg.id}] ${sg.description} (工具: ${sg.tool_name || '无'})`
+                    ).join('\n');
+                    addThinkingStep(msgElement, 'goal_decomposition_result', 
+                        `主目标: ${mainGoal}\n\n子目标:\n${subGoalsText}`);
+                    break;
+                    
+                case 'goal_execution':
+                    addThinkingStep(msgElement, 'goal_execution', data.status || '开始执行子目标...');
+                    break;
+                    
+                case 'sub_goal_start':
+                    addThinkingStep(msgElement, 'sub_goal_start', 
+                        `子目标: ${data.description || data.sub_goal_id}\n工具: ${data.tool_name || '无'}`);
+                    break;
+                    
+                case 'sub_goal_complete':
+                    addThinkingStep(msgElement, 'sub_goal_complete', 
+                        `子目标 ${data.sub_goal_id} 执行完成`);
+                    break;
+                    
+                case 'sub_goal_failed':
+                    addThinkingStep(msgElement, 'sub_goal_failed', 
+                        `子目标 ${data.sub_goal_id} 执行失败\n错误: ${data.error || '未知'}`);
+                    break;
+                    
+                case 'merge_results':
+                    addThinkingStep(msgElement, 'merge_results', data.status || '合并子目标结果...');
+                    break;
+                    
                 case 'synthesize':
                     removeTypingIndicator(msgElement);
                     const answer = data.answer || data.content;
+                    console.log('[FRONTEND_TRACE] synthesize event received:', {
+                        answerType: typeof answer,
+                        answerPreview: typeof answer === 'string' ? answer.substring(0, 200) : JSON.stringify(answer).substring(0, 200),
+                        isString: typeof answer === 'string',
+                        dataKeys: Object.keys(data)
+                    });
                     if (answer) {
-                        addAnswerContent(msgElement, 
-                            typeof answer === 'string' ? answer : JSON.stringify(answer, null, 2));
+                        const contentToAdd = typeof answer === 'string' ? answer : JSON.stringify(answer, null, 2);
+                        console.log('[FRONTEND_TRACE] Content to add:', contentToAdd.substring(0, 300));
+                        addAnswerContent(msgElement, contentToAdd);
                     }
                     break;
                     
@@ -1177,15 +1293,25 @@
             addMessage('user', query, new Date().toLocaleTimeString());
             queryInput.value = '';
 
+            // 生成新的 Trace ID 用于本次请求
+            currentTraceId = generateTraceId();
+            traceIdDisplay.textContent = `Trace: ${currentTraceId}`;
+            console.log(`[Trace] Request started: ${currentTraceId}`);
+
             try {
                 const context = parseHeroesFromQuery(query);
 
                 const response = await fetch('/api/chat', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'X-Trace-ID': currentTraceId,
+                        'X-Session-ID': sessionId
+                    },
                     body: JSON.stringify({
                         query: query,
                         session_id: sessionId,
+                        trace_id: currentTraceId,
                         context: context
                     })
                 });
@@ -1203,6 +1329,12 @@
                 updateStatus('就绪');
                 sendBtn.disabled = false;
                 queryInput.focus();
+                
+                // 记录 Trace ID 到控制台，方便调试
+                if (currentTraceId) {
+                    console.log(`[Trace] Request completed: ${currentTraceId}`);
+                    console.log(`[Trace] View logs: /api/trace/${currentTraceId}`);
+                }
             }
         }
 

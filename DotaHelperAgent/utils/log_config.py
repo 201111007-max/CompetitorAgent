@@ -55,6 +55,74 @@ class JSONFormatter(logging.Formatter):
         return json.dumps(log_data, ensure_ascii=False)
 
 
+class TraceJSONFormatter(logging.Formatter):
+    """带 Trace 信息的 JSON 格式化器
+    
+    自动从当前 Trace 上下文或日志 record 中提取 trace 信息
+    """
+    def format(self, record):
+        from utils.trace_context import get_current_trace
+        
+        log_data = {
+            "timestamp": datetime.fromtimestamp(record.created).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+            "module": record.module,
+            "function": record.funcName,
+            "line": record.lineno,
+            "component": getattr(record, 'component', 'system')
+        }
+        
+        # 优先从当前 Trace 上下文获取
+        trace_ctx = get_current_trace()
+        if trace_ctx:
+            log_data["trace"] = {
+                "trace_id": trace_ctx.trace_id,
+                "span_id": trace_ctx.span_id,
+                "parent_span_id": trace_ctx.parent_span_id,
+                "session_id": trace_ctx.session_id,
+                "operation": trace_ctx.operation,
+                "duration_ms": trace_ctx.get_duration_ms()
+            }
+        else:
+            # 回退：从 Flask g 对象获取（适用于生成器/yield 场景，contextvars 丢失时）
+            try:
+                from flask import has_request_context, g as flask_g
+                if has_request_context():
+                    flask_trace = getattr(flask_g, 'trace_ctx', None)
+                    if flask_trace:
+                        log_data["trace"] = {
+                            "trace_id": flask_trace.trace_id,
+                            "span_id": flask_trace.span_id,
+                            "parent_span_id": flask_trace.parent_span_id,
+                            "session_id": flask_trace.session_id,
+                            "operation": flask_trace.operation,
+                            "duration_ms": flask_trace.get_duration_ms()
+                        }
+            except Exception:
+                pass
+            
+            # 如果 trace 仍未设置，从 record 的 extra 字段获取（兼容旧代码）
+            if "trace" not in log_data:
+                trace_info = {}
+                if hasattr(record, 'trace_id'):
+                    trace_info["trace_id"] = record.trace_id
+                if hasattr(record, 'span_id'):
+                    trace_info["span_id"] = record.span_id
+                if hasattr(record, 'parent_span_id'):
+                    trace_info["parent_span_id"] = record.parent_span_id
+                if hasattr(record, 'session_id'):
+                    trace_info["session_id"] = record.session_id
+                if trace_info:
+                    log_data["trace"] = trace_info
+        
+        if hasattr(record, 'extra_data'):
+            log_data['extra'] = record.extra_data
+            
+        return json.dumps(log_data, ensure_ascii=False)
+
+
 class DailyPartitionRotatingHandler(logging.handlers.RotatingFileHandler):
     """
     按日期分文件夹 + 同一天内按大小分文件夹的日志处理器
@@ -391,7 +459,7 @@ logs/
 
 def get_logger(name: str, component: str = "system") -> logging.Logger:
     """
-    获取配置好的日志记录器
+    获取配置好的日志记录器（支持 Trace 上下文）
 
     Args:
         name: 日志记录器名称
@@ -404,10 +472,20 @@ def get_logger(name: str, component: str = "system") -> logging.Logger:
 
     # 添加组件标识方法
     def _log_with_context(level, msg, session_id=None, extra_data=None, *args, **kwargs):
+        from utils.trace_context import get_current_trace
+        
+        trace_ctx = get_current_trace()
         extra = {
-            'session_id': session_id or 'global',
+            'session_id': session_id or (trace_ctx.session_id if trace_ctx else 'global'),
             'component': component
         }
+        
+        # 如果有 Trace 上下文，自动添加 trace 信息
+        if trace_ctx:
+            extra['trace_id'] = trace_ctx.trace_id
+            extra['span_id'] = trace_ctx.span_id
+            extra['parent_span_id'] = trace_ctx.parent_span_id
+        
         if extra_data:
             extra['extra_data'] = extra_data
         getattr(logger, level)(msg, extra=extra, *args, **kwargs)

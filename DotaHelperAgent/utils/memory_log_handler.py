@@ -68,6 +68,14 @@ class MemoryLogHandler(logging.Handler):
 
     def _format_record(self, record: logging.LogRecord) -> Dict[str, Any]:
         """格式化日志记录"""
+        # 提取 Trace 信息
+        trace = getattr(record, 'trace', None)
+        trace_id = getattr(record, 'trace_id', None)
+        
+        # 如果 trace 是对象，转换为字典
+        if trace and hasattr(trace, 'to_dict'):
+            trace = trace.to_dict()
+        
         return {
             "id": f"{record.created}-{record.lineno}",
             "timestamp": datetime.fromtimestamp(record.created).isoformat(),
@@ -79,7 +87,9 @@ class MemoryLogHandler(logging.Handler):
             "line": record.lineno,
             "session_id": getattr(record, 'session_id', 'global'),
             "component": getattr(record, 'component', 'system'),
-            "extra_data": getattr(record, 'extra_data', None)
+            "extra_data": getattr(record, 'extra_data', None),
+            "trace": trace,
+            "trace_id": trace_id
         }
 
     def get_logs(

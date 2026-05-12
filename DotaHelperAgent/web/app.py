@@ -5,7 +5,7 @@
 
 import sys
 from pathlib import Path
-from flask import Flask, request, jsonify, Response, send_file
+from flask import Flask, request, jsonify, Response, send_file, g, stream_with_context
 from flask_cors import CORS
 import json
 import time
@@ -13,7 +13,9 @@ import uuid
 import threading
 import re
 import queue
+import schedule
 from typing import Optional
+from datetime import datetime
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -27,12 +29,16 @@ from utils.localization import DotaLocalizer
 from utils.llm_client import LLMClient
 from utils.log_config import setup_logging_with_memory, get_logger
 from utils.memory_log_handler import get_memory_handler
+from utils.trace_context import (
+    TraceContext, TraceSpan, set_current_trace, get_current_trace,
+    generate_trace_id, get_current_trace_info
+)
 
 # 初始化日志系统
 logger, memory_handler = setup_logging_with_memory(
     log_level="DEBUG",
     daily_max_bytes=300*1024*1024,  # 300MB 每天分片
-    memory_max_entries=2000,
+    memory_max_entries=10000,
     console_output=True
 )
 
@@ -52,6 +58,7 @@ conversation_manager = None
 cache_warming = False
 cache_ready = False
 localizer = DotaLocalizer()
+api_client = None  # 全局 API 客户端实例，用于缓存刷新
 
 # 日志目录（可配置，便于测试）
 LOG_DIR = Path(__file__).parent.parent / "logs"
@@ -287,6 +294,50 @@ def warm_cache():
     cache_warming = False
 
 
+def refresh_all_heroes_cache():
+    """全量刷新所有英雄克制数据缓存（每日定时任务）"""
+    global api_client
+    
+    try:
+        print(f"\n{'='*60}")
+        print(f"[CACHE_REFRESH] 开始全量刷新英雄克制数据缓存")
+        print(f"[CACHE_REFRESH] 时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"{'='*60}")
+        
+        # 获取 API 客户端
+        if api_client is None:
+            agt = get_agent()
+            api_client = agt.client
+        
+        # 执行全量预热
+        api_client.warm_up_cache(full_warmup=True)
+        
+        print(f"[CACHE_REFRESH] 全量缓存刷新完成")
+        print(f"{'='*60}\n")
+        
+    except Exception as e:
+        print(f"[CACHE_REFRESH] 全量缓存刷新失败: {e}")
+        import traceback
+        print(traceback.format_exc())
+
+
+def start_cache_scheduler():
+    """启动缓存定时刷新任务"""
+    # 每天凌晨 3 点执行全量缓存刷新
+    schedule.every().day.at("03:00").do(refresh_all_heroes_cache)
+    
+    print("[CACHE_SCHEDULER] 已启动每日缓存刷新任务（每天 03:00）")
+    
+    # 在后台线程中运行调度器
+    def run_scheduler():
+        while True:
+            schedule.run_pending()
+            time.sleep(60)  # 每分钟检查一次
+    
+    scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
+    scheduler_thread.start()
+
+
 def initialize_agent_controller():
     """初始化 Agent 和 Agent Controller"""
     global agent, agent_controller, conversation_manager
@@ -354,6 +405,72 @@ def initialize_agent_controller():
         # 回退到基本模式
         agent = DotaHelperAgent()
         return None
+
+
+@app.before_request
+def setup_trace_context():
+    """每个请求初始化 Trace 上下文"""
+    # 优先从 Header 获取，其次从 Body，最后生成新的
+    trace_id = request.headers.get('X-Trace-ID')
+    session_id = request.headers.get('X-Session-ID')
+    
+    # 如果是 POST/PUT 请求，尝试从 body 获取
+    if not trace_id and request.is_json:
+        try:
+            body = request.get_json(silent=True)
+            if body:
+                trace_id = body.get('trace_id')
+                session_id = body.get('session_id')
+        except Exception:
+            pass
+    
+    # 如果仍然没有，生成新的
+    if not trace_id:
+        trace_id = generate_trace_id()
+    if not session_id:
+        session_id = f"sess_{uuid.uuid4().hex[:9]}"
+    
+    # 创建 Trace 上下文
+    trace_ctx = TraceContext(
+        trace_id=trace_id,
+        span_id="root",
+        session_id=session_id,
+        operation=request.endpoint or "unknown"
+    )
+    
+    # 存储到 Flask g 对象和 contextvars
+    g.trace_ctx = trace_ctx
+    set_current_trace(trace_ctx)
+    
+    # 记录请求开始
+    app_logger.info_ctx(
+        "Request started",
+        session_id=session_id,
+        extra_data={
+            'trace_id': trace_id,
+            'method': request.method,
+            'path': request.path,
+            'client_ip': request.remote_addr
+        }
+    )
+
+
+@app.after_request
+def cleanup_trace_context(response):
+    """请求结束后清理并记录"""
+    trace_ctx = getattr(g, 'trace_ctx', None)
+    if trace_ctx:
+        duration_ms = int((time.time() - trace_ctx.start_time) * 1000)
+        app_logger.info_ctx(
+            "Request completed",
+            session_id=trace_ctx.session_id,
+            extra_data={
+                'trace_id': trace_ctx.trace_id,
+                'status_code': response.status_code,
+                'duration_ms': duration_ms
+            }
+        )
+    return response
 
 
 @app.route('/')
@@ -524,16 +641,21 @@ def test_tools():
 
 @app.route('/api/chat', methods=['POST'])
 def chat():
-    """使用 Agent Controller 处理聊天请求"""
+    """使用 Agent Controller 处理聊天请求（带 Trace 支持）"""
     data = request.get_json()
     query = data.get('query', '')
     session_id = data.get('session_id', str(uuid.uuid4()))
     context = data.get('context', {})
+    
+    # 获取当前 Trace 上下文
+    trace_ctx = get_current_trace()
+    trace_id = trace_ctx.trace_id if trace_ctx else generate_trace_id()
 
     print(f"\n{'='*60}")
     print(f"[APP.CHAT] 收到聊天请求")
     print(f"[APP.CHAT] Query: {query}")
     print(f"[APP.CHAT] Session ID: {session_id}")
+    print(f"[APP.CHAT] Trace ID: {trace_id}")
     print(f"[APP.CHAT] Context (from frontend): {context}")
     print(f"[APP.CHAT] Agent Controller 状态: {'已初始化' if agent_controller else '未初始化'}")
     print(f"{'='*60}\n")
@@ -542,7 +664,7 @@ def chat():
     app_logger.info_ctx(
         f"收到聊天请求",
         session_id=session_id,
-        extra_data={"query": query, "context": context}
+        extra_data={"query": query, "context": context, "trace_id": trace_id}
     )
 
     # 如果没有 Agent Controller，回退到旧版实现
@@ -556,6 +678,7 @@ def chat():
     result = {
         "success": True,
         "session_id": session_id,
+        "trace_id": trace_id,
         "query": query,
         "agent_mode": True
     }
@@ -574,7 +697,8 @@ def chat():
         
         if not our_heroes and not enemy_heroes:
             print(f"[APP.CHAT] Context 中无英雄信息（或为空），尝试使用 LLM 解析")
-            parsed = parse_heroes_with_llm(query)
+            with TraceSpan("parse_heroes", parent=trace_ctx) as parse_span:
+                parsed = parse_heroes_with_llm(query)
             print(f"[APP.CHAT] LLM 解析结果: {parsed}")
             if parsed['our_heroes'] or parsed['enemy_heroes']:
                 context.update(parsed)
@@ -594,6 +718,7 @@ def chat():
         print(f"[APP.CHAT]     Query: {query}")
         print(f"[APP.CHAT]     Context: {context}")
         print(f"[APP.CHAT]     Session ID: {session_id}")
+        print(f"[APP.CHAT]     Trace ID: {trace_id}")
         app_logger.info_ctx("开始执行 ReAct 循环", session_id=session_id)
         controller_result = agent_controller.solve(query, context, session_id)
         print(f"\n[APP.CHAT] <<< AgentController.solve() 返回")
@@ -695,6 +820,59 @@ def _format_answer_for_stream(answer_data) -> str:
     if not isinstance(answer_data, dict):
         return str(answer_data)
     
+    # 处理目标分解合并结果格式
+    if "sub_goals_summary" in answer_data:
+        parts = []
+        # 提取主要答案
+        answer = answer_data.get("answer", {})
+        print(f"[FORMAT_DEBUG] sub_goals_summary 模式")
+        print(f"[FORMAT_DEBUG] answer 类型: {type(answer)}")
+        print(f"[FORMAT_DEBUG] answer 内容（前300字符）: {str(answer)[:300]}")
+        
+        if isinstance(answer, dict):
+            print(f"[FORMAT_DEBUG] answer 是字典，尝试格式化")
+            formatted = _format_answer_for_stream(answer)
+            print(f"[FORMAT_DEBUG] 格式化结果: {formatted[:200] if formatted else 'None'}")
+            if formatted and formatted != str(answer):
+                parts.append(formatted)
+            else:
+                print(f"[FORMAT_DEBUG] 格式化失败，从 sub_goals_results 提取")
+                # 尝试从子目标结果中提取有用信息
+                results = answer_data.get("sub_goals_results", [])
+                if results:
+                    parts.append("📋 分析结果：")
+                    for r in results:
+                        desc = r.get("description", "")
+                        result = r.get("result")
+                        print(f"[FORMAT_DEBUG] sub_goal result 类型: {type(result)}")
+                        if result:
+                            if isinstance(result, list):
+                                formatted_result = _format_answer_for_stream(result)
+                                parts.append(formatted_result)
+                            elif isinstance(result, dict):
+                                formatted_result = _format_answer_for_stream(result)
+                                parts.append(formatted_result)
+                            else:
+                                parts.append(str(result))
+        elif isinstance(answer, list):
+            print(f"[FORMAT_DEBUG] answer 是列表，直接格式化")
+            formatted = _format_answer_for_stream(answer)
+            parts.append(formatted)
+        elif isinstance(answer, str):
+            print(f"[FORMAT_DEBUG] answer 是字符串")
+            parts.append(answer)
+        
+        # 如果有失败目标，简要说明
+        failed = answer_data.get("failed_goals", [])
+        if failed:
+            parts.append("\n⚠️ 部分分析未完成：")
+            for f in failed:
+                parts.append(f"• {f.get('description', '未知')}")
+        
+        final_result = "\n".join(parts) if parts else str(answer_data)
+        print(f"[FORMAT_DEBUG] 最终返回（前300字符）: {final_result[:300]}")
+        return final_result
+    
     # 检查是否有嵌套的 answer 字段
     if "answer" in answer_data and isinstance(answer_data["answer"], dict):
         actual_answer = answer_data["answer"]
@@ -753,6 +931,22 @@ def _format_answer_for_stream(answer_data) -> str:
     # 处理纯文本答案
     if "answer" in actual_answer and isinstance(actual_answer["answer"], str):
         return actual_answer["answer"]
+    
+    # 处理 message 字段
+    if "message" in actual_answer and isinstance(actual_answer["message"], str):
+        message = actual_answer["message"]
+        # 尝试解析 message 中的 JSON 字符串（如英雄推荐列表）
+        try:
+            parsed = json.loads(message)
+            if isinstance(parsed, list):
+                # 如果是列表，递归格式化
+                formatted = _format_answer_for_stream(parsed)
+                if formatted != message:
+                    return formatted
+        except (json.JSONDecodeError, ValueError):
+            pass
+        # 如果解析失败或不是列表，直接返回 message
+        return message
     
     # 兜底：尝试提取关键信息
     if "content" in actual_answer:
@@ -845,9 +1039,60 @@ def _format_answer(answer_data: dict) -> str:
     """格式化 Agent 答案为文本"""
     formatted = []
     
+    # 处理目标分解合并结果格式
+    if "sub_goals_summary" in answer_data:
+        answer = answer_data.get("answer", {})
+        
+        # 如果 answer 是列表，直接格式化
+        if isinstance(answer, list):
+            return _format_answer_for_stream(answer_data)
+        
+        # 如果 answer 是字典，提取 recommendations
+        if isinstance(answer, dict):
+            if "recommendations" in answer:
+                recs = answer["recommendations"]
+                if isinstance(recs, list) and len(recs) > 0:
+                    formatted.append("推荐结果：")
+                    for i, rec in enumerate(recs[:5], 1):
+                        if isinstance(rec, dict):
+                            hero_id = rec.get("hero_id")
+                            hero_en = rec.get("hero_name", rec.get("hero", "Unknown"))
+                            
+                            hero_cn = None
+                            if hero_id:
+                                hero_cn = localizer.get_hero_name_cn(hero_id)
+                            if not hero_cn:
+                                hero_cn = _get_hero_cn_by_name(hero_en)
+                            
+                            hero_display = hero_cn if hero_cn else hero_en
+                            score = rec.get("score", 0)
+                            reasons = rec.get("reasons", rec.get("reason", []))
+                            reason_text = "; ".join(reasons[:2]) if isinstance(reasons, list) else str(reasons)
+                            formatted.append(f"{i}. {hero_display} (指数：{score:.2f}) - {reason_text}")
+                    return "\n".join(formatted)
+            
+            # 尝试从 sub_goals_results 中提取
+            results = answer_data.get("sub_goals_results", [])
+            if results:
+                for r in results:
+                    result = r.get("result")
+                    if result:
+                        if isinstance(result, list):
+                            return _format_answer_for_stream(answer_data)
+                        elif isinstance(result, dict) and "recommendations" in result:
+                            answer = result
+                            break
+        
+        # 如果 answer 是字符串
+        if isinstance(answer, str):
+            return answer
+    
     # 检查是否有嵌套的 answer 字段（来自 thought.set_complete）
     if "answer" in answer_data and isinstance(answer_data["answer"], dict):
         actual_answer = answer_data["answer"]
+    elif "answer" in answer_data and isinstance(answer_data["answer"], list):
+        # 如果 answer 是列表，直接格式化列表
+        return _format_answer_for_stream(answer_data["answer"])
     else:
         actual_answer = answer_data
     
@@ -882,6 +1127,11 @@ def _format_answer(answer_data: dict) -> str:
         if isinstance(ans, dict):
             # 已经通过 recommendations 处理过了，不再重复输出
             pass
+        elif isinstance(ans, list):
+            # 如果 answer 是列表，尝试格式化
+            list_formatted = _format_answer_for_stream(ans)
+            if list_formatted and list_formatted != str(ans):
+                formatted.append(list_formatted)
         elif isinstance(ans, str):
             formatted.append(f"\n答案：{ans}")
         else:
@@ -1094,16 +1344,24 @@ def _chat_legacy(query, context, session_id):
 
 @app.route('/api/chat/stream', methods=['POST'])
 def chat_stream():
-    """流式输出接口（使用 Agent Controller）"""
+    """流式输出接口（使用 Agent Controller，带 Trace 支持）"""
     data = request.get_json()
     query = data.get('query', '')
     session_id = data.get('session_id', str(uuid.uuid4()))
     context = data.get('context', {})
+    
+    # 获取当前 Trace 上下文（在请求上下文中获取）
+    trace_ctx = get_current_trace()
+    trace_id = trace_ctx.trace_id if trace_ctx else generate_trace_id()
 
     def generate():
+        # 在生成器中恢复 Trace 上下文
+        if trace_ctx:
+            set_current_trace(trace_ctx)
+            
         start_time = time.time()
 
-        yield f"event: start\ndata: {json.dumps({'timestamp': int(start_time)})}\n\n"
+        yield f"event: start\ndata: {json.dumps({'timestamp': int(start_time), 'trace_id': trace_id})}\n\n"
 
         if not query.strip():
             yield f"event: error\ndata: {json.dumps({'error': 'Query cannot be empty'})}\n\n"
@@ -1116,26 +1374,170 @@ def chat_stream():
             return
 
         try:
-            # 使用流式执行
-            yield from _execute_streaming(agent_controller, query, context, start_time)
+            # 使用流式执行（传递 Trace 上下文）
+            yield from _execute_streaming(agent_controller, query, context, start_time, trace_ctx)
 
         except Exception as e:
             yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
             yield f"event: complete\ndata: {json.dumps({'timestamp': int(time.time()), 'total_time': time.time() - start_time})}\n\n"
 
-    return Response(generate(), mimetype='text/event-stream', headers={
+    return Response(stream_with_context(generate()), mimetype='text/event-stream', headers={
         'Cache-Control': 'no-cache',
         'X-Accel-Buffering': 'no'
     })
 
 
-def _execute_streaming(controller, query: str, context: dict, start_time: float):
-    """真正的流式执行 ReAct 循环"""
+def _execute_streaming(controller, query: str, context: dict, start_time: float, trace_ctx=None):
+    """真正的流式执行 ReAct 循环（支持目标分解，带 Trace 支持）"""
     from core.agent_controller import AgentThought, AgentState
+    from core.goal_planner import GoalStatus
+    from utils.trace_context import TraceSpan, set_current_trace
+    
+    # 设置 Trace 上下文
+    if trace_ctx:
+        set_current_trace(trace_ctx)
     
     thought = AgentThought(query=query, context=context or {})
     controller.current_thought = thought
 
+    try:
+        # ===== 阶段 1: 目标分解 =====
+        print(f"[STREAM] ===== 阶段 1: 目标分解 =====")
+        yield f"event: goal_decomposition\ndata: {json.dumps({'step': 'goal_decomposition', 'status': '开始目标分解'})}\n\n"
+        
+        with TraceSpan("goal_decomposition", parent=trace_ctx):
+            goal_plan = controller.goal_planner.plan(query, context)
+        controller.current_goal_plan = goal_plan
+        plan_id = f"plan_{int(time.time())}"
+        controller.goal_tracker.register_plan(plan_id, goal_plan)
+        
+        # 输出目标分解结果
+        goal_decomposition_data = {
+            'step': 'goal_decomposition_result',
+            'main_goal': goal_plan.main_goal,
+            'sub_goals': [sg.to_dict() for sg in goal_plan.sub_goals]
+        }
+        yield f"event: goal_decomposition_result\ndata: {json.dumps(goal_decomposition_data)}\n\n"
+        
+        thought.add_reasoning(f"目标分解完成: {goal_plan.main_goal}")
+        thought.add_reasoning(f"子目标数量: {len(goal_plan.sub_goals)}")
+        
+        # 如果只有一个子目标，使用传统 ReAct 循环
+        if len(goal_plan.sub_goals) <= 1:
+            print(f"[STREAM] 单目标查询，使用传统 ReAct 循环")
+            yield from _execute_single_goal_streaming(controller, thought, goal_plan.sub_goals[0] if goal_plan.sub_goals else None, start_time, trace_ctx)
+            return
+        
+        # ===== 阶段 2: 多子目标执行 =====
+        print(f"[STREAM] ===== 阶段 2: 执行子目标 =====")
+        yield f"event: goal_execution\ndata: {json.dumps({'step': 'goal_execution', 'status': '开始执行子目标'})}\n\n"
+        
+        while not goal_plan.is_complete():
+            sub_goal = goal_plan.get_next_pending_goal()
+            if not sub_goal:
+                print(f"[STREAM] 没有待执行的子目标，但计划未完成")
+                break
+            
+            print(f"\n[STREAM] >>> 执行子目标: {sub_goal.id}")
+            print(f"[STREAM]     描述: {sub_goal.description}")
+            print(f"[STREAM]     工具: {sub_goal.tool_name}")
+            
+            sub_goal_start_data = {
+                'step': 'sub_goal_start',
+                'sub_goal_id': sub_goal.id,
+                'description': sub_goal.description,
+                'tool_name': sub_goal.tool_name
+            }
+            yield f"event: sub_goal_start\ndata: {json.dumps(sub_goal_start_data)}\n\n"
+            
+            # 更新状态为执行中
+            sub_goal.status = GoalStatus.IN_PROGRESS
+            controller.goal_tracker.update_goal_status(plan_id, sub_goal.id, GoalStatus.IN_PROGRESS)
+            
+            # 执行子目标（消费生成器以实际执行）
+            sub_goal_success = False
+            for event in _execute_sub_goal_streaming(controller, thought, sub_goal, trace_ctx):
+                yield event  # 转发子目标的事件到前端
+                # 检查是否有完成或错误事件
+                if event.startswith("event: sub_goal_complete"):
+                    sub_goal_success = True
+                elif event.startswith("event: sub_goal_failed"):
+                    sub_goal_success = False
+            
+            if sub_goal_success:
+                sub_goal.status = GoalStatus.COMPLETED
+                controller.goal_tracker.update_goal_status(
+                    plan_id, sub_goal.id, GoalStatus.COMPLETED, result=sub_goal.result
+                )
+                sub_goal_complete_data = {
+                    'step': 'sub_goal_complete',
+                    'sub_goal_id': sub_goal.id,
+                    'status': 'completed'
+                }
+                yield f"event: sub_goal_complete\ndata: {json.dumps(sub_goal_complete_data)}\n\n"
+                print(f"[STREAM]     子目标完成 ✓")
+            else:
+                sub_goal.status = GoalStatus.FAILED
+                controller.goal_tracker.update_goal_status(
+                    plan_id, sub_goal.id, GoalStatus.FAILED, error=sub_goal.error
+                )
+                sub_goal_failed_data = {
+                    'step': 'sub_goal_failed',
+                    'sub_goal_id': sub_goal.id,
+                    'status': 'failed',
+                    'error': sub_goal.error
+                }
+                yield f"event: sub_goal_failed\ndata: {json.dumps(sub_goal_failed_data)}\n\n"
+                print(f"[STREAM]     子目标失败 ✗: {sub_goal.error}")
+            
+            # 将子目标结果添加到主 thought
+            thought.add_observation({
+                "sub_goal_id": sub_goal.id,
+                "description": sub_goal.description,
+                "status": sub_goal.status.value,
+                "result": sub_goal.result
+            })
+        
+        # ===== 阶段 3: 合并结果 =====
+        print(f"\n[STREAM] ===== 阶段 3: 合并结果 =====")
+        yield f"event: merge_results\ndata: {json.dumps({'step': 'merge_results', 'status': '合并子目标结果'})}\n\n"
+        
+        final_answer = controller._merge_sub_goal_results(goal_plan)
+        print(f"[STREAM_TRACE] final_answer 类型: {type(final_answer)}")
+        print(f"[STREAM_TRACE] final_answer 内容（前500字符）: {str(final_answer)[:500]}")
+        
+        thought.set_complete(final_answer)
+        
+        # 格式化最终答案（去除JSON结构，转为简洁文本）
+        formatted_answer = _format_answer_for_stream(final_answer)
+        print(f"[STREAM_TRACE] formatted_answer 类型: {type(formatted_answer)}")
+        print(f"[STREAM_TRACE] formatted_answer 内容（前500字符）: {formatted_answer[:500]}")
+        
+        # 输出最终答案
+        synthesize_event = {'step': 'synthesize', 'answer': formatted_answer}
+        print(f"[STREAM_TRACE] synthesize_event: {json.dumps(synthesize_event)[:500]}")
+        yield f"event: synthesize\ndata: {json.dumps(synthesize_event)}\n\n"
+        
+    except Exception as e:
+        import traceback
+        print(f"[STREAM] 异常: {str(e)}")
+        print(f"[STREAM] Traceback: {traceback.format_exc()}")
+        thought.set_failed(str(e))
+        yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+    
+    # 输出完成事件
+    total_time = time.time() - start_time
+    yield f"event: complete\ndata: {json.dumps({'timestamp': int(time.time()), 'total_time': round(total_time, 2), 'state': thought.state.value})}\n\n"
+
+
+def _execute_single_goal_streaming(controller, thought, sub_goal, start_time: float, trace_ctx=None):
+    """执行单个目标的流式输出"""
+    from core.agent_controller import AgentState
+    from utils.trace_context import set_current_trace
+    
+    if trace_ctx:
+        set_current_trace(trace_ctx)
+    
     try:
         for turn in range(controller.max_turns):
             thought.increment_turn()
@@ -1247,23 +1649,190 @@ def _execute_streaming(controller, query: str, context: dict, start_time: float)
 
         # 输出最终答案
         if thought.state == AgentState.COMPLETE:
-            answer = thought.final_answer or {}
-            formatted_answer = _format_answer_for_stream(answer)
-            yield f"event: synthesize\ndata: {json.dumps({'step': 'synthesize', 'answer': formatted_answer})}\n\n"
+            answer_data = thought.final_answer
+            print(f"[SINGLE_GOAL_TRACE] answer_data 类型: {type(answer_data)}")
+            print(f"[SINGLE_GOAL_TRACE] answer_data 内容（前500字符）: {str(answer_data)[:500]}")
+            
+            # 统一使用 _format_answer_for_stream 处理所有类型
+            answer_text = _format_answer_for_stream(answer_data)
+            print(f"[SINGLE_GOAL_TRACE] answer_text 内容（前500字符）: {answer_text[:500]}")
+            
+            yield f"event: synthesize\ndata: {json.dumps({'step': 'synthesize', 'answer': answer_text})}\n\n"
         else:
-            error = thought.error or '处理失败'
-            yield f"event: error\ndata: {json.dumps({'error': error})}\n\n"
-
-        total_time = time.time() - start_time
-        yield f"event: complete\ndata: {json.dumps({'timestamp': int(time.time()), 'total_time': round(total_time, 2), 'turns': thought.turn_count})}\n\n"
+            yield f"event: error\ndata: {json.dumps({'error': thought.error or '执行失败'})}\n\n"
 
     except Exception as e:
-        import traceback
-        print(f"[STREAM] 异常: {str(e)}")
-        print(f"[STREAM] Traceback: {traceback.format_exc()}")
         thought.set_failed(str(e))
         yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
-        yield f"event: complete\ndata: {json.dumps({'timestamp': int(time.time()), 'total_time': time.time() - start_time})}\n\n"
+
+
+def _execute_sub_goal_streaming(controller, thought, sub_goal, trace_ctx=None):
+    """执行单个子目标的流式输出
+    
+    Returns:
+        bool: 是否成功
+    """
+    from core.agent_controller import AgentThought, AgentState
+    from utils.trace_context import set_current_trace, TraceSpan
+    
+    if trace_ctx:
+        set_current_trace(trace_ctx)
+    
+    # 为子目标创建临时的 AgentThought
+    sub_thought = AgentThought(
+        query=f"{sub_goal.description} (来自: {controller.current_goal_plan.main_goal})",
+        context={
+            **(thought.context or {}),
+            "sub_goal_id": sub_goal.id,
+            "main_goal": controller.current_goal_plan.main_goal,
+            "goal_plan": controller.current_goal_plan.to_dict()
+        }
+    )
+    
+    try:
+        for turn in range(controller.max_turns):
+            sub_thought.increment_turn()
+
+            # 1. Think - 理解问题
+            sub_thought.state = AgentState.THINKING
+            sub_thought.add_reasoning(f"分析子目标：{sub_goal.description}")
+            yield f"event: think\ndata: {json.dumps({'step': 'think', 'content': f'分析子目标：{sub_goal.description}'})}\n\n"
+            
+            if sub_thought.state == AgentState.FAILED:
+                thought.set_failed(sub_thought.error)
+                return False
+
+            # 使用 LLM 智能选择工具
+            try:
+                tool_plan = controller.tool_selector.select_tools(
+                    query=sub_thought.query,
+                    context=sub_thought.context
+                )
+                sub_thought.context['tool_plan'] = tool_plan
+                sub_thought.add_reasoning(f"LLM 选择工具：{[t.tool_name for t in tool_plan.tools]}")
+                sub_thought.add_reasoning(f"选择理由：{tool_plan.reasoning}")
+                
+                tool_names = [t.tool_name for t in tool_plan.tools]
+                think_content = f"[{sub_goal.id}] 选择工具: " + ", ".join(tool_names) + "\n理由: " + tool_plan.reasoning
+                yield f"event: think\ndata: {json.dumps({'step': 'think', 'content': think_content})}\n\n"
+            except Exception as e:
+                error_msg = f"LLM 工具选择失败：{str(e)}"
+                sub_thought.set_failed(error_msg)
+                thought.set_failed(error_msg)
+                yield f"event: error\ndata: {json.dumps({'error': error_msg})}\n\n"
+                return False
+
+            # 2. Plan - 制定计划
+            sub_thought.state = AgentState.PLANNING
+            tool_plan = sub_thought.context.get('tool_plan')
+            if not tool_plan:
+                sub_thought.set_failed("工具计划缺失")
+                thought.set_failed("工具计划缺失")
+                return False
+
+            planned_tools = [t.tool_name for t in tool_plan.tools]
+            sub_thought.context['planned_tools'] = planned_tools
+            sub_thought.context['tool_params'] = {t.tool_name: t.parameters for t in tool_plan.tools}
+            
+            sub_thought.add_reasoning(f"计划执行工具：{planned_tools}")
+            yield f"event: plan\ndata: {json.dumps({'step': 'plan', 'actions': [{'tool': t} for t in planned_tools]})}\n\n"
+
+            # 3. Execute - 执行行动
+            sub_thought.state = AgentState.ACTING
+            
+            for tool_name in planned_tools:
+                tool = controller.tool_registry.get(tool_name)
+                if not tool:
+                    sub_thought.add_reasoning(f"工具 {tool_name} 不存在")
+                    continue
+
+                params = sub_thought.context.get('tool_params', {}).get(tool_name, {})
+                sub_thought.add_reasoning(f"执行工具：{tool_name}")
+                yield f"event: action\ndata: {json.dumps({'step': 'action', 'tool': tool_name, 'status': '执行中'})}\n\n"
+
+                try:
+                    result = tool.execute(**params)
+                    sub_thought.add_action(tool_name, params, result)
+                    
+                    # 格式化观察结果，去除冗余信息
+                    formatted_obs = _format_observation(result, tool_name)
+                    yield f"event: observation\ndata: {json.dumps({'step': 'observation', 'tool': tool_name, 'result': formatted_obs})}\n\n"
+                except Exception as e:
+                    error_msg = f"工具执行失败：{str(e)}"
+                    sub_thought.add_reasoning(error_msg)
+                    yield f"event: error\ndata: {json.dumps({'error': error_msg})}\n\n"
+
+            # 4. Observe - 观察结果
+            sub_thought.state = AgentState.OBSERVING
+            sub_thought.add_reasoning(f"收集到 {len(sub_thought.actions_taken)} 条观察结果")
+
+            # 5. Reflect - 反思（可选）
+            if controller.enable_reflection:
+                sub_thought.state = AgentState.REFLECTING
+                has_result = len(sub_thought.actions_taken) > 0 and any(a.get('result') for a in sub_thought.actions_taken)
+                
+                if has_result:
+                    sub_thought.add_reasoning("已收集到足够的信息，准备生成答案")
+                    # 提取ToolResult中的data字段，而不是整个对象
+                    last_result = sub_thought.actions_taken[-1].get('result')
+                    # last_result 可能是 ToolResult 对象或字典（来自 to_dict()）
+                    if hasattr(last_result, 'data'):
+                        result_data = last_result.data
+                    elif isinstance(last_result, dict):
+                        result_data = last_result.get('data', last_result)
+                    else:
+                        result_data = last_result
+                    sub_thought.set_complete(result_data)
+                else:
+                    sub_thought.add_reasoning("信息不足，需要继续收集")
+
+                if sub_thought.reflections:
+                    yield f"event: reflect\ndata: {json.dumps({'step': 'reflect', 'content': sub_thought.reflections[-1]})}\n\n"
+            
+            # 6. 检查是否完成（无论是否启用反思都要执行）
+            if sub_thought.state != AgentState.COMPLETE:
+                has_result = len(sub_thought.actions_taken) > 0 and any(a.get('result') for a in sub_thought.actions_taken)
+                if has_result:
+                    last_result = sub_thought.actions_taken[-1].get('result')
+                    if hasattr(last_result, 'data'):
+                        result_data = last_result.data
+                    elif isinstance(last_result, dict):
+                        result_data = last_result.get('data', last_result)
+                    else:
+                        result_data = last_result
+                    sub_thought.set_complete(result_data)
+                    sub_thought.add_reasoning("工具执行成功，标记为完成")
+
+            # 检查是否完成
+            if sub_thought.state == AgentState.COMPLETE:
+                # 只返回结果，不修改主 thought 的状态
+                sub_goal.result = sub_thought.final_answer
+                return True
+
+            if controller._should_finalize(sub_thought):
+                controller._finalize(sub_thought)
+                if sub_thought.state == AgentState.COMPLETE:
+                    sub_goal.result = sub_thought.final_answer
+                    return True
+                else:
+                    sub_goal.error = sub_thought.error
+                    return False
+
+        # 强制结束
+        if sub_thought.state not in [AgentState.COMPLETE, AgentState.FAILED]:
+            controller._finalize(sub_thought)
+
+        if sub_thought.state == AgentState.COMPLETE:
+            sub_goal.result = sub_thought.final_answer
+            return True
+        else:
+            sub_goal.error = sub_thought.error
+            return False
+
+    except Exception as e:
+        sub_thought.set_failed(str(e))
+        thought.set_failed(str(e))
+        return False
 
 
 def _generate_stream_legacy(query, context, start_time):
@@ -1483,6 +2052,203 @@ def clear_logs():
     return jsonify({"success": True})
 
 
+# === Trace 追踪 API 接口 ===
+
+@app.route('/api/trace/<trace_id>', methods=['GET'])
+def get_trace_logs(trace_id: str):
+    """根据 trace_id 查询完整链路日志
+    
+    Args:
+        trace_id: Trace ID
+        
+    Returns:
+        包含该 trace_id 的所有日志和 Span 树
+    """
+    # 从内存处理器获取所有日志
+    all_logs = memory_handler.get_logs(limit=10000)
+    
+    # 过滤包含该 trace_id 的日志
+    def has_trace_id(log, tid):
+        """检查日志是否包含指定的 trace_id"""
+        # 直接检查 trace_id 字段
+        if log.get('trace_id') == tid:
+            return True
+        # 检查 trace 对象中的 trace_id
+        trace = log.get('trace')
+        if trace and isinstance(trace, dict) and trace.get('trace_id') == tid:
+            return True
+        # 检查 extra_data 中的 trace_id
+        extra = log.get('extra_data') or {}
+        if isinstance(extra, dict) and extra.get('trace_id') == tid:
+            return True
+        return False
+    
+    trace_logs = [
+        log for log in all_logs 
+        if has_trace_id(log, trace_id)
+    ]
+    
+    # 按时间排序
+    trace_logs.sort(key=lambda x: x.get('timestamp', ''))
+    
+    # 构建 Span 树
+    span_tree = build_span_tree(trace_logs)
+    
+    # 获取相关 session_id
+    session_ids = set()
+    for log in trace_logs:
+        session_id = log.get('session_id') or log.get('trace', {}).get('session_id')
+        if session_id:
+            session_ids.add(session_id)
+    
+    return jsonify({
+        'success': True,
+        'trace_id': trace_id,
+        'total_logs': len(trace_logs),
+        'session_ids': list(session_ids),
+        'span_tree': span_tree,
+        'logs': trace_logs
+    })
+
+
+def build_span_tree(logs: list) -> dict:
+    """构建 Span 树结构
+    
+    Args:
+        logs: 日志列表
+        
+    Returns:
+        Span 树结构
+    """
+    spans = {}
+    root_spans = []
+    
+    for log in logs:
+        # 尝试从多个位置获取 Trace 信息
+        trace_info = log.get('trace') or {}
+        
+        # 如果 trace 为空，尝试从 extra_data 中获取
+        if not trace_info:
+            extra_data = log.get('extra_data') or {}
+            if isinstance(extra_data, dict) and 'span_id' in extra_data:
+                trace_info = {
+                    'span_id': extra_data.get('span_id'),
+                    'parent_span_id': extra_data.get('parent_span_id'),
+                    'operation': extra_data.get('operation'),
+                    'duration_ms': extra_data.get('duration_ms')
+                }
+        
+        if not isinstance(trace_info, dict):
+            continue
+            
+        span_id = trace_info.get('span_id')
+        parent_id = trace_info.get('parent_span_id')
+        
+        if span_id and span_id not in spans:
+            spans[span_id] = {
+                'span_id': span_id,
+                'parent_span_id': parent_id,
+                'operation': trace_info.get('operation'),
+                'session_id': log.get('session_id'),
+                'start_time': None,
+                'end_time': None,
+                'duration_ms': trace_info.get('duration_ms'),
+                'logs': [],
+                'children': []
+            }
+        
+        if span_id and span_id in spans:
+            spans[span_id]['logs'].append({
+                'timestamp': log.get('timestamp'),
+                'level': log.get('level'),
+                'message': log.get('message'),
+                'component': log.get('component')
+            })
+    
+    # 建立父子关系
+    for span_id, span in spans.items():
+        parent_id = span['parent_span_id']
+        if parent_id and parent_id in spans:
+            spans[parent_id]['children'].append(span_id)
+        else:
+            root_spans.append(span_id)
+    
+    return {
+        'roots': root_spans,
+        'spans': spans,
+        'total_spans': len(spans)
+    }
+
+
+@app.route('/api/trace/search', methods=['GET'])
+def search_traces():
+    """搜索 Trace
+    
+    Query Params:
+        session_id: 会话ID
+        operation: 操作名称
+        start_time: 开始时间 (ISO格式)
+        end_time: 结束时间 (ISO格式)
+        limit: 返回数量限制
+        
+    Returns:
+        Trace 列表
+    """
+    session_id = request.args.get('session_id')
+    operation = request.args.get('operation')
+    start_time = request.args.get('start_time')
+    end_time = request.args.get('end_time')
+    limit = int(request.args.get('limit', 100))
+    
+    # 获取所有日志
+    all_logs = memory_handler.get_logs(limit=10000)
+    
+    # 收集唯一的 trace_id
+    traces = {}
+    for log in all_logs:
+        trace_info = log.get('trace', {})
+        trace_id = trace_info.get('trace_id') or log.get('trace_id')
+        
+        if not trace_id:
+            continue
+        
+        # 过滤条件
+        if session_id:
+            log_session_id = trace_info.get('session_id') or log.get('session_id')
+            if log_session_id != session_id:
+                continue
+        
+        if operation and trace_info.get('operation') != operation:
+            continue
+        
+        # 收集 trace 信息
+        if trace_id not in traces:
+            traces[trace_id] = {
+                'trace_id': trace_id,
+                'session_id': trace_info.get('session_id') or log.get('session_id'),
+                'operation': trace_info.get('operation'),
+                'first_seen': log.get('timestamp'),
+                'last_seen': log.get('timestamp'),
+                'log_count': 0
+            }
+        
+        traces[trace_id]['log_count'] += 1
+        traces[trace_id]['last_seen'] = max(
+            traces[trace_id]['last_seen'],
+            log.get('timestamp', '')
+        )
+    
+    # 转换为列表并排序
+    trace_list = list(traces.values())
+    trace_list.sort(key=lambda x: x['last_seen'], reverse=True)
+    
+    return jsonify({
+        'success': True,
+        'total': len(trace_list),
+        'traces': trace_list[:limit]
+    })
+
+
 @app.route('/api/generate_hero_query', methods=['POST'])
 def generate_hero_query():
     """随机生成英雄查询文本"""
@@ -1564,5 +2330,8 @@ if __name__ == '__main__':
     
     # 初始化 Agent Controller
     initialize_agent_controller()
+    
+    # 启动每日缓存刷新任务
+    start_cache_scheduler()
     
     app.run(host='0.0.0.0', port=5000, debug=True, threaded=True)
