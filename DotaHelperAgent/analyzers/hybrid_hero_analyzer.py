@@ -2,6 +2,10 @@
 
 from typing import List, Dict, Optional, Any
 
+from utils.log_config import get_logger
+
+logger = get_logger("hybrid_hero_analyzer", component="analyzers")
+
 # 支持两种导入方式：包导入和直接运行
 try:
     from ..utils.api_client import OpenDotaClient
@@ -150,8 +154,7 @@ class HybridHeroAnalyzer(HybridAnalyzer):
                     "success": True
                 }
             except Exception as e:
-                print(f"⚠️ LLM 阵容分析失败：{e}")
-                print("   切换到数据驱动模式...")
+                logger.warning(f"LLM 阵容分析失败：{e}，切换到数据驱动模式...")
         
         # 数据驱动兜底
         data_analysis = self._data_analyzer.analyze_team_composition(

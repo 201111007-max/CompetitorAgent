@@ -10,6 +10,10 @@ import requests
 import json
 from typing import Dict, List, Optional, Any, Generator
 
+from utils.log_config import get_logger
+
+logger = get_logger("llm_client", component="utils")
+
 # 从核心配置模块导入 LLMConfig
 try:
     from ..core.config import LLMConfig
@@ -80,7 +84,7 @@ class LLMClient:
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
-            print(f"LLM 请求失败: {e}")
+            logger.error(f"LLM 请求失败: {e}")
             return {"error": str(e)}
     
     def chat_stream(
@@ -135,7 +139,7 @@ class LLMClient:
                         except json.JSONDecodeError:
                             continue
         except requests.exceptions.RequestException as e:
-            print(f"LLM 流式请求失败: {e}")
+            logger.error(f"LLM 流式请求失败: {e}")
             yield f"[错误: {e}]"
     
     def complete(
@@ -192,7 +196,7 @@ class LLMClient:
             data = response.json()
             return [model.get('id', '') for model in data.get('data', [])]
         except requests.exceptions.RequestException as e:
-            print(f"获取模型列表失败: {e}")
+            logger.error(f"获取模型列表失败: {e}")
             return []
 
 

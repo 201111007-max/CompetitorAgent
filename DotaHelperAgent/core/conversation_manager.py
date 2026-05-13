@@ -12,6 +12,11 @@ from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 
+from utils.log_config import get_logger
+from utils.trace_context import get_current_trace
+
+logger = get_logger("conversation_manager", component="core")
+
 
 class MessageRole(Enum):
     """消息角色枚举"""
@@ -484,7 +489,11 @@ class ConversationManager:
             conn.commit()
             conn.close()
         except Exception as e:
-            print(f"[CONVERSATION_MANAGER] 保存会话失败: {e}")
+            logger.error_ctx(
+                "保存会话失败",
+                session_id=None,
+                extra_data={"error": str(e)}
+            )
 
     def _load_session_from_db(self, session_id: str) -> Optional[ConversationSession]:
         """从数据库加载会话"""
@@ -500,5 +509,9 @@ class ConversationManager:
             data = json.loads(row[0])
             return ConversationSession.from_dict(data)
         except Exception as e:
-            print(f"[CONVERSATION_MANAGER] 加载会话失败: {e}")
+            logger.error_ctx(
+                "加载会话失败",
+                session_id=None,
+                extra_data={"error": str(e)}
+            )
             return None

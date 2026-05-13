@@ -8,6 +8,10 @@ from typing import List, Optional
 from pathlib import Path
 import yaml
 
+from utils.log_config import get_logger
+
+logger = get_logger("config", component="core")
+
 
 def load_llm_config_from_yaml(config_path: Optional[str] = None) -> dict:
     """从 YAML 配置文件加载 LLM 配置
@@ -38,8 +42,7 @@ def load_llm_config_from_yaml(config_path: Optional[str] = None) -> dict:
                 config = yaml.safe_load(f)
                 return config.get('llm', {})
         except Exception as e:
-            print(f"⚠️ 加载 LLM 配置文件失败：{e}")
-            print("   将使用默认配置")
+            logger.warning(f"加载 LLM 配置文件失败：{e}，将使用默认配置")
     
     return {}
 

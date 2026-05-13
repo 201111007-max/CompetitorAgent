@@ -8,6 +8,7 @@
 - ⚔️ **克制分析** - 基于数据的英雄克制关系分析
 - 🎒 **出装推荐** - 分阶段的最优物品搭配建议
 - 📚 **技能加点** - 基于英雄定位的加点顺序
+- 🧠 **元认知能力** - Agent 自我评估知识边界，主动请求澄清
 - 💾 **智能缓存** - 两级缓存（内存 + 文件），减少 API 调用
 - 🔄 **ReAct Agent** - 推理 - 行动循环，自主决策
 - 📝 **日志系统** - 完整的日志记录和前端实时展示
@@ -41,6 +42,39 @@
 ┌─────────────────────────────────────────────────────────────┐
 │                  返回结果 + 来源标识 (llm/data)               │
 └─────────────────────────────────────────────────────────────┘
+```
+
+### 元认知能力架构
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                      元认知评估层 (Metacognition)                 │
+├──────────────────────────────────────────────────────────────────┤
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │              LLMBasedKnowledgeBoundary                      │  │
+│  │         使用 LLM 评估知识边界和数据覆盖度                    │  │
+│  └────────────────────────────────────────────────────────────┘  │
+│                              │                                    │
+│                              ▼                                    │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │              WeightedConfidenceCalculator                   │  │
+│  │         加权计算置信度分数                                   │  │
+│  └────────────────────────────────────────────────────────────┘  │
+│                              │                                    │
+│                              ▼                                    │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │              RuleBasedClarificationGenerator                │  │
+│  │         生成澄清请求（缺失信息、歧义意图等）                 │  │
+│  └────────────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌──────────────────────────────────────────────────────────────────┐
+│                      AgentController 集成点                       │
+│  - assess_before_execution(): 执行前评估知识边界                  │
+│  - assess_after_execution(): 执行后评估结果质量                   │
+│  - should_request_clarification(): 判断是否需要澄清               │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 ### 核心模块调用图
@@ -148,7 +182,12 @@ DotaHelperAgent/
 │   ├── agent_controller.py # Agent 控制器 (ReAct 循环)
 │   ├── config.py           # 配置管理
 │   ├── react_agent.py      # ReAct Agent 实现
-│   └── tool_registry.py    # 工具注册表
+│   ├── tool_registry.py    # 工具注册表
+│   └── metacognition/      # 元认知模块
+│       ├── interfaces.py   # 接口定义
+│       ├── rule_based.py   # 规则组件（置信度计算、澄清生成）
+│       ├── llm_based.py    # LLM 驱动知识边界评估
+│       └── factory.py      # 工厂类
 │
 ├── analyzers/               # 分析器模块
 │   ├── hero_analyzer.py    # 英雄克制分析
@@ -237,12 +276,13 @@ tools = create_all_tools(
 )
 registry.register_batch(tools)
 
-# 创建 Agent Controller
+# 创建 Agent Controller（启用元认知）
 controller = AgentController(
     tool_registry=registry,
     memory=agent.memory,
     max_turns=5,
-    enable_reflection=True
+    enable_reflection=True,
+    metacognition_config={"type": "llm_based"}  # 启用 LLM 驱动的元认知
 )
 
 # 执行查询（自动进行 ReAct 循环）
@@ -255,7 +295,39 @@ print(f"推理过程：{result['reasoning']}")
 print(f"最终答案：{result['answer']}")
 ```
 
-### 4. 启动 Web API
+### 4. 使用元认知能力
+
+```python
+from core.metacognition.factory import MetacognitionFactory
+
+# 创建元认知评估器
+evaluator = MetacognitionFactory.create_evaluator(
+    config={"type": "llm_based"},
+    tool_registry=registry,
+    llm_client=llm_client
+)
+
+# 执行前评估
+assessment = evaluator.assess_before_execution(
+    query="克制谁？",
+    context={}
+)
+
+print(f"置信度：{assessment.confidence_score}")
+print(f"置信等级：{assessment.confidence_level}")
+print(f"限制：{assessment.limitations}")
+
+# 判断是否需要澄清
+if evaluator.should_request_clarification(assessment):
+    clarification = evaluator.generate_clarification(
+        query="克制谁？",
+        assessment=assessment,
+        missing_info=["英雄名称"]
+    )
+    print(f"需要澄清：{clarification.questions}")
+```
+
+### 5. 启动 Web API
 
 ```bash
 # 启动服务器
@@ -285,7 +357,7 @@ curl -X POST http://localhost:5000/api/chat \
   }'
 ```
 
-### 5. 配置 LLM（可选）
+### 6. 配置 LLM（可选）
 
 ```bash
 # 复制配置文件
@@ -295,6 +367,66 @@ cp config/llm_config.yaml.example config/llm_config.yaml
 # base_url: "http://127.0.0.1:1234/v1"
 # model: "qwen3.5-9b"
 ```
+
+## 🧠 元认知能力详解
+
+### 什么是元认知能力？
+
+元认知能力让 Agent 能够"知道自己知道什么，不知道自己不知道什么"。在 DotaHelperAgent 中，这意味着：
+
+1. **执行前评估** - 在回答之前，评估是否有足够的信息和数据
+2. **置信度计算** - 量化对答案的信心程度
+3. **主动澄清** - 当信息不足时，主动请求用户提供缺失信息
+4. **执行后评估** - 评估生成答案的质量
+
+### 元认知评估流程
+
+```
+用户查询
+    │
+    ▼
+┌─────────────────────┐
+│ 1. 知识边界评估      │ ← LLM 评估数据覆盖度
+│    - 数据覆盖度      │
+│    - 数据质量        │
+│    - 工具匹配度      │
+└─────────────────────┘
+    │
+    ▼
+┌─────────────────────┐
+│ 2. 置信度计算        │ ← 加权公式
+│    - 综合分数        │
+│    - 置信等级        │
+└─────────────────────┘
+    │
+    ▼
+┌─────────────────────┐
+│ 3. 判断是否需要澄清  │
+│    [置信度 < 阈值?]  │
+└─────────────────────┘
+    │
+    ├── 是 → 生成澄清请求 → 返回给用户
+    │
+    └── 否 → 继续执行 → 生成答案
+```
+
+### 置信度等级
+
+| 等级 | 分数范围 | 说明 |
+|------|----------|------|
+| VERY_HIGH | 0.9 - 1.0 | 数据充分，高度自信 |
+| HIGH | 0.7 - 0.9 | 数据较充分，比较自信 |
+| MEDIUM | 0.5 - 0.7 | 数据一般，谨慎回答 |
+| LOW | 0.3 - 0.5 | 数据不足，建议澄清 |
+| VERY_LOW | 0.0 - 0.3 | 数据严重不足，必须澄清 |
+
+### 澄清请求类型
+
+- **missing_hero** - 缺少英雄信息
+- **missing_context** - 缺少上下文信息
+- **ambiguous_intent** - 意图不明确
+- **version_dependent** - 版本相关，需要确认
+- **insufficient_data** - 数据不足
 
 ## 🧪 测试
 
@@ -308,6 +440,9 @@ pytest api/ -v      # API 测试
 pytest core/ -v     # 核心测试
 pytest unit/ -v     # 单元测试
 pytest e2e/ -v      # E2E 测试
+
+# 运行元认知模块测试
+python tests/core/test_metacognition.py
 ```
 
 ## 📝 日志系统
@@ -375,9 +510,9 @@ Web 界面右侧提供日志侧边栏，功能包括：
 
 ## 📖 详细文档
 
-- [TESTING_GUIDE.md](tests/TESTING_GUIDE.md) - 测试指南
-- [tests/README.md](tests/README.md) - 测试套件说明
-- [tests/STRUCTURE_OVERVIEW.md](tests/STRUCTURE_OVERVIEW.md) - 目录结构总览
+- [TESTING_GUIDE.md](DotaHelperAgent/tests/TESTING_GUIDE.md) - 测试指南
+- [tests/README.md](DotaHelperAgent/tests/README.md) - 测试套件说明
+- [tests/STRUCTURE_OVERVIEW.md](DotaHelperAgent/tests/STRUCTURE_OVERVIEW.md) - 目录结构总览
 
 ## 🔗 外部链接
 
@@ -386,5 +521,5 @@ Web 界面右侧提供日志侧边栏，功能包括：
 
 ---
 
-**最后更新**: 2026-04-24  
+**最后更新**: 2026-05-13  
 **维护者**: DotaHelperAgent Team

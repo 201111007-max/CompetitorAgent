@@ -20,6 +20,11 @@ project_root = Path(__file__).parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
+from utils.log_config import get_logger
+from utils.trace_context import get_current_trace
+
+logger = get_logger("goal_planner", component="core")
+
 
 class GoalStatus(Enum):
     """目标状态枚举"""
@@ -234,8 +239,12 @@ class GoalPlanner:
         Returns:
             GoalPlan: 目标计划
         """
-        print(f"\n[GOAL_PLANNER] 开始目标分解")
-        print(f"[GOAL_PLANNER] Query: {query}")
+        trace_ctx = get_current_trace()
+        logger.info_ctx(
+            "开始目标分解",
+            session_id=trace_ctx.session_id if trace_ctx else None,
+            extra_data={"query": query}
+        )
         
         # 获取工具描述
         tools_desc = self._format_tools_description()
@@ -248,7 +257,7 @@ class GoalPlanner:
         )
         
         # 调用 LLM
-        print(f"[GOAL_PLANNER] 调用 LLM 进行目标分解...")
+        logger.info_ctx("调用 LLM 进行目标分解", session_id=trace_ctx.session_id if trace_ctx else None)
         response = self.llm.chat(
             messages=[{"role": "user", "content": prompt}],
             temperature=0.2,
@@ -258,7 +267,7 @@ class GoalPlanner:
         # 检查错误
         if "error" in response:
             error_msg = f"LLM 目标分解失败: {response['error']}"
-            print(f"[GOAL_PLANNER] {error_msg}")
+            logger.warning_ctx(error_msg, session_id=trace_ctx.session_id if trace_ctx else None)
             # 返回单目标计划
             return GoalPlan(
                 original_query=query,
@@ -293,18 +302,21 @@ class GoalPlanner:
                 sub_goals=sub_goals
             )
             
-            print(f"[GOAL_PLANNER] 目标分解完成:")
-            print(f"[GOAL_PLANNER]   主目标: {goal_plan.main_goal}")
-            print(f"[GOAL_PLANNER]   子目标数: {len(goal_plan.sub_goals)}")
-            for sg in goal_plan.sub_goals:
-                deps = f" (依赖: {sg.dependencies})" if sg.dependencies else ""
-                print(f"[GOAL_PLANNER]   - {sg.id}: {sg.description}{deps}")
+            logger.info_ctx(
+                "目标分解完成",
+                session_id=trace_ctx.session_id if trace_ctx else None,
+                extra_data={
+                    "main_goal": goal_plan.main_goal,
+                    "sub_goals_count": len(goal_plan.sub_goals),
+                    "sub_goals": [{"id": sg.id, "description": sg.description, "dependencies": sg.dependencies} for sg in goal_plan.sub_goals]
+                }
+            )
             
             return goal_plan
             
         except Exception as e:
             error_msg = f"解析目标计划失败: {str(e)}"
-            print(f"[GOAL_PLANNER] {error_msg}")
+            logger.error_ctx(error_msg, session_id=trace_ctx.session_id if trace_ctx else None)
             # 返回单目标计划
             return GoalPlan(
                 original_query=query,
@@ -356,8 +368,11 @@ class GoalPlanner:
             return data
             
         except json.JSONDecodeError as e:
-            print(f"[GOAL_PLANNER] JSON 解析失败: {e}")
-            print(f"[GOAL_PLANNER] 原始内容: {content[:500]}")
+            logger.error_ctx(
+                "JSON 解析失败",
+                session_id=trace_ctx.session_id if trace_ctx else None,
+                extra_data={"error": str(e), "content_preview": content[:500]}
+            )
             raise
 
 

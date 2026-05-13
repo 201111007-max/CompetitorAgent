@@ -11,6 +11,7 @@ import time
 try:
     from ..utils.api_client import OpenDotaClient
     from ..utils.llm_client import LLMClient, LLMConfig, DotaLLMAnalyzer
+    from ..utils.log_config import get_logger
     from ..analyzers.hero_analyzer import HeroAnalyzer
     from ..analyzers.item_recommender import ItemRecommender
     from ..analyzers.skill_builder import SkillBuilder
@@ -20,6 +21,7 @@ except ImportError:
     try:
         from utils.api_client import OpenDotaClient
         from utils.llm_client import LLMClient, LLMConfig, DotaLLMAnalyzer
+        from utils.log_config import get_logger
         from analyzers.hero_analyzer import HeroAnalyzer
         from analyzers.item_recommender import ItemRecommender
         from analyzers.skill_builder import SkillBuilder
@@ -28,11 +30,15 @@ except ImportError:
     except ImportError:
         from DotaHelperAgent.utils.api_client import OpenDotaClient
         from DotaHelperAgent.utils.llm_client import LLMClient, LLMConfig, DotaLLMAnalyzer
+        from DotaHelperAgent.utils.log_config import get_logger
         from DotaHelperAgent.analyzers.hero_analyzer import HeroAnalyzer
         from DotaHelperAgent.analyzers.item_recommender import ItemRecommender
         from DotaHelperAgent.analyzers.skill_builder import SkillBuilder
         from DotaHelperAgent.memory.memory import AgentMemory
         from DotaHelperAgent.core.config import AgentConfig, MatchupConfig
+
+# 获取 logger
+logger = get_logger(__name__, component="agent")
 
 
 class DotaHelperAgent:
@@ -84,9 +90,10 @@ class DotaHelperAgent:
 
             # 检查 LLM 服务是否可用
             if not llm_client.check_health():
-                print(f"⚠️ 警告：LLM 服务不可用 ({config.llm.base_url})")
-                print("   将使用纯数据驱动模式")
+                logger.warning(f"LLM 服务不可用 ({config.llm.base_url})，将使用纯数据驱动模式")
                 self.llm_enabled = False
+            else:
+                logger.info(f"LLM 服务已启用 ({config.llm.base_url})")
 
         if enable_llm is not None:
             self.llm_enabled = enable_llm
@@ -112,9 +119,9 @@ class DotaHelperAgent:
                     long_term_max_items=1000,
                     episodic_max_entries=500
                 )
-                print(f"[OK] Memory 系统已初始化：{memory_dir}")
+                logger.info(f"Memory 系统已初始化：{memory_dir}")
             except Exception as e:
-                print(f"[WARN] Memory 系统初始化失败：{e}")
+                logger.error(f"Memory 系统初始化失败：{e}")
                 self.enable_memory = False
 
     def recommend_heroes(
@@ -133,15 +140,19 @@ class DotaHelperAgent:
         Returns:
             Dict: 推荐结果
         """
+        logger.info(f"开始英雄推荐 - 己方: {our_heroes}, 敌方: {enemy_heroes}, top_n: {top_n}")
+        
         # 先尝试使用 LLM 分析
         if self.llm_enabled and self.llm_analyzer:
             try:
+                logger.info("使用 LLM 进行英雄推荐分析")
                 llm_result = self.llm_analyzer.recommend_heroes(
                     our_heroes=our_heroes,
                     enemy_heroes=enemy_heroes,
                     top_n=top_n
                 )
                 if llm_result:
+                    logger.info(f"LLM 英雄推荐成功，推荐数量: {len(llm_result)}")
                     return {
                         "source": "llm",
                         "recommendations": llm_result,
@@ -149,15 +160,16 @@ class DotaHelperAgent:
                         "enemy_heroes": enemy_heroes
                     }
             except Exception as e:
-                print(f"⚠️ LLM 分析失败: {e}")
-                print("   回退到数据驱动模式")
+                logger.warning(f"LLM 分析失败: {e}，回退到数据驱动模式")
 
         # 回退到数据驱动分析
+        logger.info("使用数据驱动模式进行英雄推荐")
         recommendations = self.hero_analyzer.analyze_matchups(
             our_heroes=our_heroes,
             enemy_heroes=enemy_heroes,
             top_n=top_n
         )
+        logger.info(f"数据驱动英雄推荐完成，推荐数量: {len(recommendations)}")
         return {
             "recommendations": recommendations,
             "source": "data",
@@ -223,9 +235,11 @@ class DotaHelperAgent:
             return []
         
         try:
-            return self.memory.get_relevant_context(query, limit=limit)
+            context = self.memory.get_relevant_context(query, limit=limit)
+            logger.info(f"获取记忆上下文成功 - 查询: {query}, 返回: {len(context)} 条")
+            return context
         except Exception as e:
-            print(f"获取记忆上下文失败：{e}")
+            logger.error(f"获取记忆上下文失败：{e}")
             return []
     
     def save_query_result(self, query: str, result: Dict[str, Any], tags: Optional[List[str]] = None) -> None:
@@ -240,8 +254,9 @@ class DotaHelperAgent:
             return
         
         try:
+            key = f"query_{int(time.time())}_{hash(query) % 10000}"
             self.memory.store(
-                key=f"query_{int(time.time())}_{hash(query) % 10000}",
+                key=key,
                 value={
                     "query": query,
                     "result": result,
@@ -250,8 +265,9 @@ class DotaHelperAgent:
                 memory_type="long_term",
                 tags=tags or ["dota", "query"]
             )
+            logger.info(f"查询结果已保存到记忆 - key: {key}")
         except Exception as e:
-            print(f"保存查询结果失败：{e}")
+            logger.error(f"保存查询结果失败：{e}")
     
     def save_experience(
         self,
@@ -281,8 +297,9 @@ class DotaHelperAgent:
                 sentiment=sentiment,
                 outcome=outcome
             )
+            logger.info(f"经验已保存到情景记忆 - 类型: {event_type}")
         except Exception as e:
-            print(f"保存经验失败：{e}")
+            logger.error(f"保存经验失败：{e}")
     
     def clear_memory(self) -> None:
         """清空所有记忆"""
@@ -291,9 +308,9 @@ class DotaHelperAgent:
         
         try:
             self.memory.clear_all()
-            print("✓ Memory 已清空")
+            logger.info("Memory 已清空")
         except Exception as e:
-            print(f"清空记忆失败：{e}")
+            logger.error(f"清空记忆失败：{e}")
     
     def get_memory_stats(self) -> Dict[str, Any]:
         """获取记忆系统统计信息

@@ -7,6 +7,10 @@ from typing import Dict, List, Optional, Any
 from pathlib import Path
 import time
 
+from utils.log_config import get_logger
+
+logger = get_logger("api_client", component="utils")
+
 # 支持两种导入方式：包导入和直接运行
 try:
     from ..cache.cache_manager import CacheManager
@@ -102,7 +106,7 @@ class OpenDotaClient:
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
-            print(f"API 请求失败：{e}")
+            logger.error(f"API 请求失败：{e}")
             return None
 
     def get_heroes(self, use_cache: bool = True) -> List[Dict]:
@@ -136,7 +140,7 @@ class OpenDotaClient:
                             self.cache.set(cache_key, heroes)
                         return heroes
         except Exception as e:
-            print(f"从本地文件加载英雄列表失败: {e}")
+            logger.error(f"从本地文件加载英雄列表失败: {e}")
         
         # API 请求
         heroes = self._make_request("/heroes")
@@ -229,17 +233,17 @@ class OpenDotaClient:
             hero_ids: 要预热的英雄 ID 列表（可选，默认使用配置中的热门英雄）
             full_warmup: 是否全量预热所有英雄数据（默认 False）
         """
-        print("正在预热缓存...")
+        logger.info("正在预热缓存...")
         
         # 加载英雄列表
-        print("  - 加载英雄列表...")
+        logger.info("  - 加载英雄列表...")
         all_heroes = self.get_heroes()
         
         # 确定要预热的英雄
         if full_warmup:
             # 全量预热：获取所有英雄 ID
             heroes_to_warm = [hero["id"] for hero in all_heroes]
-            print(f"  - 全量预热模式：共 {len(heroes_to_warm)} 个英雄")
+            logger.info(f"  - 全量预热模式：共 {len(heroes_to_warm)} 个英雄")
         elif hero_ids:
             heroes_to_warm = hero_ids
         elif self.config:
@@ -249,14 +253,14 @@ class OpenDotaClient:
             heroes_to_warm = [1, 2, 5, 10, 15, 20, 25, 30, 35, 40]
         
         # 预热英雄数据
-        print(f"  - 预热 {len(heroes_to_warm)} 个英雄数据...")
+        logger.info(f"  - 预热 {len(heroes_to_warm)} 个英雄数据...")
         success_count = 0
         fail_count = 0
         
         for i, hero_id in enumerate(heroes_to_warm, 1):
             try:
                 if i % 10 == 0:
-                    print(f"    进度: {i}/{len(heroes_to_warm)}")
+                    logger.info(f"    进度: {i}/{len(heroes_to_warm)}")
                 
                 matchup_result = self.get_hero_matchups(hero_id)
                 if matchup_result is not None:
@@ -264,10 +268,10 @@ class OpenDotaClient:
                 else:
                     fail_count += 1
             except Exception as e:
-                print(f"    警告: 英雄 {hero_id} 预热失败: {e}")
+                logger.warning(f"    警告: 英雄 {hero_id} 预热失败: {e}")
                 fail_count += 1
         
-        print(f"✅ 缓存预热完成: 成功 {success_count} 个, 失败 {fail_count} 个")
+        logger.info(f"缓存预热完成: 成功 {success_count} 个, 失败 {fail_count} 个")
 
     def hero_name_to_id(self, hero_name: str) -> Optional[int]:
         """将英雄名称转换为 ID

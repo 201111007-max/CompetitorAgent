@@ -2,6 +2,10 @@
 
 from typing import List, Dict, Tuple, Optional, Any
 
+from utils.log_config import get_logger
+
+logger = get_logger("hero_analyzer", component="analyzers")
+
 # 支持两种导入方式：包导入和直接运行
 try:
     from ..utils.api_client import OpenDotaClient
@@ -115,28 +119,36 @@ class HeroAnalyzer:
         Returns:
             List[Dict]: 推荐英雄列表，包含英雄名称、理由、胜率等
         """
-        print(f"\n{'='*60}")
-        print(f"[HERO_ANALYZER.analyze_matchups] 开始分析")
-        print(f"[HERO_ANALYZER.analyze_matchups] our_heroes (输入): {our_heroes}")
-        print(f"[HERO_ANALYZER.analyze_matchups] enemy_heroes (输入): {enemy_heroes}")
-        print(f"[HERO_ANALYZER.analyze_matchups] top_n: {top_n}")
+        logger.info(
+            "开始分析英雄克制关系",
+            extra={
+                "our_heroes": our_heroes,
+                "enemy_heroes": enemy_heroes,
+                "top_n": top_n
+            }
+        )
         
         # 获取所有英雄
         all_heroes = self.client.get_heroes()
         if not all_heroes:
-            print(f"[HERO_ANALYZER.analyze_matchups] 警告: 无法获取英雄列表")
+            logger.warning("无法获取英雄列表")
             return []
-        print(f"[HERO_ANALYZER.analyze_matchups] 获取到 {len(all_heroes)} 个英雄")
+        logger.info(f"获取到 {len(all_heroes)} 个英雄")
         
         # 转换英雄名称为 ID
         our_hero_ids = self._hero_names_to_ids(our_heroes)
         enemy_hero_ids = self._hero_names_to_ids(enemy_heroes)
         
-        print(f"[HERO_ANALYZER.analyze_matchups] our_hero_ids: {our_hero_ids}")
-        print(f"[HERO_ANALYZER.analyze_matchups] enemy_hero_ids: {enemy_hero_ids}")
+        logger.info(
+            "英雄ID转换完成",
+            extra={
+                "our_hero_ids": our_hero_ids,
+                "enemy_hero_ids": enemy_hero_ids
+            }
+        )
         
         if not enemy_hero_ids and not our_hero_ids:
-            print(f"[HERO_ANALYZER.analyze_matchups] 警告: 没有有效的英雄ID，无法分析")
+            logger.warning("没有有效的英雄ID，无法分析")
         
         # 计算每个候选英雄的得分
         candidate_scores: List[Dict[str, Any]] = []
@@ -146,16 +158,21 @@ class HeroAnalyzer:
             if hero_result:
                 candidate_scores.append(hero_result)
         
-        print(f"[HERO_ANALYZER.analyze_matchups] 候选英雄数量: {len(candidate_scores)}")
+        logger.info(f"候选英雄数量: {len(candidate_scores)}")
         
         # 按得分排序，返回前 N 个
         candidate_scores.sort(key=lambda x: x["score"], reverse=True)
         result = candidate_scores[:top_n]
         
-        print(f"[HERO_ANALYZER.analyze_matchups] 最终推荐结果:")
-        for i, rec in enumerate(result, 1):
-            print(f"[HERO_ANALYZER.analyze_matchups]   {i}. {rec['hero_name']} (score: {rec['score']})")
-        print(f"{'='*60}\n")
+        logger.info(
+            "最终推荐结果",
+            extra={
+                "recommendations": [
+                    {"rank": i, "hero_name": rec['hero_name'], "score": rec['score']}
+                    for i, rec in enumerate(result, 1)
+                ]
+            }
+        )
         
         return result
     
@@ -250,10 +267,10 @@ class HeroAnalyzer:
         Returns:
             英雄 ID 列表（过滤掉 None）
         """
-        print(f"[HERO_ANALYZER._hero_names_to_ids] 输入: {hero_names}")
+        logger.debug(f"英雄名称转ID - 输入: {hero_names}")
         hero_ids = [self.client.hero_name_to_id(name) for name in hero_names]
         result = [hid for hid in hero_ids if hid is not None]
-        print(f"[HERO_ANALYZER._hero_names_to_ids] 输出: {result}")
+        logger.debug(f"英雄名称转ID - 输出: {result}")
         return result
     
     def get_counter_heroes(

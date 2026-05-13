@@ -15,6 +15,10 @@ if str(project_root) not in sys.path:
 
 from utils.llm_client import LLMClient
 from core.tool_registry import ToolRegistry
+from utils.log_config import get_logger
+from utils.trace_context import get_current_trace
+
+logger = get_logger("llm_tool_selector", component="core")
 
 
 @dataclass
@@ -114,22 +118,37 @@ class LLMToolSelector:
         Raises:
             Exception: LLM 调用失败或解析失败
         """
-        print(f"\n[LLMToolSelector] 开始工具选择")
-        print(f"[LLMToolSelector] Query: {query}")
-        print(f"[LLMToolSelector] Context: {context}")
+        trace_ctx = get_current_trace()
+        logger.info_ctx(
+            "开始工具选择",
+            session_id=trace_ctx.session_id if trace_ctx else None,
+            extra_data={"query": query}
+        )
 
         # 1. 获取可用工具描述
         tools_desc = self._format_tools_description()
-        print(f"[LLMToolSelector] 可用工具数量: {len(self.registry.list_tools())}")
-        print(f"[LLMToolSelector] 工具列表: {self.registry.list_tools()}")
+        available_tools = self.registry.list_tools()
+        logger.info_ctx(
+            "获取可用工具",
+            session_id=trace_ctx.session_id if trace_ctx else None,
+            extra_data={"tools_count": len(available_tools), "tools": available_tools}
+        )
 
         # 2. 构造上下文信息
         context_info = self._format_context(context)
-        print(f"[LLMToolSelector] 上下文信息: {context_info}")
+        logger.info_ctx(
+            "构造上下文信息",
+            session_id=trace_ctx.session_id if trace_ctx else None,
+            extra_data={"context_info": context_info}
+        )
 
         # 3. 构造对话历史
         conversation_history = self._format_conversation_history(context)
-        print(f"[LLMToolSelector] 对话历史: {'有' if conversation_history != '无对话历史' else '无'}")
+        logger.info_ctx(
+            "构造对话历史",
+            session_id=trace_ctx.session_id if trace_ctx else None,
+            extra_data={"has_history": conversation_history != "无对话历史"}
+        )
 
         # 4. 构造 Prompt
         prompt = self.TOOL_SELECTION_PROMPT.format(
@@ -140,7 +159,7 @@ class LLMToolSelector:
         )
 
         # 5. 调用 LLM
-        print(f"[LLMToolSelector] 调用 LLM 进行工具选择...")
+        logger.info_ctx("调用 LLM 进行工具选择", session_id=trace_ctx.session_id if trace_ctx else None)
         response = self.llm.chat(
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
@@ -150,28 +169,48 @@ class LLMToolSelector:
         # 6. 检查 LLM 响应
         if "error" in response:
             error_msg = response.get("error", "未知错误")
-            print(f"[LLMToolSelector] LLM 返回错误: {error_msg}")
+            logger.error_ctx(
+                "LLM 返回错误",
+                session_id=trace_ctx.session_id if trace_ctx else None,
+                extra_data={"error": error_msg}
+            )
             raise Exception(f"LLM 工具选择失败：{error_msg}")
 
         # 7. 解析 LLM 返回内容
         try:
             content = response['choices'][0]['message']['content']
-            print(f"[LLMToolSelector] LLM 原始响应:\n{content}")
+            logger.debug_ctx(
+                "LLM 原始响应",
+                session_id=trace_ctx.session_id if trace_ctx else None,
+                extra_data={"content": content[:500]}
+            )
         except (KeyError, IndexError) as e:
-            print(f"[LLMToolSelector] LLM 响应格式异常: {e}")
+            logger.error_ctx(
+                "LLM 响应格式异常",
+                session_id=trace_ctx.session_id if trace_ctx else None,
+                extra_data={"error": str(e)}
+            )
             raise Exception(f"LLM 响应格式异常：{e}")
 
         # 8. 解析 JSON
         plan = self._parse_plan(content)
-        print(f"[LLMToolSelector] 解析后的工具计划:")
-        print(f"[LLMToolSelector]   Reasoning: {plan.reasoning}")
-        print(f"[LLMToolSelector]   Tools: {[t.tool_name for t in plan.tools]}")
-        for tool_call in plan.tools:
-            print(f"[LLMToolSelector]   - {tool_call.tool_name}: {tool_call.parameters}")
+        logger.info_ctx(
+            "解析工具计划",
+            session_id=trace_ctx.session_id if trace_ctx else None,
+            extra_data={
+                "reasoning": plan.reasoning,
+                "tools": [t.tool_name for t in plan.tools],
+                "tool_params": {t.tool_name: t.parameters for t in plan.tools}
+            }
+        )
 
         # 9. 验证工具计划
         self._validate_plan(plan)
-        print(f"[LLMToolSelector] 工具计划验证通过")
+        logger.info_ctx(
+            "工具计划验证通过",
+            session_id=trace_ctx.session_id if trace_ctx else None,
+            extra_data={"tools_count": len(plan.tools)}
+        )
 
         return plan
 
@@ -265,8 +304,12 @@ class LLMToolSelector:
         try:
             data = json.loads(json_str)
         except json.JSONDecodeError as e:
-            print(f"[LLMToolSelector] JSON 解析失败: {e}")
-            print(f"[LLMToolSelector] 原始内容: {json_str}")
+            trace_ctx = get_current_trace()
+            logger.error_ctx(
+                "JSON 解析失败",
+                session_id=trace_ctx.session_id if trace_ctx else None,
+                extra_data={"error": str(e), "content_preview": json_str[:500]}
+            )
             raise Exception(f"工具计划 JSON 解析失败：{e}")
 
         # 验证必要字段
@@ -340,4 +383,11 @@ class LLMToolSelector:
                     f"应为字典类型，实际为: {type(tool_call.parameters)}"
                 )
 
-        print(f"[LLMToolSelector] 验证通过: {len(plan.tools)} 个工具均有效")
+        trace_ctx = get_current_trace()
+        logger.info_ctx(
+            "工具计划验证通过",
+            session_id=trace_ctx.session_id if trace_ctx else None,
+            extra_data={"tools_count": len(plan.tools)}
+        )
+
+

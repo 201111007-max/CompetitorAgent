@@ -7,6 +7,7 @@ from typing import Dict, List, Optional, Any, Callable
 from dataclasses import dataclass, field
 import time
 import json
+import traceback
 
 try:
     from ..tools.base import Tool, ToolResult, ToolStatus
@@ -15,6 +16,11 @@ except ImportError:
         from tools.base import Tool, ToolResult, ToolStatus
     except ImportError:
         from DotaHelperAgent.tools.base import Tool, ToolResult, ToolStatus
+
+from utils.log_config import get_logger
+from utils.trace_context import get_current_trace
+
+logger = get_logger("tool_registry", component="core")
 
 
 @dataclass
@@ -96,12 +102,20 @@ class ToolRegistry:
 
     def execute(self, tool_name: str, **kwargs) -> ToolResult:
         """执行 Tool"""
-        print(f"\n[TOOL_REGISTRY.execute] 执行工具: {tool_name}")
-        print(f"[TOOL_REGISTRY.execute] 参数: {kwargs}")
+        trace_ctx = get_current_trace()
+        logger.info_ctx(
+            "执行工具",
+            session_id=trace_ctx.session_id if trace_ctx else None,
+            extra_data={"tool_name": tool_name, "params": kwargs}
+        )
         
         tool = self.get(tool_name)
         if tool is None:
-            print(f"[TOOL_REGISTRY.execute] 错误: 工具 '{tool_name}' 未找到")
+            logger.error_ctx(
+                "工具未找到",
+                session_id=trace_ctx.session_id if trace_ctx else None,
+                extra_data={"tool_name": tool_name}
+            )
             return ToolResult(
                 tool_name=tool_name,
                 status=ToolStatus.FAILURE,
@@ -109,21 +123,39 @@ class ToolRegistry:
                 error=f"Tool '{tool_name}' not found"
             )
 
-        print(f"[TOOL_REGISTRY.execute] 找到工具对象: {tool.name}, 类型: {type(tool)}")
+        logger.info_ctx(
+            "找到工具对象",
+            session_id=trace_ctx.session_id if trace_ctx else None,
+            extra_data={"tool_name": tool.name, "tool_type": str(type(tool))}
+        )
 
         # 记录调用开始时间
         start_time = time.time()
         
         try:
             result = tool.execute(**kwargs)
-            print(f"[TOOL_REGISTRY.execute] 工具执行完成")
-            print(f"[TOOL_REGISTRY.execute] 结果类型: {type(result)}")
-            print(f"[TOOL_REGISTRY.execute] 结果内容: {result}")
-        except Exception as e:
-            print(f"[TOOL_REGISTRY.execute] 工具执行异常: {str(e)}")
-            import traceback
-            print(f"[TOOL_REGISTRY.execute] Traceback: {traceback.format_exc()}")
             execution_time = time.time() - start_time
+            logger.info_ctx(
+                "工具执行完成",
+                session_id=trace_ctx.session_id if trace_ctx else None,
+                extra_data={
+                    "tool_name": tool_name,
+                    "execution_time_ms": round(execution_time * 1000, 2),
+                    "result_type": str(type(result)),
+                    "result_preview": str(result)[:500]
+                }
+            )
+        except Exception as e:
+            execution_time = time.time() - start_time
+            logger.error_ctx(
+                "工具执行异常",
+                session_id=trace_ctx.session_id if trace_ctx else None,
+                extra_data={
+                    "tool_name": tool_name,
+                    "error": str(e),
+                    "traceback": traceback.format_exc()
+                }
+            )
             result = ToolResult(
                 tool_name=tool_name,
                 status=ToolStatus.FAILURE,

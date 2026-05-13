@@ -10,6 +10,7 @@ import time
 import json
 import sys
 import logging
+import traceback
 from pathlib import Path
 
 # 确保可以导入项目模块
@@ -22,6 +23,8 @@ from core.llm_tool_selector import LLMToolSelector
 from core.conversation_manager import ConversationManager, Message, MessageRole
 from core.context_augmenter import ContextAugmenter
 from core.goal_planner import GoalPlanner, GoalPlan, GoalStatus, GoalTracker
+from core.metacognition.factory import MetacognitionFactory
+from core.metacognition.interfaces import IMetacognitionEvaluator, KnowledgeAssessment
 from memory.memory import AgentMemory
 from tools.base import ToolResult, ToolStatus
 from utils.trace_context import TraceSpan, get_current_trace
@@ -147,7 +150,8 @@ class AgentController:
         conversation_manager: Optional[ConversationManager] = None,
         max_turns: int = 5,
         enable_reflection: bool = True,
-        enable_memory: bool = True
+        enable_memory: bool = True,
+        metacognition_config: Optional[Dict[str, Any]] = None
     ):
         """初始化 Agent Controller
 
@@ -159,6 +163,8 @@ class AgentController:
             max_turns: 最大循环轮数
             enable_reflection: 是否启用反思
             enable_memory: 是否启用记忆系统
+            metacognition_config: 元认知配置（可选）
+                                示例：{"type": "rule_based", "clarification_threshold": "low"}
         """
         self.tool_registry = tool_registry
         self.llm_client = llm_client
@@ -171,17 +177,33 @@ class AgentController:
         
         # 初始化 LLM 工具选择器
         self.tool_selector = LLMToolSelector(llm_client, tool_registry)
-        print(f"[AGENT_CONTROLLER] LLM 工具选择器已初始化")
+        logger.info("LLM 工具选择器已初始化")
         
         # 初始化上下文增强器
         self.context_augmenter = ContextAugmenter(llm_client)
-        print(f"[AGENT_CONTROLLER] 上下文增强器已初始化")
+        logger.info("上下文增强器已初始化")
         
         # 初始化目标规划器
         self.goal_planner = GoalPlanner(llm_client, tool_registry)
         self.goal_tracker = GoalTracker()
         self.current_goal_plan: Optional[GoalPlan] = None
-        print(f"[AGENT_CONTROLLER] 目标规划器已初始化")
+        logger.info("目标规划器已初始化")
+        
+        # 初始化元认知评估器
+        self.enable_metacognition = metacognition_config is not None
+        self.metacognition: Optional[IMetacognitionEvaluator] = None
+        
+        if self.enable_metacognition:
+            self.metacognition = MetacognitionFactory.create_evaluator(
+                config=metacognition_config,
+                tool_registry=tool_registry,
+                memory=memory,
+                api_client=None,
+                llm_client=llm_client
+            )
+            logger.info("元认知评估器已初始化")
+        else:
+            logger.info("元认知评估器未启用")
         
         # 加载已知英雄列表到上下文增强器
         self._load_known_heroes_to_augmenter()
@@ -206,19 +228,15 @@ class AgentController:
         trace_ctx = get_current_trace()
         
         with TraceSpan("agent_solve", parent=trace_ctx) as solve_span:
-            # 使用带 Trace 支持的 logger
             logger.info_ctx(
                 "开始处理查询",
                 session_id=session_id,
-                extra_data={"query": query, "context": context}
+                extra_data={
+                    "query": query,
+                    "context": context,
+                    "trace_id": solve_span.trace_id if solve_span else 'N/A'
+                }
             )
-            print(f"\n{'='*60}")
-            print(f"[AGENT_CONTROLLER] 开始处理查询")
-            print(f"[AGENT_CONTROLLER] Query: {query}")
-            print(f"[AGENT_CONTROLLER] Session ID: {session_id}")
-            print(f"[AGENT_CONTROLLER] Trace ID: {solve_span.trace_id if solve_span else 'N/A'}")
-            print(f"[AGENT_CONTROLLER] Context: {context}")
-            print(f"{'='*60}\n")
             
             original_query = query
             augmented_context = {}
@@ -236,19 +254,71 @@ class AgentController:
                 else:
                     context = augmented_context
                 
-                print(f"[AGENT_CONTROLLER] 上下文增强:")
-                print(f"[AGENT_CONTROLLER]   原始查询: {original_query}")
-                print(f"[AGENT_CONTROLLER]   增强查询: {query}")
-                print(f"[AGENT_CONTROLLER]   推断意图: {augmented.get('inferred_intent')}")
-                print(f"[AGENT_CONTROLLER]   当前英雄: {augmented_context.get('current_heroes')}")
-                print(f"[AGENT_CONTROLLER]   当前话题: {augmented_context.get('current_topic')}")
+                logger.info_ctx(
+                    "上下文增强完成",
+                    session_id=session_id,
+                    extra_data={
+                        "original_query": original_query,
+                        "augmented_query": query,
+                        "inferred_intent": augmented.get('inferred_intent'),
+                        "current_heroes": augmented_context.get('current_heroes'),
+                        "current_topic": augmented_context.get('current_topic')
+                    }
+                )
             
             thought = AgentThought(query=query, context=context or {})
             self.current_thought = thought
 
             try:
+                # 0. 元认知评估（执行前）
+                if self.enable_metacognition:
+                    with TraceSpan("metacognition_before_execution"):
+                        assessment = self.metacognition.assess_before_execution(query, context or {})
+                        
+                        logger.info_ctx(
+                            "元认知执行前评估完成",
+                            session_id=session_id,
+                            extra_data={
+                                "confidence_level": assessment.confidence_level.value,
+                                "confidence_score": round(assessment.confidence_score, 3),
+                                "limitations": assessment.limitations
+                            }
+                        )
+                        
+                        # 如果置信度太低，请求用户澄清
+                        if self.metacognition.should_request_clarification(assessment):
+                            clarification = self.metacognition.generate_clarification(query, assessment)
+                            
+                            logger.info_ctx(
+                                "元认知请求用户澄清",
+                                session_id=session_id,
+                                extra_data={
+                                    "clarification_type": clarification.type,
+                                    "questions": clarification.questions
+                                }
+                            )
+                            
+                            thought.set_complete({
+                                "answer": {
+                                    "message": "我需要更多信息来准确回答您的问题",
+                                    "clarification": clarification.to_dict()
+                                },
+                                "reasoning": thought.reasoning_steps,
+                                "actions": thought.actions_taken,
+                                "confidence": assessment.confidence_score,
+                                "source": "metacognition_clarification",
+                                "metacognition_assessment": assessment.to_dict()
+                            })
+                            
+                            response = self._build_response(thought)
+                            
+                            if session_id and self.conversation_manager:
+                                self._save_conversation_history(session_id, original_query, response, augmented_context)
+                            
+                            return response
+
                 # 1. 目标分解阶段
-                print(f"[AGENT_CONTROLLER] ===== 阶段 1: 目标分解 =====")
+                logger.info_ctx("开始目标分解", session_id=session_id)
                 with TraceSpan("goal_decomposition"):
                     goal_plan = self.goal_planner.plan(query, context)
                 self.current_goal_plan = goal_plan
@@ -258,24 +328,39 @@ class AgentController:
                 thought.add_reasoning(f"目标分解完成: {goal_plan.main_goal}")
                 thought.add_reasoning(f"子目标数量: {len(goal_plan.sub_goals)}")
                 
+                logger.info_ctx(
+                    "目标分解完成",
+                    session_id=session_id,
+                    extra_data={
+                        "main_goal": goal_plan.main_goal,
+                        "sub_goals_count": len(goal_plan.sub_goals)
+                    }
+                )
+                
                 # 如果只有一个子目标，使用传统 ReAct 循环
                 if len(goal_plan.sub_goals) <= 1:
-                    print(f"[AGENT_CONTROLLER] 单目标查询，使用传统 ReAct 循环")
+                    logger.info_ctx("单目标查询，使用传统 ReAct 循环", session_id=session_id)
                     return self._execute_single_goal(thought, goal_plan.sub_goals[0] if goal_plan.sub_goals else None, 
                                                      session_id, original_query, augmented_context)
                 
                 # 2. 多子目标执行阶段
-                print(f"[AGENT_CONTROLLER] ===== 阶段 2: 执行子目标 =====")
+                logger.info_ctx("开始执行多子目标", session_id=session_id)
                 
                 while not goal_plan.is_complete():
                     sub_goal = goal_plan.get_next_pending_goal()
                     if not sub_goal:
-                        print(f"[AGENT_CONTROLLER] 没有待执行的子目标，但计划未完成")
+                        logger.warning_ctx("没有待执行的子目标，但计划未完成", session_id=session_id)
                         break
                     
-                    print(f"\n[AGENT_CONTROLLER] >>> 执行子目标: {sub_goal.id}")
-                    print(f"[AGENT_CONTROLLER]     描述: {sub_goal.description}")
-                    print(f"[AGENT_CONTROLLER]     工具: {sub_goal.tool_name}")
+                    logger.info_ctx(
+                        "开始执行子目标",
+                        session_id=session_id,
+                        extra_data={
+                            "sub_goal_id": sub_goal.id,
+                            "description": sub_goal.description,
+                            "tool_name": sub_goal.tool_name
+                        }
+                    )
                     
                     # 更新状态为执行中
                     sub_goal.status = GoalStatus.IN_PROGRESS
@@ -302,14 +387,18 @@ class AgentController:
                         self.goal_tracker.update_goal_status(
                             plan_id, sub_goal.id, GoalStatus.COMPLETED, result=sub_thought.final_answer
                         )
-                        print(f"[AGENT_CONTROLLER]     子目标完成 ✓")
+                        logger.info_ctx("子目标完成", session_id=session_id, extra_data={"sub_goal_id": sub_goal.id})
                     else:
                         sub_goal.status = GoalStatus.FAILED
                         sub_goal.error = sub_thought.error
                         self.goal_tracker.update_goal_status(
                             plan_id, sub_goal.id, GoalStatus.FAILED, error=sub_thought.error
                         )
-                        print(f"[AGENT_CONTROLLER]     子目标失败 ✗: {sub_thought.error}")
+                        logger.error_ctx(
+                            "子目标失败",
+                            session_id=session_id,
+                            extra_data={"sub_goal_id": sub_goal.id, "error": sub_thought.error}
+                        )
                     
                     # 将子目标结果添加到主 thought
                     thought.add_observation({
@@ -322,12 +411,44 @@ class AgentController:
                     
                     # 更新进度
                     progress = goal_plan.get_progress()
-                    print(f"[AGENT_CONTROLLER]     进度: {progress['completed']}/{progress['total']} ({progress['percentage']:.0f}%)")
+                    logger.info_ctx(
+                        "子目标执行进度",
+                        session_id=session_id,
+                        extra_data={
+                            "completed": progress['completed'],
+                            "total": progress['total'],
+                            "percentage": progress['percentage']
+                        }
+                    )
                 
                 # 3. 合并结果
-                print(f"\n[AGENT_CONTROLLER] ===== 阶段 3: 合并结果 =====")
+                logger.info_ctx("开始合并子目标结果", session_id=session_id)
                 with TraceSpan("merge_results"):
                     final_answer = self._merge_sub_goal_results(goal_plan)
+                
+                # 元认知评估（执行后）
+                if self.enable_metacognition:
+                    with TraceSpan("metacognition_after_execution"):
+                        post_assessment = self.metacognition.assess_after_execution(
+                            query=original_query,
+                            final_result=final_answer,
+                            context=context or {}
+                        )
+                        
+                        logger.info_ctx(
+                            "元认知执行后评估完成",
+                            session_id=session_id,
+                            extra_data={
+                                "confidence_level": post_assessment.confidence_level.value,
+                                "confidence_score": round(post_assessment.confidence_score, 3)
+                            }
+                        )
+                        
+                        # 添加元认知评估到最终结果
+                        if isinstance(final_answer, dict):
+                            final_answer["metacognition_assessment"] = post_assessment.to_dict()
+                            final_answer["confidence"] = post_assessment.confidence_score
+                
                 thought.set_complete(final_answer)
                 
                 response = self._build_response(thought)
@@ -335,20 +456,27 @@ class AgentController:
                 if session_id and self.conversation_manager:
                     self._save_conversation_history(session_id, original_query, response, augmented_context)
                 
-                print(f"\n[AGENT_CONTROLLER] 最终响应:")
-                print(f"[AGENT_CONTROLLER]   State: {response.get('state')}")
-                print(f"[AGENT_CONTROLLER]   Success: {response.get('success')}")
-                print(f"[AGENT_CONTROLLER]   Turn Count: {response.get('turn_count')}")
-                print(f"[AGENT_CONTROLLER]   Duration: {response.get('duration'):.2f}s")
-                print(f"{'='*60}\n")
+                logger.info_ctx(
+                    "查询处理完成",
+                    session_id=session_id,
+                    extra_data={
+                        "state": response.get('state'),
+                        "success": response.get('success'),
+                        "turn_count": response.get('turn_count'),
+                        "duration": response.get('duration')
+                    }
+                )
                 
                 return response
 
             except Exception as e:
-                print(f"[AGENT_CONTROLLER] 异常: {str(e)}")
-                import traceback
-                print(f"[AGENT_CONTROLLER] Traceback: {traceback.format_exc()}")
-                thought.set_failed(str(e))
+                error_msg = f"查询处理失败: {str(e)}"
+                logger.error_ctx(
+                    error_msg,
+                    session_id=session_id,
+                    extra_data={"error": str(e), "traceback": traceback.format_exc()}
+                )
+                thought.set_failed(error_msg)
                 
                 if session_id and self.conversation_manager:
                     error_response = {
@@ -373,20 +501,32 @@ class AgentController:
 
         # 使用 LLM 智能选择工具
         try:
-            print(f"[AGENT_CONTROLLER._think] 调用 LLM 工具选择器...")
+            start_time = time.time()
+            logger.info_ctx("调用 LLM 工具选择器", session_id=thought.context.get('session_id'))
             tool_plan = self.tool_selector.select_tools(
                 query=thought.query,
                 context=thought.context
             )
+            selection_time = time.time() - start_time
             thought.context['tool_plan'] = tool_plan
             thought.add_reasoning(f"LLM 选择工具：{[t.tool_name for t in tool_plan.tools]}")
             thought.add_reasoning(f"选择理由：{tool_plan.reasoning}")
-            print(f"[AGENT_CONTROLLER._think] LLM 工具选择完成")
-            print(f"[AGENT_CONTROLLER._think] 选择工具: {[t.tool_name for t in tool_plan.tools]}")
-            print(f"[AGENT_CONTROLLER._think] 选择理由: {tool_plan.reasoning}")
+            logger.info_ctx(
+                "LLM 工具选择完成",
+                session_id=thought.context.get('session_id'),
+                extra_data={
+                    "selected_tools": [t.tool_name for t in tool_plan.tools],
+                    "reasoning": tool_plan.reasoning,
+                    "selection_time_ms": round(selection_time * 1000, 2)
+                }
+            )
         except Exception as e:
             error_msg = f"LLM 工具选择失败：{str(e)}"
-            print(f"[AGENT_CONTROLLER._think] {error_msg}")
+            logger.error_ctx(
+                error_msg,
+                session_id=thought.context.get('session_id'),
+                extra_data={"error": str(e)}
+            )
             thought.set_failed(error_msg)
             return
 
@@ -396,6 +536,11 @@ class AgentController:
             if relevant_context:
                 thought.add_reasoning(f"从记忆中检索到 {len(relevant_context)} 条相关上下文")
                 thought.context['memory_context'] = relevant_context
+                logger.info_ctx(
+                    "从记忆中检索到相关上下文",
+                    session_id=thought.context.get('session_id'),
+                    extra_data={"context_count": len(relevant_context)}
+                )
 
     def _plan(self, thought: AgentThought) -> None:
         """Plan 步骤 - 制定行动计划
@@ -408,7 +553,7 @@ class AgentController:
         tool_plan = thought.context.get('tool_plan')
         if not tool_plan:
             error_msg = "工具计划缺失，无法制定执行计划"
-            print(f"[AGENT_CONTROLLER._plan] {error_msg}")
+            logger.error_ctx(error_msg, session_id=thought.context.get('session_id'))
             thought.set_failed(error_msg)
             return
 
@@ -422,14 +567,18 @@ class AgentController:
         }
 
         thought.add_reasoning(f"计划执行工具：{planned_tools}")
-        print(f"[AGENT_CONTROLLER._plan] 计划执行工具: {planned_tools}")
-        print(f"[AGENT_CONTROLLER._plan] 工具参数:")
-        for tool_name, params in thought.context['tool_params'].items():
-            print(f"[AGENT_CONTROLLER._plan]   {tool_name}: {params}")
+        logger.info_ctx(
+            "制定执行计划",
+            session_id=thought.context.get('session_id'),
+            extra_data={
+                "planned_tools": planned_tools,
+                "tool_params": thought.context['tool_params']
+            }
+        )
 
         # 如果 LLM 返回空工具列表，说明不需要调用工具，直接用 LLM 回答
         if not planned_tools:
-            print(f"[AGENT_CONTROLLER._plan] 空工具列表，标记为直接回答模式")
+            logger.info_ctx("空工具列表，标记为直接回答模式", session_id=thought.context.get('session_id'))
             thought.context['direct_answer_mode'] = True
 
     def _execute(self, thought: AgentThought) -> None:
@@ -441,11 +590,13 @@ class AgentController:
 
         planned_tools = thought.context.get('planned_tools', [])
         tool_params = thought.context.get('tool_params', {})
+        session_id = thought.context.get('session_id')
 
-        print(f"[AGENT_CONTROLLER._execute] 计划执行工具: {planned_tools}")
-        print(f"[AGENT_CONTROLLER._execute] 工具参数:")
-        for tool_name, params in tool_params.items():
-            print(f"[AGENT_CONTROLLER._execute]   {tool_name}: {params}")
+        logger.info_ctx(
+            "开始执行工具",
+            session_id=session_id,
+            extra_data={"planned_tools": planned_tools}
+        )
 
         # 执行工具调用
         for tool_name in planned_tools:
@@ -454,56 +605,70 @@ class AgentController:
 
             tool = self.tool_registry.get(tool_name)
             if tool:
+                start_time = time.time()
                 try:
                     thought.add_reasoning(f"执行工具：{tool_name}")
-                    print(f"\n[AGENT_CONTROLLER._execute] >>> 执行工具: {tool_name}")
-                    print(f"[AGENT_CONTROLLER._execute]     参数: {params}")
+                    logger.info_ctx(
+                        f"执行工具: {tool_name}",
+                        session_id=session_id,
+                        extra_data={"params": params}
+                    )
                     result = self.tool_registry.execute(tool_name, **params)
-                    print(f"[AGENT_CONTROLLER._execute]     结果状态: {result.status.value if result else 'None'}")
-                    if result:
-                        print(f"[AGENT_CONTROLLER._execute]     结果数据: {result.data}")
-                        if result.error:
-                            print(f"[AGENT_CONTROLLER._execute]     错误信息: {result.error}")
+                    execution_time = time.time() - start_time
                     thought.add_action(tool_name, params, result)
+
+                    logger.info_ctx(
+                        "工具执行完成",
+                        session_id=session_id,
+                        extra_data={
+                            "tool_name": tool_name,
+                            "execution_time_ms": round(execution_time * 1000, 2),
+                            "success": result.is_success()
+                        }
+                    )
 
                     if result.is_success():
                         thought.add_observation(result.data)
-                        print(f"[AGENT_CONTROLLER._execute]     工具执行成功，已添加观察结果")
-                        # 记录工具执行结果到日志
                         logger.info_ctx(
-                            f"工具执行成功",
+                            "工具执行成功",
                             session_id=session_id,
                             extra_data={
                                 "tool_name": tool_name,
-                                "params": params,
                                 "result_data": result.data
                             }
                         )
                         # 如果工具执行成功且有结果，可以考虑完成
                         if self._has_sufficient_data(thought):
-                            print(f"[AGENT_CONTROLLER._execute]     已收集足够数据，准备合成结果")
+                            logger.info_ctx("已收集足够数据，准备合成结果", session_id=session_id)
                             self._synthesize(thought)
                             return
                     else:
                         thought.add_reasoning(f"工具 {tool_name} 执行失败：{result.error}")
-                        print(f"[AGENT_CONTROLLER._execute]     工具执行失败: {result.error}")
                         logger.error_ctx(
-                            f"工具执行失败",
+                            "工具执行失败",
                             session_id=session_id,
                             extra_data={"tool_name": tool_name, "error": result.error}
                         )
 
                 except Exception as e:
+                    execution_time = time.time() - start_time
                     thought.add_reasoning(f"工具 {tool_name} 执行异常：{str(e)}")
                     thought.add_action(tool_name, params, None)
-                    print(f"[AGENT_CONTROLLER._execute]     工具执行异常: {str(e)}")
-                    import traceback
-                    print(f"[AGENT_CONTROLLER._execute]     Traceback: {traceback.format_exc()}")
+                    logger.error_ctx(
+                        "工具执行异常",
+                        session_id=session_id,
+                        extra_data={
+                            "tool_name": tool_name,
+                            "execution_time_ms": round(execution_time * 1000, 2),
+                            "error": str(e),
+                            "traceback": traceback.format_exc()
+                        }
+                    )
 
         # 如果没有工具执行成功，标记为失败
         if not thought.observations:
             thought.add_reasoning("所有工具执行失败")
-            print(f"[AGENT_CONTROLLER._execute] 所有工具执行失败，无观察结果")
+            logger.warning_ctx("所有工具执行失败，无观察结果", session_id=session_id)
 
     def _observe(self, thought: AgentThought) -> None:
         """Observe 步骤 - 观察和分析结果
@@ -511,9 +676,15 @@ class AgentController:
         分析工具执行结果，提取关键信息
         """
         thought.state = AgentState.OBSERVING
+        session_id = thought.context.get('session_id')
 
         if thought.observations:
             thought.add_reasoning(f"收集到 {len(thought.observations)} 条观察结果")
+            logger.info_ctx(
+                "收集到观察结果",
+                session_id=session_id,
+                extra_data={"observation_count": len(thought.observations)}
+            )
 
             # 分析观察结果
             for i, obs in enumerate(thought.observations):
@@ -521,6 +692,8 @@ class AgentController:
                     thought.add_reasoning(f"观察结果 {i+1}: 包含 {len(obs)} 个字段")
                 elif isinstance(obs, list):
                     thought.add_reasoning(f"观察结果 {i+1}: 包含 {len(obs)} 项")
+        else:
+            logger.warning_ctx("没有收集到观察结果", session_id=session_id)
 
     def _reflect(self, thought: AgentThought) -> None:
         """Reflect 步骤 - 反思和评估
@@ -529,28 +702,42 @@ class AgentController:
         """
         try:
             thought.state = AgentState.REFLECTING
+            session_id = thought.context.get('session_id')
 
             # 评估结果质量
             quality_score = self._evaluate_result_quality(thought)
             thought.add_reflection(f"结果质量评分：{quality_score:.2f}/1.00")
+            logger.info_ctx(
+                "结果质量评估完成",
+                session_id=session_id,
+                extra_data={"quality_score": quality_score}
+            )
 
             # 检查是否需要更多行动
             if quality_score < 0.6 and thought.turn_count < self.max_turns:
                 thought.add_reflection("结果质量不足，需要更多行动")
+                logger.info_ctx("结果质量不足，调整策略", session_id=session_id)
                 # 调整策略
                 self._adjust_strategy(thought)
             else:
                 thought.add_reflection("结果质量可接受，准备结束")
+                logger.info_ctx("结果质量可接受，准备合成结果", session_id=session_id)
                 self._synthesize(thought)
         except Exception as e:
-            print(f"[AGENT_CONTROLLER._reflect] Reflect 步骤失败: {e}")
-            import traceback
-            print(f"[AGENT_CONTROLLER._reflect] Traceback: {traceback.format_exc()}")
+            logger.error_ctx(
+                f"Reflect 步骤失败: {e}",
+                session_id=thought.context.get('session_id'),
+                extra_data={"error": str(e), "traceback": traceback.format_exc()}
+            )
             # 如果 reflect 失败，尝试直接合成结果
             try:
                 self._synthesize(thought)
             except Exception as synthesize_error:
-                print(f"[AGENT_CONTROLLER._reflect] Synthesize 也失败了: {synthesize_error}")
+                logger.error_ctx(
+                    f"Synthesize 也失败了: {synthesize_error}",
+                    session_id=thought.context.get('session_id'),
+                    extra_data={"error": str(synthesize_error)}
+                )
                 thought.set_failed(f"Reflect 步骤失败: {str(e)}")
 
     def _synthesize(self, thought: AgentThought) -> None:
@@ -558,9 +745,11 @@ class AgentController:
 
         综合所有观察和推理，形成最终答案
         """
+        session_id = thought.context.get('session_id')
+        
         # 直接回答模式：不需要调用工具，直接用 LLM 回答用户问题
         if thought.context.get('direct_answer_mode'):
-            print(f"[AGENT_CONTROLLER._synthesize] 直接回答模式，使用 LLM 生成答案")
+            logger.info_ctx("直接回答模式，使用 LLM 生成答案", session_id=session_id)
             try:
                 llm_response = self._generate_direct_answer(thought.query, thought)
                 thought.set_complete({
@@ -570,8 +759,13 @@ class AgentController:
                     "confidence": 0.8,
                     "source": "llm_direct"
                 })
+                logger.info_ctx("LLM 直接回答生成成功", session_id=session_id)
             except Exception as e:
-                print(f"[AGENT_CONTROLLER._synthesize] LLM 直接回答失败: {e}")
+                logger.error_ctx(
+                    f"LLM 直接回答失败: {e}",
+                    session_id=session_id,
+                    extra_data={"error": str(e)}
+                )
                 thought.set_complete({
                     "answer": {"message": f"抱歉，我无法回答这个问题：{str(e)}"},
                     "reasoning": thought.reasoning_steps,
@@ -588,6 +782,7 @@ class AgentController:
                 "actions": thought.actions_taken,
                 "confidence": self._evaluate_result_quality(thought)
             })
+            logger.info_ctx("观察结果合并完成", session_id=session_id)
         else:
             thought.set_complete({
                 "answer": {"message": "无法获取有效数据"},
@@ -595,6 +790,7 @@ class AgentController:
                 "actions": thought.actions_taken,
                 "confidence": 0.0
             })
+            logger.warning_ctx("无法获取有效数据", session_id=session_id)
 
     def _generate_direct_answer(self, query: str, thought: AgentThought) -> str:
         """使用 LLM 直接回答用户问题（不需要工具调用）
@@ -691,12 +887,10 @@ class AgentController:
                 merged['data_sources'].append(obs)
             elif isinstance(obs, list):
                 # 处理直接返回列表的情况（如 analyze_matchups 的返回）
-                print(f"[AGENT_CONTROLLER._merge_observations] 处理列表格式观察结果，包含 {len(obs)} 项")
                 if len(obs) > 0 and isinstance(obs[0], dict):
                     # 检查是否是英雄推荐格式
                     if 'hero_name' in obs[0] or 'hero_id' in obs[0]:
                         merged['recommendations'].extend(obs)
-                        print(f"[AGENT_CONTROLLER._merge_observations] 已添加 {len(obs)} 条英雄推荐")
                     else:
                         merged['data_sources'].extend(obs)
                 else:
@@ -704,14 +898,12 @@ class AgentController:
             else:
                 merged['raw_data'] = obs
 
-        print(f"[AGENT_CONTROLLER._merge_observations] 最终合并结果: {len(merged['recommendations'])} 条推荐")
-        # 记录合并结果到日志
         logger.info_ctx(
             "观察结果合并完成",
             session_id=None,
             extra_data={
                 "recommendations_count": len(merged['recommendations']),
-                "recommendations": merged['recommendations']
+                "data_sources_count": len(merged['data_sources'])
             }
         )
         return merged
@@ -828,7 +1020,11 @@ class AgentController:
             )
 
         except Exception as e:
-            print(f"[AGENT_CONTROLLER] 保存对话历史失败：{str(e)}")
+            logger.error_ctx(
+                f"保存对话历史失败：{str(e)}",
+                session_id=session_id,
+                extra_data={"error": str(e)}
+            )
 
     def _load_known_heroes_to_augmenter(self) -> None:
         """加载已知英雄列表到上下文增强器"""
@@ -847,11 +1043,11 @@ class AgentController:
                         hero_names.append(localized_name)
                 
                 self.context_augmenter.load_known_heroes(hero_names)
-                print(f"[AGENT_CONTROLLER] 已加载 {len(hero_names)} 个英雄名称到上下文增强器")
+                logger.info_ctx(f"已加载 {len(hero_names)} 个英雄名称到上下文增强器")
             else:
-                print(f"[AGENT_CONTROLLER] 未能获取英雄列表，使用默认实体提取")
+                logger.warning("未能获取英雄列表，使用默认实体提取")
         except Exception as e:
-            print(f"[AGENT_CONTROLLER] 加载英雄列表失败: {e}")
+            logger.error(f"加载英雄列表失败: {e}")
 
     def _deep_merge_contexts(
         self,
@@ -881,7 +1077,7 @@ class AgentController:
         """判断是否应该结束循环"""
         # 直接回答模式：不需要工具调用，直接结束
         if thought.context.get('direct_answer_mode'):
-            print(f"[AGENT_CONTROLLER._should_finalize] 直接回答模式，提前结束循环")
+            logger.info_ctx("直接回答模式，提前结束循环", session_id=thought.context.get('session_id'))
             return True
         
         # 如果已经收集了足够的观察结果
@@ -909,57 +1105,57 @@ class AgentController:
         try:
             for turn in range(self.max_turns):
                 thought.increment_turn()
-                print(f"\n[AGENT_CONTROLLER] ===== 第 {turn + 1} 轮循环 =====")
+                logger.info_ctx(f"第 {turn + 1} 轮循环", session_id=session_id)
 
                 # 1. Think - 理解问题
-                print(f"[AGENT_CONTROLLER] [Step 1/5] Think - 理解问题")
+                logger.info_ctx("[Step 1/5] Think - 理解问题", session_id=session_id)
                 with TraceSpan(f"turn_{turn+1}_think"):
                     self._think(thought)
                 if thought.state == AgentState.FAILED:
-                    print(f"[AGENT_CONTROLLER] Think 步骤失败，终止循环")
+                    logger.warning_ctx("Think 步骤失败，终止循环", session_id=session_id)
                     break
 
                 # 2. Plan - 制定计划
-                print(f"[AGENT_CONTROLLER] [Step 2/5] Plan - 制定计划")
+                logger.info_ctx("[Step 2/5] Plan - 制定计划", session_id=session_id)
                 with TraceSpan(f"turn_{turn+1}_plan"):
                     self._plan(thought)
                 if thought.state == AgentState.FAILED:
-                    print(f"[AGENT_CONTROLLER] Plan 步骤失败，终止循环")
+                    logger.warning_ctx("Plan 步骤失败，终止循环", session_id=session_id)
                     break
 
                 # 3. Execute - 执行行动
-                print(f"[AGENT_CONTROLLER] [Step 3/5] Execute - 执行行动")
+                logger.info_ctx("[Step 3/5] Execute - 执行行动", session_id=session_id)
                 with TraceSpan(f"turn_{turn+1}_execute"):
                     self._execute(thought)
                 if thought.state == AgentState.FAILED:
-                    print(f"[AGENT_CONTROLLER] Execute 步骤失败，终止循环")
+                    logger.warning_ctx("Execute 步骤失败，终止循环", session_id=session_id)
                     break
 
                 # 4. Observe - 观察结果
-                print(f"[AGENT_CONTROLLER] [Step 4/5] Observe - 观察结果")
+                logger.info_ctx("[Step 4/5] Observe - 观察结果", session_id=session_id)
                 with TraceSpan(f"turn_{turn+1}_observe"):
                     self._observe(thought)
 
                 # 5. Reflect - 反思（可选）
                 if self.enable_reflection:
-                    print(f"[AGENT_CONTROLLER] [Step 5/5] Reflect - 反思")
+                    logger.info_ctx("[Step 5/5] Reflect - 反思", session_id=session_id)
                     with TraceSpan(f"turn_{turn+1}_reflect"):
                         self._reflect(thought)
 
                 # 检查是否已完成
                 if thought.state == AgentState.COMPLETE:
-                    print(f"[AGENT_CONTROLLER] 循环完成，状态: COMPLETE")
+                    logger.info_ctx(f"循环完成，状态: COMPLETE", session_id=session_id)
                     break
 
                 # 如果已经收集了足够的信息，可以提前结束
                 if self._should_finalize(thought):
-                    print(f"[AGENT_CONTROLLER] 满足提前结束条件")
+                    logger.info_ctx("满足提前结束条件", session_id=session_id)
                     self._finalize(thought)
                     break
 
             # 如果达到最大轮数仍未完成，强制结束
             if thought.state not in [AgentState.COMPLETE, AgentState.FAILED]:
-                print(f"[AGENT_CONTROLLER] 达到最大轮数 ({self.max_turns})，强制结束")
+                logger.warning_ctx(f"达到最大轮数 ({self.max_turns})，强制结束", session_id=session_id)
                 self._finalize(thought)
 
             response = self._build_response(thought)
@@ -967,19 +1163,25 @@ class AgentController:
             if session_id and self.conversation_manager:
                 self._save_conversation_history(session_id, original_query, response, augmented_context)
             
-            print(f"\n[AGENT_CONTROLLER] 最终响应:")
-            print(f"[AGENT_CONTROLLER]   State: {response.get('state')}")
-            print(f"[AGENT_CONTROLLER]   Success: {response.get('success')}")
-            print(f"[AGENT_CONTROLLER]   Turn Count: {response.get('turn_count')}")
-            print(f"[AGENT_CONTROLLER]   Duration: {response.get('duration'):.2f}s")
-            print(f"{'='*60}\n")
+            logger.info_ctx(
+                "最终响应",
+                session_id=session_id,
+                extra_data={
+                    "state": response.get('state'),
+                    "success": response.get('success'),
+                    "turn_count": response.get('turn_count'),
+                    "duration": response.get('duration')
+                }
+            )
             
             return response
 
         except Exception as e:
-            print(f"[AGENT_CONTROLLER] 异常: {str(e)}")
-            import traceback
-            print(f"[AGENT_CONTROLLER] Traceback: {traceback.format_exc()}")
+            logger.error_ctx(
+                f"执行单目标异常: {str(e)}",
+                session_id=session_id,
+                extra_data={"error": str(e), "traceback": traceback.format_exc()}
+            )
             thought.set_failed(str(e))
             return self._build_response(thought)
 
@@ -994,9 +1196,15 @@ class AgentController:
             bool: 是否执行成功
         """
         try:
+            session_id = thought.context.get('session_id')
+            
             # 如果子目标指定了工具，直接使用
             if sub_goal.tool_name:
-                print(f"[AGENT_CONTROLLER._execute_sub_goal] 使用指定工具: {sub_goal.tool_name}")
+                logger.info_ctx(
+                    "使用指定工具执行子目标",
+                    session_id=session_id,
+                    extra_data={"tool_name": sub_goal.tool_name}
+                )
                 
                 # 构造工具计划
                 from core.llm_tool_selector import ToolCall
@@ -1025,7 +1233,7 @@ class AgentController:
                 return thought.state == AgentState.COMPLETE
             else:
                 # 没有指定工具，使用标准 ReAct 流程
-                print(f"[AGENT_CONTROLLER._execute_sub_goal] 使用标准 ReAct 流程")
+                logger.info_ctx("使用标准 ReAct 流程执行子目标", session_id=session_id)
                 for turn in range(self.max_turns):
                     thought.increment_turn()
                     
@@ -1051,13 +1259,16 @@ class AgentController:
                         return True
                 
                 # 达到最大轮数
+                logger.warning_ctx("子目标执行达到最大轮数", session_id=session_id)
                 self._finalize(thought)
                 return thought.state == AgentState.COMPLETE
                 
         except Exception as e:
-            print(f"[AGENT_CONTROLLER._execute_sub_goal] 异常: {str(e)}")
-            import traceback
-            print(f"[AGENT_CONTROLLER._execute_sub_goal] Traceback: {traceback.format_exc()}")
+            logger.error_ctx(
+                f"执行子目标异常: {str(e)}",
+                session_id=thought.context.get('session_id'),
+                extra_data={"error": str(e), "traceback": traceback.format_exc()}
+            )
             thought.set_failed(str(e))
             return False
 
@@ -1107,31 +1318,27 @@ class AgentController:
         if results:
             # 优先使用最后一个子目标的结果作为主要答案
             last_result = results[-1].get("result", {})
-            print(f"[MERGE_TRACE] last_result 类型: {type(last_result)}")
-            print(f"[MERGE_TRACE] last_result 内容（前500字符）: {str(last_result)[:500]}")
             
             if isinstance(last_result, dict) and "answer" in last_result:
                 final_answer["answer"] = last_result["answer"]
-                print(f"[MERGE_TRACE] 使用 last_result['answer']，类型: {type(last_result['answer'])}")
             elif isinstance(last_result, dict):
                 final_answer["answer"] = last_result
-                print(f"[MERGE_TRACE] 使用 last_result (dict)")
             elif isinstance(last_result, list):
                 # 如果结果是列表（如英雄推荐列表），直接作为 answer
                 final_answer["answer"] = last_result
-                print(f"[MERGE_TRACE] 使用 last_result (list)，长度: {len(last_result)}")
             else:
                 final_answer["answer"] = {"message": str(last_result)}
-                print(f"[MERGE_TRACE] 使用 str(last_result) 包装为 message")
         else:
             final_answer["answer"] = {"message": "未能完成任何子目标"}
-            print(f"[MERGE_TRACE] 无结果，使用默认 message")
         
-        print(f"[MERGE_TRACE] final_answer['answer'] 类型: {type(final_answer['answer'])}")
-        print(f"[MERGE_TRACE] final_answer['answer'] 内容（前500字符）: {str(final_answer['answer'])[:500]}")
-        
-        print(f"[AGENT_CONTROLLER._merge_sub_goal_results] 合并完成:")
-        print(f"[AGENT_CONTROLLER._merge_sub_goal_results]   完成: {len(completed_goals)}/{len(goal_plan.sub_goals)}")
-        print(f"[AGENT_CONTROLLER._merge_sub_goal_results]   失败: {len(failed_goals)}/{len(goal_plan.sub_goals)}")
+        logger.info_ctx(
+            "子目标结果合并完成",
+            session_id=None,
+            extra_data={
+                "total": len(goal_plan.sub_goals),
+                "completed": len(completed_goals),
+                "failed": len(failed_goals)
+            }
+        )
         
         return final_answer

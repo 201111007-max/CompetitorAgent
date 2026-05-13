@@ -11,6 +11,10 @@ from abc import ABC, abstractmethod
 from typing import TypeVar, Generic, Optional, Dict, Any, Callable
 from enum import Enum
 
+from utils.log_config import get_logger
+
+logger = get_logger("hybrid_base", component="core")
+
 
 class ExecutionSource(Enum):
     """执行来源枚举"""
@@ -92,8 +96,7 @@ class HybridExecutor(ABC, Generic[T, D]):
             except Exception as e:
                 error_msg = f"LLM 执行失败：{str(e)}"
                 if fallback_on_error:
-                    print(f"⚠️ {error_msg}")
-                    print("   切换到数据驱动模式...")
+                    logger.warning(f"{error_msg}，切换到数据驱动模式...")
                 else:
                     result["error"] = error_msg
                     return result
@@ -140,10 +143,9 @@ class HybridExecutor(ABC, Generic[T, D]):
             source: 执行来源
             success: 是否成功
         """
-        emoji = "[LLM]" if source == ExecutionSource.LLM else "[DATA]"
-        status = "[OK]" if success else "[FAIL]"
         mode = "LLM" if source == ExecutionSource.LLM else "数据驱动"
-        print(f"{emoji} {mode} 模式执行 {status}")
+        status = "成功" if success else "失败"
+        logger.info(f"{mode} 模式执行 {status}")
 
 
 class HybridAnalyzer(HybridExecutor[Dict[str, Any], Dict[str, Any]]):
@@ -201,7 +203,7 @@ class HybridAnalyzer(HybridExecutor[Dict[str, Any], Dict[str, Any]]):
         self._log_execution(result["source"], result["success"])
         
         if result["error"]:
-            print(f"错误：{result['error']}")
+            logger.error(f"错误：{result['error']}")
         
         return result["result"]
     

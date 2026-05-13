@@ -163,7 +163,7 @@ def parse_heroes_with_llm(query):
     """
     client = get_llm_client()
     if client is None:
-        print(f"[PARSE_HEROES] LLM 客户端未初始化，返回空结果")
+        app_logger.warning("LLM 客户端未初始化，返回空结果")
         return {"our_heroes": [], "enemy_heroes": []}
 
     try:
@@ -173,7 +173,7 @@ def parse_heroes_with_llm(query):
         response = client.chat(messages, max_tokens=512, temperature=0.1)
 
         if "error" in response:
-            print(f"[PARSE_HEROES] LLM 解析失败：{response['error']}")
+            app_logger.warning(f"LLM 解析失败：{response['error']}")
             return {"our_heroes": [], "enemy_heroes": []}
 
         content = response.get("choices", [{}])[0].get("message", {}).get("content", "")
@@ -192,17 +192,17 @@ def parse_heroes_with_llm(query):
             "enemy_heroes": result.get("enemy_heroes", [])
         }
         
-        print(f"[PARSE_HEROES] LLM 解析成功: our={parsed['our_heroes']}, enemy={parsed['enemy_heroes']}")
+        app_logger.info(f"LLM 解析成功: our={parsed['our_heroes']}, enemy={parsed['enemy_heroes']}")
         return parsed
         
     except json.JSONDecodeError as e:
-        print(f"[PARSE_HEROES] JSON 解析失败: {e}")
-        print(f"[PARSE_HEROES] 原始内容: {content}")
+        app_logger.error(f"JSON 解析失败: {e}")
+        app_logger.error(f"原始内容: {content}")
         return {"our_heroes": [], "enemy_heroes": []}
     except Exception as e:
-        print(f"[PARSE_HEROES] LLM 解析异常：{e}")
         import traceback
-        print(f"[PARSE_HEROES] Traceback: {traceback.format_exc()}")
+        app_logger.error(f"LLM 解析异常：{e}")
+        app_logger.error(f"Traceback: {traceback.format_exc()}")
         return {"our_heroes": [], "enemy_heroes": []}
 
 
@@ -220,7 +220,7 @@ def parse_items_with_llm(query):
         response = client.chat(messages, max_tokens=512, temperature=0.1)
 
         if "error" in response:
-            print(f"LLM 解析物品失败：{response['error']}")
+            app_logger.warning(f"LLM 解析物品失败：{response['error']}")
             return {"items": []}
 
         content = response.get("choices", [{}])[0].get("message", {}).get("content", "")
@@ -230,7 +230,7 @@ def parse_items_with_llm(query):
             result = json.loads(json_match.group())
             return {"items": result.get("items", [])}
     except Exception as e:
-        print(f"LLM 解析物品异常：{e}")
+        app_logger.warning(f"LLM 解析物品异常：{e}")
 
     return {"items": []}
 
@@ -268,7 +268,7 @@ def parse_hero_from_query(query):
         hero = re.sub(r'[^a-z_]', '', content.lower())
         return hero
     except Exception as e:
-        print(f"LLM 解析英雄名异常：{e}")
+        app_logger.warning(f"LLM 解析英雄名异常：{e}")
         return ""
 
 
@@ -277,7 +277,7 @@ def warm_cache():
     if cache_warming or cache_ready:
         return
     cache_warming = True
-    print("正在预热缓存，请稍候...")
+    app_logger.info("正在预热缓存，请稍候...")
     try:
         agt = get_agent()
         client = agt.client
@@ -286,11 +286,11 @@ def warm_cache():
             enemy_ids = [1, 11, 15, 23, 25]
             for hid in enemy_ids:
                 matchups = client.get_hero_matchups(hid)
-                print(f"已缓存英雄 {hid} 的克制数据")
+                app_logger.info(f"已缓存英雄 {hid} 的克制数据")
         cache_ready = True
-        print("缓存预热完成！")
+        app_logger.info("缓存预热完成！")
     except Exception as e:
-        print(f"缓存预热失败：{e}")
+        app_logger.error(f"缓存预热失败：{e}")
     cache_warming = False
 
 
@@ -299,10 +299,10 @@ def refresh_all_heroes_cache():
     global api_client
     
     try:
-        print(f"\n{'='*60}")
-        print(f"[CACHE_REFRESH] 开始全量刷新英雄克制数据缓存")
-        print(f"[CACHE_REFRESH] 时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"{'='*60}")
+        app_logger.info("="*60)
+        app_logger.info("开始全量刷新英雄克制数据缓存")
+        app_logger.info(f"时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        app_logger.info("="*60)
         
         # 获取 API 客户端
         if api_client is None:
@@ -312,13 +312,13 @@ def refresh_all_heroes_cache():
         # 执行全量预热
         api_client.warm_up_cache(full_warmup=True)
         
-        print(f"[CACHE_REFRESH] 全量缓存刷新完成")
-        print(f"{'='*60}\n")
+        app_logger.info("全量缓存刷新完成")
+        app_logger.info("="*60)
         
     except Exception as e:
-        print(f"[CACHE_REFRESH] 全量缓存刷新失败: {e}")
         import traceback
-        print(traceback.format_exc())
+        app_logger.error(f"全量缓存刷新失败: {e}")
+        app_logger.error(traceback.format_exc())
 
 
 def start_cache_scheduler():
@@ -326,7 +326,7 @@ def start_cache_scheduler():
     # 每天凌晨 3 点执行全量缓存刷新
     schedule.every().day.at("03:00").do(refresh_all_heroes_cache)
     
-    print("[CACHE_SCHEDULER] 已启动每日缓存刷新任务（每天 03:00）")
+    app_logger.info("已启动每日缓存刷新任务（每天 03:00）")
     
     # 在后台线程中运行调度器
     def run_scheduler():
@@ -356,7 +356,7 @@ def initialize_agent_controller():
             max_turns=20,
             max_context_turns=5
         )
-        print(f"[OK] ConversationManager 初始化完成")
+        app_logger.info("ConversationManager 初始化完成")
         
         # 创建 DotaHelperAgent（带 Memory 支持）
         agent = DotaHelperAgent(
@@ -378,12 +378,12 @@ def initialize_agent_controller():
         
         # 注册所有 Tools
         registry.register_batch(tools)
-        print(f"[OK] 已注册 {len(registry)} 个 Agent Tools")
+        app_logger.info(f"已注册 {len(registry)} 个 Agent Tools")
         
         # 获取 LLM 客户端
         llm_client = get_llm_client()
         if llm_client is None:
-            print("[ERROR] LLM 客户端未初始化，无法使用智能工具选择")
+            app_logger.error("LLM 客户端未初始化，无法使用智能工具选择")
             raise Exception("LLM 客户端未初始化")
         
         # 创建 Agent Controller
@@ -397,11 +397,11 @@ def initialize_agent_controller():
             enable_memory=True
         )
         
-        print("[OK] Agent Controller 初始化完成")
+        app_logger.info("Agent Controller 初始化完成")
         return agent_controller
         
     except Exception as e:
-        print(f"[ERROR] Agent Controller 初始化失败：{e}")
+        app_logger.error(f"Agent Controller 初始化失败：{e}")
         # 回退到基本模式
         agent = DotaHelperAgent()
         return None
@@ -490,7 +490,7 @@ def get_agent():
             config = AgentConfig()
             agent = DotaHelperAgent(config=config)
         except Exception as e:
-            print(f"Failed to load config: {e}")
+            app_logger.warning(f"Failed to load config: {e}")
             agent = DotaHelperAgent()
     return agent
 
@@ -579,7 +579,7 @@ def get_conversation(session_id):
             try:
                 messages.append(msg.to_dict())
             except Exception as e:
-                print(f"[APP] 序列化消息失败: {e}")
+                app_logger.error(f"序列化消息失败: {e}")
                 messages.append({"role": "unknown", "content": "[序列化失败]", "timestamp": 0})
         
         return jsonify({
@@ -589,7 +589,7 @@ def get_conversation(session_id):
             "context_state": session.context_state
         })
     except Exception as e:
-        print(f"[APP] 获取会话失败: {e}")
+        app_logger.error(f"获取会话失败: {e}")
         return jsonify({"error": f"Failed to get conversation: {str(e)}"}), 500
 
 
@@ -612,8 +612,8 @@ def test_tools():
         # 测试 analyze_counter_picks 工具
         counter_tool = agent_controller.tool_registry.get("analyze_counter_picks")
         if counter_tool:
-            print(f"[TEST] Found tool: {counter_tool.name}")
-            print(f"[TEST] Tool parameters: {counter_tool.parameters}")
+            app_logger.info(f"Found tool: {counter_tool.name}")
+            app_logger.info(f"Tool parameters: {counter_tool.parameters}")
             
             # 执行工具
             exec_result = agent_controller.tool_registry.execute(
@@ -651,14 +651,17 @@ def chat():
     trace_ctx = get_current_trace()
     trace_id = trace_ctx.trace_id if trace_ctx else generate_trace_id()
 
-    print(f"\n{'='*60}")
-    print(f"[APP.CHAT] 收到聊天请求")
-    print(f"[APP.CHAT] Query: {query}")
-    print(f"[APP.CHAT] Session ID: {session_id}")
-    print(f"[APP.CHAT] Trace ID: {trace_id}")
-    print(f"[APP.CHAT] Context (from frontend): {context}")
-    print(f"[APP.CHAT] Agent Controller 状态: {'已初始化' if agent_controller else '未初始化'}")
-    print(f"{'='*60}\n")
+    app_logger.info_ctx(
+        "收到聊天请求",
+        session_id=session_id,
+        extra_data={
+            "query": query,
+            "session_id": session_id,
+            "trace_id": trace_id,
+            "context": context,
+            "agent_controller_status": "已初始化" if agent_controller else "未初始化"
+        }
+    )
 
     # 记录请求日志
     app_logger.info_ctx(
@@ -670,7 +673,6 @@ def chat():
     # 如果没有 Agent Controller，回退到旧版实现
     if agent_controller is None:
         app_logger.warning_ctx("Agent Controller 未初始化，使用旧版实现", session_id=session_id)
-        print(f"[APP.CHAT] Agent Controller 未初始化，使用旧版实现")
         return _chat_legacy(query, context, session_id)
 
     agt = get_agent()
@@ -687,7 +689,6 @@ def chat():
         result["success"] = False
         result["error"] = "Query cannot be empty"
         app_logger.warning_ctx("查询为空", session_id=session_id)
-        print(f"[APP.CHAT] 查询为空，返回错误")
         return jsonify(result)
 
     try:
@@ -696,33 +697,32 @@ def chat():
         enemy_heroes = context.get('enemy_heroes', [])
         
         if not our_heroes and not enemy_heroes:
-            print(f"[APP.CHAT] Context 中无英雄信息（或为空），尝试使用 LLM 解析")
+            app_logger.debug_ctx("Context 中无英雄信息，尝试使用 LLM 解析", session_id=session_id)
             with TraceSpan("parse_heroes", parent=trace_ctx) as parse_span:
                 parsed = parse_heroes_with_llm(query)
-            print(f"[APP.CHAT] LLM 解析结果: {parsed}")
+            app_logger.debug_ctx(f"LLM 解析结果: {parsed}", session_id=session_id)
             if parsed['our_heroes'] or parsed['enemy_heroes']:
                 context.update(parsed)
-                print(f"[APP.CHAT] 更新 context: {context}")
+                app_logger.debug_ctx(f"更新 context: {context}", session_id=session_id)
                 app_logger.debug_ctx(
                     f"从查询中解析到英雄",
                     session_id=session_id,
                     extra_data={"parsed": parsed}
                 )
             else:
-                print(f"[APP.CHAT] LLM 解析未找到英雄")
+                app_logger.debug_ctx("LLM 解析未找到英雄", session_id=session_id)
         else:
-            print(f"[APP.CHAT] Context 已包含英雄信息，跳过解析")
+            app_logger.debug_ctx("Context 已包含英雄信息，跳过解析", session_id=session_id)
 
         # 使用 Agent Controller 执行 ReAct 循环
-        print(f"\n[APP.CHAT] >>> 调用 AgentController.solve()")
-        print(f"[APP.CHAT]     Query: {query}")
-        print(f"[APP.CHAT]     Context: {context}")
-        print(f"[APP.CHAT]     Session ID: {session_id}")
-        print(f"[APP.CHAT]     Trace ID: {trace_id}")
-        app_logger.info_ctx("开始执行 ReAct 循环", session_id=session_id)
+        app_logger.info_ctx("开始调用 AgentController.solve()", session_id=session_id, extra_data={
+            "query": query,
+            "context": context,
+            "session_id": session_id,
+            "trace_id": trace_id
+        })
         controller_result = agent_controller.solve(query, context, session_id)
-        print(f"\n[APP.CHAT] <<< AgentController.solve() 返回")
-        print(f"[APP.CHAT]     Result: {controller_result}")
+        app_logger.info_ctx("AgentController.solve() 返回", session_id=session_id, extra_data={"result": str(controller_result)[:500]})
         
         # 整合结果
         result.update({
@@ -737,12 +737,12 @@ def chat():
 
         if controller_result.get("success"):
             answer_data = controller_result.get("answer", {})
-            print(f"[APP.CHAT] 成功，answer_data: {answer_data}")
+            app_logger.info_ctx(f"成功，answer_data: {answer_data}", session_id=session_id)
             if isinstance(answer_data, dict):
                 result["final_answer"] = _format_answer(answer_data)
             else:
                 result["final_answer"] = str(answer_data)
-            print(f"[APP.CHAT] 最终答案: {result['final_answer']}")
+            app_logger.info_ctx(f"最终答案: {result['final_answer']}", session_id=session_id)
             app_logger.info_ctx(
                 f"ReAct 循环完成",
                 session_id=session_id,
@@ -753,9 +753,8 @@ def chat():
             )
         else:
             result["final_answer"] = controller_result.get("error", "处理失败")
-            print(f"[APP.CHAT] 失败，错误: {result['final_answer']}")
             app_logger.error_ctx(
-                f"ReAct 循环失败",
+                f"处理失败，错误: {result['final_answer']}",
                 session_id=session_id,
                 extra_data={"error": controller_result.get("error")}
             )
@@ -768,19 +767,21 @@ def chat():
         result["success"] = False
         result["error"] = str(e)
         result["final_answer"] = f"处理查询时出错：{str(e)}"
-        print(f"[APP.CHAT] 异常: {str(e)}")
         import traceback
-        print(f"[APP.CHAT] Traceback: {traceback.format_exc()}")
         app_logger.error_ctx(
-            f"处理查询时出错",
+            f"处理查询时出错: {str(e)}",
             session_id=session_id,
-            extra_data={"error": str(e), "traceback": str(__import__('traceback').format_exc())}
+            extra_data={"error": str(e), "traceback": traceback.format_exc()}
         )
 
-    print(f"\n[APP.CHAT] 返回结果:")
-    print(f"[APP.CHAT]   Success: {result['success']}")
-    print(f"[APP.CHAT]   Final Answer: {result.get('final_answer', 'N/A')}")
-    print(f"{'='*60}\n")
+    app_logger.info_ctx(
+        "返回结果",
+        session_id=session_id,
+        extra_data={
+            "success": result['success'],
+            "final_answer_preview": result.get('final_answer', 'N/A')[:200]
+        }
+    )
 
     return jsonify(result)
 
@@ -825,18 +826,15 @@ def _format_answer_for_stream(answer_data) -> str:
         parts = []
         # 提取主要答案
         answer = answer_data.get("answer", {})
-        print(f"[FORMAT_DEBUG] sub_goals_summary 模式")
-        print(f"[FORMAT_DEBUG] answer 类型: {type(answer)}")
-        print(f"[FORMAT_DEBUG] answer 内容（前300字符）: {str(answer)[:300]}")
+        app_logger.debug(f"sub_goals_summary 模式 - answer 类型: {type(answer)}")
         
         if isinstance(answer, dict):
-            print(f"[FORMAT_DEBUG] answer 是字典，尝试格式化")
             formatted = _format_answer_for_stream(answer)
-            print(f"[FORMAT_DEBUG] 格式化结果: {formatted[:200] if formatted else 'None'}")
+            app_logger.debug(f"格式化结果: {formatted[:200] if formatted else 'None'}")
             if formatted and formatted != str(answer):
                 parts.append(formatted)
             else:
-                print(f"[FORMAT_DEBUG] 格式化失败，从 sub_goals_results 提取")
+                app_logger.debug("格式化失败，从 sub_goals_results 提取")
                 # 尝试从子目标结果中提取有用信息
                 results = answer_data.get("sub_goals_results", [])
                 if results:
@@ -844,7 +842,7 @@ def _format_answer_for_stream(answer_data) -> str:
                     for r in results:
                         desc = r.get("description", "")
                         result = r.get("result")
-                        print(f"[FORMAT_DEBUG] sub_goal result 类型: {type(result)}")
+                        app_logger.debug(f"sub_goal result 类型: {type(result)}")
                         if result:
                             if isinstance(result, list):
                                 formatted_result = _format_answer_for_stream(result)
@@ -855,11 +853,11 @@ def _format_answer_for_stream(answer_data) -> str:
                             else:
                                 parts.append(str(result))
         elif isinstance(answer, list):
-            print(f"[FORMAT_DEBUG] answer 是列表，直接格式化")
+            app_logger.debug("answer 是列表，直接格式化")
             formatted = _format_answer_for_stream(answer)
             parts.append(formatted)
         elif isinstance(answer, str):
-            print(f"[FORMAT_DEBUG] answer 是字符串")
+            app_logger.debug("answer 是字符串")
             parts.append(answer)
         
         # 如果有失败目标，简要说明
@@ -870,7 +868,7 @@ def _format_answer_for_stream(answer_data) -> str:
                 parts.append(f"• {f.get('description', '未知')}")
         
         final_result = "\n".join(parts) if parts else str(answer_data)
-        print(f"[FORMAT_DEBUG] 最终返回（前300字符）: {final_result[:300]}")
+        app_logger.debug(f"最终返回（前300字符）: {final_result[:300]}")
         return final_result
     
     # 检查是否有嵌套的 answer 字段
@@ -1402,7 +1400,7 @@ def _execute_streaming(controller, query: str, context: dict, start_time: float,
 
     try:
         # ===== 阶段 1: 目标分解 =====
-        print(f"[STREAM] ===== 阶段 1: 目标分解 =====")
+        app_logger.info("阶段 1: 目标分解")
         yield f"event: goal_decomposition\ndata: {json.dumps({'step': 'goal_decomposition', 'status': '开始目标分解'})}\n\n"
         
         with TraceSpan("goal_decomposition", parent=trace_ctx):
@@ -1424,23 +1422,21 @@ def _execute_streaming(controller, query: str, context: dict, start_time: float,
         
         # 如果只有一个子目标，使用传统 ReAct 循环
         if len(goal_plan.sub_goals) <= 1:
-            print(f"[STREAM] 单目标查询，使用传统 ReAct 循环")
+            app_logger.info("单目标查询，使用传统 ReAct 循环")
             yield from _execute_single_goal_streaming(controller, thought, goal_plan.sub_goals[0] if goal_plan.sub_goals else None, start_time, trace_ctx)
             return
         
         # ===== 阶段 2: 多子目标执行 =====
-        print(f"[STREAM] ===== 阶段 2: 执行子目标 =====")
+        app_logger.info("阶段 2: 执行子目标")
         yield f"event: goal_execution\ndata: {json.dumps({'step': 'goal_execution', 'status': '开始执行子目标'})}\n\n"
         
         while not goal_plan.is_complete():
             sub_goal = goal_plan.get_next_pending_goal()
             if not sub_goal:
-                print(f"[STREAM] 没有待执行的子目标，但计划未完成")
+                app_logger.warning("没有待执行的子目标，但计划未完成")
                 break
             
-            print(f"\n[STREAM] >>> 执行子目标: {sub_goal.id}")
-            print(f"[STREAM]     描述: {sub_goal.description}")
-            print(f"[STREAM]     工具: {sub_goal.tool_name}")
+            app_logger.info(f"执行子目标: {sub_goal.id} - {sub_goal.description} - 工具: {sub_goal.tool_name}")
             
             sub_goal_start_data = {
                 'step': 'sub_goal_start',
@@ -1475,7 +1471,7 @@ def _execute_streaming(controller, query: str, context: dict, start_time: float,
                     'status': 'completed'
                 }
                 yield f"event: sub_goal_complete\ndata: {json.dumps(sub_goal_complete_data)}\n\n"
-                print(f"[STREAM]     子目标完成 ✓")
+                app_logger.info(f"子目标完成 ✓: {sub_goal.id}")
             else:
                 sub_goal.status = GoalStatus.FAILED
                 controller.goal_tracker.update_goal_status(
@@ -1488,7 +1484,7 @@ def _execute_streaming(controller, query: str, context: dict, start_time: float,
                     'error': sub_goal.error
                 }
                 yield f"event: sub_goal_failed\ndata: {json.dumps(sub_goal_failed_data)}\n\n"
-                print(f"[STREAM]     子目标失败 ✗: {sub_goal.error}")
+                app_logger.error(f"子目标失败 ✗: {sub_goal.id} - {sub_goal.error}")
             
             # 将子目标结果添加到主 thought
             thought.add_observation({
@@ -1499,29 +1495,29 @@ def _execute_streaming(controller, query: str, context: dict, start_time: float,
             })
         
         # ===== 阶段 3: 合并结果 =====
-        print(f"\n[STREAM] ===== 阶段 3: 合并结果 =====")
+        app_logger.info("阶段 3: 合并结果")
         yield f"event: merge_results\ndata: {json.dumps({'step': 'merge_results', 'status': '合并子目标结果'})}\n\n"
         
         final_answer = controller._merge_sub_goal_results(goal_plan)
-        print(f"[STREAM_TRACE] final_answer 类型: {type(final_answer)}")
-        print(f"[STREAM_TRACE] final_answer 内容（前500字符）: {str(final_answer)[:500]}")
+        app_logger.debug(f"final_answer 类型: {type(final_answer)}")
+        app_logger.debug(f"final_answer 内容（前500字符）: {str(final_answer)[:500]}")
         
         thought.set_complete(final_answer)
         
         # 格式化最终答案（去除JSON结构，转为简洁文本）
         formatted_answer = _format_answer_for_stream(final_answer)
-        print(f"[STREAM_TRACE] formatted_answer 类型: {type(formatted_answer)}")
-        print(f"[STREAM_TRACE] formatted_answer 内容（前500字符）: {formatted_answer[:500]}")
+        app_logger.debug(f"formatted_answer 类型: {type(formatted_answer)}")
+        app_logger.debug(f"formatted_answer 内容（前500字符）: {formatted_answer[:500]}")
         
         # 输出最终答案
         synthesize_event = {'step': 'synthesize', 'answer': formatted_answer}
-        print(f"[STREAM_TRACE] synthesize_event: {json.dumps(synthesize_event)[:500]}")
+        app_logger.debug(f"synthesize_event: {json.dumps(synthesize_event)[:500]}")
         yield f"event: synthesize\ndata: {json.dumps(synthesize_event)}\n\n"
         
     except Exception as e:
         import traceback
-        print(f"[STREAM] 异常: {str(e)}")
-        print(f"[STREAM] Traceback: {traceback.format_exc()}")
+        app_logger.error(f"流式处理异常: {str(e)}")
+        app_logger.error(traceback.format_exc())
         thought.set_failed(str(e))
         yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
     
@@ -1650,12 +1646,12 @@ def _execute_single_goal_streaming(controller, thought, sub_goal, start_time: fl
         # 输出最终答案
         if thought.state == AgentState.COMPLETE:
             answer_data = thought.final_answer
-            print(f"[SINGLE_GOAL_TRACE] answer_data 类型: {type(answer_data)}")
-            print(f"[SINGLE_GOAL_TRACE] answer_data 内容（前500字符）: {str(answer_data)[:500]}")
+            app_logger.debug(f"answer_data 类型: {type(answer_data)}")
+            app_logger.debug(f"answer_data 内容（前500字符）: {str(answer_data)[:500]}")
             
             # 统一使用 _format_answer_for_stream 处理所有类型
             answer_text = _format_answer_for_stream(answer_data)
-            print(f"[SINGLE_GOAL_TRACE] answer_text 内容（前500字符）: {answer_text[:500]}")
+            app_logger.debug(f"answer_text 内容（前500字符）: {answer_text[:500]}")
             
             yield f"event: synthesize\ndata: {json.dumps({'step': 'synthesize', 'answer': answer_text})}\n\n"
         else:
@@ -2321,12 +2317,12 @@ def generate_hero_query():
 
 
 if __name__ == '__main__':
-    print("=" * 50)
-    print("DotaHelperAgent Web Server - ReAct Agent 架构")
-    print("=" * 50)
-    print("API Server: http://localhost:5000")
-    print("Web UI: http://localhost:5000/web/index.html")
-    print("=" * 50)
+    app_logger.info("=" * 50)
+    app_logger.info("DotaHelperAgent Web Server - ReAct Agent 架构")
+    app_logger.info("=" * 50)
+    app_logger.info("API Server: http://localhost:5000")
+    app_logger.info("Web UI: http://localhost:5000/web/index.html")
+    app_logger.info("=" * 50)
     
     # 初始化 Agent Controller
     initialize_agent_controller()

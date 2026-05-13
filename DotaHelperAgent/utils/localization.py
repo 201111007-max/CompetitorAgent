@@ -5,6 +5,10 @@ import os
 from typing import Dict, Optional
 from pathlib import Path
 
+from utils.log_config import get_logger
+
+logger = get_logger("localization", component="utils")
+
 
 class DotaLocalizer:
     """Dota 2 本地化工具类
@@ -36,10 +40,10 @@ class DotaLocalizer:
                 with open(heroes_file, 'r', encoding='utf-8') as f:
                     self._heroes_cn = json.load(f)
             except Exception as e:
-                print(f"加载英雄中文数据失败: {e}")
+                logger.error(f"加载英雄中文数据失败: {e}")
                 self._heroes_cn = {}
         else:
-            print(f"警告: 英雄中文数据文件不存在: {heroes_file}")
+            logger.warning(f"英雄中文数据文件不存在: {heroes_file}")
             self._heroes_cn = {}
 
         # 加载物品中文数据
@@ -49,10 +53,10 @@ class DotaLocalizer:
                 with open(items_file, 'r', encoding='utf-8') as f:
                     self._items_cn = json.load(f)
             except Exception as e:
-                print(f"加载物品中文数据失败: {e}")
+                logger.error(f"加载物品中文数据失败: {e}")
                 self._items_cn = {}
         else:
-            print(f"警告: 物品中文数据文件不存在: {items_file}")
+            logger.warning(f"物品中文数据文件不存在: {items_file}")
             self._items_cn = {}
 
     def get_hero_name_cn(self, hero_id: int) -> Optional[str]:
