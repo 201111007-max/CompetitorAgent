@@ -40,7 +40,8 @@ from core.metacognition.interfaces import (
 from core.metacognition.rule_based import (
     WeightedConfidenceCalculator,
     RuleBasedClarificationGenerator,
-    RuleBasedMetacognitionEvaluator
+    RuleBasedMetacognitionEvaluator,
+    RuleBasedKnowledgeBoundary
 )
 from utils.log_config import get_logger
 
@@ -56,6 +57,7 @@ class MetacognitionFactory:
     - 支持从 YAML 配置文件加载
     
     支持的评估器类型：
+    - rule_based: 基于规则的评估器（快速，不需要 API）
     - llm_based: 基于 LLM 的评估器（智能，需要 API）
     
     扩展方式：
@@ -91,12 +93,16 @@ class MetacognitionFactory:
         
         logger.info(f"创建元认知评估器，类型：{evaluator_type}")
         
-        if evaluator_type == "llm_based":
+        if evaluator_type == "rule_based":
+            return MetacognitionFactory._create_rule_based(
+                config, tool_registry, memory
+            )
+        elif evaluator_type == "llm_based":
             return MetacognitionFactory._create_llm_based(
                 config, tool_registry, llm_client
             )
         else:
-            raise ValueError(f"未知的评估器类型：{evaluator_type}，支持：llm_based")
+            raise ValueError(f"未知的评估器类型：{evaluator_type}，支持：rule_based, llm_based")
     
     @staticmethod
     def create_from_yaml(
@@ -137,6 +143,45 @@ class MetacognitionFactory:
             api_client=api_client,
             llm_client=llm_client
         )
+    
+    @staticmethod
+    def _create_rule_based(
+        config: Dict[str, Any],
+        tool_registry,
+        memory
+    ) -> IMetacognitionEvaluator:
+        """创建规则基础评估器"""
+        logger.info("创建基于规则的元认知评估器")
+        
+        # 创建知识边界评估器
+        knowledge_boundary = RuleBasedKnowledgeBoundary(
+            tool_registry=tool_registry,
+            memory=memory,
+            api_client=None
+        )
+        
+        # 创建置信度计算器（支持自定义权重）
+        weights = config.get("weights")
+        calculator = WeightedConfidenceCalculator(weights=weights)
+        
+        clarification_generator = RuleBasedClarificationGenerator()
+        
+        threshold_str = config.get("clarification_threshold", "low")
+        try:
+            threshold = ConfidenceLevel(threshold_str)
+        except ValueError:
+            logger.warning(f"无效的阈值配置：{threshold_str}，使用默认值 low")
+            threshold = ConfidenceLevel.LOW
+        
+        evaluator = RuleBasedMetacognitionEvaluator(
+            knowledge_boundary=knowledge_boundary,
+            confidence_calculator=calculator,
+            clarification_generator=clarification_generator,
+            clarification_threshold=threshold
+        )
+        
+        logger.info("基于规则的元认知评估器创建完成")
+        return evaluator
     
     @staticmethod
     def _create_llm_based(

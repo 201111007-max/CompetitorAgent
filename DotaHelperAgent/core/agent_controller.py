@@ -25,6 +25,10 @@ from core.context_augmenter import ContextAugmenter
 from core.goal_planner import GoalPlanner, GoalPlan, GoalStatus, GoalTracker
 from core.metacognition.factory import MetacognitionFactory
 from core.metacognition.interfaces import IMetacognitionEvaluator, KnowledgeAssessment
+from core.reflection_evaluator import (
+    ReflectionEvaluator, ReflectionResult, ReflectionAction,
+    EvaluationDimension, QualityScore
+)
 from memory.memory import AgentMemory
 from tools.base import ToolResult, ToolStatus
 from utils.trace_context import TraceSpan, get_current_trace
@@ -201,7 +205,16 @@ class AgentController:
                 api_client=None,
                 llm_client=llm_client
             )
-            logger.info("元认知评估器已初始化")
+            logger.info_ctx(
+                "元认知评估器已初始化",
+                extra_data={
+                    "evaluator_type": metacognition_config.get("type"),
+                    "clarification_threshold": metacognition_config.get("clarification_threshold", "medium"),
+                    "has_tool_registry": tool_registry is not None,
+                    "has_memory": memory is not None,
+                    "has_llm_client": llm_client is not None
+                }
+            )
         else:
             logger.info("元认知评估器未启用")
         
@@ -281,9 +294,16 @@ class AgentController:
                             extra_data={
                                 "confidence_level": assessment.confidence_level.value,
                                 "confidence_score": round(assessment.confidence_score, 3),
-                                "limitations": assessment.limitations
+                                "knowledge_coverage": round(assessment.knowledge_coverage, 3),
+                                "data_quality_score": round(assessment.data_quality_score, 3),
+                                "limitations": assessment.limitations,
+                                "data_sources": assessment.data_sources,
+                                "reasoning": assessment.reasoning
                             }
                         )
+                        
+                        # 保存评估结果供后续对比
+                        pre_assessment = assessment
                         
                         # 如果置信度太低，请求用户澄清
                         if self.metacognition.should_request_clarification(assessment):
@@ -294,7 +314,11 @@ class AgentController:
                                 session_id=session_id,
                                 extra_data={
                                     "clarification_type": clarification.type,
-                                    "questions": clarification.questions
+                                    "confidence_level": clarification.confidence_level.value,
+                                    "missing_info": clarification.missing_info,
+                                    "questions": clarification.questions,
+                                    "suggestions": clarification.suggestions,
+                                    "has_partial_answer": clarification.partial_answer is not None
                                 }
                             )
                             
@@ -439,8 +463,17 @@ class AgentController:
                             "元认知执行后评估完成",
                             session_id=session_id,
                             extra_data={
+                                "pre_confidence": pre_assessment.confidence_score if 'pre_assessment' in locals() else 'N/A',
+                                "post_confidence": post_assessment.confidence_score,
+                                "confidence_delta": round(
+                                    post_assessment.confidence_score - (pre_assessment.confidence_score if 'pre_assessment' in locals() else 0),
+                                    3
+                                ),
                                 "confidence_level": post_assessment.confidence_level.value,
-                                "confidence_score": round(post_assessment.confidence_score, 3)
+                                "final_quality": "high" if post_assessment.confidence_score >= 0.7 else "low",
+                                "knowledge_coverage": round(post_assessment.knowledge_coverage, 3),
+                                "data_quality_score": round(post_assessment.data_quality_score, 3),
+                                "limitations": post_assessment.limitations
                             }
                         )
                         
@@ -931,9 +964,433 @@ class AgentController:
         return min(1.0, score)
 
     def _adjust_strategy(self, thought: AgentThought) -> None:
-        """调整策略"""
-        thought.add_reasoning("调整策略：尝试不同的工具或参数")
-        # 可以在这里实现更复杂的策略调整逻辑
+        """调整策略（增强版）
+        
+        根据反思评估结果智能调整：
+        1. 分析低分维度
+        2. 选择替代工具
+        3. 调整工具参数
+        4. 利用历史经验
+        5. 记录调整决策
+        """
+        session_id = thought.context.get('session_id')
+        
+        # 1. 执行完整反思评估
+        reflection_result = self._full_reflection_evaluation(thought)
+        
+        # 2. 根据反思结果调整
+        if reflection_result is None:
+            # 降级方案
+            thought.add_reasoning("反思评估失败，使用默认调整策略")
+            self._default_strategy_adjustment(thought)
+            return
+        
+        # 3. 记录反思结果
+        thought.add_reflection(f"反思结果：{reflection_result.action.value}")
+        thought.add_reflection(f"总体评分：{reflection_result.overall_score:.2f}")
+        thought.add_reflection(f"策略调整：{reflection_result.strategy_adjustments}")
+        
+        logger.info_ctx(
+            "反思评估完成，开始策略调整",
+            session_id=session_id,
+            extra_data={
+                "action": reflection_result.action.value,
+                "overall_score": reflection_result.overall_score,
+                "strategy_adjustments": reflection_result.strategy_adjustments,
+                "missing_information": reflection_result.missing_information
+            }
+        )
+        
+        # 4. 根据行动类型调整
+        if reflection_result.action == ReflectionAction.ADJUST_STRATEGY:
+            self._apply_strategy_adjustments(thought, reflection_result)
+        elif reflection_result.action == ReflectionAction.CONTINUE:
+            self._continue_with_more_data(thought, reflection_result)
+        elif reflection_result.action == ReflectionAction.REQUEST_CLARIFICATION:
+            self._request_user_clarification(thought, reflection_result)
+        elif reflection_result.action == ReflectionAction.FINALIZE:
+            self._finalize_with_current_results(thought)
+
+    def _full_reflection_evaluation(self, thought: AgentThought) -> Optional[ReflectionResult]:
+        """执行完整的反思评估
+        
+        使用 ReflectionEvaluator 进行多维度评估
+        """
+        try:
+            # 检查是否已初始化反思评估器
+            if not hasattr(self, 'reflection_evaluator'):
+                self.reflection_evaluator = ReflectionEvaluator()
+            
+            # 执行评估
+            reflection_result = self.reflection_evaluator.evaluate(
+                query=thought.query,
+                observations=thought.observations,
+                actions=thought.actions_taken,
+                context=thought.context
+            )
+            
+            return reflection_result
+            
+        except Exception as e:
+            logger.error_ctx(
+                f"反思评估失败：{e}",
+                session_id=thought.context.get('session_id'),
+                extra_data={"error": str(e)}
+            )
+            return None
+
+    def _apply_strategy_adjustments(
+        self,
+        thought: AgentThought,
+        reflection_result: ReflectionResult
+    ) -> None:
+        """应用策略调整建议
+        
+        根据反思结果的具体建议调整策略
+        """
+        session_id = thought.context.get('session_id')
+        
+        # 分析各维度评分
+        low_dimensions = [
+            ds for ds in reflection_result.dimension_scores
+            if ds.score < 0.6
+        ]
+        
+        for dim_score in low_dimensions:
+            dimension = dim_score.dimension
+            
+            # 完整性不足：尝试更多工具
+            if dimension == EvaluationDimension.COMPLETENESS:
+                thought.add_reasoning("完整性不足，尝试更多工具")
+                self._try_additional_tools(thought)
+            
+            # 一致性不足：检查数据矛盾
+            elif dimension == EvaluationDimension.CONSISTENCY:
+                thought.add_reasoning("一致性不足，检查数据矛盾")
+                self._resolve_data_conflicts(thought)
+            
+            # 可信度不足：使用更权威数据源
+            elif dimension == EvaluationDimension.CREDIBILITY:
+                thought.add_reasoning("可信度不足，切换到更权威数据源")
+                self._switch_to_reliable_source(thought)
+            
+            # 相关性不足：调整工具选择
+            elif dimension == EvaluationDimension.RELEVANCE:
+                thought.add_reasoning("相关性不足，调整工具选择")
+                self._select_more_relevant_tools(thought)
+            
+            # 可操作性不足：提供更详细信息
+            elif dimension == EvaluationDimension.ACTIONABILITY:
+                thought.add_reasoning("可操作性不足，提供更详细信息")
+                self._enhance_actionable_details(thought)
+        
+        # 应用通用调整建议
+        for adjustment in reflection_result.strategy_adjustments:
+            thought.add_reasoning(f"应用调整建议：{adjustment}")
+            self._apply_single_adjustment(thought, adjustment)
+        
+        logger.info_ctx(
+            "策略调整应用完成",
+            session_id=session_id,
+            extra_data={
+                "low_dimensions": [d.dimension.value for d in low_dimensions],
+                "adjustments_applied": len(reflection_result.strategy_adjustments)
+            }
+        )
+
+    def _try_additional_tools(self, thought: AgentThought) -> None:
+        """尝试更多工具
+        
+        基于当前已用工具，选择未使用的相关工具
+        """
+        # 获取已使用的工具
+        used_tools = set()
+        for action in thought.actions_taken:
+            used_tools.add(action.get("tool_name"))
+        
+        # 获取可用工具
+        all_tools = self.tool_registry.list_tools()
+        available_tools = [t for t in all_tools if t.name not in used_tools]
+        
+        # 使用 LLM 选择最相关的未使用工具
+        if available_tools:
+            try:
+                tool_plan = self.tool_selector.select_tools(
+                    query=thought.query,
+                    context={
+                        **thought.context,
+                        "exclude_tools": list(used_tools)
+                    }
+                )
+                
+                # 执行新选择的工具
+                for tool_call in tool_plan.tools:
+                    if tool_call.tool_name not in used_tools:
+                        result = self.tool_registry.execute(
+                            tool_call.tool_name,
+                            **tool_call.parameters
+                        )
+                        thought.add_action(tool_call.tool_name, tool_call.parameters, result)
+                        thought.add_observation(result.data if result.is_success() else None)
+                        
+                        logger.info_ctx(
+                            f"尝试额外工具：{tool_call.tool_name}",
+                            session_id=thought.context.get('session_id'),
+                            extra_data={"success": result.is_success()}
+                        )
+            except Exception as e:
+                logger.warning_ctx(
+                    f"尝试额外工具失败：{e}",
+                    session_id=thought.context.get('session_id')
+                )
+
+    def _resolve_data_conflicts(self, thought: AgentThought) -> None:
+        """解决数据冲突
+        
+        检查观察结果中的矛盾信息，尝试解决
+        """
+        session_id = thought.context.get('session_id')
+        
+        # 检查是否有多个观察结果
+        if len(thought.observations) < 2:
+            return
+        
+        # 简单冲突检测：检查相同字段的不同值
+        conflicts_found = []
+        for i, obs1 in enumerate(thought.observations):
+            for j, obs2 in enumerate(thought.observations[i+1:], i+1):
+                if isinstance(obs1, dict) and isinstance(obs2, dict):
+                    common_keys = set(obs1.keys()) & set(obs2.keys())
+                    for key in common_keys:
+                        if obs1[key] != obs2[key]:
+                            conflicts_found.append({
+                                "key": key,
+                                "value1": obs1[key],
+                                "value2": obs2[key]
+                            })
+        
+        if conflicts_found:
+            logger.info_ctx(
+                "检测到数据冲突",
+                session_id=session_id,
+                extra_data={"conflicts": conflicts_found[:5]}  # 最多记录5个
+            )
+            
+            thought.add_reasoning(f"检测到 {len(conflicts_found)} 个数据冲突，尝试解决")
+            
+            # 简单解决策略：使用最新的数据
+            thought.add_reasoning("使用最新数据源解决冲突")
+
+    def _switch_to_reliable_source(self, thought: AgentThought) -> None:
+        """切换到更可靠的数据源
+        
+        如果当前数据源不可靠，尝试使用备用数据源
+        """
+        session_id = thought.context.get('session_id')
+        
+        # 检查是否有失败的工具
+        failed_tools = [
+            action for action in thought.actions_taken
+            if not action.get("result", {}).get("status") == "success"
+        ]
+        
+        if failed_tools:
+            thought.add_reasoning(f"检测到 {len(failed_tools)} 个失败工具，尝试备用数据源")
+            
+            # 尝试使用不同的参数重试
+            for action in failed_tools[:2]:  # 最多重试2个
+                tool_name = action.get("tool_name")
+                original_params = action.get("parameters", {})
+                
+                # 调整参数
+                adjusted_params = self._adjust_tool_parameters(tool_name, original_params)
+                
+                try:
+                    result = self.tool_registry.execute(tool_name, **adjusted_params)
+                    thought.add_action(f"{tool_name}_retry", adjusted_params, result)
+                    thought.add_observation(result.data if result.is_success() else None)
+                    
+                    logger.info_ctx(
+                        f"工具重试成功：{tool_name}",
+                        session_id=session_id,
+                        extra_data={"success": result.is_success()}
+                    )
+                except Exception as e:
+                    logger.warning_ctx(
+                        f"工具重试失败：{tool_name}",
+                        session_id=session_id,
+                        extra_data={"error": str(e)}
+                    )
+
+    def _select_more_relevant_tools(self, thought: AgentThought) -> None:
+        """选择更相关的工具
+        
+        重新执行工具选择，强调相关性
+        """
+        try:
+            # 使用增强的上下文重新选择工具
+            enhanced_context = {
+                **thought.context,
+                "focus_on_relevance": True,
+                "previous_tools_failed": [
+                    action.get("tool_name")
+                    for action in thought.actions_taken
+                    if not action.get("result", {}).get("status") == "success"
+                ]
+            }
+            
+            tool_plan = self.tool_selector.select_tools(
+                query=thought.query,
+                context=enhanced_context
+            )
+            
+            # 更新工具计划
+            thought.context['tool_plan'] = tool_plan
+            thought.add_reasoning(f"重新选择工具：{[t.tool_name for t in tool_plan.tools]}")
+            
+        except Exception as e:
+            logger.error_ctx(
+                f"重新选择工具失败：{e}",
+                session_id=thought.context.get('session_id')
+            )
+
+    def _enhance_actionable_details(self, thought: AgentThought) -> None:
+        """提供更详细的信息
+        
+        增强结果的可操作性，添加更多解释和建议
+        """
+        session_id = thought.context.get('session_id')
+        
+        # 标记需要增强详细信息
+        thought.context['enhance_details'] = True
+        
+        logger.info_ctx(
+            "标记增强详细信息",
+            session_id=session_id
+        )
+
+    def _adjust_tool_parameters(
+        self,
+        tool_name: str,
+        original_params: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """调整工具参数
+        
+        根据工具类型智能调整参数
+        """
+        adjusted = original_params.copy()
+        tool_name_lower = tool_name.lower()
+        
+        # 技能加点工具：提供更多信息（优先检查，避免被 recommend 匹配）
+        if "skill" in tool_name_lower:
+            adjusted["include_explanations"] = True
+        
+        # 英雄分析工具：扩大分析范围
+        elif "counter" in tool_name_lower or "analyze" in tool_name_lower:
+            adjusted["include_alternatives"] = True
+            adjusted["min_recommendations"] = original_params.get("min_recommendations", 3) + 2
+        
+        # 物品推荐工具：增加物品数量
+        elif "item" in tool_name_lower or "recommend" in tool_name_lower:
+            adjusted["max_items"] = original_params.get("max_items", 5) + 3
+        
+        return adjusted
+
+    def _apply_single_adjustment(self, thought: AgentThought, adjustment: str) -> None:
+        """应用单个调整建议
+        
+        根据调整建议字符串执行相应操作
+        """
+        # 根据调整建议关键词匹配操作
+        if "更多观察" in adjustment or "更多工具" in adjustment:
+            self._try_additional_tools(thought)
+        elif "一致性" in adjustment or "矛盾" in adjustment:
+            self._resolve_data_conflicts(thought)
+        elif "权威" in adjustment or "数据源" in adjustment:
+            self._switch_to_reliable_source(thought)
+        elif "聚焦" in adjustment or "相关" in adjustment:
+            self._select_more_relevant_tools(thought)
+        elif "详细" in adjustment or "信息" in adjustment:
+            self._enhance_actionable_details(thought)
+
+    def _default_strategy_adjustment(self, thought: AgentThought) -> None:
+        """默认策略调整（降级方案）
+        
+        当反思评估不可用时的简单调整
+        """
+        # 1. 检查是否有失败的工具
+        failed_tools = [
+            action for action in thought.actions_taken
+            if not action.get("result", {}).get("status") == "success"
+        ]
+        
+        if failed_tools:
+            thought.add_reasoning(f"检测到 {len(failed_tools)} 个失败工具，尝试替代方案")
+            
+            # 2. 尝试使用不同的参数重试
+            for action in failed_tools:
+                tool_name = action.get("tool_name")
+                original_params = action.get("parameters", {})
+                
+                # 简单参数调整示例
+                adjusted_params = self._adjust_tool_parameters(tool_name, original_params)
+                
+                try:
+                    result = self.tool_registry.execute(tool_name, **adjusted_params)
+                    thought.add_action(f"{tool_name}_retry", adjusted_params, result)
+                    thought.add_observation(result.data if result.is_success() else None)
+                except Exception as e:
+                    logger.warning_ctx(
+                        f"工具重试失败：{tool_name}",
+                        session_id=thought.context.get('session_id')
+                    )
+        else:
+            # 3. 没有失败工具但质量不足，尝试更多工具
+            thought.add_reasoning("结果质量不足，尝试收集更多数据")
+            self._try_additional_tools(thought)
+
+    def _continue_with_more_data(self, thought: AgentThought, reflection_result: ReflectionResult) -> None:
+        """继续收集更多数据
+        
+        当反思结果为 CONTINUE 时，继续下一轮循环
+        """
+        thought.add_reasoning("需要更多信息，继续下一轮循环")
+        logger.info_ctx(
+            "继续收集数据",
+            session_id=thought.context.get('session_id'),
+            extra_data={
+                "missing_info": reflection_result.missing_information
+            }
+        )
+
+    def _request_user_clarification(self, thought: AgentThought, reflection_result: ReflectionResult) -> None:
+        """请求用户澄清
+        
+        当反思结果为 REQUEST_CLARIFICATION 时，生成澄清请求
+        """
+        thought.add_reasoning("需要用户澄清，生成澄清请求")
+        
+        # 设置直接回答模式，返回澄清请求
+        thought.set_complete({
+            "answer": {
+                "message": "我需要更多信息来准确回答您的问题",
+                "clarification_request": True,
+                "missing_info": reflection_result.missing_information,
+                "reasoning": reflection_result.reasoning
+            },
+            "reasoning": thought.reasoning_steps,
+            "actions": thought.actions_taken,
+            "confidence": reflection_result.confidence,
+            "source": "clarification_request"
+        })
+
+    def _finalize_with_current_results(self, thought: AgentThought) -> None:
+        """使用当前结果结束
+        
+        当反思结果为 FINALIZE 时，直接合成结果
+        """
+        thought.add_reasoning("结果质量可接受，准备结束")
+        self._synthesize(thought)
 
     def _save_to_memory(self, thought: AgentThought) -> None:
         """保存思考过程到记忆系统"""

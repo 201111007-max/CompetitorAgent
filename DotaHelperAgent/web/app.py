@@ -394,10 +394,20 @@ def initialize_agent_controller():
             conversation_manager=conversation_manager,
             max_turns=5,
             enable_reflection=True,
-            enable_memory=True
+            enable_memory=True,
+            metacognition_config={
+                "type": "rule_based",
+                "clarification_threshold": "low",
+                "weights": {
+                    "knowledge_coverage": 0.35,
+                    "data_quality": 0.25,
+                    "tool_match": 0.20,
+                    "memory_relevance": 0.20
+                }
+            }
         )
         
-        app_logger.info("Agent Controller 初始化完成")
+        app_logger.info("Agent Controller 初始化完成（含元认知评估器）")
         return agent_controller
         
     except Exception as e:
