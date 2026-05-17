@@ -9,6 +9,11 @@
 - `test_analyzers.py` - Hero Analyzer、Item Recommender 等分析器测试
 - `test_react.py` - ReAct Agent 循环测试
 - `test_strategies.py` - 策略模块测试
+- `test_metacognition_quick.py` - 元认知模块快速测试
+- `test_metacognition.py` - 元认知模块完整测试
+- `test_goal_planner.py` - 目标规划器测试
+- `test_llm_tool_selector.py` - LLM 工具选择器测试
+- `test_conversation.py` - 会话管理器测试
 
 ## 运行测试
 
@@ -35,6 +40,10 @@ pytest core/test_agent.py::TestAgentInit -v
 - ✅ ReAct 循环（Think-Plan-Act）
 - ✅ Tool Registry 和 Tool 执行
 - ✅ 策略评分和排序
+- ✅ 元认知模块（知识边界评估、置信度计算、澄清请求）
+- ✅ 目标规划器（子目标分解、依赖关系处理）
+- ✅ LLM 工具选择器（智能工具选择、参数提取）
+- ✅ 会话管理器（多轮对话、上下文增强）
 
 ## 依赖
 

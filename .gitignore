@@ -50,6 +50,10 @@ logs/
 *.db
 !*.sqlite3
 
+# Runtime data directories
+memory_runtime/
+cache_runtime/
+
 # Test memory
 test_memory/
 test_prefix/

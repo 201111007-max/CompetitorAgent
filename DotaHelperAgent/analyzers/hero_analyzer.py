@@ -258,15 +258,18 @@ class HeroAnalyzer:
         """
         return self._localizer.get_hero_name_cn(hero_id)
     
-    def _hero_names_to_ids(self, hero_names: List[str]) -> List[int]:
+    def _hero_names_to_ids(self, hero_names: Optional[List[str]]) -> List[int]:
         """将英雄名称列表转换为 ID 列表
         
         Args:
-            hero_names: 英雄名称列表
+            hero_names: 英雄名称列表（可为 None）
             
         Returns:
             英雄 ID 列表（过滤掉 None）
         """
+        if hero_names is None:
+            return []
+        
         logger.debug(f"英雄名称转ID - 输入: {hero_names}")
         hero_ids = [self.client.hero_name_to_id(name) for name in hero_names]
         result = [hid for hid in hero_ids if hid is not None]
@@ -318,33 +321,38 @@ class HeroAnalyzer:
     def analyze_composition(
         self,
         our_heroes: List[str],
-        enemy_heroes: List[str]
+        enemy_heroes: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """分析阵容（analyze_composition 别名方法，用于 Tool 调用）
         
         Args:
             our_heroes: 己方英雄列表
-            enemy_heroes: 敌方英雄列表
+            enemy_heroes: 敌方英雄列表（可选，默认为空列表）
             
         Returns:
             阵容分析结果
         """
+        if enemy_heroes is None:
+            enemy_heroes = []
         return self.analyze_team_composition(our_heroes, enemy_heroes)
     
     def analyze_team_composition(
         self,
         our_heroes: List[str],
-        enemy_heroes: List[str]
+        enemy_heroes: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """分析双方阵容
         
         Args:
             our_heroes: 己方英雄列表
-            enemy_heroes: 敌方英雄列表
+            enemy_heroes: 敌方英雄列表（可选，默认为空列表）
             
         Returns:
             阵容分析结果
         """
+        if enemy_heroes is None:
+            enemy_heroes = []
+        
         our_hero_ids = self._hero_names_to_ids(our_heroes)
         enemy_hero_ids = self._hero_names_to_ids(enemy_heroes)
         

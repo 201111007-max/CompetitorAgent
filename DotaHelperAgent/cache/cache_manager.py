@@ -52,7 +52,9 @@ class CacheManager:
             db_name: SQLite 数据库文件名，默认 cache.db
         """
         self.cache_dir = Path(cache_dir)
-        self.cache_dir.mkdir(exist_ok=True)
+        if not self.cache_dir.is_absolute():
+            self.cache_dir = Path(__file__).parent.parent / cache_dir
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.db_path = self.cache_dir / db_name
         self.ttl_hours = ttl_hours
         self.max_size_mb = max_size_mb

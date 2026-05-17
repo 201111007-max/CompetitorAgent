@@ -776,15 +776,15 @@
                 <div class="chat-area" id="chatArea">
                     <div class="empty-state" id="emptyState">
                         <div class="icon">💬</div>
-                        <p>开始对话吧！<br>试试输入：推荐克制英雄（敌方：pudge, am）</p>
+                        <p>开始对话吧！<br>试试输入：对面有帕吉和斧王，推荐什么英雄</p>
                     </div>
                 </div>
 
-                <div class="hint">支持格式：敌方：英雄1,英雄2 | 己方：英雄1,英雄2</div>
+                <div class="hint">支持自然语言输入，如：对面有帕吉和斧王，推荐什么英雄</div>
 
                 <div class="input-area">
-                    <input type="text" class="query-input" id="queryInput" placeholder="输入您的问题，如：推荐克制敌方英雄">
-                    <button class="send-btn" id="sendBtn" onclick="sendMessage()">➤</button>
+                    <input type="text" class="query-input" id="queryInput" placeholder="输入您的问题，如：对面有帕吉和斧王，推荐什么英雄">
+                    <button class="send-btn" id="sendBtn">➤</button>
                 </div>
 
                 <div class="status-bar">
@@ -919,48 +919,7 @@
         }
 
         function generateTraceId() {
-            // 生成 UUID v4 格式的 Trace ID
             return 'trace_' + crypto.randomUUID().replace(/-/g, '').substring(0, 16);
-        }
-
-        function parseHeroesFromQuery(query) {
-            const context = {
-                our_heroes: [],
-                enemy_heroes: []
-            };
-
-            const enemyPatterns = [
-                /敌方[：:]\s*([^，,。\n]+)/gi,
-                /enemy[：:]\s*([^，,。\n]+)/gi,
-                /敌方英雄[：:]\s*([^，,。\n]+)/gi
-            ];
-
-            const ourPatterns = [
-                /己方[：:]\s*([^，,。\n]+)/gi,
-                /our[：:]\s*([^，,。\n]+)/gi,
-                /己方英雄[：:]\s*([^，,。\n]+)/gi
-            ];
-
-            for (const pattern of enemyPatterns) {
-                let match;
-                while ((match = pattern.exec(query)) !== null) {
-                    const heroes = match[1].split(/[,，]/).map(h => h.trim()).filter(h => h);
-                    context.enemy_heroes.push(...heroes);
-                }
-            }
-
-            for (const pattern of ourPatterns) {
-                let match;
-                while ((match = pattern.exec(query)) !== null) {
-                    const heroes = match[1].split(/[,，]/).map(h => h.trim()).filter(h => h);
-                    context.our_heroes.push(...heroes);
-                }
-            }
-
-            context.our_heroes = [...new Set(context.our_heroes)];
-            context.enemy_heroes = [...new Set(context.enemy_heroes)];
-
-            return context;
         }
 
         function addMessage(role, content, meta = '') {
@@ -1116,7 +1075,6 @@
             console.log(`[Trace] Request started: ${currentTraceId}`);
 
             const msgElement = createStreamingMessage();
-            const context = parseHeroesFromQuery(query);
 
             try {
                 const response = await fetch('/api/chat/stream', {
@@ -1129,8 +1087,7 @@
                     body: JSON.stringify({
                         query: query,
                         session_id: sessionId,
-                        trace_id: currentTraceId,
-                        context: context
+                        trace_id: currentTraceId
                     })
                 });
 
@@ -1282,62 +1239,9 @@
             }
         }
 
-        async function sendMessage() {
-            const query = queryInput.value.trim();
-            if (!query) return;
-
-            if (isStreaming) return;
-
-            updateStatus('处理中...');
-            sendBtn.disabled = true;
-            addMessage('user', query, new Date().toLocaleTimeString());
-            queryInput.value = '';
-
-            // 生成新的 Trace ID 用于本次请求
-            currentTraceId = generateTraceId();
-            traceIdDisplay.textContent = `Trace: ${currentTraceId}`;
-            console.log(`[Trace] Request started: ${currentTraceId}`);
-
-            try {
-                const context = parseHeroesFromQuery(query);
-
-                const response = await fetch('/api/chat', {
-                    method: 'POST',
-                    headers: { 
-                        'Content-Type': 'application/json',
-                        'X-Trace-ID': currentTraceId,
-                        'X-Session-ID': sessionId
-                    },
-                    body: JSON.stringify({
-                        query: query,
-                        session_id: sessionId,
-                        trace_id: currentTraceId,
-                        context: context
-                    })
-                });
-
-                const data = await response.json();
-
-                if (data.success) {
-                    addMessage('assistant', data.final_answer || '处理完成');
-                } else {
-                    addMessage('assistant', `错误: ${data.error || '未知错误'}`);
-                }
-            } catch (error) {
-                addMessage('assistant', `请求失败: ${error.message}`);
-            } finally {
-                updateStatus('就绪');
-                sendBtn.disabled = false;
-                queryInput.focus();
-                
-                // 记录 Trace ID 到控制台，方便调试
-                if (currentTraceId) {
-                    console.log(`[Trace] Request completed: ${currentTraceId}`);
-                    console.log(`[Trace] View logs: /api/trace/${currentTraceId}`);
-                }
-            }
-        }
-
+        // 注意：sendMessage() 已被弃用，使用 sendMessageStream() 进行流式输出
+        // 所有交互都通过事件监听器调用 sendMessageStream()
+        
         queryInput.addEventListener('keypress', function(e) {
             if (e.key === 'Enter') {
                 sendMessageStream();
@@ -1642,18 +1546,33 @@
 
         // 渲染历史记录
         function renderHistory() {
-            const container = document.getElementById('historyList');
-            if (heroHistory.length === 0) {
-                container.innerHTML = '<p style="color: #888; text-align: center; font-size: 12px;">暂无历史记录</p>';
-                return;
+            try {
+                const container = document.getElementById('historyList');
+                
+                // 检查容器是否存在
+                if (!container) {
+                    console.warn('historyList 容器未找到');
+                    return;
+                }
+                
+                if (!Array.isArray(heroHistory) || heroHistory.length === 0) {
+                    container.innerHTML = '<p style="color: #888; text-align: center; font-size: 12px;">暂无历史记录</p>';
+                    return;
+                }
+                
+                container.innerHTML = heroHistory.map(item => `
+                    <div class="history-item" onclick="loadHistoryItem(${item.id})">
+                        <div class="time">${escapeHtml(item.time || '未知时间')}</div>
+                        <div class="content">${escapeHtml(item.query || '无内容')}</div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('渲染历史记录时发生错误:', error);
+                const container = document.getElementById('historyList');
+                if (container) {
+                    container.innerHTML = '<p style="color: #dc3545; text-align: center; font-size: 12px;">加载历史记录失败</p>';
+                }
             }
-            
-            container.innerHTML = heroHistory.map(item => `
-                <div class="history-item" onclick="loadHistoryItem(${item.id})">
-                    <div class="time">${item.time}</div>
-                    <div class="content">${item.query}</div>
-                </div>
-            `).join('');
         }
 
         // 加载历史记录项
@@ -1668,9 +1587,35 @@
         // 清空历史记录
         function clearHistory() {
             if (confirm('确定要清空所有历史记录吗？')) {
-                heroHistory = [];
-                localStorage.removeItem('heroGenHistory');
-                renderHistory();
+                try {
+                    // 清空内存中的历史记录
+                    heroHistory = [];
+                    
+                    // 安全地清除 localStorage
+                    try {
+                        localStorage.removeItem('heroGenHistory');
+                    } catch (storageError) {
+                        console.warn('localStorage 清除失败:', storageError);
+                    }
+                    
+                    // 安全地渲染历史记录
+                    renderHistory();
+                    
+                    // 可选：清空结果区域
+                    const resultContent = document.getElementById('resultContent');
+                    const resultSection = document.getElementById('resultSection');
+                    if (resultContent) {
+                        resultContent.textContent = '';
+                    }
+                    if (resultSection) {
+                        resultSection.style.display = 'none';
+                    }
+                    
+                    console.log('历史记录已清空');
+                } catch (error) {
+                    console.error('清空历史记录时发生错误:', error);
+                    alert('清空历史记录失败：' + error.message);
+                }
             }
         }
 

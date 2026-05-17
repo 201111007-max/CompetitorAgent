@@ -217,8 +217,65 @@ class TestHeroParsing:
             
             assert 'our_heroes' in result
             assert 'enemy_heroes' in result
-            assert result['our_heroes'] == []
-            assert result['enemy_heroes'] == []
+            assert 'confidence' in result
+            assert result['confidence'] < 0.5
+    
+    def test_parse_heroes_with_confidence(self):
+        """测试 LLM 解析 - 包含置信度"""
+        with patch('web.app.get_llm_client') as mock_get_client:
+            mock_client = Mock()
+            mock_client.chat.return_value = {
+                'choices': [{
+                    'message': {
+                        'content': '{"our_heroes": ["anti-mage"], "enemy_heroes": ["pudge", "axe"], "confidence": 0.95}'
+                    }
+                }]
+            }
+            mock_get_client.return_value = mock_client
+            
+            query = "我们选了敌法，对面有帕吉和斧王"
+            result = parse_heroes_with_llm(query)
+            
+            assert 'confidence' in result
+            assert result['confidence'] == 0.95
+    
+    def test_parse_heroes_fallback(self):
+        """测试 LLM 解析失败时的降级策略"""
+        with patch('web.app.get_llm_client') as mock_get_client:
+            mock_client = Mock()
+            mock_client.chat.return_value = {
+                'error': 'LLM service unavailable'
+            }
+            mock_get_client.return_value = mock_client
+            
+            query = "对面有帕吉和斧王"
+            result = parse_heroes_with_llm(query)
+            
+            assert 'our_heroes' in result
+            assert 'enemy_heroes' in result
+            assert 'confidence' in result
+            assert result['confidence'] < 0.5
+    
+    def test_parse_heroes_json_error(self):
+        """测试 LLM 解析 JSON 错误时的降级策略"""
+        with patch('web.app.get_llm_client') as mock_get_client:
+            mock_client = Mock()
+            mock_client.chat.return_value = {
+                'choices': [{
+                    'message': {
+                        'content': 'Invalid JSON response'
+                    }
+                }]
+            }
+            mock_get_client.return_value = mock_client
+            
+            query = "对面有帕吉"
+            result = parse_heroes_with_llm(query)
+            
+            assert 'our_heroes' in result
+            assert 'enemy_heroes' in result
+            assert 'confidence' in result
+            assert result['confidence'] < 0.5
 
 
 class TestItemParsing:
@@ -307,6 +364,47 @@ class TestMockRecommendations:
         
         assert isinstance(result, str)
         assert len(result) > 0
+
+
+class TestParsePreviewAPI:
+    """测试解析预览 API"""
+    
+    def test_parse_preview_success(self, client):
+        """测试解析预览成功"""
+        with patch('web.app.parse_heroes_with_llm') as mock_parse:
+            mock_parse.return_value = {
+                'our_heroes': ['anti-mage'],
+                'enemy_heroes': ['pudge', 'axe'],
+                'confidence': 0.95
+            }
+            
+            response = client.post('/api/parse/preview', json={
+                'query': '我们选了敌法，对面有帕吉和斧王'
+            })
+            
+            assert response.status_code == 200
+            data = response.get_json()
+            assert data['success'] == True
+            assert 'parsed' in data
+            assert data['parsed']['confidence'] == 0.95
+    
+    def test_parse_preview_empty_query(self, client):
+        """测试解析预览空查询"""
+        response = client.post('/api/parse/preview', json={
+            'query': ''
+        })
+        
+        assert response.status_code == 400
+        data = response.get_json()
+        assert 'error' in data
+    
+    def test_parse_preview_no_query(self, client):
+        """测试解析预览缺少查询参数"""
+        response = client.post('/api/parse/preview', json={})
+        
+        assert response.status_code == 400
+        data = response.get_json()
+        assert 'error' in data
 
 
 class TestStaticFiles:

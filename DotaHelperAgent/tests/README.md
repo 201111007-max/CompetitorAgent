@@ -31,6 +31,10 @@ tests/
 ├── integration/            # 集成测试
 │   └── README.md
 │
+├── frontend/               # 前端测试
+│   ├── test_frontend_optimization.html  # 前端优化验证测试
+│   └── README.md
+│
 ├── conftest.py             # pytest 配置和共享 fixtures
 ├── run_tests.py            # 运行所有测试
 ├── run_api_e2e_tests.py    # 运行 API 和 E2E 测试

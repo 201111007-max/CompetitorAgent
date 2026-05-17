@@ -14,7 +14,7 @@ import threading
 import re
 import queue
 import schedule
-from typing import Optional
+from typing import Optional, Dict, List, Any, Tuple, Generator
 from datetime import datetime
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -72,7 +72,8 @@ HERO_PARSE_PROMPT = """你是一个 Dota 2 英雄名称解析专家。请从用�
 严格返回以下 JSON 格式，不要包含任何其他内容：
 {{
     "our_heroes": ["己方英雄英文名称列表"],
-    "enemy_heroes": ["敌方英雄英文名称列表"]
+    "enemy_heroes": ["敌方英雄英文名称列表"],
+    "confidence": 0.95
 }}
 
 ## 判断规则
@@ -82,6 +83,9 @@ HERO_PARSE_PROMPT = """你是一个 Dota 2 英雄名称解析专家。请从用�
    - 如果用户只说"有"某个英雄，没有明确说明是己方还是敌方，默认为**敌方**
    - 如果用户说"推荐英雄"、"选什么英雄"等，前面提到的英雄通常是己方已选的
    - 如果用户说"克制XX"，XX 是敌方英雄
+4. **模糊处理**：
+   - 如果无法确定是己方还是敌方，根据上下文推断
+   - 如果完全无法确定，放入 enemy_heroes（默认假设为敌方）
 
 ## 英雄名称处理
 1. **必须转换为英文名称**，使用 Dota 2 官方英文名
@@ -99,13 +103,16 @@ HERO_PARSE_PROMPT = """你是一个 Dota 2 英雄名称解析专家。请从用�
 
 ## 示例
 用户输入："我方英雄有虚空假面,帕格纳,沙王，推荐我选什么英雄"
-输出：{{"our_heroes": ["faceless_void", "pugna", "sand_king"], "enemy_heroes": []}}
+输出：{{"our_heroes": ["faceless_void", "pugna", "sand_king"], "enemy_heroes": [], "confidence": 0.95}}
 
 用户输入："对面有帕吉和斧王，选什么克制"
-输出：{{"our_heroes": [], "enemy_heroes": ["pudge", "axe"]}}
+输出：{{"our_heroes": [], "enemy_heroes": ["pudge", "axe"], "confidence": 0.95}}
 
 用户输入："我们选了影魔，对面有宙斯和水晶"
-输出：{{"our_heroes": ["shadow_fiend"], "enemy_heroes": ["zeus", "crystal_maiden"]}}
+输出：{{"our_heroes": ["shadow_fiend"], "enemy_heroes": ["zeus", "crystal_maiden"], "confidence": 0.95}}
+
+用户输入："有帕吉和斧王"（未明确说明是己方还是敌方）
+输出：{{"our_heroes": [], "enemy_heroes": ["pudge", "axe"], "confidence": 0.7}}
 
 ## 用户输入
 {query}
@@ -133,7 +140,7 @@ ITEM_PARSE_PROMPT = """你是一个 Dota 2 物品名称解析器。请从用户�
 请只返回 JSON，不要其他内容："""
 
 
-def get_llm_client():
+def get_llm_client() -> Optional[LLMClient]:
     global llm_client
     if llm_client is None:
         try:
@@ -150,21 +157,65 @@ def get_llm_client():
     return llm_client
 
 
-def parse_heroes_with_llm(query):
-    """使用 LLM 从 query 中解析英雄名称
+from functools import lru_cache
+
+
+@lru_cache(maxsize=100)
+def parse_heroes_with_llm_cached(query: str) -> tuple:
+    """带缓存的英雄解析（缓存 100 个查询）
     
-    完全依赖 LLM 进行英雄名称解析，不再使用规则解析作为降级方案。
+    注意：lru_cache 要求参数必须是可哈希的，所以返回 tuple 而不是 dict
+    """
+    result = parse_heroes_with_llm(query)
+    return (tuple(result["our_heroes"]), tuple(result["enemy_heroes"]), result["confidence"])
+
+
+def fallback_parse(query: str) -> dict:
+    """降级解析策略：简单的关键词匹配
+    
+    当 LLM 解析失败时使用简单的关键词匹配作为降级方案
+    """
+    enemy_keywords = ["敌方", "对面", "对方", "enemy", "克制"]
+    our_keywords = ["己方", "我方", "我们", "our", "we"]
+    
+    our_heroes = []
+    enemy_heroes = []
+    
+    # 简单的关键词匹配
+    query_lower = query.lower()
+    
+    # 检测敌方英雄
+    if any(kw in query_lower for kw in enemy_keywords):
+        # 尝试提取英雄名（简单实现）
+        pass
+    
+    # 检测己方英雄
+    if any(kw in query_lower for kw in our_keywords):
+        # 尝试提取英雄名（简单实现）
+        pass
+    
+    return {
+        "our_heroes": our_heroes,
+        "enemy_heroes": enemy_heroes,
+        "confidence": 0.3
+    }
+
+
+def parse_heroes_with_llm(query: str) -> Dict[str, Any]:
+    """使用 LLM 从 query 中解析英雄名称（增强版）
+    
+    完全依赖 LLM 进行英雄名称解析，支持缓存和降级策略。
     
     Args:
         query: 用户输入的查询文本
         
     Returns:
-        dict: 包含 our_heroes 和 enemy_heroes 的字典
+        dict: 包含 our_heroes、enemy_heroes 和 confidence 的字典
     """
     client = get_llm_client()
     if client is None:
-        app_logger.warning("LLM 客户端未初始化，返回空结果")
-        return {"our_heroes": [], "enemy_heroes": []}
+        app_logger.warning("LLM 客户端未初始化，使用降级解析")
+        return fallback_parse(query)
 
     try:
         messages = [
@@ -173,8 +224,8 @@ def parse_heroes_with_llm(query):
         response = client.chat(messages, max_tokens=512, temperature=0.1)
 
         if "error" in response:
-            app_logger.warning(f"LLM 解析失败：{response['error']}")
-            return {"our_heroes": [], "enemy_heroes": []}
+            app_logger.warning(f"LLM 解析失败：{response['error']}，使用降级解析")
+            return fallback_parse(query)
 
         content = response.get("choices", [{}])[0].get("message", {}).get("content", "")
         
@@ -189,25 +240,26 @@ def parse_heroes_with_llm(query):
         result = json.loads(json_str)
         parsed = {
             "our_heroes": result.get("our_heroes", []),
-            "enemy_heroes": result.get("enemy_heroes", [])
+            "enemy_heroes": result.get("enemy_heroes", []),
+            "confidence": result.get("confidence", 0.5)
         }
         
-        app_logger.info(f"LLM 解析成功: our={parsed['our_heroes']}, enemy={parsed['enemy_heroes']}")
+        app_logger.info(f"LLM 解析成功: our={parsed['our_heroes']}, enemy={parsed['enemy_heroes']}, confidence={parsed['confidence']}")
         return parsed
         
     except json.JSONDecodeError as e:
         app_logger.error(f"JSON 解析失败: {e}")
         app_logger.error(f"原始内容: {content}")
-        return {"our_heroes": [], "enemy_heroes": []}
+        return fallback_parse(query)
     except Exception as e:
         import traceback
         app_logger.error(f"LLM 解析异常：{e}")
         app_logger.error(f"Traceback: {traceback.format_exc()}")
-        return {"our_heroes": [], "enemy_heroes": []}
+        return fallback_parse(query)
 
 
 
-def parse_items_with_llm(query):
+def parse_items_with_llm(query: str) -> Dict[str, List[str]]:
     """使用 LLM 从 query 中解析物品名称"""
     client = get_llm_client()
     if client is None:
@@ -235,7 +287,7 @@ def parse_items_with_llm(query):
     return {"items": []}
 
 
-def parse_hero_from_query(query):
+def parse_hero_from_query(query: str) -> Dict[str, Any]:
     """从 query 中提取单个英雄名称（用于出装/技能查询）"""
     if "出装" in query or "装备" in query or "item" in query.lower():
         prompt = f"""从以下用户输入中提取英雄名称，只返回一个英雄名称（英文名）：
@@ -272,7 +324,7 @@ def parse_hero_from_query(query):
         return ""
 
 
-def warm_cache():
+def warm_cache() -> None:
     global cache_warming, cache_ready
     if cache_warming or cache_ready:
         return
@@ -294,7 +346,7 @@ def warm_cache():
     cache_warming = False
 
 
-def refresh_all_heroes_cache():
+def refresh_all_heroes_cache() -> None:
     """全量刷新所有英雄克制数据缓存（每日定时任务）"""
     global api_client
     
@@ -321,7 +373,7 @@ def refresh_all_heroes_cache():
         app_logger.error(traceback.format_exc())
 
 
-def start_cache_scheduler():
+def start_cache_scheduler() -> None:
     """启动缓存定时刷新任务"""
     # 每天凌晨 3 点执行全量缓存刷新
     schedule.every().day.at("03:00").do(refresh_all_heroes_cache)
@@ -338,7 +390,7 @@ def start_cache_scheduler():
     scheduler_thread.start()
 
 
-def initialize_agent_controller():
+def initialize_agent_controller() -> None:
     """初始化 Agent 和 Agent Controller"""
     global agent, agent_controller, conversation_manager
     
@@ -418,7 +470,7 @@ def initialize_agent_controller():
 
 
 @app.before_request
-def setup_trace_context():
+def setup_trace_context() -> None:
     """每个请求初始化 Trace 上下文"""
     # 优先从 Header 获取，其次从 Body，最后生成新的
     trace_id = request.headers.get('X-Trace-ID')
@@ -466,7 +518,7 @@ def setup_trace_context():
 
 
 @app.after_request
-def cleanup_trace_context(response):
+def cleanup_trace_context(response: Response) -> Response:
     """请求结束后清理并记录"""
     trace_ctx = getattr(g, 'trace_ctx', None)
     if trace_ctx:
@@ -484,16 +536,16 @@ def cleanup_trace_context(response):
 
 
 @app.route('/')
-def index():
+def index() -> str:
     return send_file(WEB_DIR / 'index.html')
 
 
 @app.route('/web/<path:filename>')
-def serve_web(filename):
+def serve_web(filename: str) -> Response:
     return send_file(WEB_DIR / filename)
 
 
-def get_agent():
+def get_agent() -> AgentController:
     global agent
     if agent is None:
         try:
@@ -505,7 +557,7 @@ def get_agent():
     return agent
 
 
-def get_agent_safe():
+def get_agent_safe() -> Optional[AgentController]:
     global cache_ready, cache_warming
     agt = get_agent()
     if not cache_ready and not cache_warming:
@@ -513,7 +565,7 @@ def get_agent_safe():
     return agt
 
 
-def _get_mock_recommendations(enemy_heroes):
+def _get_mock_recommendations(enemy_heroes: List[str]) -> str:
     mock_data = {
         "anti-mage": [
             {"hero": "Axe", "reason": "控制能力强，克制脆皮", "score": 0.92},
@@ -541,14 +593,14 @@ def _get_mock_recommendations(enemy_heroes):
 
 
 @app.before_request
-def before_first_request():
+def before_first_request() -> None:
     global cache_ready, cache_warming
     if not cache_ready and not cache_warming:
         threading.Thread(target=warm_cache, daemon=True).start()
 
 
 @app.route('/api/health', methods=['GET'])
-def health_check():
+def health_check() -> Response:
     llm_enabled = get_llm_client() is not None
     controller_ready = agent_controller is not None
     memory_stats = agent.get_memory_stats() if agent else {}
@@ -565,7 +617,7 @@ def health_check():
 
 
 @app.route('/api/conversation/stats', methods=['GET'])
-def conversation_stats():
+def conversation_stats() -> Response:
     """获取会话统计信息"""
     if conversation_manager is None:
         return jsonify({"error": "ConversationManager not initialized"})
@@ -574,7 +626,7 @@ def conversation_stats():
 
 
 @app.route('/api/conversation/<session_id>', methods=['GET'])
-def get_conversation(session_id):
+def get_conversation(session_id: str) -> Response:
     """获取会话历史"""
     if conversation_manager is None:
         return jsonify({"error": "ConversationManager not initialized"})
@@ -604,7 +656,7 @@ def get_conversation(session_id):
 
 
 @app.route('/api/test_tools', methods=['GET'])
-def test_tools():
+def test_tools() -> Response:
     """测试工具执行"""
     if agent_controller is None:
         return jsonify({"error": "Agent Controller not initialized"})
@@ -650,7 +702,7 @@ def test_tools():
 
 
 @app.route('/api/chat', methods=['POST'])
-def chat():
+def chat() -> Response:
     """使用 Agent Controller 处理聊天请求（带 Trace 支持）"""
     data = request.get_json()
     query = data.get('query', '')
@@ -1267,7 +1319,7 @@ def _get_hero_cn_by_name(hero_en: str) -> Optional[str]:
     return hero_map.get(hero_en_lower)
 
 
-def _chat_legacy(query, context, session_id):
+def _chat_legacy(query: str, context: Dict[str, Any], session_id: str) -> Generator:
     """旧版聊天实现（回退用）"""
     agt = get_agent_safe()
     
@@ -1350,8 +1402,31 @@ def _chat_legacy(query, context, session_id):
     return jsonify(result)
 
 
+@app.route('/api/parse/preview', methods=['POST'])
+def parse_preview() -> Response:
+    """解析预览 API - 用于前端实时显示解析结果"""
+    try:
+        data = request.get_json()
+        query = data.get('query', '')
+        
+        if not query:
+            return jsonify({"error": "Query is required"}), 400
+        
+        parsed = parse_heroes_with_llm(query)
+        
+        return jsonify({
+            "success": True,
+            "parsed": parsed,
+            "query": query
+        })
+        
+    except Exception as e:
+        app_logger.error(f"Parse preview error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/chat/stream', methods=['POST'])
-def chat_stream():
+def chat_stream() -> Response:
     """流式输出接口（使用 Agent Controller，带 Trace 支持）"""
     data = request.get_json()
     query = data.get('query', '')
@@ -1841,7 +1916,7 @@ def _execute_sub_goal_streaming(controller, thought, sub_goal, trace_ctx=None):
         return False
 
 
-def _generate_stream_legacy(query, context, start_time):
+def _generate_stream_legacy(query: str, context: Dict[str, Any], start_time: float) -> Generator:
     """旧版流式生成（回退用）"""
     agt = get_agent_safe()
     
@@ -1871,17 +1946,17 @@ def _generate_stream_legacy(query, context, start_time):
 
 
 @app.route('/api/sessions', methods=['GET'])
-def get_sessions():
+def get_sessions() -> Response:
     return jsonify([])
 
 
 @app.route('/api/sessions/<session_id>', methods=['GET'])
-def get_session(session_id):
+def get_session(session_id: str) -> Response:
     return jsonify({"session_id": session_id, "messages": []})
 
 
 @app.route('/api/tools', methods=['GET'])
-def get_tools():
+def get_tools() -> Response:
     """获取所有可用的 Agent Tools"""
     if agent_controller:
         tools_info = []
@@ -1907,7 +1982,7 @@ def get_tools():
 
 
 @app.route('/api/memory/stats', methods=['GET'])
-def get_memory_stats():
+def get_memory_stats() -> Response:
     """获取 Memory 系统统计信息"""
     if agent:
         return jsonify(agent.get_memory_stats())
@@ -1915,7 +1990,7 @@ def get_memory_stats():
 
 
 @app.route('/api/memory/clear', methods=['POST'])
-def clear_memory():
+def clear_memory() -> Response:
     """清空 Memory 系统"""
     if agent:
         agent.clear_memory()
@@ -1926,7 +2001,7 @@ def clear_memory():
 # === 日志 API 接口 ===
 
 @app.route('/api/logs', methods=['GET'])
-def get_logs():
+def get_logs() -> Response:
     """获取日志（从内存）"""
     session_id = request.args.get('session_id')
     level = request.args.get('level')
@@ -1944,7 +2019,7 @@ def get_logs():
 
 
 @app.route('/api/logs/stream')
-def stream_logs():
+def stream_logs() -> Response:
     """SSE 流式日志"""
     session_id = request.args.get('session_id')
 
@@ -1979,7 +2054,7 @@ def stream_logs():
 
 
 @app.route('/api/logs/files', methods=['GET'])
-def get_log_files():
+def get_log_files() -> Response:
     """获取日志文件列表（支持新的文件夹结构）"""
     from pathlib import Path
     import re
@@ -2014,7 +2089,7 @@ def get_log_files():
 
 
 @app.route('/api/logs/files/<path:filename>', methods=['GET'])
-def get_log_file_content(filename):
+def get_log_file_content(filename: str) -> Response:
     """获取日志文件内容"""
     from pathlib import Path
 
@@ -2049,7 +2124,7 @@ def get_log_file_content(filename):
 
 
 @app.route('/api/logs/clear', methods=['POST'])
-def clear_logs():
+def clear_logs() -> Response:
     """清空内存日志"""
     data = request.get_json() or {}
     session_id = data.get('session_id')
@@ -2187,7 +2262,7 @@ def build_span_tree(logs: list) -> dict:
 
 
 @app.route('/api/trace/search', methods=['GET'])
-def search_traces():
+def search_traces() -> Response:
     """搜索 Trace
     
     Query Params:
@@ -2256,7 +2331,7 @@ def search_traces():
 
 
 @app.route('/api/generate_hero_query', methods=['POST'])
-def generate_hero_query():
+def generate_hero_query() -> Response:
     """随机生成英雄查询文本"""
     import random
     

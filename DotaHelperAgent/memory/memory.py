@@ -91,7 +91,9 @@ class AgentMemory:
             episodic_max_entries: 情景记忆最大条目数
         """
         self.memory_dir = Path(memory_dir)
-        self.memory_dir.mkdir(exist_ok=True)
+        if not self.memory_dir.is_absolute():
+            self.memory_dir = Path(__file__).parent.parent / memory_dir
+        self.memory_dir.mkdir(parents=True, exist_ok=True)
         self.short_term_ttl = short_term_ttl
         self.long_term_max_items = long_term_max_items
         self.episodic_max_entries = episodic_max_entries
