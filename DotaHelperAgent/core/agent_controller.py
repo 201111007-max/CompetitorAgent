@@ -896,12 +896,21 @@ class AgentController:
         if not thought.observations:
             return False
 
-        # 简单判断：至少有一条观察结果且包含有效数据
+        valid_keys = {
+            'recommendations', 'answer', 'meta_heroes', 'matchups',
+            'hero_info', 'items', 'skills', 'talents', 'composition',
+            'counter_picks', 'result'
+        }
+
         for obs in thought.observations:
             if isinstance(obs, dict):
-                if 'recommendations' in obs or 'answer' in obs:
+                if any(key in obs for key in valid_keys):
+                    return True
+                if len(obs) > 0:
                     return True
             elif isinstance(obs, list) and len(obs) > 0:
+                return True
+            elif obs is not None:
                 return True
 
         return False
@@ -1655,41 +1664,107 @@ class AgentController:
         try:
             session_id = thought.context.get('session_id')
             
-            # 如果子目标指定了工具，直接使用
+            logger.debug_ctx(
+                "开始执行子目标",
+                session_id=session_id,
+                extra_data={
+                    "sub_goal_id": sub_goal.id,
+                    "description": sub_goal.description,
+                    "tool_name": sub_goal.tool_name,
+                    "parameters": sub_goal.parameters
+                }
+            )
+            
             if sub_goal.tool_name:
                 logger.info_ctx(
                     "使用指定工具执行子目标",
                     session_id=session_id,
-                    extra_data={"tool_name": sub_goal.tool_name}
+                    extra_data={"tool_name": sub_goal.tool_name, "parameters": sub_goal.parameters}
                 )
                 
-                # 构造工具计划
-                from core.llm_tool_selector import ToolCall
-                tool_plan = type('ToolCallPlan', (), {
-                    'tools': [ToolCall(tool_name=sub_goal.tool_name, parameters=sub_goal.parameters)],
-                    'reasoning': f"执行子目标: {sub_goal.description}"
-                })()
+                from core.llm_tool_selector import ToolCall, ToolCallPlan
+                tool_plan = ToolCallPlan(
+                    tools=[ToolCall(tool_name=sub_goal.tool_name, parameters=sub_goal.parameters or {})],
+                    reasoning=f"执行子目标: {sub_goal.description}"
+                )
                 
                 thought.context['tool_plan'] = tool_plan
+                logger.debug_ctx(
+                    "工具计划已创建",
+                    session_id=session_id,
+                    extra_data={
+                        "tools": [t.tool_name for t in tool_plan.tools],
+                        "tool_params": [t.parameters for t in tool_plan.tools]
+                    }
+                )
                 
-                # 执行 ReAct 循环的一个迭代
+                logger.debug_ctx("调用 _plan 方法", session_id=session_id)
                 self._plan(thought)
+                logger.debug_ctx(
+                    "_plan 方法完成",
+                    session_id=session_id,
+                    extra_data={"state": thought.state.value, "planned_tools": thought.context.get('planned_tools')}
+                )
                 if thought.state == AgentState.FAILED:
+                    logger.error_ctx(
+                        "_plan 失败",
+                        session_id=session_id,
+                        extra_data={"error": thought.error}
+                    )
                     return False
                 
+                logger.debug_ctx("调用 _execute 方法", session_id=session_id)
                 self._execute(thought)
+                logger.debug_ctx(
+                    "_execute 方法完成",
+                    session_id=session_id,
+                    extra_data={"state": thought.state.value, "observations_count": len(thought.observations)}
+                )
                 if thought.state == AgentState.FAILED:
+                    logger.error_ctx(
+                        "_execute 失败",
+                        session_id=session_id,
+                        extra_data={"error": thought.error}
+                    )
                     return False
                 
+                logger.debug_ctx("调用 _observe 方法", session_id=session_id)
                 self._observe(thought)
+                logger.debug_ctx(
+                    "_observe 方法完成",
+                    session_id=session_id,
+                    extra_data={"observations_count": len(thought.observations)}
+                )
                 
-                # 合成结果
                 if thought.observations:
+                    logger.debug_ctx("调用 _synthesize 方法", session_id=session_id)
                     self._synthesize(thought)
+                    logger.debug_ctx(
+                        "_synthesize 方法完成",
+                        session_id=session_id,
+                        extra_data={"state": thought.state.value}
+                    )
+                else:
+                    logger.warning_ctx(
+                        "没有观察结果，无法合成",
+                        session_id=session_id,
+                        extra_data={"actions_taken": [a.get('tool_name') for a in thought.actions_taken]}
+                    )
+                    thought.set_failed("工具执行后没有观察结果")
+                    return False
                 
-                return thought.state == AgentState.COMPLETE
+                success = thought.state == AgentState.COMPLETE
+                logger.info_ctx(
+                    "子目标执行完成",
+                    session_id=session_id,
+                    extra_data={
+                        "sub_goal_id": sub_goal.id,
+                        "success": success,
+                        "state": thought.state.value
+                    }
+                )
+                return success
             else:
-                # 没有指定工具，使用标准 ReAct 流程
                 logger.info_ctx("使用标准 ReAct 流程执行子目标", session_id=session_id)
                 for turn in range(self.max_turns):
                     thought.increment_turn()
@@ -1715,7 +1790,6 @@ class AgentController:
                         self._finalize(thought)
                         return True
                 
-                # 达到最大轮数
                 logger.warning_ctx("子目标执行达到最大轮数", session_id=session_id)
                 self._finalize(thought)
                 return thought.state == AgentState.COMPLETE

@@ -1,11 +1,12 @@
-"""DotaHelperAgent Web API Server
+"""DotaHelperAgent API Server
 
-基于 ReAct Agent 架构的 Flask 后端，支持完整的 Agent 推理循环
+基于 ReAct Agent 架构的 Flask API 后端，提供完整的 Agent 推理循环。
+前端使用 Vue 3 + TypeScript + Vite，位于 frontend/ 目录。
 """
 
 import sys
 from pathlib import Path
-from flask import Flask, request, jsonify, Response, send_file, g, stream_with_context
+from flask import Flask, request, jsonify, Response, g, stream_with_context
 from flask_cors import CORS
 import json
 import time
@@ -47,8 +48,6 @@ app_logger = get_logger("web_app", component="web")
 
 app = Flask(__name__)
 CORS(app)
-
-WEB_DIR = Path(__file__).parent
 
 # 全局变量
 agent = None
@@ -536,13 +535,24 @@ def cleanup_trace_context(response: Response) -> Response:
 
 
 @app.route('/')
-def index() -> str:
-    return send_file(WEB_DIR / 'index.html')
-
-
-@app.route('/web/<path:filename>')
-def serve_web(filename: str) -> Response:
-    return send_file(WEB_DIR / filename)
+def index() -> Response:
+    """API 服务根路径，返回服务信息"""
+    return jsonify({
+        "service": "DotaHelperAgent",
+        "version": "1.0.0",
+        "description": "Dota 2 智能助手 API",
+        "docs": "https://github.com/your-repo/DotaHelperAgent",
+        "endpoints": {
+            "health": "/api/health",
+            "chat": "/api/chat",
+            "chat_stream": "/api/chat/stream",
+            "tools": "/api/tools",
+            "parse": "/api/parse/preview",
+            "logs": "/api/logs",
+            "trace": "/api/trace/<trace_id>",
+            "memory": "/api/memory/stats"
+        }
+    })
 
 
 def get_agent() -> AgentController:
@@ -2403,10 +2413,10 @@ def generate_hero_query() -> Response:
 
 if __name__ == '__main__':
     app_logger.info("=" * 50)
-    app_logger.info("DotaHelperAgent Web Server - ReAct Agent 架构")
+    app_logger.info("DotaHelperAgent API Server - ReAct Agent 架构")
     app_logger.info("=" * 50)
     app_logger.info("API Server: http://localhost:5000")
-    app_logger.info("Web UI: http://localhost:5000/web/index.html")
+    app_logger.info("Frontend: cd frontend && npm run dev")
     app_logger.info("=" * 50)
     
     # 初始化 Agent Controller

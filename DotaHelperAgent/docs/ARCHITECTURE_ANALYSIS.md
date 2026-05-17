@@ -1923,11 +1923,780 @@ def _adjust_strategy(self, thought: AgentThought) -> None:
 - ✅ 添加目标分解和元认知实现详解
 - ✅ 更新完成度评估
 
+### 9.4 前端 Vue 框架迁移方案
+
+#### 9.4.1 当前前端现状分析
+
+**当前实现**：
+- 单文件 HTML ([index.html](file:///d:/trae_projects/first-agent/DotaHelperAgent/web/index.html))
+- 原生 JavaScript + 内联 CSS（约 1600+ 行）
+- 功能模块：
+  - 聊天界面（消息展示、流式输出）
+  - 思考步骤可视化（Think→Plan→Execute→Observe→Reflect）
+  - 日志侧边栏（实时日志、文件查看）
+  - 英雄选择器侧边栏
+  - Trace ID 追踪
+
+**痛点**：
+- ❌ 代码耦合度高，难以维护
+- ❌ 无组件化，复用性差
+- ❌ 无状态管理，数据流混乱
+- ❌ 无类型检查，容易出错
+- ❌ 无构建优化，性能受限
+
+#### 9.4.2 Vue 3 技术栈选型
+
+```
+技术栈：
+├── Vue 3 (Composition API)
+├── TypeScript
+├── Vite (构建工具)
+├── Pinia (状态管理)
+├── Vue Router (路由)
+├── Axios (HTTP 客户端)
+├── Element Plus / Naive UI (UI 组件库)
+└── SSE.js (服务端推送)
+```
+
+#### 9.4.3 项目结构设计
+
+```
+DotaHelperAgent/
+├── frontend/                    # Vue 前端项目
+│   ├── src/
+│   │   ├── main.ts             # 入口文件
+│   │   ├── App.vue             # 根组件
+│   │   ├── router/             # 路由配置
+│   │   │   └── index.ts
+│   │   ├── stores/             # Pinia 状态管理
+│   │   │   ├── chat.ts         # 聊天状态
+│   │   │   ├── hero.ts         # 英雄选择状态
+│   │   │   └── log.ts          # 日志状态
+│   │   ├── components/         # 组件
+│   │   │   ├── chat/
+│   │   │   │   ├── ChatContainer.vue
+│   │   │   │   ├── MessageList.vue
+│   │   │   │   ├── MessageItem.vue
+│   │   │   │   ├── ThinkingSteps.vue
+│   │   │   │   └── ChatInput.vue
+│   │   │   ├── sidebar/
+│   │   │   │   ├── LogSidebar.vue
+│   │   │   │   ├── HeroSidebar.vue
+│   │   │   │   └── LogEntry.vue
+│   │   │   └── common/
+│   │   │       ├── StatusBadge.vue
+│   │   │       └── TraceIdBadge.vue
+│   │   ├── composables/        # 组合式函数
+│   │   │   ├── useChat.ts      # 聊天逻辑
+│   │   │   ├── useSSE.ts       # SSE 流式处理
+│   │   │   └── useTrace.ts     # Trace 追踪
+│   │   ├── services/           # API 服务
+│   │   │   ├── api.ts          # Axios 配置
+│   │   │   ├── chatService.ts  # 聊天 API
+│   │   │   └── logService.ts   # 日志 API
+│   │   ├── types/              # TypeScript 类型定义
+│   │   │   ├── chat.ts
+│   │   │   ├── hero.ts
+│   │   │   └── log.ts
+│   │   └── styles/             # 全局样式
+│   │       └── main.css
+│   ├── public/
+│   ├── package.json
+│   ├── vite.config.ts
+│   └── tsconfig.json
+└── web/                        # Flask 后端（保持不变）
+    └── app.py
+```
+
+#### 9.4.4 核心组件设计
+
+**1. 聊天状态管理 (Pinia Store)**
+
+```typescript
+import { defineStore } from 'pinia'
+import type { Message, ThinkingStep } from '@/types/chat'
+
+export const useChatStore = defineStore('chat', {
+  state: () => ({
+    messages: [] as Message[],
+    currentThinkingSteps: [] as ThinkingStep[],
+    isStreaming: false,
+    traceId: '',
+    sessionId: ''
+  }),
+  
+  actions: {
+    addMessage(message: Message) {
+      this.messages.push(message)
+    },
+    
+    updateThinkingSteps(steps: ThinkingStep[]) {
+      this.currentThinkingSteps = steps
+    },
+    
+    clearMessages() {
+      this.messages = []
+    }
+  }
+})
+```
+
+**2. SSE 流式处理 (Composable)**
+
+```typescript
+import { ref, onUnmounted } from 'vue'
+import { useChatStore } from '@/stores/chat'
+
+export function useSSE() {
+  const chatStore = useChatStore()
+  const eventSource = ref<EventSource | null>(null)
+  
+  const connect = (query: string, context: any) => {
+    const url = `/api/chat/stream?query=${encodeURIComponent(query)}`
+    eventSource.value = new EventSource(url)
+    
+    eventSource.value.onmessage = (event) => {
+      const data = JSON.parse(event.data)
+      
+      switch (data.type) {
+        case 'thinking':
+          chatStore.updateThinkingSteps(data.steps)
+          break
+        case 'answer':
+          chatStore.addMessage({
+            role: 'assistant',
+            content: data.content,
+            timestamp: new Date()
+          })
+          break
+        case 'complete':
+          disconnect()
+          break
+      }
+    }
+  }
+  
+  const disconnect = () => {
+    eventSource.value?.close()
+    eventSource.value = null
+  }
+  
+  onUnmounted(disconnect)
+  
+  return { connect, disconnect }
+}
+```
+
+**3. 思考步骤组件 (Vue Component)**
+
+```vue
+<template>
+  <div class="thinking-steps">
+    <div 
+      v-for="(step, index) in steps" 
+      :key="index"
+      class="thinking-step"
+      :class="{ collapsed: step.collapsed, thinking: step.status === 'running' }"
+    >
+      <div class="step-header" @click="toggleStep(index)">
+        <span class="step-icon">{{ getStepIcon(step.type) }}</span>
+        <span class="step-title">{{ step.title }}</span>
+        <span class="step-toggle">{{ step.collapsed ? '▶' : '▼' }}</span>
+      </div>
+      <div v-if="!step.collapsed" class="step-content">
+        <pre>{{ step.content }}</pre>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref } from 'vue'
+import type { ThinkingStep } from '@/types/chat'
+
+const props = defineProps<{
+  steps: ThinkingStep[]
+}>()
+
+const toggleStep = (index: number) => {
+  props.steps[index].collapsed = !props.steps[index].collapsed
+}
+
+const getStepIcon = (type: string) => {
+  const icons = {
+    think: '🤔',
+    plan: '📋',
+    execute: '⚡',
+    observe: '👁️',
+    reflect: '💭'
+  }
+  return icons[type] || '📌'
+}
+</script>
+```
+
+#### 9.4.5 后端 API 调整
+
+**需要调整的接口**：
+
+```python
+@app.route('/api/chat/stream', methods=['POST'])
+def chat_stream():
+    """流式聊天接口 - 保持 SSE 格式"""
+    data = request.get_json()
+    query = data.get('query', '')
+    context = data.get('context', {})
+    
+    def generate():
+        for event in agent_controller.solve_stream(query, context):
+            yield f"data: {json.dumps(event)}\n\n"
+    
+    return Response(
+        generate(),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no',
+            'Connection': 'keep-alive'
+        }
+    )
+```
+
+#### 9.4.6 迁移步骤
+
+**阶段一：项目初始化（1-2 天）**
+1. 创建 Vue 3 + TypeScript + Vite 项目
+2. 配置 Pinia、Vue Router、Axios
+3. 搭建基础目录结构
+4. 配置 Element Plus / Naive UI
+
+**阶段二：核心组件开发（3-5 天）**
+1. 实现聊天界面组件（MessageList、ChatInput）
+2. 实现思考步骤可视化组件
+3. 实现 SSE 流式处理逻辑
+4. 实现状态管理
+
+**阶段三：侧边栏功能（2-3 天）**
+1. 实现日志侧边栏
+2. 实现英雄选择器侧边栏
+3. 实现文件查看功能
+
+**阶段四：样式与优化（2-3 天）**
+1. 迁移样式到 Vue 组件
+2. 响应式布局优化
+3. 性能优化（懒加载、虚拟滚动）
+4. 错误处理与边界情况
+
+**阶段五：测试与部署（1-2 天）**
+1. 单元测试
+2. E2E 测试
+3. 构建优化
+4. 部署配置
+
+**总计工期**: 9-15 天
+
 ---
 
-> **文档版本**: v2.1
-> **最后更新**: 2026-05-17
-> **更新内容**: 前端职责优化已完成，项目完成度提升至 100%
+### 9.5 Langfuse Agent 监控集成方案
 
-**结论**: DotaHelperAgent 已实现完整的 ReAct Agent 架构，具备智能工具选择、多维度反思、三层记忆、目标分解与追踪、元认知能力等核心能力。项目完成度达 **100%**，架构成熟度达到生产级别。所有计划的优化工作已完成，无遗留问题。
+#### 9.5.1 Langfuse 简介
+
+**Langfuse** 是开源的 LLM 应用可观测性平台，提供：
+- 🔍 **Trace 追踪**：完整记录 Agent 执行链路
+- 📊 **性能监控**：延迟、Token 消耗、成本分析
+- 🎯 **评分系统**：用户反馈、自动评估
+- 📝 **Prompt 管理**：版本控制、A/B 测试
+- 🗂️ **数据集管理**：测试数据集、评估基准
+
+#### 9.5.2 集成架构设计
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Langfuse Integration                      │
+└─────────────────────────────────────────────────────────────┘
+                              │
+        ┌─────────────────────┼─────────────────────┐
+        │                     │                     │
+        ▼                     ▼                     ▼
+┌───────────────┐    ┌───────────────┐    ┌───────────────┐
+│  Trace Context │    │  Span Manager │    │  Score Handler│
+│   (已存在)     │    │   (新增)      │    │   (新增)      │
+└───────────────┘    └───────────────┘    └───────────────┘
+        │                     │                     │
+        └─────────────────────┼─────────────────────┘
+                              │
+                              ▼
+                    ┌───────────────────┐
+                    │   Langfuse SDK    │
+                    │  (Python Client)  │
+                    └───────────────────┘
+                              │
+                              ▼
+                    ┌───────────────────┐
+                    │  Langfuse Server  │
+                    │   (Self-hosted)   │
+                    └───────────────────┘
+```
+
+#### 9.5.3 技术实现方案
+
+**1. 依赖安装**
+
+```bash
+pip install langfuse
+```
+
+**2. 配置文件更新 (config/llm_config.yaml)**
+
+```yaml
+langfuse:
+  enabled: true
+  public_key: "pk-xxx"
+  secret_key: "sk-xxx"
+  host: "http://localhost:3000"  # 自托管地址
+  environment: "development"
+  release: "1.0.0"
+  sampling_rate: 1.0  # 采样率（0.0-1.0）
+```
+
+**3. Langfuse 客户端封装 (monitoring/langfuse_manager.py)**
+
+```python
+from langfuse import Langfuse
+from typing import Dict, List, Any, Optional
+from utils.log_config import get_logger
+
+logger = get_logger("langfuse_client", component="monitoring")
+
+class LangfuseManager:
+    """Langfuse 监控管理器
+    
+    封装 Langfuse SDK，提供统一的监控接口
+    """
+    
+    _instance: Optional['LangfuseManager'] = None
+    
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+    
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        if hasattr(self, '_initialized') and self._initialized:
+            return
+            
+        self.config = config or {}
+        self.enabled = self.config.get('enabled', False)
+        self.client: Optional[Langfuse] = None
+        
+        if self.enabled:
+            try:
+                self.client = Langfuse(
+                    public_key=self.config.get('public_key'),
+                    secret_key=self.config.get('secret_key'),
+                    host=self.config.get('host', 'https://cloud.langfuse.com'),
+                    environment=self.config.get('environment', 'development'),
+                    release=self.config.get('release', '1.0.0'),
+                )
+                logger.info("Langfuse 客户端初始化成功")
+            except Exception as e:
+                logger.error(f"Langfuse 初始化失败: {e}")
+                self.enabled = False
+        
+        self._initialized = True
+    
+    def create_trace(
+        self,
+        trace_id: str,
+        name: str,
+        user_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ):
+        """创建 Trace"""
+        if not self.enabled or not self.client:
+            return None
+            
+        return self.client.trace(
+            id=trace_id,
+            name=name,
+            user_id=user_id,
+            session_id=session_id,
+            metadata=metadata or {}
+        )
+    
+    def log_llm_call(
+        self,
+        trace,
+        name: str,
+        model: str,
+        prompt: str,
+        completion: str,
+        usage: Dict[str, int],
+        latency_ms: float
+    ):
+        """记录 LLM 调用"""
+        if not self.enabled or not trace:
+            return
+            
+        trace.generation(
+            name=name,
+            model=model,
+            prompt=prompt,
+            completion=completion,
+            usage={
+                "prompt_tokens": usage.get("prompt_tokens", 0),
+                "completion_tokens": usage.get("completion_tokens", 0),
+                "total_tokens": usage.get("total_tokens", 0)
+            },
+            metadata={"latency_ms": latency_ms}
+        )
+    
+    def log_tool_call(
+        self,
+        trace,
+        tool_name: str,
+        parameters: Dict[str, Any],
+        result: Any,
+        latency_ms: float
+    ):
+        """记录工具调用"""
+        if not self.enabled or not trace:
+            return
+            
+        trace.span(
+            name=f"tool_{tool_name}",
+            metadata={
+                "tool_name": tool_name,
+                "parameters": parameters,
+                "result": result,
+                "latency_ms": latency_ms
+            }
+        )
+    
+    def log_score(
+        self,
+        trace_id: str,
+        name: str,
+        value: float,
+        comment: Optional[str] = None
+    ):
+        """记录评分"""
+        if not self.enabled or not self.client:
+            return
+            
+        self.client.score(
+            trace_id=trace_id,
+            name=name,
+            value=value,
+            comment=comment
+        )
+    
+    def flush(self):
+        """刷新缓冲区"""
+        if self.enabled and self.client:
+            self.client.flush()
+```
+
+**4. AgentController 集成 (core/agent_controller.py)**
+
+```python
+from monitoring.langfuse_manager import LangfuseManager
+
+class AgentController:
+    def __init__(self, ...):
+        # 初始化 Langfuse
+        langfuse_config = config.get('langfuse', {})
+        self.langfuse = LangfuseManager(langfuse_config)
+        
+    def solve(self, query: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
+        """ReAct 循环主入口"""
+        # 创建 Langfuse Trace
+        trace = self.langfuse.create_trace(
+            trace_id=self.current_thought.trace_id,
+            name="agent_solve",
+            session_id=self.current_thought.session_id,
+            metadata={"query": query, "context": context}
+        )
+        
+        try:
+            # Think 阶段
+            with self._create_span(trace, "think"):
+                reasoning = self._think(query, context)
+            
+            # Plan 阶段
+            with self._create_span(trace, "plan"):
+                tool_plan = self._plan(query, context)
+            
+            # Execute 阶段
+            for tool_call in tool_plan.tools:
+                with self._create_span(trace, f"execute_{tool_call.tool_name}"):
+                    result = self._execute_tool(tool_call)
+                    
+                    # 记录工具调用
+                    self.langfuse.log_tool_call(
+                        trace=trace,
+                        tool_name=tool_call.tool_name,
+                        parameters=tool_call.parameters,
+                        result=result.to_dict(),
+                        latency_ms=result.duration * 1000
+                    )
+            
+            # Observe & Reflect 阶段
+            with self._create_span(trace, "observe"):
+                observation = self._observe()
+            
+            with self._create_span(trace, "reflect"):
+                reflection = self._reflect()
+            
+            return self.current_thought.to_dict()
+            
+        finally:
+            # 刷新 Langfuse 数据
+            self.langfuse.flush()
+```
+
+**5. LLM 调用监控 (utils/llm_client.py)**
+
+```python
+class LLMClient:
+    def __init__(self, config: LLMConfig, langfuse: LangfuseManager = None):
+        self.config = config
+        self.langfuse = langfuse
+        
+    def chat(self, messages: List[Dict], **kwargs) -> Dict[str, Any]:
+        """带监控的 LLM 调用"""
+        start_time = time.time()
+        
+        try:
+            response = self._call_api(messages, **kwargs)
+            
+            # 记录到 Langfuse
+            if self.langfuse and self.langfuse.enabled:
+                trace = get_current_trace()
+                if trace:
+                    latency_ms = (time.time() - start_time) * 1000
+                    usage = response.get('usage', {})
+                    
+                    self.langfuse.log_llm_call(
+                        trace=trace,
+                        name="llm_chat",
+                        model=self.config.model,
+                        prompt=str(messages),
+                        completion=response.get('choices', [{}])[0].get('message', {}).get('content', ''),
+                        usage=usage,
+                        latency_ms=latency_ms
+                    )
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"LLM 调用失败: {e}")
+            raise
+```
+
+**6. 前端评分集成 (Vue Component)**
+
+```vue
+<template>
+  <div class="message-feedback">
+    <div class="score-buttons">
+      <button 
+        v-for="score in [1, 2, 3, 4, 5]" 
+        :key="score"
+        @click="submitFeedback(score)"
+        :class="{ active: currentScore === score }"
+      >
+        {{ score }} ⭐
+      </button>
+    </div>
+    <textarea 
+      v-if="showComment"
+      v-model="comment"
+      placeholder="请输入反馈意见..."
+    />
+    <button @click="submitWithComment">提交</button>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref } from 'vue'
+import { useFeedback } from '@/composables/useFeedback'
+
+const props = defineProps<{
+  traceId: string
+}>()
+
+const { submitScore } = useFeedback()
+const currentScore = ref<number | null>(null)
+const comment = ref('')
+const showComment = ref(false)
+
+const submitFeedback = (score: number) => {
+  currentScore.value = score
+  showComment.value = true
+}
+
+const submitWithComment = () => {
+  if (currentScore.value) {
+    submitScore(props.traceId, currentScore.value, comment.value)
+    showComment.value = false
+  }
+}
+</script>
+```
+
+#### 9.5.4 监控指标设计
+
+**核心指标**：
+
+| 指标类型 | 指标名称 | 说明 |
+|---------|---------|------|
+| **性能指标** | `agent_solve_duration_ms` | Agent 完整执行时长 |
+| | `llm_call_duration_ms` | LLM 调用延迟 |
+| | `tool_call_duration_ms` | 工具调用延迟 |
+| | `first_token_latency_ms` | 首个 Token 延迟 |
+| **质量指标** | `user_score` | 用户评分（1-5 星） |
+| | `reflection_score` | 反思评分（0-1） |
+| | `tool_success_rate` | 工具调用成功率 |
+| **成本指标** | `total_tokens` | 总 Token 消耗 |
+| | `prompt_tokens` | 提示词 Token |
+| | `completion_tokens` | 完成 Token |
+| | `estimated_cost_usd` | 预估成本（美元） |
+| **业务指标** | `query_type` | 查询类型（hero/item/skill） |
+| | `tool_count` | 工具调用次数 |
+| | `turn_count` | ReAct 循环轮数 |
+
+**仪表板设计**：
+
+```
+Langfuse Dashboard
+├── Overview
+│   ├── Total Traces (24h/7d/30d)
+│   ├── Avg Latency
+│   ├── Total Tokens
+│   └── Estimated Cost
+├── Performance
+│   ├── Latency Distribution (P50/P95/P99)
+│   ├── LLM Call Duration
+│   ├── Tool Call Duration
+│   └── Error Rate
+├── Quality
+│   ├── User Score Distribution
+│   ├── Reflection Score Trend
+│   └── Tool Success Rate
+└── Cost
+    ├── Token Usage Trend
+    ├── Cost by Model
+    └── Cost by Query Type
+```
+
+#### 9.5.5 部署方案
+
+**Langfuse 自托管部署 (docker-compose.yml)**：
+
+```yaml
+version: '3.8'
+
+services:
+  langfuse-server:
+    image: langfuse/langfuse:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=postgresql://user:pass@postgres:5432/langfuse
+      - NEXTAUTH_SECRET=your-secret
+      - SALT=your-salt
+      - NEXTAUTH_URL=http://localhost:3000
+    depends_on:
+      - postgres
+  
+  postgres:
+    image: postgres:15
+    environment:
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=pass
+      - POSTGRES_DB=langfuse
+    volumes:
+      - langfuse-db:/var/lib/postgresql/data
+
+volumes:
+  langfuse-db:
+```
+
+#### 9.5.6 实施步骤
+
+**阶段一：基础设施搭建（1-2 天）**
+1. 部署 Langfuse Server（Docker）
+2. 配置 PostgreSQL 数据库
+3. 创建 API Keys
+4. 测试连通性
+
+**阶段二：SDK 集成（2-3 天）**
+1. 安装 Langfuse Python SDK
+2. 实现 LangfuseManager 封装
+3. 集成到 AgentController
+4. 集成到 LLMClient
+5. 集成到 ToolRegistry
+
+**阶段三：监控指标完善（2-3 天）**
+1. 定义监控指标
+2. 实现自动评分逻辑
+3. 实现成本计算
+4. 配置告警规则
+
+**阶段四：前端集成（1-2 天）**
+1. 实现评分组件
+2. 实现反馈提交
+3. 集成到消息展示
+
+**阶段五：仪表板与优化（1-2 天）**
+1. 创建 Langfuse 仪表板
+2. 配置数据导出
+3. 性能优化（采样、异步）
+4. 文档编写
+
+**总计工期**: 7-12 天
+
+---
+
+### 9.6 方案对比与实施建议
+
+#### 9.6.1 优势对比
+
+| 维度 | Vue 前端迁移 | Langfuse 监控 |
+|-----|------------|--------------|
+| **开发成本** | 中等（9-15 天） | 较低（7-12 天） |
+| **维护成本** | 大幅降低 | 略微增加 |
+| **用户体验** | 显著提升 | 无直接影响 |
+| **可观测性** | 无变化 | 大幅提升 |
+| **技术债务** | 清除前端债务 | 引入新依赖 |
+| **团队收益** | 提升开发效率 | 提升运维效率 |
+
+#### 9.6.2 实施建议
+
+**优先级排序**：
+1. **优先实施 Langfuse 监控**（建议先做）
+   - ✅ 改动范围小，风险低
+   - ✅ 快速获得可观测性收益
+   - ✅ 为后续优化提供数据支撑
+   - ✅ 不影响现有功能
+
+2. **后续实施 Vue 前端迁移**
+   - ✅ 在监控数据支撑下进行
+   - ✅ 可以量化性能提升
+   - ✅ 更好地评估用户体验改进
+
+**并行实施建议**：
+- 如果团队资源充足，可以并行实施
+- Langfuse 监控可以独立推进
+- Vue 迁移需要更多前端开发资源
+
+---
+
+> **文档版本**: v2.2
+> **最后更新**: 2026-05-17
+> **更新内容**: 添加前端 Vue 框架迁移方案和 Langfuse 监控集成方案
+
+**结论**: DotaHelperAgent 已实现完整的 ReAct Agent 架构，具备智能工具选择、多维度反思、三层记忆、目标分解与追踪、元认知能力等核心能力。项目完成度达 **100%**，架构成熟度达到生产级别。建议优先实施 Langfuse 监控集成，快速获得可观测性收益，后续再进行前端 Vue 框架迁移，进一步提升代码质量和开发效率。
 
