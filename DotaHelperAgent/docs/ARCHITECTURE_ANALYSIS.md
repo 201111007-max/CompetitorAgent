@@ -2694,9 +2694,1707 @@ volumes:
 
 ---
 
-> **文档版本**: v2.2
-> **最后更新**: 2026-05-17
-> **更新内容**: 添加前端 Vue 框架迁移方案和 Langfuse 监控集成方案
+### 9.7 多 API 格式支持方案
 
-**结论**: DotaHelperAgent 已实现完整的 ReAct Agent 架构，具备智能工具选择、多维度反思、三层记忆、目标分解与追踪、元认知能力等核心能力。项目完成度达 **100%**，架构成熟度达到生产级别。建议优先实施 Langfuse 监控集成，快速获得可观测性收益，后续再进行前端 Vue 框架迁移，进一步提升代码质量和开发效率。
+#### 9.7.1 当前问题分析
+
+**现有配置方式的局限性**：
+
+```yaml
+llm:
+  enabled: true
+  base_url: "http://127.0.0.1:1234/v1"
+  model: "qwen3.5-9b"
+  api_key: null
+```
+
+**存在的问题**：
+1. ❌ **API 格式单一**：只支持 OpenAI 兼容格式，无法使用 Anthropic、Ollama 等不同 API 格式
+2. ❌ **请求格式固定**：不同 API 的请求/响应格式不同，无法适配
+3. ❌ **认证方式单一**：只支持 Bearer Token，不支持 Anthropic 的 x-api-key 等
+4. ❌ **流式格式不兼容**：不同 API 的 SSE 流式格式有差异
+5. ❌ **错误处理不完善**：不同 API 的错误响应格式不同
+
+#### 9.7.2 目标设计
+
+**核心目标**：
+- ✅ 支持多种 API 格式：OpenAI、Anthropic、Ollama、LM Studio、自定义
+- ✅ 自动适配请求/响应格式
+- ✅ 支持不同的认证方式
+- ✅ 统一的流式输出处理
+- ✅ 统一的错误处理接口
+
+**支持的 API 格式**：
+
+| API 格式 | 认证方式 | 端点格式 | 流式格式 |
+|---------|---------|---------|---------|
+| **OpenAI** | Bearer Token | `/v1/chat/completions` | SSE `data: {...}` |
+| **Anthropic** | x-api-key + anthropic-version | `/v1/messages` | SSE `event: ...` |
+| **Ollama** | 无 / Bearer | `/api/chat` 或 `/api/generate` | JSON Lines |
+| **LM Studio** | Bearer Token | `/v1/chat/completions` | SSE (OpenAI 兼容) |
+| **Azure OpenAI** | api-key header | `/deployments/{model}/chat/completions` | SSE (OpenAI 兼容) |
+| **自定义** | 可配置 | 可配置 | 可配置 |
+
+**架构设计**：
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    LLM Client (统一接口)                      │
+│  - chat() / chat_stream() / complete()                      │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    API Format Adapter                        │
+│  - 请求格式转换                                              │
+│  - 响应格式解析                                              │
+│  - 流式数据处理                                              │
+│  - 错误格式统一                                              │
+└─────────────────────────────────────────────────────────────┘
+                              │
+        ┌─────────────────────┼─────────────────────┐
+        │                     │                     │
+        ▼                     ▼                     ▼
+┌───────────────┐    ┌───────────────┐    ┌───────────────┐
+│ OpenAI Adapter│    │Anthropic Adapter│   │ Ollama Adapter│
+│  (OpenAI 格式)│    │ (Anthropic 格式)│   │ (Ollama 格式) │
+└───────────────┘    └───────────────┘    └───────────────┘
+        │                     │                     │
+        ▼                     ▼                     ▼
+┌───────────────┐    ┌───────────────┐    ┌───────────────┐
+│  OpenAI API   │    │ Anthropic API │    │  Ollama API   │
+│  GPT-4o/mini  │    │  Claude 3.5   │    │ Llama/Qwen    │
+└───────────────┘    └───────────────┘    └───────────────┘
+```
+
+#### 9.7.3 配置文件格式设计
+
+**新版配置文件 (config/llm_config.yaml)**：
+
+```yaml
+# LLM API 配置
+llm:
+  # API 格式类型
+  # 可选值: openai, anthropic, ollama, lm_studio, azure_openai, custom
+  api_format: "openai"
+  
+  # API 基础 URL
+  base_url: "https://api.openai.com/v1"
+  
+  # API Key（支持环境变量）
+  api_key: "${OPENAI_API_KEY}"
+  
+  # 模型名称
+  model: "gpt-4o-mini"
+  
+  # 生成参数
+  temperature: 0.7
+  max_tokens: 4096
+  top_p: 0.9
+  
+  # 超时时间（秒）
+  timeout: 60
+  
+  # 是否启用流式输出
+  stream: true
+  
+  # API 格式特定配置（可选）
+  api_options:
+    # OpenAI 特定配置
+    openai:
+      # 可选：组织 ID
+      organization: null
+      # 可选：项目 ID
+      project: null
+    
+    # Anthropic 特定配置
+    anthropic:
+      # API 版本（必需）
+      api_version: "2023-06-01"
+      # 可选：Beta 功能
+      betas: []
+    
+    # Azure OpenAI 特定配置
+    azure_openai:
+      # 部署名称
+      deployment_name: "gpt-4o"
+      # API 版本
+      api_version: "2024-02-15-preview"
+    
+    # Ollama 特定配置
+    ollama:
+      # 使用 /api/chat 还是 /api/generate
+      endpoint_type: "chat"  # chat 或 generate
+      # 保持上下文
+      keep_alive: "5m"
+    
+    # LM Studio 特定配置（与 OpenAI 兼容）
+    lm_studio:
+      # 无特殊配置
+      pass
+    
+    # 自定义 API 配置
+    custom:
+      # 聊天端点路径
+      chat_endpoint: "/chat"
+      # 认证头名称
+      auth_header: "Authorization"
+      # 认证头值格式（{api_key} 会被替换）
+      auth_format: "Bearer {api_key}"
+      # 请求格式映射
+      request_mapping:
+        model: "model"
+        messages: "messages"
+        temperature: "temperature"
+        max_tokens: "max_tokens"
+      # 响应格式映射
+      response_mapping:
+        content: "choices[0].message.content"
+        finish_reason: "choices[0].finish_reason"
+```
+
+**配置示例**：
+
+```yaml
+# 示例 1: OpenAI API
+llm:
+  api_format: "openai"
+  base_url: "https://api.openai.com/v1"
+  api_key: "${OPENAI_API_KEY}"
+  model: "gpt-4o-mini"
+
+# 示例 2: Anthropic API
+llm:
+  api_format: "anthropic"
+  base_url: "https://api.anthropic.com"
+  api_key: "${ANTHROPIC_API_KEY}"
+  model: "claude-3-5-sonnet-20241022"
+  api_options:
+    anthropic:
+      api_version: "2023-06-01"
+
+# 示例 3: Ollama 本地模型
+llm:
+  api_format: "ollama"
+  base_url: "http://127.0.0.1:11434"
+  model: "qwen2.5:7b"
+  api_options:
+    ollama:
+      endpoint_type: "chat"
+
+# 示例 4: LM Studio 本地模型
+llm:
+  api_format: "lm_studio"
+  base_url: "http://127.0.0.1:1234/v1"
+  model: "qwen-2.5-7b-instruct"
+
+# 示例 5: DeepSeek API (OpenAI 兼容)
+llm:
+  api_format: "openai"
+  base_url: "https://api.deepseek.com/v1"
+  api_key: "${DEEPSEEK_API_KEY}"
+  model: "deepseek-chat"
+
+# 示例 6: Azure OpenAI
+llm:
+  api_format: "azure_openai"
+  base_url: "https://your-resource.openai.azure.com"
+  api_key: "${AZURE_OPENAI_API_KEY}"
+  model: "gpt-4o"
+  api_options:
+    azure_openai:
+      deployment_name: "gpt-4o-deployment"
+      api_version: "2024-02-15-preview"
+```
+
+#### 9.7.4 代码实现方案
+
+**1. API 格式适配器基类 (utils/api_adapters/base.py)**
+
+```python
+from abc import ABC, abstractmethod
+from typing import Dict, Any, Generator, Optional
+from dataclasses import dataclass
+import requests
+
+
+@dataclass
+class ChatResponse:
+    """统一的聊天响应格式"""
+    content: str
+    model: str
+    finish_reason: str
+    usage: Optional[Dict[str, int]] = None
+    raw_response: Optional[Dict[str, Any]] = None
+
+
+@dataclass
+class StreamChunk:
+    """统一的流式响应块"""
+    content: str
+    finish_reason: Optional[str] = None
+
+
+class BaseAPIAdapter(ABC):
+    """API 格式适配器基类"""
+    
+    def __init__(
+        self,
+        base_url: str,
+        api_key: Optional[str] = None,
+        model: str = "",
+        timeout: int = 60,
+        **options
+    ):
+        self.base_url = base_url.rstrip('/')
+        self.api_key = api_key
+        self.model = model
+        self.timeout = timeout
+        self.options = options
+        self.session = requests.Session()
+        self._setup_session()
+    
+    @abstractmethod
+    def _setup_session(self):
+        """设置请求会话（认证头等）"""
+        pass
+    
+    @abstractmethod
+    def _build_request_body(
+        self,
+        messages: list,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """构建请求体"""
+        pass
+    
+    @abstractmethod
+    def _get_chat_endpoint(self) -> str:
+        """获取聊天端点路径"""
+        pass
+    
+    @abstractmethod
+    def _parse_response(self, response: Dict[str, Any]) -> ChatResponse:
+        """解析响应"""
+        pass
+    
+    @abstractmethod
+    def _parse_stream_chunk(self, line: str) -> Optional[StreamChunk]:
+        """解析流式响应块"""
+        pass
+    
+    def chat(
+        self,
+        messages: list,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        **kwargs
+    ) -> ChatResponse:
+        """发送聊天请求"""
+        url = f"{self.base_url}{self._get_chat_endpoint()}"
+        body = self._build_request_body(messages, temperature, max_tokens, **kwargs)
+        
+        response = self.session.post(
+            url,
+            json=body,
+            timeout=self.timeout
+        )
+        response.raise_for_status()
+        
+        return self._parse_response(response.json())
+    
+    def chat_stream(
+        self,
+        messages: list,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        **kwargs
+    ) -> Generator[StreamChunk, None, None]:
+        """流式聊天请求"""
+        url = f"{self.base_url}{self._get_chat_endpoint()}"
+        body = self._build_request_body(messages, temperature, max_tokens, stream=True, **kwargs)
+        
+        response = self.session.post(
+            url,
+            json=body,
+            timeout=self.timeout,
+            stream=True
+        )
+        response.raise_for_status()
+        
+        for line in response.iter_lines():
+            if line:
+                chunk = self._parse_stream_chunk(line.decode('utf-8'))
+                if chunk:
+                    yield chunk
+    
+    def health_check(self) -> bool:
+        """检查 API 是否可用"""
+        try:
+            return self._do_health_check()
+        except Exception:
+            return False
+    
+    @abstractmethod
+    def _do_health_check(self) -> bool:
+        """执行健康检查"""
+        pass
+```
+
+**2. OpenAI 适配器 (utils/api_adapters/openai_adapter.py)**
+
+```python
+from typing import Dict, Any, Optional, Generator
+from .base import BaseAPIAdapter, ChatResponse, StreamChunk
+import json
+
+
+class OpenAIAdapter(BaseAPIAdapter):
+    """OpenAI API 格式适配器
+    
+    兼容：OpenAI、DeepSeek、Moonshot、智谱 AI 等
+    """
+    
+    def _setup_session(self):
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        
+        org = self.options.get('organization')
+        if org:
+            headers["OpenAI-Organization"] = org
+        
+        project = self.options.get('project')
+        if project:
+            headers["OpenAI-Project"] = project
+        
+        self.session.headers.update(headers)
+    
+    def _get_chat_endpoint(self) -> str:
+        return "/chat/completions"
+    
+    def _build_request_body(
+        self,
+        messages: list,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        stream: bool = False,
+        **kwargs
+    ) -> Dict[str, Any]:
+        body = {
+            "model": self.model,
+            "messages": messages,
+            "stream": stream,
+        }
+        
+        if temperature is not None:
+            body["temperature"] = temperature
+        if max_tokens is not None:
+            body["max_tokens"] = max_tokens
+        
+        body.update(kwargs)
+        return body
+    
+    def _parse_response(self, response: Dict[str, Any]) -> ChatResponse:
+        choice = response.get('choices', [{}])[0]
+        message = choice.get('message', {})
+        
+        return ChatResponse(
+            content=message.get('content', ''),
+            model=response.get('model', self.model),
+            finish_reason=choice.get('finish_reason', ''),
+            usage=response.get('usage'),
+            raw_response=response
+        )
+    
+    def _parse_stream_chunk(self, line: str) -> Optional[StreamChunk]:
+        if not line.startswith('data: '):
+            return None
+        
+        data = line[6:]
+        if data == '[DONE]':
+            return None
+        
+        try:
+            chunk = json.loads(data)
+            delta = chunk.get('choices', [{}])[0].get('delta', {})
+            finish_reason = chunk.get('choices', [{}])[0].get('finish_reason')
+            
+            return StreamChunk(
+                content=delta.get('content', ''),
+                finish_reason=finish_reason
+            )
+        except json.JSONDecodeError:
+            return None
+    
+    def _do_health_check(self) -> bool:
+        response = self.session.get(
+            f"{self.base_url}/models",
+            timeout=5
+        )
+        return response.status_code == 200
+```
+
+**3. Anthropic 适配器 (utils/api_adapters/anthropic_adapter.py)**
+
+```python
+from typing import Dict, Any, Optional, Generator
+from .base import BaseAPIAdapter, ChatResponse, StreamChunk
+import json
+
+
+class AnthropicAdapter(BaseAPIAdapter):
+    """Anthropic API 格式适配器
+    
+    用于 Claude 系列模型
+    """
+    
+    def _setup_session(self):
+        headers = {
+            "Content-Type": "application/json",
+            "anthropic-version": self.options.get('api_version', '2023-06-01'),
+        }
+        
+        if self.api_key:
+            headers["x-api-key"] = self.api_key
+        
+        betas = self.options.get('betas', [])
+        if betas:
+            headers["anthropic-beta"] = ','.join(betas)
+        
+        self.session.headers.update(headers)
+    
+    def _get_chat_endpoint(self) -> str:
+        return "/v1/messages"
+    
+    def _build_request_body(
+        self,
+        messages: list,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        stream: bool = False,
+        **kwargs
+    ) -> Dict[str, Any]:
+        body = {
+            "model": self.model,
+            "messages": messages,
+            "max_tokens": max_tokens or 4096,
+        }
+        
+        if temperature is not None:
+            body["temperature"] = temperature
+        
+        if stream:
+            body["stream"] = True
+        
+        body.update(kwargs)
+        return body
+    
+    def _parse_response(self, response: Dict[str, Any]) -> ChatResponse:
+        content_blocks = response.get('content', [])
+        content = ''.join(
+            block.get('text', '')
+            for block in content_blocks
+            if block.get('type') == 'text'
+        )
+        
+        return ChatResponse(
+            content=content,
+            model=response.get('model', self.model),
+            finish_reason=response.get('stop_reason', ''),
+            usage={
+                'input_tokens': response.get('usage', {}).get('input_tokens', 0),
+                'output_tokens': response.get('usage', {}).get('output_tokens', 0),
+            },
+            raw_response=response
+        )
+    
+    def _parse_stream_chunk(self, line: str) -> Optional[StreamChunk]:
+        if not line.startswith('data: '):
+            return None
+        
+        data = line[6:]
+        
+        try:
+            event = json.loads(data)
+            event_type = event.get('type', '')
+            
+            if event_type == 'content_block_delta':
+                delta = event.get('delta', {})
+                if delta.get('type') == 'text_delta':
+                    return StreamChunk(content=delta.get('text', ''))
+            
+            elif event_type == 'message_stop':
+                return StreamChunk(content='', finish_reason='end_turn')
+            
+            return None
+        except json.JSONDecodeError:
+            return None
+    
+    def _do_health_check(self) -> bool:
+        return True
+```
+
+**4. Ollama 适配器 (utils/api_adapters/ollama_adapter.py)**
+
+```python
+from typing import Dict, Any, Optional, Generator
+from .base import BaseAPIAdapter, ChatResponse, StreamChunk
+import json
+
+
+class OllamaAdapter(BaseAPIAdapter):
+    """Ollama API 格式适配器
+    
+    用于本地 Ollama 服务
+    """
+    
+    def _setup_session(self):
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        self.session.headers.update(headers)
+    
+    def _get_chat_endpoint(self) -> str:
+        endpoint_type = self.options.get('endpoint_type', 'chat')
+        return f"/api/{endpoint_type}"
+    
+    def _build_request_body(
+        self,
+        messages: list,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        stream: bool = False,
+        **kwargs
+    ) -> Dict[str, Any]:
+        body = {
+            "model": self.model,
+            "stream": stream,
+        }
+        
+        endpoint_type = self.options.get('endpoint_type', 'chat')
+        if endpoint_type == 'chat':
+            body["messages"] = messages
+        else:
+            body["prompt"] = self._messages_to_prompt(messages)
+        
+        options = {}
+        if temperature is not None:
+            options["temperature"] = temperature
+        if max_tokens is not None:
+            options["num_predict"] = max_tokens
+        
+        if options:
+            body["options"] = options
+        
+        keep_alive = self.options.get('keep_alive')
+        if keep_alive:
+            body["keep_alive"] = keep_alive
+        
+        body.update(kwargs)
+        return body
+    
+    def _messages_to_prompt(self, messages: list) -> str:
+        """将消息列表转换为 prompt（用于 /api/generate）"""
+        parts = []
+        for msg in messages:
+            role = msg.get('role', 'user')
+            content = msg.get('content', '')
+            parts.append(f"<{role}>{content}</{role}>")
+        return '\n'.join(parts)
+    
+    def _parse_response(self, response: Dict[str, Any]) -> ChatResponse:
+        return ChatResponse(
+            content=response.get('message', {}).get('content', '') or response.get('response', ''),
+            model=response.get('model', self.model),
+            finish_reason='stop' if response.get('done') else '',
+            usage={
+                'input_tokens': response.get('prompt_eval_count', 0),
+                'output_tokens': response.get('eval_count', 0),
+            },
+            raw_response=response
+        )
+    
+    def _parse_stream_chunk(self, line: str) -> Optional[StreamChunk]:
+        try:
+            chunk = json.loads(line)
+            content = chunk.get('message', {}).get('content', '') or chunk.get('response', '')
+            finish_reason = 'stop' if chunk.get('done') else None
+            
+            return StreamChunk(
+                content=content,
+                finish_reason=finish_reason
+            )
+        except json.JSONDecodeError:
+            return None
+    
+    def _do_health_check(self) -> bool:
+        response = self.session.get(
+            f"{self.base_url}/api/tags",
+            timeout=5
+        )
+        return response.status_code == 200
+```
+
+**5. 适配器工厂 (utils/api_adapters/factory.py)**
+
+```python
+from typing import Optional, Dict, Any
+from .base import BaseAPIAdapter
+from .openai_adapter import OpenAIAdapter
+from .anthropic_adapter import AnthropicAdapter
+from .ollama_adapter import OllamaAdapter
+
+
+ADAPTER_MAP = {
+    'openai': OpenAIAdapter,
+    'anthropic': AnthropicAdapter,
+    'ollama': OllamaAdapter,
+    'lm_studio': OpenAIAdapter,  # LM Studio 兼容 OpenAI 格式
+    'azure_openai': OpenAIAdapter,  # Azure OpenAI 基本兼容
+    'deepseek': OpenAIAdapter,  # DeepSeek 兼容 OpenAI 格式
+    'moonshot': OpenAIAdapter,  # Moonshot 兼容 OpenAI 格式
+    'zhipu': OpenAIAdapter,  # 智谱 AI 兼容 OpenAI 格式
+}
+
+
+def create_adapter(
+    api_format: str,
+    base_url: str,
+    api_key: Optional[str] = None,
+    model: str = "",
+    timeout: int = 60,
+    **options
+) -> BaseAPIAdapter:
+    """创建 API 适配器
+    
+    Args:
+        api_format: API 格式类型
+        base_url: API 基础 URL
+        api_key: API Key
+        model: 模型名称
+        timeout: 超时时间
+        **options: 其他选项
+    
+    Returns:
+        API 适配器实例
+    """
+    adapter_class = ADAPTER_MAP.get(api_format.lower())
+    
+    if not adapter_class:
+        raise ValueError(f"不支持的 API 格式: {api_format}。支持的格式: {list(ADAPTER_MAP.keys())}")
+    
+    return adapter_class(
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+        timeout=timeout,
+        **options
+    )
+```
+
+**6. 更新 LLMClient (utils/llm_client.py)**
+
+```python
+from typing import Dict, Any, Optional, Generator
+from core.config import LLMConfig
+from utils.api_adapters.factory import create_adapter
+from utils.api_adapters.base import ChatResponse, StreamChunk
+from utils.log_config import get_logger
+
+logger = get_logger("llm_client", component="utils")
+
+
+class LLMClient:
+    """LLM 客户端 - 支持多种 API 格式"""
+    
+    def __init__(self, config: Optional[LLMConfig] = None):
+        self.config = config or LLMConfig.from_yaml()
+        self._adapter = self._create_adapter()
+    
+    def _create_adapter(self):
+        """创建 API 适配器"""
+        api_format = getattr(self.config, 'api_format', 'openai')
+        api_options = getattr(self.config, 'api_options', {})
+        
+        return create_adapter(
+            api_format=api_format,
+            base_url=self.config.base_url,
+            api_key=self.config.api_key,
+            model=self.config.model,
+            timeout=self.config.timeout,
+            **api_options.get(api_format, {})
+        )
+    
+    def chat(
+        self,
+        messages: list,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """发送聊天请求"""
+        response = self._adapter.chat(
+            messages=messages,
+            temperature=temperature or self.config.temperature,
+            max_tokens=max_tokens or self.config.max_tokens,
+            **kwargs
+        )
+        
+        return {
+            'content': response.content,
+            'model': response.model,
+            'finish_reason': response.finish_reason,
+            'usage': response.usage,
+        }
+    
+    def chat_stream(
+        self,
+        messages: list,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        **kwargs
+    ) -> Generator[str, None, None]:
+        """流式聊天"""
+        for chunk in self._adapter.chat_stream(
+            messages=messages,
+            temperature=temperature or self.config.temperature,
+            max_tokens=max_tokens or self.config.max_tokens,
+            **kwargs
+        ):
+            if chunk.content:
+                yield chunk.content
+    
+    def complete(
+        self,
+        prompt: str,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None
+    ) -> str:
+        """简单的文本补全"""
+        messages = [{"role": "user", "content": prompt}]
+        response = self.chat(messages, temperature, max_tokens)
+        return response.get('content', '')
+    
+    def check_health(self) -> bool:
+        """检查 LLM 服务是否可用"""
+        return self._adapter.health_check()
+```
+
+**7. 更新配置数据结构 (core/config.py)**
+
+```python
+@dataclass
+class LLMConfig:
+    """LLM 配置"""
+    
+    enabled: bool = True
+    
+    api_format: str = "openai"
+    base_url: str = "http://127.0.0.1:1234/v1"
+    model: str = "qwen3.5-9b"
+    api_key: Optional[str] = None
+    
+    temperature: float = 0.7
+    max_tokens: int = 2048
+    top_p: float = 0.9
+    timeout: int = 60
+    stream: bool = False
+    
+    api_options: Dict[str, Any] = field(default_factory=dict)
+    
+    @classmethod
+    def from_yaml(cls, config_path: Optional[str] = None, **overrides) -> 'LLMConfig':
+        """从 YAML 配置文件创建"""
+        yaml_config = load_llm_config_from_yaml(config_path)
+        merged = {**yaml_config, **overrides}
+        
+        return cls(
+            enabled=merged.get('enabled', cls.enabled),
+            api_format=merged.get('api_format', cls.api_format),
+            base_url=merged.get('base_url', cls.base_url),
+            model=merged.get('model', cls.model),
+            api_key=cls._resolve_env_var(merged.get('api_key')),
+            temperature=merged.get('temperature', cls.temperature),
+            max_tokens=merged.get('max_tokens', cls.max_tokens),
+            top_p=merged.get('top_p', cls.top_p),
+            timeout=merged.get('timeout', cls.timeout),
+            stream=merged.get('stream', cls.stream),
+            api_options=merged.get('api_options', {}),
+        )
+    
+    @staticmethod
+    def _resolve_env_var(value: Optional[str]) -> Optional[str]:
+        """解析环境变量"""
+        if not value or not isinstance(value, str):
+            return value
+        
+        import re
+        import os
+        pattern = r'\$\{([^}]+)\}'
+        matches = re.findall(pattern, value)
+        for var_name in matches:
+            var_value = os.environ.get(var_name, '')
+            value = value.replace(f'${{{var_name}}}', var_value)
+        return value
+```
+
+#### 9.7.5 使用示例
+
+**1. OpenAI API**
+
+```python
+from core.config import LLMConfig
+from utils.llm_client import LLMClient
+
+config = LLMConfig(
+    api_format="openai",
+    base_url="https://api.openai.com/v1",
+    api_key="${OPENAI_API_KEY}",
+    model="gpt-4o-mini"
+)
+
+client = LLMClient(config)
+response = client.chat([{"role": "user", "content": "你好"}])
+```
+
+**2. Anthropic API**
+
+```python
+config = LLMConfig(
+    api_format="anthropic",
+    base_url="https://api.anthropic.com",
+    api_key="${ANTHROPIC_API_KEY}",
+    model="claude-3-5-sonnet-20241022",
+    api_options={
+        "anthropic": {
+            "api_version": "2023-06-01"
+        }
+    }
+)
+
+client = LLMClient(config)
+response = client.chat([{"role": "user", "content": "你好"}])
+```
+
+**3. Ollama 本地模型**
+
+```python
+config = LLMConfig(
+    api_format="ollama",
+    base_url="http://127.0.0.1:11434",
+    model="qwen2.5:7b",
+    api_options={
+        "ollama": {
+            "endpoint_type": "chat",
+            "keep_alive": "5m"
+        }
+    }
+)
+
+client = LLMClient(config)
+response = client.chat([{"role": "user", "content": "你好"}])
+```
+
+**4. LM Studio 本地模型**
+
+```python
+config = LLMConfig(
+    api_format="lm_studio",  # 使用 OpenAI 兼容格式
+    base_url="http://127.0.0.1:1234/v1",
+    model="qwen-2.5-7b-instruct"
+)
+
+client = LLMClient(config)
+response = client.chat([{"role": "user", "content": "你好"}])
+```
+
+#### 9.7.6 迁移步骤
+
+**阶段一：配置文件更新（0.5 天）**
+1. 更新 `llm_config.yaml` 格式，添加 `api_format` 字段
+2. 添加 `api_options` 配置项
+3. 更新配置示例
+
+**阶段二：适配器实现（1.5 天）**
+1. 实现 `BaseAPIAdapter` 基类
+2. 实现 `OpenAIAdapter`
+3. 实现 `AnthropicAdapter`
+4. 实现 `OllamaAdapter`
+5. 实现 `create_adapter` 工厂函数
+
+**阶段三：LLMClient 更新（0.5 天）**
+1. 更新 `LLMClient` 使用适配器
+2. 更新 `LLMConfig` 支持 `api_format`
+3. 保持向后兼容
+
+**阶段四：测试（0.5 天）**
+1. 单元测试（各适配器）
+2. 集成测试（端到端）
+3. 兼容性测试
+
+**总计工期**: 3 天
+
+#### 9.7.7 扩展自定义 API
+
+如果需要支持新的 API 格式，只需：
+
+```python
+from utils.api_adapters.base import BaseAPIAdapter, ChatResponse, StreamChunk
+
+class CustomAPIAdapter(BaseAPIAdapter):
+    """自定义 API 适配器"""
+    
+    def _setup_session(self):
+        auth_header = self.options.get('auth_header', 'Authorization')
+        auth_format = self.options.get('auth_format', 'Bearer {api_key}')
+        
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers[auth_header] = auth_format.format(api_key=self.api_key)
+        
+        self.session.headers.update(headers)
+    
+    def _get_chat_endpoint(self) -> str:
+        return self.options.get('chat_endpoint', '/chat')
+    
+    def _build_request_body(self, messages, temperature, max_tokens, **kwargs):
+        return {
+            "model": self.model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            **kwargs
+        }
+    
+    def _parse_response(self, response) -> ChatResponse:
+        return ChatResponse(
+            content=response.get('content', ''),
+            model=self.model,
+            finish_reason=response.get('finish_reason', ''),
+            raw_response=response
+        )
+    
+    def _parse_stream_chunk(self, line) -> StreamChunk:
+        pass
+    
+    def _do_health_check(self) -> bool:
+        return True
+
+# 注册到工厂
+from utils.api_adapters.factory import ADAPTER_MAP
+ADAPTER_MAP['custom'] = CustomAPIAdapter
+```
+
+---
+
+> **文档版本**: v2.3
+> **最后更新**: 2026-05-19
+> **更新内容**: 添加多 API 格式支持方案（OpenAI、Anthropic、Ollama 等）
+          pricing:
+            input: 0.15
+            output: 0.6
+    
+    # DeepSeek 配置
+    deepseek:
+      enabled: true
+      api_type: "openai_compatible"
+      base_url: "https://api.deepseek.com/v1"
+      api_key: "${DEEPSEEK_API_KEY}"
+      models:
+        deepseek-chat:
+          model_id: "deepseek-chat"
+          max_tokens: 4096
+          context_window: 64000
+          supports_function_calling: true
+          pricing:
+            input: 0.14
+            output: 0.28
+        deepseek-reasoner:
+          model_id: "deepseek-reasoner"
+          max_tokens: 8192
+          context_window: 64000
+          supports_reasoning: true
+          pricing:
+            input: 0.55
+            output: 2.19
+    
+    # 本地模型配置 (LM Studio)
+    lm_studio:
+      enabled: true
+      api_type: "openai_compatible"
+      base_url: "http://127.0.0.1:1234/v1"
+      api_key: null
+      models:
+        qwen-2.5-7b:
+          model_id: "qwen-2.5-7b-instruct"
+          max_tokens: 4096
+          context_window: 32768
+        qwen-2.5-14b:
+          model_id: "qwen-2.5-14b-instruct"
+          max_tokens: 4096
+          context_window: 32768
+    
+    # 本地模型配置 (Ollama)
+    ollama:
+      enabled: true
+      api_type: "ollama"
+      base_url: "http://127.0.0.1:11434"
+      api_key: null
+      models:
+        llama3.1:
+          model_id: "llama3.1:8b"
+          max_tokens: 4096
+          context_window: 128000
+        qwen2.5:
+          model_id: "qwen2.5:7b"
+          max_tokens: 4096
+          context_window: 32768
+
+  # 模型别名（简化调用）
+  model_aliases:
+    # 快速模型（用于简单任务）
+    fast: "deepseek-chat"
+    # 智能模型（用于复杂推理）
+    smart: "deepseek-reasoner"
+    # 本地模型（离线使用）
+    local: "qwen-2.5-7b"
+    # 视觉模型（处理图片）
+    vision: "gpt-4o"
+  
+  # 任务路由配置（根据任务类型自动选择模型）
+  task_routing:
+    # 英雄推荐（需要推理）
+    hero_recommendation:
+      model: "smart"
+      fallback: "fast"
+    # 英雄解析（简单任务）
+    hero_parsing:
+      model: "fast"
+    # 工具选择（需要理解意图）
+    tool_selection:
+      model: "smart"
+      fallback: "fast"
+    # 反思评估（需要深度分析）
+    reflection:
+      model: "smart"
+    # 元认知（需要推理）
+    metacognition:
+      model: "smart"
+      fallback: "fast"
+    # 通用对话
+    chat:
+      model: "fast"
+  
+  # 全局生成参数
+  generation:
+    temperature: 0.7
+    top_p: 0.9
+    timeout: 60
+    max_retries: 3
+  
+  # 速率限制
+  rate_limits:
+    openai:
+      requests_per_minute: 500
+      tokens_per_minute: 30000
+    deepseek:
+      requests_per_minute: 60
+      tokens_per_minute: 30000
+    default:
+      requests_per_minute: 60
+      tokens_per_minute: 10000
+```
+
+#### 9.7.4 代码实现方案
+
+**1. 配置数据结构 (core/config.py)**
+
+```python
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Literal
+from pathlib import Path
+import yaml
+import os
+import re
+
+
+@dataclass
+class ModelConfig:
+    """单个模型配置"""
+    model_id: str
+    max_tokens: int = 4096
+    context_window: int = 8192
+    supports_vision: bool = False
+    supports_function_calling: bool = False
+    supports_reasoning: bool = False
+    pricing: Optional[Dict[str, float]] = None
+
+
+@dataclass
+class ProviderConfig:
+    """提供商配置"""
+    enabled: bool = True
+    api_type: Literal["openai", "openai_compatible", "ollama", "anthropic"] = "openai_compatible"
+    base_url: str = ""
+    api_key: Optional[str] = None
+    models: Dict[str, ModelConfig] = field(default_factory=dict)
+    
+    def get_model(self, model_name: str) -> Optional[ModelConfig]:
+        """获取模型配置"""
+        return self.models.get(model_name)
+
+
+@dataclass
+class TaskRoutingConfig:
+    """任务路由配置"""
+    model: str
+    fallback: Optional[str] = None
+
+
+@dataclass
+class MultiLLMConfig:
+    """多 LLM 配置"""
+    default_provider: str = "deepseek"
+    default_model: str = "deepseek-chat"
+    providers: Dict[str, ProviderConfig] = field(default_factory=dict)
+    model_aliases: Dict[str, str] = field(default_factory=dict)
+    task_routing: Dict[str, TaskRoutingConfig] = field(default_factory=dict)
+    generation: Dict[str, Any] = field(default_factory=lambda: {
+        "temperature": 0.7,
+        "top_p": 0.9,
+        "timeout": 60,
+        "max_retries": 3
+    })
+    rate_limits: Dict[str, Dict[str, int]] = field(default_factory=dict)
+    
+    @classmethod
+    def from_yaml(cls, config_path: Optional[str] = None) -> 'MultiLLMConfig':
+        """从 YAML 加载配置"""
+        if config_path is None:
+            config_path = Path(__file__).parent.parent / "config" / "llm_config.yaml"
+        
+        with open(config_path, 'r', encoding='utf-8') as f:
+            raw_config = yaml.safe_load(f)
+        
+        llm_config = raw_config.get('llm', {})
+        
+        # 解析提供商配置
+        providers = {}
+        for provider_name, provider_data in llm_config.get('providers', {}).items():
+            models = {}
+            for model_name, model_data in provider_data.get('models', {}).items():
+                models[model_name] = ModelConfig(
+                    model_id=model_data.get('model_id', model_name),
+                    max_tokens=model_data.get('max_tokens', 4096),
+                    context_window=model_data.get('context_window', 8192),
+                    supports_vision=model_data.get('supports_vision', False),
+                    supports_function_calling=model_data.get('supports_function_calling', False),
+                    supports_reasoning=model_data.get('supports_reasoning', False),
+                    pricing=model_data.get('pricing')
+                )
+            
+            # 解析 API Key（支持环境变量）
+            api_key = provider_data.get('api_key')
+            if api_key and isinstance(api_key, str):
+                api_key = cls._resolve_env_var(api_key)
+            
+            providers[provider_name] = ProviderConfig(
+                enabled=provider_data.get('enabled', True),
+                api_type=provider_data.get('api_type', 'openai_compatible'),
+                base_url=provider_data.get('base_url', ''),
+                api_key=api_key,
+                models=models
+            )
+        
+        # 解析任务路由
+        task_routing = {}
+        for task_name, routing_data in llm_config.get('task_routing', {}).items():
+            task_routing[task_name] = TaskRoutingConfig(
+                model=routing_data.get('model', 'fast'),
+                fallback=routing_data.get('fallback')
+            )
+        
+        return cls(
+            default_provider=llm_config.get('default_provider', 'deepseek'),
+            default_model=llm_config.get('default_model', 'deepseek-chat'),
+            providers=providers,
+            model_aliases=llm_config.get('model_aliases', {}),
+            task_routing=task_routing,
+            generation=llm_config.get('generation', {}),
+            rate_limits=llm_config.get('rate_limits', {})
+        )
+    
+    @staticmethod
+    def _resolve_env_var(value: str) -> str:
+        """解析环境变量 ${VAR_NAME} 格式"""
+        pattern = r'\$\{([^}]+)\}'
+        matches = re.findall(pattern, value)
+        for var_name in matches:
+            var_value = os.environ.get(var_name, '')
+            value = value.replace(f'${{{var_name}}}', var_value)
+        return value
+    
+    def resolve_model(self, model_alias: str) -> tuple[str, str, ModelConfig]:
+        """解析模型别名，返回 (provider_name, model_name, model_config)
+        
+        Args:
+            model_alias: 模型别名或模型名，如 "fast", "deepseek-chat", "openai/gpt-4o"
+        
+        Returns:
+            (provider_name, model_name, model_config)
+        """
+        # 1. 检查是否是 provider/model 格式
+        if '/' in model_alias:
+            provider_name, model_name = model_alias.split('/', 1)
+            provider = self.providers.get(provider_name)
+            if provider and provider.enabled:
+                model_config = provider.get_model(model_name)
+                if model_config:
+                    return provider_name, model_name, model_config
+        
+        # 2. 检查是否是别名
+        if model_alias in self.model_aliases:
+            actual_model = self.model_aliases[model_alias]
+            return self.resolve_model(actual_model)
+        
+        # 3. 搜索所有提供商查找模型
+        for provider_name, provider in self.providers.items():
+            if not provider.enabled:
+                continue
+            model_config = provider.get_model(model_alias)
+            if model_config:
+                return provider_name, model_alias, model_config
+        
+        # 4. 使用默认模型
+        return self.default_provider, self.default_model, \
+               self.providers[self.default_provider].models.get(self.default_model)
+    
+    def get_model_for_task(self, task_type: str) -> tuple[str, str, ModelConfig]:
+        """根据任务类型获取模型
+        
+        Args:
+            task_type: 任务类型，如 "hero_recommendation", "tool_selection"
+        
+        Returns:
+            (provider_name, model_name, model_config)
+        """
+        routing = self.task_routing.get(task_type)
+        if routing:
+            try:
+                return self.resolve_model(routing.model)
+            except Exception:
+                if routing.fallback:
+                    return self.resolve_model(routing.fallback)
+        
+        # 默认使用 fast 模型
+        return self.resolve_model('fast')
+```
+
+**2. LLM 客户端池 (utils/llm_client_pool.py)**
+
+```python
+from typing import Dict, Optional, Any, Generator
+from dataclasses import dataclass
+import requests
+import time
+
+from core.config import MultiLLMConfig, ModelConfig, ProviderConfig
+from utils.log_config import get_logger
+
+logger = get_logger("llm_client_pool", component="utils")
+
+
+@dataclass
+class LLMClientInstance:
+    """LLM 客户端实例"""
+    provider_name: str
+    model_name: str
+    model_config: ModelConfig
+    provider_config: ProviderConfig
+    session: requests.Session
+    
+    def chat(
+        self,
+        messages: list,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """发送聊天请求"""
+        url = f"{self.provider_config.base_url}/chat/completions"
+        
+        payload = {
+            "model": self.model_config.model_id,
+            "messages": messages,
+            "temperature": temperature or 0.7,
+            "max_tokens": max_tokens or self.model_config.max_tokens,
+            **kwargs
+        }
+        
+        response = self.session.post(url, json=payload, timeout=60)
+        response.raise_for_status()
+        return response.json()
+    
+    def chat_stream(
+        self,
+        messages: list,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        **kwargs
+    ) -> Generator[str, None, None]:
+        """流式聊天"""
+        url = f"{self.provider_config.base_url}/chat/completions"
+        
+        payload = {
+            "model": self.model_config.model_id,
+            "messages": messages,
+            "temperature": temperature or 0.7,
+            "max_tokens": max_tokens or self.model_config.max_tokens,
+            "stream": True,
+            **kwargs
+        }
+        
+        response = self.session.post(url, json=payload, timeout=60, stream=True)
+        response.raise_for_status()
+        
+        for line in response.iter_lines():
+            if line:
+                line = line.decode('utf-8')
+                if line.startswith('data: ') and line != 'data: [DONE]':
+                    import json
+                    try:
+                        chunk = json.loads(line[6:])
+                        delta = chunk.get('choices', [{}])[0].get('delta', {})
+                        content = delta.get('content', '')
+                        if content:
+                            yield content
+                    except json.JSONDecodeError:
+                        continue
+
+
+class LLMClientPool:
+    """LLM 客户端池 - 管理多个 LLM 提供商的客户端"""
+    
+    def __init__(self, config: MultiLLMConfig):
+        self.config = config
+        self._clients: Dict[str, LLMClientInstance] = {}
+        self._init_clients()
+    
+    def _init_clients(self):
+        """初始化所有提供商的客户端"""
+        for provider_name, provider_config in self.config.providers.items():
+            if not provider_config.enabled:
+                continue
+            
+            for model_name, model_config in provider_config.models.items():
+                client_key = f"{provider_name}/{model_name}"
+                
+                session = requests.Session()
+                headers = {"Content-Type": "application/json"}
+                if provider_config.api_key:
+                    headers["Authorization"] = f"Bearer {provider_config.api_key}"
+                session.headers.update(headers)
+                
+                self._clients[client_key] = LLMClientInstance(
+                    provider_name=provider_name,
+                    model_name=model_name,
+                    model_config=model_config,
+                    provider_config=provider_config,
+                    session=session
+                )
+    
+    def get_client(self, model_alias: str) -> LLMClientInstance:
+        """获取指定模型的客户端
+        
+        Args:
+            model_alias: 模型别名，如 "fast", "deepseek-chat", "openai/gpt-4o"
+        
+        Returns:
+            LLMClientInstance 实例
+        """
+        provider_name, model_name, model_config = self.config.resolve_model(model_alias)
+        client_key = f"{provider_name}/{model_name}"
+        
+        if client_key not in self._clients:
+            raise ValueError(f"客户端不存在: {client_key}")
+        
+        return self._clients[client_key]
+    
+    def get_client_for_task(self, task_type: str) -> LLMClientInstance:
+        """根据任务类型获取客户端
+        
+        Args:
+            task_type: 任务类型，如 "hero_recommendation", "tool_selection"
+        
+        Returns:
+            LLMClientInstance 实例
+        """
+        provider_name, model_name, model_config = self.config.get_model_for_task(task_type)
+        client_key = f"{provider_name}/{model_name}"
+        
+        if client_key not in self._clients:
+            # 尝试使用默认客户端
+            logger.warning(f"任务 {task_type} 的模型 {client_key} 不可用，使用默认模型")
+            return self.get_client(self.config.default_model)
+        
+        return self._clients[client_key]
+    
+    def list_available_models(self) -> list:
+        """列出所有可用模型"""
+        return list(self._clients.keys())
+    
+    def health_check(self) -> Dict[str, bool]:
+        """检查所有提供商的健康状态"""
+        results = {}
+        for client_key, client in self._clients.items():
+            try:
+                url = f"{client.provider_config.base_url}/models"
+                response = client.session.get(url, timeout=5)
+                results[client_key] = response.status_code == 200
+            except Exception:
+                results[client_key] = False
+        return results
+```
+
+**3. 更新 LLMClient 接口 (utils/llm_client.py)**
+
+```python
+from utils.llm_client_pool import LLMClientPool, LLMClientInstance
+from core.config import MultiLLMConfig
+
+class LLMClient:
+    """LLM 客户端 - 兼容旧接口，内部使用客户端池"""
+    
+    _instance = None
+    _pool: Optional[LLMClientPool] = None
+    
+    def __new__(cls, config=None):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+    
+    def __init__(self, config=None):
+        if self._pool is None:
+            if isinstance(config, MultiLLMConfig):
+                self._pool = LLMClientPool(config)
+            else:
+                # 兼容旧配置
+                self._pool = LLMClientPool(MultiLLMConfig.from_yaml())
+    
+    def chat(
+        self,
+        messages: list,
+        model: str = None,
+        task_type: str = None,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """发送聊天请求
+        
+        Args:
+            messages: 消息列表
+            model: 模型别名（优先级高于 task_type）
+            task_type: 任务类型
+        """
+        if model:
+            client = self._pool.get_client(model)
+        elif task_type:
+            client = self._pool.get_client_for_task(task_type)
+        else:
+            client = self._pool.get_client('fast')
+        
+        return client.chat(messages, **kwargs)
+    
+    def chat_stream(
+        self,
+        messages: list,
+        model: str = None,
+        task_type: str = None,
+        **kwargs
+    ) -> Generator[str, None, None]:
+        """流式聊天"""
+        if model:
+            client = self._pool.get_client(model)
+        elif task_type:
+            client = self._pool.get_client_for_task(task_type)
+        else:
+            client = self._pool.get_client('fast')
+        
+        yield from client.chat_stream(messages, **kwargs)
+```
+
+#### 9.7.5 使用示例
+
+**1. 基本使用**
+
+```python
+from core.config import MultiLLMConfig
+from utils.llm_client import LLMClient
+
+# 加载配置
+config = MultiLLMConfig.from_yaml()
+client = LLMClient(config)
+
+# 使用别名
+response = client.chat(
+    messages=[{"role": "user", "content": "你好"}],
+    model="fast"  # 使用 fast 别名
+)
+
+# 使用完整模型名
+response = client.chat(
+    messages=[{"role": "user", "content": "你好"}],
+    model="deepseek-chat"
+)
+
+# 使用 provider/model 格式
+response = client.chat(
+    messages=[{"role": "user", "content": "你好"}],
+    model="openai/gpt-4o"
+)
+```
+
+**2. 任务路由**
+
+```python
+# 英雄推荐任务（自动使用 smart 模型）
+response = client.chat(
+    messages=[{"role": "user", "content": "推荐克制帕吉的英雄"}],
+    task_type="hero_recommendation"
+)
+
+# 工具选择任务
+response = client.chat(
+    messages=[{"role": "user", "content": "用户想查询英雄数据"}],
+    task_type="tool_selection"
+)
+```
+
+**3. 在 AgentController 中使用**
+
+```python
+class AgentController:
+    def __init__(self):
+        self.llm_client = LLMClient()
+    
+    def _think(self, query: str, context: Dict) -> str:
+        """思考阶段 - 使用智能模型"""
+        response = self.llm_client.chat(
+            messages=[{"role": "user", "content": prompt}],
+            task_type="metacognition"
+        )
+        return response
+    
+    def _parse_heroes(self, query: str) -> Dict:
+        """英雄解析 - 使用快速模型"""
+        response = self.llm_client.chat(
+            messages=[{"role": "user", "content": prompt}],
+            task_type="hero_parsing"
+        )
+        return response
+```
+
+#### 9.7.6 迁移步骤
+
+**阶段一：配置文件更新（0.5 天）**
+1. 创建新的 `llm_config.yaml` 格式
+2. 保留旧的 `llm_config.yaml.example` 作为参考
+3. 添加环境变量配置说明
+
+**阶段二：配置模块重构（1 天）**
+1. 实现 `MultiLLMConfig` 数据类
+2. 实现 `ProviderConfig` 和 `ModelConfig`
+3. 实现环境变量解析
+4. 实现模型别名解析
+5. 实现任务路由逻辑
+
+**阶段三：客户端池实现（1 天）**
+1. 实现 `LLMClientPool`
+2. 实现 `LLMClientInstance`
+3. 实现健康检查
+4. 实现速率限制
+
+**阶段四：接口兼容（0.5 天）**
+1. 更新 `LLMClient` 保持向后兼容
+2. 更新所有调用点
+3. 添加废弃警告
+
+**阶段五：测试与文档（0.5 天）**
+1. 单元测试
+2. 集成测试
+3. 更新文档
+
+**总计工期**: 3-4 天
+
+#### 9.7.7 配置验证
+
+**验证脚本 (scripts/validate_llm_config.py)**：
+
+```python
+#!/usr/bin/env python3
+"""验证 LLM 配置"""
+
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from core.config import MultiLLMConfig
+from utils.llm_client_pool import LLMClientPool
+
+def validate_config():
+    """验证配置文件"""
+    print("=" * 50)
+    print("LLM 配置验证")
+    print("=" * 50)
+    
+    # 加载配置
+    config = MultiLLMConfig.from_yaml()
+    print(f"\n✓ 配置文件加载成功")
+    print(f"  默认提供商: {config.default_provider}")
+    print(f"  默认模型: {config.default_model}")
+    
+    # 验证提供商
+    print(f"\n提供商配置:")
+    for name, provider in config.providers.items():
+        status = "✓" if provider.enabled else "✗"
+        print(f"  {status} {name}: {len(provider.models)} 个模型")
+        for model_name in provider.models:
+            print(f"      - {model_name}")
+    
+    # 验证别名
+    print(f"\n模型别名:")
+    for alias, model in config.model_aliases.items():
+        try:
+            provider, model_name, _ = config.resolve_model(alias)
+            print(f"  ✓ {alias} -> {provider}/{model_name}")
+        except Exception as e:
+            print(f"  ✗ {alias} -> 错误: {e}")
+    
+    # 验证任务路由
+    print(f"\n任务路由:")
+    for task, routing in config.task_routing.items():
+        print(f"  - {task}: {routing.model} (fallback: {routing.fallback})")
+    
+    # 测试连接
+    print(f"\n连接测试:")
+    pool = LLMClientPool(config)
+    health = pool.health_check()
+    for client_key, is_healthy in health.items():
+        status = "✓" if is_healthy else "✗"
+        print(f"  {status} {client_key}")
+    
+    print("\n" + "=" * 50)
+    print("验证完成")
+
+if __name__ == "__main__":
+    validate_config()
+```
+
+---
+
+> **文档版本**: v2.3
+> **最后更新**: 2026-05-19
+> **更新内容**: 添加多 LLM API 配置支持方案
 
