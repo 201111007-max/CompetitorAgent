@@ -9,6 +9,14 @@ import time
 
 from utils.log_config import get_logger
 
+# Langfuse 监控（可选）
+try:
+    from utils.langfuse_adapter import LangfuseClient
+    LANGFUSE_AVAILABLE = True
+except ImportError:
+    LANGFUSE_AVAILABLE = False
+    LangfuseClient = None
+
 logger = get_logger("api_client", component="utils")
 
 # 支持两种导入方式：包导入和直接运行
@@ -152,19 +160,38 @@ class OpenDotaClient:
 
     def get_hero_matchups(self, hero_id: int, use_cache: bool = True) -> Optional[List[Dict]]:
         """获取英雄克制关系数据（带缓存）"""
-        cache_key = f"hero_matchups_{hero_id}"
+        # 获取 Langfuse 客户端
+        langfuse_client = LangfuseClient.get_instance() if LANGFUSE_AVAILABLE else None
         
-        # 尝试缓存
-        if use_cache:
-            cached = self.cache.get(cache_key)
-            if cached is not None:
-                return cached
+        # 创建 Langfuse Span（如果启用）
+        if langfuse_client and langfuse_client.enabled:
+            from utils.langfuse_adapter import NoOpTrace
+            trace = NoOpTrace()
+            span = trace.span(
+                name="api_call_hero_matchups",
+                metadata={"api": "opendota", "hero_id": hero_id}
+            )
+        else:
+            from utils.langfuse_adapter import NoOpSpan
+            span = NoOpSpan()
         
-        # API 请求
-        result = self._make_request(f"/heroes/{hero_id}/matchups")
-        if result is not None and use_cache:
-            self.cache.set(cache_key, result)
-        return result
+        with span:
+            cache_key = f"hero_matchups_{hero_id}"
+            
+            # 尝试缓存
+            if use_cache:
+                cached = self.cache.get(cache_key)
+                if cached is not None:
+                    span.update(metadata={"cache_hit": True})
+                    return cached
+            
+            # API 请求
+            result = self._make_request(f"/heroes/{hero_id}/matchups")
+            if result is not None and use_cache:
+                self.cache.set(cache_key, result)
+            
+            span.update(output={"result_type": type(result).__name__})
+            return result
 
     def get_hero_item_popularity(self, hero_id: int, use_cache: bool = True) -> Optional[Dict]:
         """获取英雄物品 popularity 数据（带缓存）"""
