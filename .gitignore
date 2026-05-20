@@ -64,3 +64,6 @@ Thumbs.db
 
 # Output projects
 out_project/
+
+# Trae IDE
+.trae/

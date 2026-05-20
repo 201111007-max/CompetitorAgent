@@ -275,6 +275,8 @@
 
 **仍需改进**：
 - ✅ 前端职责划分优化（已完成，前端不再承担解析逻辑）
+- 🔴 **高优先级：前端流式响应展示未实现** - 后端已实现 SSE 流式输出，但前端未实现流式接收和展示，Agent 的思考过程、工具调用等实时信息无法在前端展示，需要定位并修改前端代码实现流式渲染
+- 🔴 **高优先级：Trace 定位与日志追踪体系不完善** - 当前 trace 定位困难，需要全面分析已实现的 trace 机制（包括 trace ID 生成、传递、存储），建立完整的日志追踪方案，支持根据 trace ID 快速获取完整调用链日志
 
 **已完成的重大改进**（2026-05-17 更新）：
 - ✅ 前端职责优化（删除冗余代码，统一后端解析）
@@ -1031,16 +1033,133 @@ def submit_feedback():
 
 ### 7.2 待改进优先级
 
-| 优先级 | 改进项                           | 预计工作量 | 影响 |
-| --- | ----------------------------- | ----- | -- |
-| P0  | 工具选择智能化（LLM Function Calling） | 中     | 高  |
-| P1  | 记忆系统深度集成                      | 中     | 高  |
-| P1  | 多轮对话上下文                       | 中     | 高  |
-| P2  | 反思结果驱动策略调整                    | 小     | 中  |
-| P2  | 工具执行并行化                       | 中     | 中  |
-| P3  | 用户反馈学习                        | 大     | 中  |
+> 更新时间：2026-05-20
 
-### 7.3 架构成熟度评估
+| 优先级 | 改进项 | 预计工作量 | 影响 | 状态 |
+| --- | --- | --- | --- | --- |
+| **P0** | **接入 Langfuse 监控系统** | 中 | 高 | ❌ 待实现 |
+| P1 | 工具执行并行化 | 中 | 中 | ❌ 待实现 |
+| P2 | 用户反馈学习 | 大 | 中 | ❌ 待实现 |
+
+#### 已完成的改进项
+
+| 优先级 | 改进项 | 完成时间 | 代码位置 |
+| --- | --- | --- | --- |
+| P0 | 工具选择智能化（LLM Function Calling） | 2026-05-17 | `core/llm_tool_selector.py` |
+| P1 | 记忆系统深度集成 | 2026-05-17 | `memory/memory.py` |
+| P1 | 多轮对话上下文 | 2026-05-17 | `core/conversation_manager.py` + `core/context_augmenter.py` |
+| P2 | 反思结果驱动策略调整 | 2026-05-17 | `core/agent_controller.py#_adjust_strategy` |
+
+### 7.3 P0：接入 Langfuse 监控系统
+
+#### 7.3.1 概述
+
+Langfuse 是一个开源的 LLM 应用可观测性平台，提供：
+- **Trace 追踪**：完整记录请求生命周期
+- **Prompt 管理**：版本化 Prompt 模板
+- **评分系统**：用户反馈和自动评估
+- **成本分析**：Token 使用量和成本统计
+- **会话分析**：多轮对话上下文追踪
+
+**官方文档**：https://langfuse.com/docs
+
+#### 7.3.2 集成方案
+
+**安装依赖**：
+```bash
+pip install langfuse
+```
+
+**配置环境变量**：
+```env
+LANGFUSE_PUBLIC_KEY=pk-lf-xxx
+LANGFUSE_SECRET_KEY=sk-lf-xxx
+LANGFUSE_HOST=https://cloud.langfuse.com  # 或自建地址
+```
+
+**核心集成点**：
+
+1. **LLM 调用追踪** - `utils/llm_client.py`
+```python
+from langfuse import Langfuse
+
+langfuse = Langfuse()
+
+def chat(self, messages: List[Dict], **kwargs) -> Dict:
+    trace = langfuse.trace(
+        name="llm_chat",
+        metadata={"model": self.model, "provider": self.provider}
+    )
+    
+    generation = trace.generation(
+        name="chat_completion",
+        model=self.model,
+        input=messages,
+        metadata=kwargs
+    )
+    
+    response = self._call_api(messages, **kwargs)
+    
+    generation.end(output=response)
+    return response
+```
+
+2. **工具执行追踪** - `core/tool_registry.py`
+```python
+def execute(self, tool_name: str, **params) -> ToolResult:
+    span = trace.span(
+        name=f"tool_{tool_name}",
+        metadata={"params": params}
+    )
+    
+    result = tool.execute(**params)
+    
+    span.end(output=result.data)
+    return result
+```
+
+3. **ReAct 循环追踪** - `core/agent_controller.py`
+```python
+def solve(self, query: str, context: Optional[Dict] = None) -> Dict:
+    trace = langfuse.trace(
+        name="react_loop",
+        user_id=context.get("user_id"),
+        session_id=context.get("session_id"),
+        metadata={"query": query}
+    )
+    
+    for turn in range(self.max_turns):
+        with trace.span(name=f"turn_{turn}"):
+            self._think(thought)
+            self._plan(thought)
+            self._execute(thought)
+            self._observe(thought)
+            self._reflect(thought)
+    
+    trace.update(output=result)
+    return result
+```
+
+#### 7.3.3 实现清单
+
+| 模块 | 集成内容 | 优先级 |
+| --- | --- | --- |
+| `utils/llm_client.py` | LLM 调用追踪、Token 统计 | 高 |
+| `core/tool_registry.py` | 工具执行追踪、耗时统计 | 高 |
+| `core/agent_controller.py` | ReAct 循环追踪、会话关联 | 高 |
+| `memory/memory.py` | 记忆操作追踪 | 中 |
+| `web/app.py` | API 请求追踪、用户反馈收集 | 中 |
+| `core/config.py` | Langfuse 配置管理 | 高 |
+
+#### 7.3.4 预期收益
+
+1. **调试效率提升**：快速定位问题请求
+2. **性能优化**：识别慢查询和瓶颈
+3. **成本控制**：Token 使用量可视化
+4. **质量评估**：用户评分 + 自动评估
+5. **Prompt 优化**：版本管理和 A/B 测试
+
+### 7.4 架构成熟度评估
 
 当前 DotaHelperAgent 已具备 **ReAct Agent 核心骨架**，但距离真正的智能 Agent 仍有显著差距：
 
@@ -1073,7 +1192,7 @@ def submit_feedback():
 
 这三项改进将使 DotaHelperAgent 从"高级路由系统"升级为"真正的智能体"。
 
-### 7.4 新增功能：目标分解与追踪 ✅
+### 7.5 新增功能：目标分解与追踪 ✅
 
 **实现状态**: ✅ 已完成
 
@@ -4394,7 +4513,7 @@ if __name__ == "__main__":
 
 ---
 
-> **文档版本**: v2.3
-> **最后更新**: 2026-05-19
-> **更新内容**: 添加多 LLM API 配置支持方案
+> **文档版本**: v2.4
+> **最后更新**: 2026-05-20
+> **更新内容**: 新增高优先级待办事项（前端流式响应展示、Trace 定位与日志追踪）
 

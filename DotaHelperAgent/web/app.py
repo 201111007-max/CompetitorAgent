@@ -524,10 +524,10 @@ def setup_trace_context() -> None:
     
     # Langfuse 追踪（可选）
     if langfuse_client and langfuse_client.enabled:
-        g.langfuse_trace = langfuse_client.trace(
-            trace_id=trace_id,
-            session_id=session_id,
-            metadata={"path": request.path, "method": request.method}
+        g.langfuse_trace = langfuse_client.observation(
+            name=f"request_{request.path.replace('/', '_')}",
+            as_type="chain",
+            metadata={"path": request.path, "method": request.method, "trace_id": trace_id, "session_id": session_id}
         )
     
     # 记录请求开始
@@ -559,8 +559,8 @@ def cleanup_trace_context(response: Response) -> Response:
             }
         )
     
-    # 刷新 Langfuse 数据
-    if langfuse_client and hasattr(g, 'langfuse_trace'):
+    # 刷新 Langfuse 数据到服务器
+    if langfuse_client:
         langfuse_client.flush()
     
     return response
@@ -704,6 +704,16 @@ def test_tools() -> Response:
     if agent_controller is None:
         return jsonify({"error": "Agent Controller not initialized"})
     
+    # 更新 Langfuse observation 的 input
+    if hasattr(g, 'langfuse_trace') and g.langfuse_trace:
+        try:
+            g.langfuse_trace.update(
+                input={"test_type": "tools"},
+                metadata={"endpoint": "test_tools"}
+            )
+        except Exception as e:
+            app_logger.warning(f"更新 Langfuse input 失败: {e}")
+    
     # 测试工具注册
     tools = agent_controller.tool_registry.list_tools()
     
@@ -737,6 +747,21 @@ def test_tools() -> Response:
     except Exception as e:
         result['tool_execution'] = {'error': str(e)}
     
+    # 更新 Langfuse observation 的 output
+    if hasattr(g, 'langfuse_trace') and g.langfuse_trace:
+        try:
+            g.langfuse_trace.update(
+                output={
+                    "success": True,
+                    "tools": tools,
+                    "parsed_heroes": parsed,
+                    "test_result": result
+                }
+            )
+            g.langfuse_trace.end()
+        except Exception as e:
+            app_logger.warning(f"更新 Langfuse output 失败: {e}")
+    
     return jsonify({
         "tools": tools,
         "parsed_heroes": parsed,
@@ -755,6 +780,16 @@ def chat() -> Response:
     # 获取当前 Trace 上下文
     trace_ctx = get_current_trace()
     trace_id = trace_ctx.trace_id if trace_ctx else generate_trace_id()
+
+    # 更新 Langfuse observation 的 input
+    if hasattr(g, 'langfuse_trace') and g.langfuse_trace:
+        try:
+            g.langfuse_trace.update(
+                input={"query": query, "context": context},
+                metadata={"session_id": session_id, "trace_id": trace_id}
+            )
+        except Exception as e:
+            app_logger.warning(f"更新 Langfuse input 失败: {e}")
 
     app_logger.info_ctx(
         "收到聊天请求",
@@ -888,6 +923,21 @@ def chat() -> Response:
         }
     )
 
+    # 更新 Langfuse observation 的 output
+    if hasattr(g, 'langfuse_trace') and g.langfuse_trace:
+        try:
+            g.langfuse_trace.update(
+                output={
+                    "success": result['success'],
+                    "final_answer": result.get('final_answer', ''),
+                    "turn_count": result.get('turn_count'),
+                    "duration": result.get('duration')
+                }
+            )
+            g.langfuse_trace.end()
+        except Exception as e:
+            app_logger.warning(f"更新 Langfuse output 失败: {e}")
+
     return jsonify(result)
 
 
@@ -934,20 +984,16 @@ def _format_answer_for_stream(answer_data) -> str:
         app_logger.debug(f"sub_goals_summary 模式 - answer 类型: {type(answer)}")
         
         if isinstance(answer, dict):
-            formatted = _format_answer_for_stream(answer)
-            app_logger.debug(f"格式化结果: {formatted[:200] if formatted else 'None'}")
-            if formatted and formatted != str(answer):
-                parts.append(formatted)
-            else:
-                app_logger.debug("格式化失败，从 sub_goals_results 提取")
-                # 尝试从子目标结果中提取有用信息
+            # 检查是否为空字典
+            if not answer:
+                app_logger.debug("answer 是空字典")
+                # 检查是否有子目标结果
                 results = answer_data.get("sub_goals_results", [])
                 if results:
                     parts.append("📋 分析结果：")
                     for r in results:
                         desc = r.get("description", "")
                         result = r.get("result")
-                        app_logger.debug(f"sub_goal result 类型: {type(result)}")
                         if result:
                             if isinstance(result, list):
                                 formatted_result = _format_answer_for_stream(result)
@@ -957,6 +1003,32 @@ def _format_answer_for_stream(answer_data) -> str:
                                 parts.append(formatted_result)
                             else:
                                 parts.append(str(result))
+                else:
+                    parts.append("未能获取有效结果")
+            else:
+                formatted = _format_answer_for_stream(answer)
+                app_logger.debug(f"格式化结果: {formatted[:200] if formatted else 'None'}")
+                if formatted and formatted != str(answer):
+                    parts.append(formatted)
+                else:
+                    app_logger.debug("格式化失败，从 sub_goals_results 提取")
+                    # 尝试从子目标结果中提取有用信息
+                    results = answer_data.get("sub_goals_results", [])
+                    if results:
+                        parts.append("📋 分析结果：")
+                        for r in results:
+                            desc = r.get("description", "")
+                            result = r.get("result")
+                            app_logger.debug(f"sub_goal result 类型: {type(result)}")
+                            if result:
+                                if isinstance(result, list):
+                                    formatted_result = _format_answer_for_stream(result)
+                                    parts.append(formatted_result)
+                                elif isinstance(result, dict):
+                                    formatted_result = _format_answer_for_stream(result)
+                                    parts.append(formatted_result)
+                                else:
+                                    parts.append(str(result))
         elif isinstance(answer, list):
             app_logger.debug("answer 是列表，直接格式化")
             formatted = _format_answer_for_stream(answer)
@@ -1455,7 +1527,30 @@ def parse_preview() -> Response:
         if not query:
             return jsonify({"error": "Query is required"}), 400
         
+        # 更新 Langfuse observation 的 input
+        if hasattr(g, 'langfuse_trace') and g.langfuse_trace:
+            try:
+                g.langfuse_trace.update(
+                    input={"query": query},
+                    metadata={"endpoint": "parse_preview"}
+                )
+            except Exception as e:
+                app_logger.warning(f"更新 Langfuse input 失败: {e}")
+        
         parsed = parse_heroes_with_llm(query)
+        
+        # 更新 Langfuse observation 的 output
+        if hasattr(g, 'langfuse_trace') and g.langfuse_trace:
+            try:
+                g.langfuse_trace.update(
+                    output={
+                        "success": True,
+                        "parsed": parsed
+                    }
+                )
+                g.langfuse_trace.end()
+            except Exception as e:
+                app_logger.warning(f"更新 Langfuse output 失败: {e}")
         
         return jsonify({
             "success": True,
@@ -1465,6 +1560,20 @@ def parse_preview() -> Response:
         
     except Exception as e:
         app_logger.error(f"Parse preview error: {e}")
+        
+        # 更新 Langfuse observation 的 error
+        if hasattr(g, 'langfuse_trace') and g.langfuse_trace:
+            try:
+                g.langfuse_trace.update(
+                    output={
+                        "success": False,
+                        "error": str(e)
+                    }
+                )
+                g.langfuse_trace.end()
+            except Exception as e:
+                app_logger.warning(f"更新 Langfuse output 失败: {e}")
+        
         return jsonify({"error": str(e)}), 500
 
 
@@ -1480,12 +1589,24 @@ def chat_stream() -> Response:
     trace_ctx = get_current_trace()
     trace_id = trace_ctx.trace_id if trace_ctx else generate_trace_id()
 
+    # 更新 Langfuse observation 的 input
+    if hasattr(g, 'langfuse_trace') and g.langfuse_trace:
+        try:
+            g.langfuse_trace.update(
+                input={"query": query, "context": context},
+                metadata={"session_id": session_id, "trace_id": trace_id}
+            )
+            app_logger.debug(f"已更新 Langfuse input: query={query[:50]}...")
+        except Exception as e:
+            app_logger.warning(f"更新 Langfuse input 失败: {e}")
+
     def generate():
         # 在生成器中恢复 Trace 上下文
         if trace_ctx:
             set_current_trace(trace_ctx)
             
         start_time = time.time()
+        final_result = None
 
         yield f"event: start\ndata: {json.dumps({'timestamp': int(start_time), 'trace_id': trace_id})}\n\n"
 
@@ -1501,11 +1622,34 @@ def chat_stream() -> Response:
 
         try:
             # 使用流式执行（传递 Trace 上下文）
-            yield from _execute_streaming(agent_controller, query, context, start_time, trace_ctx)
+            for event in _execute_streaming(agent_controller, query, context, start_time, trace_ctx):
+                yield event
+                # 捕获最终结果
+                if event.startswith("event: synthesize"):
+                    try:
+                        event_data = json.loads(event.split("data: ")[1])
+                        final_result = event_data.get("answer", "")
+                    except:
+                        pass
 
         except Exception as e:
             yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
             yield f"event: complete\ndata: {json.dumps({'timestamp': int(time.time()), 'total_time': time.time() - start_time})}\n\n"
+        
+        # 更新 Langfuse observation 的 output 并结束
+        if hasattr(g, 'langfuse_trace') and g.langfuse_trace:
+            try:
+                g.langfuse_trace.update(
+                    output={
+                        "success": final_result is not None,
+                        "final_answer": final_result or "",
+                        "duration": time.time() - start_time
+                    }
+                )
+                g.langfuse_trace.end()
+                app_logger.debug(f"已更新 Langfuse output 并结束: success={final_result is not None}")
+            except Exception as e:
+                app_logger.warning(f"更新 Langfuse output 失败: {e}")
 
     return Response(stream_with_context(generate()), mimetype='text/event-stream', headers={
         'Cache-Control': 'no-cache',
@@ -2064,8 +2208,7 @@ def submit_feedback() -> Response:
     
     if langfuse_client and langfuse_client.enabled and trace_id and score is not None:
         try:
-            trace = langfuse_client.trace(trace_id=trace_id)
-            trace.score(name="user_feedback", value=float(score), comment=comment)
+            langfuse_client.score(name="user_feedback", value=float(score), comment=comment)
             langfuse_client.flush()
         except Exception as e:
             app_logger.warning(f"记录用户反馈失败: {e}")

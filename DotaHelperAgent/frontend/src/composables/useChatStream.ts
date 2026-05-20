@@ -91,6 +91,13 @@ export function useChatStream() {
         }
         break
 
+      case 'synthesize':
+        if (data.answer) {
+          chatStore.appendToLastMessage(data.answer)
+        }
+        break
+
+      case 'complete':
       case 'done':
         chatStore.setStreaming(false)
         break
