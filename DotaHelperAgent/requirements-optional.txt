@@ -1,0 +1,4 @@
+# 可选依赖 - Langfuse 监控
+# 安装命令: pip install -r requirements-optional.txt
+
+langfuse>=2.0.0

@@ -1,0 +1,28 @@
+# Langfuse 配置文件
+# 用于配置 LLM 追踪和监控
+
+langfuse:
+  # 是否启用 Langfuse 监控
+  # 设置为 false 可禁用追踪功能
+  enabled: true
+  
+  # Langfuse 服务器地址
+  # Self-hosted 部署时修改为你的服务器地址
+  host: "http://localhost:3000"
+  
+  # API 密钥
+  # 建议使用环境变量设置，不要在此文件中硬编码
+  # 环境变量: LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY
+  public_key: "${LANGFUSE_PUBLIC_KEY}"
+  secret_key: "${LANGFUSE_SECRET_KEY}"
+  
+  # 追踪配置
+  trace:
+    llm_calls: true       # 追踪 LLM 调用
+    agent_flow: true      # 追踪 Agent 执行流程
+    tool_calls: true      # 追踪工具调用
+    api_calls: true       # 追踪外部 API 调用
+  
+  # 采样率 (0.0 - 1.0)
+  # 1.0 表示追踪所有请求，0.5 表示追踪 50% 的请求
+  sample_rate: 1.0

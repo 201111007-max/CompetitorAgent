@@ -1,0 +1,19 @@
+# DotaHelperAgent 核心依赖
+
+# Web 框架
+flask>=2.0.0
+flask-cors>=3.0.0
+
+# HTTP 请求
+requests>=2.28.0
+
+# 配置管理
+pyyaml>=6.0
+
+# 数据处理
+python-dateutil>=2.8.0
+
+# 可选依赖 - Langfuse 监控（推荐安装）
+# 安装命令: pip install langfuse
+# 或: pip install -r requirements-optional.txt
+# langfuse>=2.0.0
