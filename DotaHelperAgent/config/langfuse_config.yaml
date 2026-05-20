@@ -8,7 +8,7 @@ langfuse:
   
   # Langfuse 服务器地址
   # Self-hosted 部署时修改为你的服务器地址
-  host: "http://localhost:3000"
+  host: "http://localhost:3001"
   
   # API 密钥
   # 建议使用环境变量设置，不要在此文件中硬编码

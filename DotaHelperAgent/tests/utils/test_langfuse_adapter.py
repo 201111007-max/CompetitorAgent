@@ -6,48 +6,31 @@ import pytest
 class TestNoOpClasses:
     """测试空操作类"""
     
-    def test_noop_trace_span_returns_noop_span(self):
-        from utils.langfuse_adapter import NoOpTrace
+    def test_noop_observation_span_returns_noop(self):
+        from utils.langfuse_adapter import NoOpObservation
         
-        trace = NoOpTrace()
-        span = trace.span(name="test")
+        obs = NoOpObservation()
+        span = obs.span(name="test")
         
         assert span is not None
         assert hasattr(span, 'update')
-        assert hasattr(span, 'event')
         assert hasattr(span, 'score')
+        assert hasattr(span, 'end')
     
-    def test_noop_trace_event_returns_noop_event(self):
-        from utils.langfuse_adapter import NoOpTrace
+    def test_noop_observation_context_manager(self):
+        from utils.langfuse_adapter import NoOpObservation
         
-        trace = NoOpTrace()
-        event = trace.event(name="test")
-        
-        assert event is not None
-        assert hasattr(event, 'update')
+        with NoOpObservation() as obs:
+            assert obs is not None
+            obs.update(metadata={"test": "value"})
+            obs.score(name="test", value=0.9)
     
-    def test_noop_trace_context_manager(self):
-        from utils.langfuse_adapter import NoOpTrace
+    def test_noop_observation_chain(self):
+        from utils.langfuse_adapter import NoOpObservation
         
-        with NoOpTrace() as trace:
-            assert trace is not None
-            trace.update(metadata={"test": "value"})
-            trace.score(name="test", value=0.9)
-    
-    def test_noop_span_context_manager(self):
-        from utils.langfuse_adapter import NoOpSpan
-        
-        with NoOpSpan() as span:
-            assert span is not None
-            span.update(output={"result": "success"})
-            span.score(name="quality", value=0.8)
-    
-    def test_noop_event_context_manager(self):
-        from utils.langfuse_adapter import NoOpEvent
-        
-        with NoOpEvent() as event:
-            assert event is not None
-            event.update(metadata={"key": "value"})
+        obs = NoOpObservation()
+        result = obs.update(output={"result": "success"}).score(name="quality", value=0.8).end()
+        assert result is obs
 
 
 class TestLangfuseClient:
@@ -67,13 +50,13 @@ class TestLangfuseClient:
         client = LangfuseClient.get_instance()
         assert client.enabled is False
     
-    def test_trace_returns_noop_when_disabled(self):
-        from utils.langfuse_adapter import LangfuseClient, NoOpTrace
+    def test_observation_returns_noop_when_disabled(self):
+        from utils.langfuse_adapter import LangfuseClient, NoOpObservation
         
         client = LangfuseClient.get_instance()
-        trace = client.trace(trace_id="test_123")
+        obs = client.observation(name="test_obs")
         
-        assert isinstance(trace, NoOpTrace)
+        assert isinstance(obs, NoOpObservation)
 
 
 class TestIsLangfuseAvailable:
@@ -84,3 +67,22 @@ class TestIsLangfuseAvailable:
         
         result = is_langfuse_available()
         assert isinstance(result, bool)
+
+
+class TestBackwardCompatibility:
+    """测试向后兼容性"""
+    
+    def test_noop_trace_alias(self):
+        from utils.langfuse_adapter import NoOpTrace, NoOpObservation
+        
+        assert NoOpTrace is NoOpObservation
+    
+    def test_noop_span_alias(self):
+        from utils.langfuse_adapter import NoOpSpan, NoOpObservation
+        
+        assert NoOpSpan is NoOpObservation
+    
+    def test_noop_event_alias(self):
+        from utils.langfuse_adapter import NoOpEvent, NoOpObservation
+        
+        assert NoOpEvent is NoOpObservation

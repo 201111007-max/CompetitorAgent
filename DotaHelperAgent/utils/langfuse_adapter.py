@@ -10,13 +10,12 @@
     client = LangfuseClient.get_instance()
     client.init()
     
-    with client.trace(trace_id="xxx", session_id="yyy") as trace:
-        with trace.span(name="operation") as span:
-            span.update(output={"result": "success"})
+    with client.observation(name="operation") as obs:
+        obs.update(output={"result": "success"})
 """
 
 import logging
-from typing import Optional, Dict, Any, Union
+from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
 
@@ -38,193 +37,73 @@ def is_langfuse_available() -> bool:
     return LANGFUSE_AVAILABLE
 
 
-class NoOpTrace:
-    """空操作 Trace - 当 langfuse 不可用时使用
+class NoOpObservation:
+    """空操作 Observation - 当 langfuse 不可用时使用
     
     所有方法都是空操作，返回自身或对应的空操作对象
     """
     
-    def span(self, **kwargs: Any) -> "NoOpSpan":
+    def span(self, **kwargs: Any) -> "NoOpObservation":
         """创建空操作 Span
         
         Args:
             **kwargs: 任意参数（忽略）
         
         Returns:
-            NoOpSpan: 空操作 Span 实例
+            NoOpObservation: 空操作 Observation 实例
         """
-        return NoOpSpan()
+        return NoOpObservation()
     
-    def event(self, **kwargs: Any) -> "NoOpEvent":
-        """创建空操作 Event
+    def update(self, **kwargs: Any) -> "NoOpObservation":
+        """更新 Observation（空操作）
         
         Args:
             **kwargs: 任意参数（忽略）
         
         Returns:
-            NoOpEvent: 空操作 Event 实例
-        """
-        return NoOpEvent()
-    
-    def update(self, **kwargs: Any) -> "NoOpTrace":
-        """更新 Trace（空操作）
-        
-        Args:
-            **kwargs: 任意参数（忽略）
-        
-        Returns:
-            NoOpTrace: 自身实例
+            NoOpObservation: 自身实例
         """
         return self
     
-    def score(self, **kwargs: Any) -> "NoOpTrace":
+    def score(self, **kwargs: Any) -> "NoOpObservation":
         """记录评分（空操作）
         
         Args:
             **kwargs: 任意参数（忽略）
         
         Returns:
-            NoOpTrace: 自身实例
+            NoOpObservation: 自身实例
         """
         return self
     
-    def __enter__(self) -> "NoOpTrace":
+    def end(self, **kwargs: Any) -> "NoOpObservation":
+        """结束 Observation（空操作）
+        
+        Args:
+            **kwargs: 任意参数（忽略）
+        
+        Returns:
+            NoOpObservation: 自身实例
+        """
+        return self
+    
+    def __enter__(self) -> "NoOpObservation":
         """进入上下文管理器
         
         Returns:
-            NoOpTrace: 自身实例
+            NoOpObservation: 自身实例
         """
         return self
     
     def __exit__(self, exc_type: Optional[type], exc_val: Optional[BaseException], exc_tb: Optional[Any]) -> None:
-        """退出上下文管理器
-        
-        Args:
-            exc_type: 异常类型
-            exc_val: 异常值
-            exc_tb: 异常追踪信息
-        """
-        pass
-
-
-class NoOpSpan:
-    """空操作 Span
-    
-    所有方法都是空操作，返回自身或对应的空操作对象
-    """
-    
-    def event(self, **kwargs: Any) -> "NoOpEvent":
-        """创建空操作 Event
-        
-        Args:
-            **kwargs: 任意参数（忽略）
-        
-        Returns:
-            NoOpEvent: 空操作 Event 实例
-        """
-        return NoOpEvent()
-    
-    def update(self, **kwargs: Any) -> "NoOpSpan":
-        """更新 Span（空操作）
-        
-        Args:
-            **kwargs: 任意参数（忽略）
-        
-        Returns:
-            NoOpSpan: 自身实例
-        """
-        return self
-    
-    def score(self, **kwargs: Any) -> "NoOpSpan":
-        """记录评分（空操作）
-        
-        Args:
-            **kwargs: 任意参数（忽略）
-        
-        Returns:
-            NoOpSpan: 自身实例
-        """
-        return self
-    
-    def end(self) -> "NoOpSpan":
-        """结束 Span（空操作）
-        
-        Returns:
-            NoOpSpan: 自身实例
-        """
-        return self
-    
-    def __enter__(self) -> "NoOpSpan":
-        """进入上下文管理器
-        
-        Returns:
-            NoOpSpan: 自身实例
-        """
-        return self
-    
-    def __exit__(self, exc_type: Optional[type], exc_val: Optional[BaseException], exc_tb: Optional[Any]) -> None:
-        """退出上下文管理器
-        
-        Args:
-            exc_type: 异常类型
-            exc_val: 异常值
-            exc_tb: 异常追踪信息
-        """
-        pass
-
-
-class NoOpEvent:
-    """空操作 Event
-    
-    所有方法都是空操作，返回自身
-    """
-    
-    def update(self, **kwargs: Any) -> "NoOpEvent":
-        """更新 Event（空操作）
-        
-        Args:
-            **kwargs: 任意参数（忽略）
-        
-        Returns:
-            NoOpEvent: 自身实例
-        """
-        return self
-    
-    def __enter__(self) -> "NoOpEvent":
-        """进入上下文管理器
-        
-        Returns:
-            NoOpEvent: 自身实例
-        """
-        return self
-    
-    def __exit__(self, exc_type: Optional[type], exc_val: Optional[BaseException], exc_tb: Optional[Any]) -> None:
-        """退出上下文管理器
-        
-        Args:
-            exc_type: 异常类型
-            exc_val: 异常值
-            exc_tb: 异常追踪信息
-        """
+        """退出上下文管理器"""
         pass
 
 
 class LangfuseClient:
-    """Langfuse 客户端包装器 - 单例模式
+    """Langfuse 客户端单例
     
-    如果 langfuse SDK 未安装，所有方法都是空操作
-    
-    使用方式:
-        client = LangfuseClient.get_instance()
-        client.init(config={
-            "public_key": "xxx",
-            "secret_key": "yyy",
-            "host": "http://localhost:3000"
-        })
-        
-        with client.trace(trace_id="xxx") as trace:
-            with trace.span(name="operation") as span:
-                span.update(output={"result": "success"})
+    确保全局只有一个 Langfuse 客户端实例
     """
     
     _instance: Optional["LangfuseClient"] = None
@@ -258,27 +137,24 @@ class LangfuseClient:
             config: 配置字典，包含:
                 - public_key: Langfuse 公钥
                 - secret_key: Langfuse 密钥
-                - host: Langfuse 服务器地址（默认 http://localhost:3000）
-                - enabled: 是否启用（默认 True）
+                - host: Langfuse 服务器地址
+                - enabled: 是否启用
         """
         if not LANGFUSE_AVAILABLE:
             logger.info("langfuse SDK 未安装，监控功能已禁用")
             self._enabled = False
             return
         
-        if config:
-            self._config = config
+        import os
         
-        if not self._config.get('enabled', True):
-            logger.info("Langfuse 监控已禁用")
-            self._enabled = False
-            return
+        self._config = config or {}
         
-        public_key = self._config.get('public_key')
-        secret_key = self._config.get('secret_key')
+        public_key = self._config.get('public_key') or os.getenv('LANGFUSE_PUBLIC_KEY')
+        secret_key = self._config.get('secret_key') or os.getenv('LANGFUSE_SECRET_KEY')
+        host = self._config.get('host') or os.getenv('LANGFUSE_HOST', 'http://localhost:3000')
         
         if not public_key or not secret_key:
-            logger.warning("Langfuse 配置不完整（缺少 public_key 或 secret_key），监控功能已禁用")
+            logger.warning("Langfuse 密钥未配置，监控功能已禁用")
             self._enabled = False
             return
         
@@ -286,46 +162,135 @@ class LangfuseClient:
             self._client = Langfuse(
                 public_key=public_key,
                 secret_key=secret_key,
-                host=self._config.get('host', 'http://localhost:3000')
+                host=host
             )
-            self._enabled = True
-            logger.info(f"Langfuse 监控已启用: {self._config.get('host', 'http://localhost:3000')}")
+            
+            if self._config.get('enabled', True):
+                if self._client.auth_check():
+                    self._enabled = True
+                    logger.info(f"Langfuse 客户端初始化成功，连接到 {host}")
+                else:
+                    logger.warning("Langfuse 认证失败，监控功能已禁用")
+                    self._enabled = False
+            else:
+                self._enabled = False
+                logger.info("Langfuse 监控已被配置禁用")
         except Exception as e:
-            logger.error(f"Langfuse 初始化失败: {e}")
+            logger.warning(f"Langfuse 初始化失败: {e}")
             self._enabled = False
     
     @property
     def enabled(self) -> bool:
-        """检查是否启用
+        """检查客户端是否启用
         
         Returns:
             bool: 是否启用
         """
-        return self._enabled and LANGFUSE_AVAILABLE
+        return self._enabled
     
-    def trace(self, trace_id: str, **kwargs: Any) -> Union["Trace", NoOpTrace]:
-        """创建 Trace
-        
-        Args:
-            trace_id: 追踪 ID（与现有 Trace 系统兼容）
-            **kwargs: 其他参数（session_id, metadata 等）
+    @property
+    def client(self) -> Optional[Any]:
+        """获取底层 Langfuse 客户端
         
         Returns:
-            Union[Trace, NoOpTrace]: Langfuse Trace 或 NoOpTrace
+            Optional[Any]: Langfuse 客户端实例或 None
+        """
+        return self._client
+    
+    def observation(
+        self, 
+        name: str, 
+        as_type: str = "span",
+        input: Optional[Any] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> Any:
+        """创建 Observation
+        
+        Args:
+            name: Observation 名称
+            as_type: 类型 (span, chain, agent, tool, generation 等)
+            input: 输入数据
+            metadata: 元数据
+        
+        Returns:
+            Observation 实例或 NoOpObservation
         """
         if not self.enabled or not self._client:
-            return NoOpTrace()
+            return NoOpObservation()
         
         try:
-            return self._client.trace(id=trace_id, **kwargs)
+            return self._client.start_observation(
+                name=name,
+                as_type=as_type,
+                input=input,
+                metadata=metadata
+            )
         except Exception as e:
-            logger.warning(f"创建 Langfuse Trace 失败: {e}")
-            return NoOpTrace()
+            logger.warning(f"创建 Langfuse observation 失败: {e}")
+            return NoOpObservation()
+    
+    def event(
+        self,
+        name: str,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> Any:
+        """创建 Event
+        
+        Args:
+            name: Event 名称
+            metadata: 元数据
+        
+        Returns:
+            Event 实例
+        """
+        if not self.enabled or not self._client:
+            return None
+        
+        try:
+            return self._client.create_event(name=name, metadata=metadata)
+        except Exception as e:
+            logger.warning(f"创建 Langfuse event 失败: {e}")
+            return None
+    
+    def score(
+        self,
+        name: str,
+        value: float,
+        comment: Optional[str] = None
+    ) -> None:
+        """创建评分
+        
+        Args:
+            name: 评分名称
+            value: 评分值
+            comment: 评论文
+        """
+        if not self.enabled or not self._client:
+            return
+        
+        try:
+            self._client.create_score(name=name, value=value, comment=comment)
+        except Exception as e:
+            logger.warning(f"创建 Langfuse score 失败: {e}")
     
     def flush(self) -> None:
-        """刷新数据到 Langfuse Server"""
-        if self.enabled and self._client:
+        """刷新数据到 Langfuse 服务器"""
+        if self._client:
             try:
                 self._client.flush()
             except Exception as e:
                 logger.warning(f"刷新 Langfuse 数据失败: {e}")
+    
+    def shutdown(self) -> None:
+        """关闭客户端"""
+        if self._client:
+            try:
+                self._client.shutdown()
+            except Exception as e:
+                logger.warning(f"关闭 Langfuse 客户端失败: {e}")
+
+
+# 兼容旧 API 的别名
+NoOpTrace = NoOpObservation
+NoOpSpan = NoOpObservation
+NoOpEvent = NoOpObservation
