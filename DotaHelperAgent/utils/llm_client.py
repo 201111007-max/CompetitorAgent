@@ -12,6 +12,14 @@ from typing import Dict, List, Optional, Any, Generator
 
 from utils.log_config import get_logger
 
+# Langfuse 监控（可选）
+try:
+    from utils.langfuse_adapter import LangfuseClient
+    LANGFUSE_AVAILABLE = True
+except ImportError:
+    LANGFUSE_AVAILABLE = False
+    LangfuseClient = None
+
 logger = get_logger("llm_client", component="utils")
 
 # 从核心配置模块导入 LLMConfig
@@ -64,6 +72,9 @@ class LLMClient:
         Returns:
             API 响应结果
         """
+        # 获取 Langfuse 客户端
+        langfuse_client = LangfuseClient.get_instance() if LANGFUSE_AVAILABLE else None
+        
         url = f"{self.config.base_url}/chat/completions"
         
         payload = {
@@ -75,17 +86,46 @@ class LLMClient:
             "stream": stream if stream is not None else self.config.stream,
         }
         
-        try:
-            response = self.session.post(
-                url,
-                json=payload,
-                timeout=self.config.timeout
+        # 创建 Langfuse Span（如果启用）
+        if langfuse_client and langfuse_client.enabled:
+            from utils.langfuse_adapter import NoOpTrace
+            trace = NoOpTrace()
+            span = trace.span(
+                name="llm_call",
+                input={"message_count": len(messages)},
+                metadata={"model": self.config.model}
             )
-            response.raise_for_status()
-            return response.json()
-        except requests.exceptions.RequestException as e:
-            logger.error(f"LLM 请求失败: {e}")
-            return {"error": str(e)}
+        else:
+            from utils.langfuse_adapter import NoOpSpan
+            span = NoOpSpan()
+        
+        with span:
+            try:
+                response = self.session.post(
+                    url,
+                    json=payload,
+                    timeout=self.config.timeout
+                )
+                response.raise_for_status()
+                result = response.json()
+                
+                # 记录输出和 token 使用量
+                usage = result.get("usage", {})
+                span.update(
+                    output={"content_length": len(str(result.get("choices", [{}])[0].get("message", {}).get("content", "")))},
+                    metadata={
+                        "model": self.config.model,
+                        "prompt_tokens": usage.get("prompt_tokens", 0),
+                        "completion_tokens": usage.get("completion_tokens", 0),
+                        "total_tokens": usage.get("total_tokens", 0)
+                    }
+                )
+                
+                return result
+            except requests.exceptions.RequestException as e:
+                logger.error(f"LLM 请求失败: {e}")
+                span.update(metadata={"error": str(e)})
+                return {"error": str(e)}
     
     def chat_stream(
         self,
