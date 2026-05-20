@@ -34,6 +34,14 @@ from tools.base import ToolResult, ToolStatus
 from utils.trace_context import TraceSpan, get_current_trace
 from utils.log_config import get_logger
 
+# Langfuse 监控（可选）
+try:
+    from utils.langfuse_adapter import LangfuseClient
+    LANGFUSE_AVAILABLE = True
+except ImportError:
+    LANGFUSE_AVAILABLE = False
+    LangfuseClient = None
+
 # 获取带 Trace 支持的 logger
 logger = get_logger("agent_controller", component="core")
 
@@ -240,7 +248,22 @@ class AgentController:
         # 获取当前 Trace 上下文
         trace_ctx = get_current_trace()
         
+        # 获取 Langfuse 客户端（用于可选的追踪增强）
+        langfuse_client = LangfuseClient.get_instance() if LANGFUSE_AVAILABLE else None
+        
         with TraceSpan("agent_solve", parent=trace_ctx) as solve_span:
+            # 记录 Langfuse event（如果启用）
+            if langfuse_client and langfuse_client.enabled and solve_span:
+                try:
+                    langfuse_trace = langfuse_client.trace(
+                        trace_id=solve_span.trace_id,
+                        session_id=session_id,
+                        metadata={"query": query[:100] if query else ""}
+                    )
+                    langfuse_trace.event(name="agent_solve_start", metadata={"query": query[:100] if query else ""})
+                except Exception:
+                    pass
+            
             logger.info_ctx(
                 "开始处理查询",
                 session_id=session_id,
