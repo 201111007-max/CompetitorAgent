@@ -35,6 +35,16 @@ from utils.trace_context import (
     generate_trace_id, get_current_trace_info
 )
 
+# Langfuse 监控（可选）
+try:
+    from utils.langfuse_adapter import LangfuseClient
+    from utils.langfuse_config import LangfuseConfig
+    LANGFUSE_AVAILABLE = True
+except ImportError:
+    LANGFUSE_AVAILABLE = False
+    LangfuseClient = None
+    LangfuseConfig = None
+
 # 初始化日志系统
 logger, memory_handler = setup_logging_with_memory(
     log_level="DEBUG",
@@ -61,6 +71,15 @@ api_client = None  # 全局 API 客户端实例，用于缓存刷新
 
 # 日志目录（可配置，便于测试）
 LOG_DIR = Path(__file__).parent.parent / "logs"
+
+# 初始化 Langfuse 监控（可选）
+project_root = Path(__file__).parent.parent
+if LANGFUSE_AVAILABLE:
+    langfuse_config = LangfuseConfig(config_path=str(project_root / "config" / "langfuse_config.yaml"))
+    langfuse_client = LangfuseClient.get_instance()
+    langfuse_client.init(config=langfuse_config.to_dict())
+else:
+    langfuse_client = None
 
 HERO_PARSE_PROMPT = """你是一个 Dota 2 英雄名称解析专家。请从用户输入中准确提取英雄名称。
 
@@ -503,6 +522,14 @@ def setup_trace_context() -> None:
     g.trace_ctx = trace_ctx
     set_current_trace(trace_ctx)
     
+    # Langfuse 追踪（可选）
+    if langfuse_client and langfuse_client.enabled:
+        g.langfuse_trace = langfuse_client.trace(
+            trace_id=trace_id,
+            session_id=session_id,
+            metadata={"path": request.path, "method": request.method}
+        )
+    
     # 记录请求开始
     app_logger.info_ctx(
         "Request started",
@@ -531,6 +558,11 @@ def cleanup_trace_context(response: Response) -> Response:
                 'duration_ms': duration_ms
             }
         )
+    
+    # 刷新 Langfuse 数据
+    if langfuse_client and hasattr(g, 'langfuse_trace'):
+        langfuse_client.flush()
+    
     return response
 
 
@@ -550,7 +582,8 @@ def index() -> Response:
             "parse": "/api/parse/preview",
             "logs": "/api/logs",
             "trace": "/api/trace/<trace_id>",
-            "memory": "/api/memory/stats"
+            "memory": "/api/memory/stats",
+            "feedback": "/api/feedback"
         }
     })
 
@@ -2006,6 +2039,38 @@ def clear_memory() -> Response:
         agent.clear_memory()
         return jsonify({"success": True})
     return jsonify({"success": False, "error": "Agent not initialized"})
+
+
+# === Langfuse 用户反馈 API ===
+
+@app.route('/api/feedback', methods=['POST'])
+def submit_feedback() -> Response:
+    """提交用户反馈
+    
+    Request JSON:
+        {
+            "trace_id": "trace_xxx",
+            "score": 0.9,
+            "comment": "很有帮助"
+        }
+    
+    Returns:
+        {"status": "ok"}
+    """
+    data = request.json or {}
+    trace_id = data.get('trace_id')
+    score = data.get('score')
+    comment = data.get('comment', '')
+    
+    if langfuse_client and langfuse_client.enabled and trace_id and score is not None:
+        try:
+            trace = langfuse_client.trace(trace_id=trace_id)
+            trace.score(name="user_feedback", value=float(score), comment=comment)
+            langfuse_client.flush()
+        except Exception as e:
+            app_logger.warning(f"记录用户反馈失败: {e}")
+    
+    return jsonify({"status": "ok"})
 
 
 # === 日志 API 接口 ===
