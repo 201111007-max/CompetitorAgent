@@ -155,8 +155,8 @@ class RateLimitConfig:
     # 请求间隔（秒）
     delay_seconds: float = 1.0
     
-    # 超时时间（秒）
-    timeout_seconds: int = 10
+    # 超时时间（秒）- 增加到 120 秒
+    timeout_seconds: int = 120
     
     # 最大重试次数
     max_retries: int = 3

@@ -41,20 +41,34 @@ dmypy.json
 *.swo
 *~
 
-# Logs
+# ==================== Logs ====================
+# 日志文件 - DotaHelperAgent/logs/ 目录
+# 结构: logs/YYYY-MM-DD/part-N/*.log
+DotaHelperAgent/logs/
 *.log
-logs/
 *.json.log
 
-# Cache databases
-*.db
-!*.sqlite3
+# ==================== Cache ====================
+# 缓存数据库文件 - DotaHelperAgent/cache/cache.db
+DotaHelperAgent/cache/*.db
 
-# Runtime data directories
+# API数据缓存文件 - 英雄克制数据等
+# 这些文件可以通过API重新获取，不需要提交到git
+DotaHelperAgent/cache/hero_matchups_*.json
+DotaHelperAgent/cache/heroes_list.json
+
+# 通用数据库文件
+*.db
+*.sqlite
+*.sqlite3
+
+# ==================== Runtime Data ====================
+# 运行时数据目录
 memory_runtime/
 cache_runtime/
 
-# Test memory
+# ==================== Test Data ====================
+# 测试数据目录
 test_memory/
 test_prefix/
 

@@ -74,6 +74,21 @@ export function useChatStream() {
     }
   }
 
+  /**
+   * 处理SSE事件流中的各种事件类型
+   * 
+   * 支持的事件类型：
+   * - start: 会话开始，设置trace_id和session_id
+   * - goal_decomposition*: 目标分解相关事件
+   * - think: Agent思考过程（包含工具选择理由）
+   * - plan: 执行计划（要执行的工具列表）
+   * - action: 执行动作（正在执行的工具）
+   * - observation: 观察结果（工具执行结果）
+   * - answer: 中间答案
+   * - synthesize: 最终综合答案
+   * - complete/done: 流式输出完成
+   * - error: 错误信息
+   */
   const handleEvent = (eventType: string, data: any) => {
     switch (eventType) {
       case 'start':
@@ -82,6 +97,46 @@ export function useChatStream() {
         }
         if (data.session_id) {
           chatStore.setSessionId(data.session_id)
+        }
+        break
+
+      case 'goal_decomposition':
+      case 'goal_decomposition_result':
+      case 'goal_execution':
+      case 'sub_goal_start':
+      case 'sub_goal_complete':
+      case 'merge_results':
+        if (data.status || data.main_goal) {
+          const statusMsg = data.status || `目标: ${data.main_goal}`
+          chatStore.appendToLastMessage(`\n📍 ${statusMsg}\n`)
+        }
+        break
+
+      case 'think':
+        if (data.content) {
+          chatStore.appendToLastMessage(`\n💭 思考: ${data.content}\n`)
+        }
+        break
+
+      case 'plan':
+        if (data.actions) {
+          const tools = data.actions.map((a: any) => a.tool).join(', ')
+          chatStore.appendToLastMessage(`\n📋 计划执行: ${tools}\n`)
+        }
+        break
+
+      case 'action':
+        if (data.tool) {
+          chatStore.appendToLastMessage(`\n🔧 执行工具: ${data.tool}\n`)
+        }
+        break
+
+      case 'observation':
+        if (data.result) {
+          const resultPreview = typeof data.result === 'string' 
+            ? data.result.substring(0, 150) 
+            : JSON.stringify(data.result).substring(0, 150)
+          chatStore.appendToLastMessage(`\n👀 观察结果: ${resultPreview}${resultPreview.length >= 150 ? '...' : ''}\n`)
         }
         break
 
