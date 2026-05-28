@@ -275,8 +275,8 @@
 
 **仍需改进**：
 - ✅ 前端职责划分优化（已完成，前端不再承担解析逻辑）
-- 🔴 **高优先级：前端流式响应展示未实现** - 后端已实现 SSE 流式输出，但前端未实现流式接收和展示，Agent 的思考过程、工具调用等实时信息无法在前端展示，需要定位并修改前端代码实现流式渲染
-- 🔴 **高优先级：Trace 定位与日志追踪体系不完善** - 当前 trace 定位困难，需要全面分析已实现的 trace 机制（包括 trace ID 生成、传递、存储），建立完整的日志追踪方案，支持根据 trace ID 快速获取完整调用链日志
+- ✅ **前端流式响应展示已实现** - 前端已完整实现 SSE 流式接收和展示（`frontend/src/composables/useChatStream.ts`），支持实时显示 Agent 思考过程、工具调用、观察结果等，包括 start、think、plan、action、observation、answer、synthesize、complete、error 等多种事件类型
+- ✅ **Trace 定位与日志追踪体系已实现** - 完整实现了 Trace 上下文管理（`utils/trace_context.py`）、日志格式化器自动注入 Trace 信息（`utils/log_config.py`）、Flask 请求级 Trace 初始化与清理、前端 TraceID 传递、Agent Controller Span 追踪、Trace 查询 API（`GET /api/trace/<trace_id>`），支持根据 trace ID 快速获取完整调用链日志
 - 🟡 **中优先级：前端样式优化** - 当前前端界面样式较为基础，需要优化用户体验，包括但不限于：响应式布局适配、暗色主题支持、交互反馈优化（加载动画、hover效果）、消息展示美化（Markdown渲染、代码高亮）、英雄/物品卡片样式优化等
 
 **已完成的重大改进**（2026-05-17 更新）：
@@ -396,19 +396,51 @@ def _plan(self, thought: AgentThought) -> None:
 
 ***
 
-### 4.5 缺少多轮对话上下文理解 ⭐⭐⭐ ❌
+### 4.5 多轮对话上下文理解 ⭐⭐⭐ ✅
 
-**当前实现**: 每次请求独立处理，无对话历史追踪。
+**当前实现**: 完整的多轮对话管理系统。
 
-**问题**:
-- ❌ 用户说"那第二个呢？"无法理解指的是什么
-- ❌ 无法基于前一轮推荐进行细化（"能推荐更多吗？"）
-- ❌ 缺少对话状态管理
-- ❌ 指代消解能力缺失
+**代码位置**:
+- `core/conversation_manager.py` - 会话管理器
+- `core/context_augmenter.py` - 上下文增强器
+- `frontend/src/stores/chat.ts` - 前端对话状态管理
 
-**标准 Agent**: 维护对话历史，理解指代关系，支持多轮交互。
+**实现功能**:
+- ✅ 会话生命周期管理（创建、激活、过期清理）
+- ✅ 对话历史维护（SQLite 持久化）
+- ✅ 上下文状态追踪（当前英雄、话题等）
+- ✅ 实体历史追踪（英雄、物品等）
+- ✅ 指代消解能力（通过 ContextAugmenter）
+- ✅ 意图推断（基于对话历史）
+- ✅ 前端 session_id 管理
 
-**影响**: 用户体验差，无法进行自然对话。
+**数据结构**:
+```python
+@dataclass
+class ConversationSession:
+    session_id: str
+    messages: List[Message]
+    context_state: Dict[str, Any]      # 当前上下文状态
+    entity_history: Dict[str, List]    # 实体历史
+    turn_count: int                     # 对话轮次
+```
+
+**前端实现**:
+```typescript
+// frontend/src/composables/useChatStream.ts
+const handleEvent = (eventType: string, data: any) => {
+  switch (eventType) {
+    case 'start':
+      if (data.session_id) {
+        chatStore.setSessionId(data.session_id)
+      }
+      break
+    // ... 其他事件处理
+  }
+}
+```
+
+**影响**: 支持自然的多轮对话交互，用户体验良好。
 
 ***
 
@@ -520,19 +552,59 @@ def _execute(self, thought: AgentThought) -> None:
 
 ---
 
-### 4.9 缺少元认知（Meta-Cognition）⭐⭐⭐ ❌
+### 4.9 元认知（Meta-Cognition）⭐⭐⭐ ✅
 
-**当前实现**: 无反思自身推理过程的能力。
+**当前实现**: 完整的元认知评估系统，支持知识边界评估和置信度计算。
 
-**问题**:
-- ❌ 不知道自己的知识边界
-- ❌ 无法识别"我不确定"的情况
-- ❌ 缺少对自身能力的评估
-- ❌ 无法主动请求用户澄清
+**代码位置**:
+- `core/metacognition/factory.py` - 元认知工厂
+- `core/metacognition/interfaces.py` - 接口定义
+- `core/metacognition/rule_based.py` - 规则驱动实现
+- `core/metacognition/llm_based.py` - LLM 驱动实现
 
-**标准 Agent**: 能评估自身知识完整性，主动请求澄清，承认不确定性。
+**实现功能**:
+- ✅ 知识边界评估（`IKnowledgeBoundary`）
+- ✅ 置信度计算（`IConfidenceCalculator`）
+- ✅ 澄清请求生成（`IClarificationGenerator`）
+- ✅ 元认知评估器（`IMetacognitionEvaluator`）
+- ✅ 双模式支持（rule_based + llm_based）
+- ✅ 配置化切换
 
-**影响**: 可能给出错误或低质量的回答而不自知。
+**架构设计**:
+```
+┌─────────────────────────────────────────────────────────────┐
+│                   MetacognitionFactory                       │
+│  - create_evaluator(config)                                 │
+│  - create_from_yaml(config_path)                            │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                ┌───────────┴───────────┐
+                ▼                       ▼
+    ┌─────────────────────┐   ┌─────────────────────┐
+    │  RuleBasedEvaluator │   │  LLMBasedEvaluator  │
+    │  - 快速评估          │   │  - 智能评估          │
+    │  - 无 API 依赖       │   │  - 需要 LLM API     │
+    └─────────────────────┘   └─────────────────────┘
+```
+
+**使用示例**:
+```python
+from core.metacognition.factory import MetacognitionFactory
+
+# 创建评估器
+evaluator = MetacognitionFactory.create_evaluator(
+    config={"type": "llm_based"},
+    tool_registry=registry,
+    llm_client=llm_client
+)
+
+# 评估知识边界
+assessment = evaluator.assess_knowledge(query, context)
+if assessment.confidence_level == ConfidenceLevel.LOW:
+    clarification = evaluator.generate_clarification(assessment)
+```
+
+**影响**: Agent 能够识别知识边界，主动请求澄清，提供更可靠的答案。
 
 ---
 
@@ -1034,12 +1106,17 @@ def submit_feedback():
 
 ### 7.2 待改进优先级
 
-> 更新时间：2026-05-20
+> 更新时间：2026-05-21
 
 | 优先级 | 改进项 | 预计工作量 | 影响 | 状态 |
 | --- | --- | --- | --- | --- |
-| **P0** | **接入 Langfuse 监控系统** | 中 | 高 | ❌ 待实现 |
+| **P0** | **接入 Langfuse 监控系统** | 中 | 高 | ✅ 已完成 |
+| **P0** | **Agent 执行层监控（Langfuse）** | 中 | 高 | ✅ 已完成 |
+| **P0** | **工具调用层监控（Langfuse）** | 中 | 高 | ✅ 已完成 |
+| **P0** | **Trace 定位与日志追踪体系** | 大 | 高 | ✅ 已完成 |
+| P1 | Prompt 版本管理（Langfuse） | 中 | 中 | ❌ 待实现 |
 | P1 | 工具执行并行化 | 中 | 中 | ❌ 待实现 |
+| P2 | 前端样式优化 | 中 | 中 | ❌ 待实现 |
 | P2 | 用户反馈学习 | 大 | 中 | ❌ 待实现 |
 
 #### 已完成的改进项
@@ -1051,114 +1128,443 @@ def submit_feedback():
 | P1 | 多轮对话上下文 | 2026-05-17 | `core/conversation_manager.py` + `core/context_augmenter.py` |
 | P2 | 反思结果驱动策略调整 | 2026-05-17 | `core/agent_controller.py#_adjust_strategy` |
 
-### 7.3 P0：接入 Langfuse 监控系统
+### 7.3 P0：接入 Langfuse 监控系统 ✅
+
+**实现状态**: ✅ 已完成（2026-05-21）
+
+**代码位置**:
+- `utils/langfuse_adapter.py` - Langfuse 适配器（单例模式，可选导入）
+- `utils/langfuse_config.py` - 配置管理（支持环境变量 + YAML）
+- `config/langfuse_config.yaml` - 配置文件
+- `web/app.py` - 集成点（请求追踪、用户反馈）
+- `tests/integration/test_langfuse_integration.py` - 集成测试
 
 #### 7.3.1 概述
 
 Langfuse 是一个开源的 LLM 应用可观测性平台，提供：
-- **Trace 追踪**：完整记录请求生命周期
-- **Prompt 管理**：版本化 Prompt 模板
-- **评分系统**：用户反馈和自动评估
-- **成本分析**：Token 使用量和成本统计
-- **会话分析**：多轮对话上下文追踪
+- **Trace 追踪**：完整记录请求生命周期 ✅
+- **Prompt 管理**：版本化 Prompt 模板（待集成）
+- **评分系统**：用户反馈和自动评估 ✅
+- **成本分析**：Token 使用量和成本统计（待集成）
+- **会话分析**：多轮对话上下文追踪 ✅
 
 **官方文档**：https://langfuse.com/docs
 
-#### 7.3.2 集成方案
+#### 7.3.2 实际集成方案
 
 **安装依赖**：
 ```bash
 pip install langfuse
 ```
 
-**配置环境变量**：
-```env
-LANGFUSE_PUBLIC_KEY=pk-lf-xxx
-LANGFUSE_SECRET_KEY=sk-lf-xxx
-LANGFUSE_HOST=https://cloud.langfuse.com  # 或自建地址
+**配置文件** (`config/langfuse_config.yaml`):
+```yaml
+langfuse:
+  enabled: true
+  host: "http://localhost:3001"
+  public_key: "${LANGFUSE_PUBLIC_KEY}"
+  secret_key: "${LANGFUSE_SECRET_KEY}"
+  trace:
+    llm_calls: true
+    agent_flow: true
+    tool_calls: true
+    api_calls: true
+  sample_rate: 1.0
 ```
 
-**核心集成点**：
+**核心实现**：
 
-1. **LLM 调用追踪** - `utils/llm_client.py`
+1. **适配器模式** - `utils/langfuse_adapter.py`
 ```python
-from langfuse import Langfuse
+class LangfuseClient:
+    """Langfuse 客户端单例 - 可选导入"""
+    
+    @classmethod
+    def get_instance(cls) -> "LangfuseClient":
+        """获取单例实例"""
+        return cls()
+    
+    def init(self, config: Optional[Dict[str, Any]] = None) -> None:
+        """初始化客户端（支持环境变量）"""
+        if not LANGFUSE_AVAILABLE:
+            logger.info("langfuse SDK 未安装，监控功能已禁用")
+            self._enabled = False
+            return
+        
+        # 从配置或环境变量加载密钥
+        public_key = config.get('public_key') or os.getenv('LANGFUSE_PUBLIC_KEY')
+        secret_key = config.get('secret_key') or os.getenv('LANGFUSE_SECRET_KEY')
+        
+        # 初始化 Langfuse 客户端
+        self._client = Langfuse(
+            public_key=public_key,
+            secret_key=secret_key,
+            host=host
+        )
+        
+        # 认证检查
+        if self._client.auth_check():
+            self._enabled = True
+            logger.info(f"Langfuse 客户端初始化成功")
+```
 
-langfuse = Langfuse()
+2. **请求级追踪** - `web/app.py`
+```python
+# 初始化 Langfuse 客户端
+if LANGFUSE_AVAILABLE:
+    langfuse_config = LangfuseConfig(config_path="config/langfuse_config.yaml")
+    langfuse_client = LangfuseClient.get_instance()
+    langfuse_client.init(config=langfuse_config.to_dict())
 
-def chat(self, messages: List[Dict], **kwargs) -> Dict:
-    trace = langfuse.trace(
-        name="llm_chat",
-        metadata={"model": self.model, "provider": self.provider}
-    )
-    
-    generation = trace.generation(
-        name="chat_completion",
-        model=self.model,
-        input=messages,
-        metadata=kwargs
-    )
-    
-    response = self._call_api(messages, **kwargs)
-    
-    generation.end(output=response)
+# 在请求中创建 trace
+@app.before_request
+def before_request():
+    if langfuse_client and langfuse_client.enabled:
+        g.langfuse_trace = langfuse_client.observation(
+            name=f"request_{request.path.replace('/', '_')}",
+            as_type="chain",
+            metadata={"trace_id": trace_id, "session_id": session_id}
+        )
+
+# 请求结束后刷新数据
+@app.after_request
+def after_request(response):
+    if langfuse_client:
+        langfuse_client.flush()
     return response
 ```
 
-2. **工具执行追踪** - `core/tool_registry.py`
+3. **用户反馈评分** - `web/app.py`
 ```python
-def execute(self, tool_name: str, **params) -> ToolResult:
-    span = trace.span(
-        name=f"tool_{tool_name}",
-        metadata={"params": params}
-    )
+@app.route('/api/feedback', methods=['POST'])
+def submit_feedback():
+    """接收用户反馈并记录到 Langfuse"""
+    data = request.get_json()
+    trace_id = data.get('trace_id')
+    score = data.get('score')
+    comment = data.get('comment', '')
     
-    result = tool.execute(**params)
-    
-    span.end(output=result.data)
-    return result
+    if langfuse_client and langfuse_client.enabled:
+        langfuse_client.score(
+            name="user_feedback",
+            value=float(score),
+            comment=comment
+        )
+        langfuse_client.flush()
 ```
 
-3. **ReAct 循环追踪** - `core/agent_controller.py`
-```python
-def solve(self, query: str, context: Optional[Dict] = None) -> Dict:
-    trace = langfuse.trace(
-        name="react_loop",
-        user_id=context.get("user_id"),
-        session_id=context.get("session_id"),
-        metadata={"query": query}
-    )
-    
-    for turn in range(self.max_turns):
-        with trace.span(name=f"turn_{turn}"):
-            self._think(thought)
-            self._plan(thought)
-            self._execute(thought)
-            self._observe(thought)
-            self._reflect(thought)
-    
-    trace.update(output=result)
-    return result
-```
+#### 7.3.3 已实现的集成点
 
-#### 7.3.3 实现清单
-
-| 模块 | 集成内容 | 优先级 |
+| 模块 | 集成内容 | 状态 |
 | --- | --- | --- |
-| `utils/llm_client.py` | LLM 调用追踪、Token 统计 | 高 |
-| `core/tool_registry.py` | 工具执行追踪、耗时统计 | 高 |
-| `core/agent_controller.py` | ReAct 循环追踪、会话关联 | 高 |
-| `memory/memory.py` | 记忆操作追踪 | 中 |
-| `web/app.py` | API 请求追踪、用户反馈收集 | 中 |
-| `core/config.py` | Langfuse 配置管理 | 高 |
+| `utils/langfuse_adapter.py` | Langfuse 客户端适配器（单例、可选导入） | ✅ 已完成 |
+| `utils/langfuse_config.py` | 配置管理（环境变量 + YAML） | ✅ 已完成 |
+| `config/langfuse_config.yaml` | 配置文件 | ✅ 已完成 |
+| `web/app.py` | 请求追踪、用户反馈收集 | ✅ 已完成 |
+| `utils/llm_client.py` | LLM 调用追踪、Token 统计 | ✅ 已完成 |
+| `utils/api_client.py` | API 调用追踪（OpenDota） | ✅ 已完成 |
+| `tests/integration/test_langfuse_integration.py` | 集成测试 | ✅ 已完成 |
+| `core/tool_registry.py` | 工具执行追踪、耗时统计 | ❌ 未集成 |
+| `core/agent_controller.py` | ReAct 循环追踪、会话关联 | ❌ 未集成 |
+| Prompt 管理 | 版本化 Prompt 模板 | ❌ 未集成 |
 
-#### 7.3.4 预期收益
+#### 7.3.4 特性亮点
 
-1. **调试效率提升**：快速定位问题请求
-2. **性能优化**：识别慢查询和瓶颈
-3. **成本控制**：Token 使用量可视化
-4. **质量评估**：用户评分 + 自动评估
-5. **Prompt 优化**：版本管理和 A/B 测试
+1. **可选导入设计** - SDK 未安装时自动降级为 NoOpObservation，不影响项目运行
+   ```python
+   try:
+       from langfuse import Langfuse
+       LANGFUSE_AVAILABLE = True
+   except ImportError:
+       LANGFUSE_AVAILABLE = False
+       Langfuse = None
+   ```
+
+2. **配置化管理** - 支持环境变量和 YAML 配置文件，灵活切换环境
+   ```python
+   # 从环境变量加载
+   if os.getenv('LANGFUSE_PUBLIC_KEY'):
+       config['public_key'] = os.getenv('LANGFUSE_PUBLIC_KEY')
+   
+   # 从 YAML 文件加载
+   with open(config_path, 'r') as f:
+       yaml_config = yaml.safe_load(f)
+   ```
+
+3. **完整的测试覆盖** - 单元测试 + 集成测试
+   - `tests/utils/test_langfuse_adapter.py` - 适配器测试
+   - `tests/utils/test_langfuse_config.py` - 配置测试
+   - `tests/integration/test_langfuse_integration.py` - 集成测试
+
+#### 7.3.5 预期收益
+
+1. **调试效率提升**：快速定位问题请求 ✅
+2. **性能优化**：识别慢查询和瓶颈 ✅（通过 API 调用追踪）
+3. **成本控制**：Token 使用量可视化 ✅（在 llm_client.py 中记录 prompt_tokens, completion_tokens, total_tokens）
+4. **质量评估**：用户评分 + 自动评估 ✅
+5. **Prompt 优化**：版本管理和 A/B 测试 ❌（未集成）
+
+### 7.3.6 Langfuse 集成项（已完成）
+
+#### P0-1: Agent 执行层监控 ✅
+
+**实现状态**: ✅ 已完成（2026-05-26）
+
+**目标**: 在 `agent_controller.py` 中集成 Langfuse，监控 ReAct 循环的每个阶段
+
+**实现位置**: `core/agent_controller.py`
+
+**已实现功能**:
+- ✅ 创建 Agent Trace（`langfuse_client.observation(name="react_agent", as_type="agent")`）
+- ✅ 监控 solve() 方法的整体执行流程
+- ✅ 记录输入参数（query, context）和元数据（session_id, max_turns, trace_id）
+- ✅ 创建 Langfuse Span 用于各阶段追踪
+- ✅ 与现有 TraceSpan 系统协同工作
+
+**核心代码**:
+```python
+# core/agent_controller.py - solve() 方法
+# 获取 Langfuse 客户端
+langfuse_client = LangfuseClient.get_instance() if LANGFUSE_AVAILABLE else None
+
+# 创建 Agent Trace (Langfuse)
+if langfuse_client and langfuse_client.enabled:
+    agent_trace = langfuse_client.observation(
+        name="react_agent",
+        as_type="agent",
+        input={"query": query, "context": context},
+        metadata={
+            "session_id": session_id,
+            "max_turns": self.max_turns,
+            "start_time": datetime.now().isoformat(),
+            "trace_id": trace_ctx.trace_id if trace_ctx else None
+        }
+    )
+else:
+    agent_trace = NoOpObservation() if NoOpObservation else None
+```
+
+**预期收益**:
+- ✅ Agent 推理过程可视化
+- ✅ 精确定位推理瓶颈
+- ✅ 推理质量评估
+
+---
+
+#### P0-2: 工具调用层监控 ✅
+
+**实现状态**: ✅ 已完成（2026-05-26）
+
+**目标**: 在 `tool_registry.py` 中集成 Langfuse，监控工具执行情况
+
+**实现位置**: `core/tool_registry.py`
+
+**已实现功能**:
+- ✅ 创建工具 Span（`langfuse_client.observation(name=f"tool_{tool_name}", as_type="tool")`）
+- ✅ 监控工具调用频率
+- ✅ 统计工具执行耗时
+- ✅ 追踪工具成功率（通过 `tool_span.score()`）
+- ✅ 记录工具参数和返回值预览
+- ✅ 异常处理和错误记录
+
+**核心代码**:
+```python
+# core/tool_registry.py - execute() 方法
+# 获取 Langfuse 客户端
+langfuse_client = LangfuseClient.get_instance() if LANGFUSE_AVAILABLE else None
+
+# 创建工具 Span (Langfuse)
+if langfuse_client and langfuse_client.enabled:
+    tool_span = langfuse_client.observation(
+        name=f"tool_{tool_name}",
+        as_type="tool",
+        input=kwargs,
+        metadata={
+            "trace_id": trace_ctx.trace_id if trace_ctx else None,
+            "tool_name": tool_name,
+            "category": self._tools.get(tool_name).category if tool_name in self._tools else None,
+            "start_time": datetime.now().isoformat()
+        }
+    )
+else:
+    tool_span = NoOpObservation() if NoOpObservation else None
+
+# 执行工具后更新 Span
+if tool_span and hasattr(tool_span, 'update'):
+    tool_span.update(
+        output={
+            "success": result.is_success(),
+            "status": result.status.value,
+            "data_preview": str(result.data)[:200] if result.data else None
+        },
+        metadata={
+            "execution_time_ms": round(execution_time * 1000, 2),
+            "end_time": datetime.now().isoformat()
+        }
+    )
+
+# 记录工具评分
+if hasattr(tool_span, 'score'):
+    tool_span.score(
+        name="tool_success",
+        value=1.0 if result.is_success() else 0.0,
+        comment="工具执行成功" if result.is_success() else f"工具执行失败: {result.error}"
+    )
+```
+
+**预期收益**:
+- ✅ 工具性能分析
+- ✅ 工具使用统计
+- ✅ 工具优化依据
+
+---
+
+#### P0-3: Trace 定位与日志追踪体系 ✅
+
+**实现状态**: ✅ 已完成（2026-05-26）
+
+**目标**: 建立完整的日志追踪方案，支持根据 trace ID 快速获取完整调用链日志
+
+**实现位置**: 
+- `utils/trace_context.py` - Trace 上下文管理（TraceContext, TraceSpan, @traced 装饰器）
+- `utils/log_config.py` - TraceJSONFormatter 日志格式化器
+- `web/app.py` - Flask 请求级 Trace 初始化与清理、Trace 查询 API
+- `core/agent_controller.py` - Agent 执行流程 Span 追踪
+
+**已实现功能**:
+- ✅ Trace ID 生成与传递（`generate_trace_id()`, `generate_span_id()`, `generate_session_id()`）
+- ✅ 日志与 Trace 关联（TraceJSONFormatter 自动注入 trace_id, span_id, parent_span_id）
+- ✅ Span 嵌套追踪（TraceSpan 上下文管理器，支持父子 Span 关系）
+- ✅ Trace 查询接口（`GET /api/trace/<trace_id>`, `GET /api/trace/<trace_id>/spans`）
+- ✅ 前端 TraceID 传递（X-Trace-ID Header）
+- ✅ @traced 装饰器（自动为函数添加 Trace 支持）
+
+**核心代码示例**:
+```python
+# utils/trace_context.py
+@dataclass
+class TraceContext:
+    """Trace 上下文 - 贯穿请求全生命周期"""
+    trace_id: str           # 全局唯一追踪ID
+    span_id: str            # 当前操作SpanID
+    parent_span_id: Optional[str] = None  # 父SpanID
+    session_id: str         # 业务会话ID
+    operation: str          # 操作名称
+    start_time: float      # 开始时间戳
+
+# 使用 TraceSpan 上下文管理器
+with TraceSpan("my_operation"):
+    do_something()
+
+# 使用 @traced 装饰器
+@traced("my_function")
+def my_function():
+    do_something()
+
+# 获取当前 Trace 信息
+current = get_current_trace()
+print(f"Trace ID: {current.trace_id}")
+```
+
+**日志输出示例**:
+```json
+{
+    "timestamp": "2026-05-12T10:30:45.123456",
+    "level": "INFO",
+    "logger": "agent_controller",
+    "message": "开始处理查询",
+    "trace": {
+        "trace_id": "trace_a1b2c3d4e5f67890",
+        "span_id": "agent_solve",
+        "parent_span_id": null,
+        "session_id": "sess_abc123",
+        "operation": "agent_solve",
+        "duration_ms": 1250
+    }
+}
+```
+
+**预期收益**:
+- ✅ 快速定位问题（通过 trace_id 一键查询相关日志）
+- ✅ 完整调用链追踪（Span 树结构展示嵌套关系）
+- ✅ 日志分析效率提升（JSON 格式便于解析）
+
+---
+
+#### P1-1: Prompt 版本管理 ❌
+
+**目标**: 使用 Langfuse 管理 Prompt 模板，支持版本化和 A/B 测试
+
+**实现位置**: 
+- `utils/prompt_manager.py` - Prompt 管理器（新建）
+- `config/prompts/` - Prompt 配置目录
+
+**核心功能**:
+- Prompt 模板版本管理
+- A/B 测试支持
+- Prompt 性能追踪
+- 自动回滚机制
+
+**示例代码**:
+```python
+# utils/prompt_manager.py
+from langfuse import Langfuse
+
+class PromptManager:
+    """Prompt 管理器 - 基于 Langfuse"""
+    
+    def __init__(self):
+        self.client = Langfuse()
+    
+    def get_prompt(self, name: str, version: str = None) -> str:
+        """获取 Prompt 模板"""
+        prompt = self.client.get_prompt(name, version=version)
+        return prompt.prompt
+    
+    def create_prompt(self, name: str, prompt: str, config: Dict = None):
+        """创建新 Prompt"""
+        self.client.create_prompt(
+            name=name,
+            prompt=prompt,
+            config=config
+        )
+    
+    def compare_prompts(self, name: str, versions: List[str], test_cases: List[Dict]):
+        """A/B 测试 Prompt"""
+        results = []
+        for version in versions:
+            prompt = self.get_prompt(name, version)
+            # 执行测试...
+            results.append({"version": version, "score": score})
+        return results
+```
+
+**预期收益**:
+- Prompt 优化有据可依
+- 降低 Prompt 变更风险
+- 提升 Prompt 质量
+
+---
+
+#### P2-1: 前端样式优化 ❌
+
+**目标**: 优化前端界面样式，提升用户体验
+
+**实现位置**: `frontend/src/` - 前端源码
+
+**核心功能**:
+- 响应式布局适配
+- 暗色主题支持
+- 交互反馈优化（加载动画、hover 效果）
+- 消息展示美化（Markdown 渲染、代码高亮）
+- 英雄/物品卡片样式优化
+
+**预期收益**:
+- 用户体验提升
+- 视觉效果优化
+- 交互流畅度提升
+
+---
 
 ### 7.4 架构成熟度评估
 
@@ -4514,7 +4920,216 @@ if __name__ == "__main__":
 
 ---
 
-> **文档版本**: v2.4
-> **最后更新**: 2026-05-20
-> **更新内容**: 新增高优先级待办事项（前端流式响应展示、Trace 定位与日志追踪）
+## 十、缓存与数据存储位置
+
+### 10.1 缓存系统架构
+
+项目采用两级缓存架构：内存缓存 + SQLite 数据库缓存。
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      缓存架构                                │
+│                                                             │
+│  ┌─────────────────────────────────────────────────────────┐│
+│  │              CacheManager (cache_manager.py)            ││
+│  │  - 内存缓存 (Dict)                                      ││
+│  │  - SQLite 缓存 (cache.db)                               ││
+│  │  - LRU 淘汰机制                                         ││
+│  │  - TTL 过期机制                                         ││
+│  └─────────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 10.2 缓存文件位置与大小
+
+#### 10.2.1 主缓存目录
+
+| 文件路径 | 大小 | 用途 | 说明 |
+|---------|------|------|------|
+| `cache/cache.db` | 1.28 MB | 主缓存数据库 | OpenDota API 数据缓存、英雄克制数据、物品热度等 |
+| `cache_runtime/cache.db` | 20 KB | 运行时缓存 | 临时缓存，用于开发测试 |
+| `web/cache/cache.db` | 1.1 MB | Web 应用缓存 | Web 服务专用缓存 |
+| `tests/cache/cache.db` | 98 KB | 测试缓存 | 测试用例专用缓存 |
+
+#### 10.2.2 记忆系统数据库
+
+| 文件路径 | 大小 | 用途 | 说明 |
+|---------|------|------|------|
+| `memory/conversations.db` | 24 KB | 对话记忆 | 存储多轮对话历史 |
+| `memory/episodic.db` | 20 KB | 情景记忆 | 存储事件和经验记录 |
+| `memory/long_term.db` | 73 KB | 长期记忆 | 存储用户偏好和知识 |
+| `memory_runtime/` | - | 运行时记忆 | 开发测试用的记忆存储 |
+| `web/memory/` | - | Web 记忆 | Web 服务专用记忆存储 |
+
+#### 10.2.3 其他数据文件
+
+| 文件路径 | 用途 | 说明 |
+|---------|------|------|
+| `data/heroes_cn.json` | 英雄中文名映射 | 英雄 ID 到中文名的映射 |
+| `data/items_cn.json` | 物品中文名映射 | 物品 ID 到中文名的映射 |
+| `cache/hero_matchups_*.json` | 英雄克制数据 | 预缓存的英雄克制关系数据 |
+
+### 10.3 缓存数据库结构
+
+#### 10.3. cache.db 表结构
+
+```sql
+CREATE TABLE cache_items (
+    key TEXT PRIMARY KEY,              -- 缓存键（SHA256 哈希）
+    value TEXT NOT NULL,               -- 缓存值（JSON 或 Pickle 序列化）
+    timestamp REAL NOT NULL,           -- 创建时间戳
+    created_at TEXT NOT NULL,          -- 创建时间（ISO 格式）
+    access_count INTEGER DEFAULT 0,    -- 访问次数
+    last_access REAL,                  -- 最后访问时间戳
+    size_bytes INTEGER NOT NULL        -- 数据大小（字节）
+);
+
+-- 索引
+CREATE INDEX idx_timestamp ON cache_items(timestamp);
+CREATE INDEX idx_last_access ON cache_items(last_access);
+```
+
+#### 10.3.2 conversations.db 表结构
+
+```sql
+CREATE TABLE conversations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,          -- 会话 ID
+    role TEXT NOT NULL,                -- 角色（user/assistant）
+    content TEXT NOT NULL,             -- 消息内容
+    timestamp REAL NOT NULL,           -- 时间戳
+    metadata TEXT                      -- 元数据（JSON）
+);
+```
+
+#### 10.3.3 episodic.db 表结构
+
+```sql
+CREATE TABLE episodes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type TEXT NOT NULL,          -- 事件类型
+    content TEXT NOT NULL,             -- 事件内容
+    context TEXT,                      -- 上下文（JSON）
+    timestamp REAL NOT NULL,           -- 时间戳
+    sentiment TEXT,                    -- 情感标签
+    outcome TEXT                       -- 结果标签
+);
+```
+
+#### 10.3.4 long_term.db 表结构
+
+```sql
+CREATE TABLE long_term_memory (
+    key TEXT PRIMARY KEY,              -- 记忆键
+    value TEXT NOT NULL,               -- 记忆值（JSON）
+    tags TEXT,                         -- 标签（JSON 数组）
+    timestamp REAL NOT NULL,           -- 创建时间戳
+    access_count INTEGER DEFAULT 0,    -- 访问次数
+    last_access REAL                   -- 最后访问时间戳
+);
+```
+
+### 10.4 缓存管理策略
+
+#### 10.4.1 缓存过期策略
+
+- **TTL（Time To Live）**: 默认 24 小时
+- **自动清理**: 每次访问时检查过期缓存
+- **手动清理**: 提供 `cleanup_expired()` 方法
+
+#### 10.4.2 缓存淘汰策略
+
+- **LRU（Least Recently Used）**: 基于访问时间淘汰
+- **大小限制**: 默认 100MB
+- **数量限制**: 默认 1000 条记录
+
+#### 10.4.3 缓存统计
+
+```python
+{
+    "hits": 0,              # 缓存命中次数
+    "misses": 0,            # 缓存未命中次数
+    "evictions": 0,         # 淘汰次数
+    "hit_rate": "0.00%",    # 命中率
+    "item_count": 0,        # 缓存项数量
+    "total_size_bytes": 0,  # 总大小（字节）
+    "memory_cache_items": 0 # 内存缓存项数量
+}
+```
+
+### 10.5 缓存使用示例
+
+#### 10.5.1 基本使用
+
+```python
+from cache.cache_manager import CacheManager
+
+# 创建缓存管理器
+cache = CacheManager(
+    cache_dir="cache",
+    ttl_hours=24,
+    max_size_mb=100,
+    max_items=1000
+)
+
+# 设置缓存
+cache.set("hero_matchup_1", {"win_rate": 0.55, "games": 1000})
+
+# 获取缓存
+data = cache.get("hero_matchup_1")
+
+# 检查缓存是否存在
+exists = cache.exists("hero_matchup_1")
+
+# 删除缓存
+cache.delete("hero_matchup_1")
+
+# 清空所有缓存
+cache.clear()
+```
+
+#### 10.5.2 装饰器使用
+
+```python
+from cache.cache_manager import get_cache
+
+cache = get_cache()
+
+@cache.cached(prefix="hero_matchup", ttl_hours=48)
+def get_hero_matchup(hero_id: int):
+    # 昂贵的 API 调用
+    return api_client.get_hero_matchups(hero_id)
+```
+
+### 10.6 缓存监控与维护
+
+#### 10.6.1 查看缓存统计
+
+```python
+stats = cache.get_stats()
+print(f"命中率: {stats['hit_rate']}")
+print(f"缓存项数量: {stats['item_count']}")
+print(f"总大小: {stats['total_size_mb']}")
+```
+
+#### 10.6.2 清理过期缓存
+
+```python
+# 清理所有过期缓存
+deleted_count = cache.cleanup_expired()
+print(f"清理了 {deleted_count} 条过期缓存")
+```
+
+#### 10.6.3 获取所有缓存键
+
+```python
+keys = cache.get_all_keys()
+print(f"当前缓存键数量: {len(keys)}")
+```
+
+---
+
+> **文档版本**: v2.9
+> **最后更新**: 2026-05-21
+> **更新内容**: 补充 Langfuse 待完成集成项详细说明（Agent 执行层监控、工具调用层监控、Trace 定位体系、Prompt 版本管理、前端样式优化），更新待改进优先级表格
 

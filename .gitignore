@@ -57,6 +57,9 @@ DotaHelperAgent/cache/*.db
 DotaHelperAgent/cache/hero_matchups_*.json
 DotaHelperAgent/cache/heroes_list.json
 
+# Matchup 数据目录 - 英雄对局数据本地存储
+DotaHelperAgent/data/matchups/
+
 # 通用数据库文件
 *.db
 *.sqlite

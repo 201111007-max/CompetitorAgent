@@ -12,28 +12,56 @@ try:
     from ..core.config import MatchupConfig
     from ..strategies.score_strategies import IScoreStrategy, WinRateStrategy
     from ..utils.localization import DotaLocalizer
+    from ..managers.matchup_data_manager import MatchupDataManager
 except ImportError:
     from utils.api_client import OpenDotaClient
     from core.config import MatchupConfig
     from strategies.score_strategies import IScoreStrategy, WinRateStrategy
     from utils.localization import DotaLocalizer
+    from managers.matchup_data_manager import MatchupDataManager
 
 
 class HeroAnalyzer:
-    """英雄克制关系分析器"""
+    """英雄克制关系分析器
     
-    def __init__(self, client: OpenDotaClient, config: Optional[MatchupConfig] = None):
+    支持两种数据源：
+    1. MatchupDataManager（推荐）：多数据源优先级访问
+    2. OpenDotaClient（兼容）：直接调用 API
+    """
+    
+    def __init__(
+        self,
+        client: OpenDotaClient,
+        config: Optional[MatchupConfig] = None,
+        matchup_manager: Optional[MatchupDataManager] = None
+    ):
         """初始化分析器
         
         Args:
             client: OpenDota API 客户端
             config: 配置（可选，使用默认配置）
+            matchup_manager: MatchupDataManager 实例（可选，推荐使用）
         """
         self.client = client
         self.config = config or MatchupConfig()
+        self.matchup_manager = matchup_manager
         self._strategies: List[IScoreStrategy] = [WinRateStrategy()]
         self._llm_analyzer = None
         self._localizer = DotaLocalizer()
+        
+        if self.matchup_manager:
+            logger.info("HeroAnalyzer 使用 MatchupDataManager 作为数据源")
+        else:
+            logger.info("HeroAnalyzer 使用 OpenDotaClient 作为数据源")
+    
+    def set_matchup_manager(self, matchup_manager: MatchupDataManager) -> None:
+        """设置 MatchupDataManager
+        
+        Args:
+            matchup_manager: MatchupDataManager 实例
+        """
+        self.matchup_manager = matchup_manager
+        logger.info("已设置 MatchupDataManager")
     
     def set_llm_analyzer(self, llm_analyzer) -> None:
         """设置 LLM 分析器
@@ -51,6 +79,24 @@ class HeroAnalyzer:
         """
         self._strategies.append(strategy)
     
+    def _get_matchup_data(self, hero_id: int) -> Optional[List[Dict]]:
+        """获取英雄 matchup 数据
+        
+        优先使用 MatchupDataManager，如果没有则使用 api_client
+        
+        Args:
+            hero_id: 英雄 ID
+            
+        Returns:
+            matchup 数据列表
+        """
+        if self.matchup_manager:
+            data = self.matchup_manager.get_matchup(hero_id)
+            if data:
+                return data
+        
+        return self.client.get_hero_matchups(hero_id)
+    
     def _analyze_single_matchup(
         self,
         hero_id: int,
@@ -65,7 +111,7 @@ class HeroAnalyzer:
         Returns:
             (score, reasons): 得分和理由列表
         """
-        matchup_data = self.client.get_hero_matchups(hero_id)
+        matchup_data = self._get_matchup_data(hero_id)
         if not matchup_data:
             return 0.0, []
         

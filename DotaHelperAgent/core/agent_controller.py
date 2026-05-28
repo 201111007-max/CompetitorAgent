@@ -12,6 +12,7 @@ import sys
 import logging
 import traceback
 from pathlib import Path
+from datetime import datetime
 
 # 确保可以导入项目模块
 project_root = Path(__file__).parent.parent
@@ -36,11 +37,12 @@ from utils.log_config import get_logger
 
 # Langfuse 监控（可选）
 try:
-    from utils.langfuse_adapter import LangfuseClient
+    from utils.langfuse_adapter import LangfuseClient, NoOpObservation
     LANGFUSE_AVAILABLE = True
 except ImportError:
     LANGFUSE_AVAILABLE = False
     LangfuseClient = None
+    NoOpObservation = None
 
 # 获取带 Trace 支持的 logger
 logger = get_logger("agent_controller", component="core")
@@ -235,7 +237,7 @@ class AgentController:
         context: Optional[Dict[str, Any]] = None,
         session_id: Optional[str] = None
     ) -> Dict[str, Any]:
-        """执行完整的 ReAct 循环解决问题（带 Trace 支持）
+        """执行完整的 ReAct 循环解决问题（带 Trace 和 Langfuse 支持）
 
         Args:
             query: 用户查询
@@ -247,14 +249,40 @@ class AgentController:
         """
         trace_ctx = get_current_trace()
         
+        # 获取 Langfuse 客户端
+        langfuse_client = LangfuseClient.get_instance() if LANGFUSE_AVAILABLE else None
+        
+        # 创建 Agent Trace (Langfuse)
+        if langfuse_client and langfuse_client.enabled:
+            agent_trace = langfuse_client.observation(
+                name="react_agent",
+                as_type="agent",
+                input={"query": query, "context": context},
+                metadata={
+                    "session_id": session_id,
+                    "max_turns": self.max_turns,
+                    "start_time": datetime.now().isoformat(),
+                    "trace_id": trace_ctx.trace_id if trace_ctx else None
+                }
+            )
+        else:
+            agent_trace = NoOpObservation() if NoOpObservation else None
+        
         with TraceSpan("agent_solve", parent=trace_ctx) as solve_span:
+            # 同时使用 Langfuse Span（如果可用）
+            if agent_trace and hasattr(agent_trace, 'span'):
+                langfuse_solve_span = agent_trace.span(name="agent_solve_phase")
+            else:
+                langfuse_solve_span = NoOpObservation() if NoOpObservation else None
+            
             logger.info_ctx(
                 "开始处理查询",
                 session_id=session_id,
                 extra_data={
                     "query": query,
                     "context": context,
-                    "trace_id": solve_span.trace_id if solve_span else 'N/A'
+                    "trace_id": solve_span.trace_id if solve_span else 'N/A',
+                    "langfuse_enabled": langfuse_client.enabled if langfuse_client else False
                 }
             )
             
@@ -705,10 +733,139 @@ class AgentController:
                         }
                     )
 
-        # 如果没有工具执行成功，标记为失败
-        if not thought.observations:
-            thought.add_reasoning("所有工具执行失败")
-            logger.warning_ctx("所有工具执行失败，无观察结果", session_id=session_id)
+        # 检查是否有有效的观察结果（非空数据）
+        has_valid_data = False
+        for obs in thought.observations:
+            if isinstance(obs, dict) and len(obs) > 0:
+                has_valid_data = True
+                break
+            elif isinstance(obs, list) and len(obs) > 0:
+                has_valid_data = True
+                break
+            elif obs is not None and obs != "":
+                has_valid_data = True
+                break
+        
+        if not has_valid_data:
+            thought.add_reasoning("工具返回空数据，使用 LLM 直接回答作为 fallback")
+            logger.warning_ctx("工具返回空数据，启用 LLM fallback", session_id=session_id)
+            
+            try:
+                fallback_response = self._llm_fallback_answer(thought)
+                if fallback_response:
+                    thought.add_observation({"llm_fallback_answer": fallback_response})
+                    thought.add_reasoning("LLM fallback 回答成功")
+                    logger.info_ctx("LLM fallback 回答成功", session_id=session_id)
+            except Exception as e:
+                logger.error_ctx(f"LLM fallback 失败: {e}", session_id=session_id)
+
+    def _llm_fallback_answer(self, thought: AgentThought) -> Optional[str]:
+        """LLM fallback 回答
+        
+        当工具执行失败时，直接使用 LLM 的知识回答问题
+        
+        Args:
+            thought: Agent 思考状态
+            
+        Returns:
+            LLM 回答内容
+        """
+        query = thought.query or thought.context.get('query', '')
+        session_id = thought.context.get('session_id')
+        
+        fallback_prompt = f"""你是一个 Dota 2 游戏专家助手。由于数据 API 暂时不可用，请直接根据你的游戏知识回答用户问题。
+
+用户问题：{query}
+
+请提供专业、详细的回答，包括：
+1. 直接回答用户的核心问题
+2. 给出合理的理由和分析
+3. 如果涉及英雄推荐，说明推荐理由和战术思路
+
+注意：这是基于游戏知识的回答，不是基于实时数据的分析。"""
+
+        try:
+            response = self.llm.chat(
+                messages=[{"role": "user", "content": fallback_prompt}],
+                temperature=0.7,
+                max_tokens=1024
+            )
+            
+            if "error" in response:
+                logger.error_ctx(f"LLM fallback 调用失败: {response['error']}", session_id=session_id)
+                return None
+            
+            content = response['choices'][0]['message']['content']
+            return content
+            
+        except Exception as e:
+            logger.error_ctx(f"LLM fallback 异常: {e}", session_id=session_id)
+            return None
+    
+    def _llm_fallback_with_search(self, thought: AgentThought) -> Optional[str]:
+        """LLM Fallback + 搜索增强
+        
+        当数据不可用时，先尝试搜索获取最新信息，再使用 LLM 回答
+        
+        Args:
+            thought: Agent 思考状态
+            
+        Returns:
+            LLM 回答内容
+        """
+        query = thought.query or thought.context.get('query', '')
+        session_id = thought.context.get('session_id')
+        
+        search_context = ""
+        
+        try:
+            from tools.search_tools import DuckDuckGoSearchTool
+            search_tool = DuckDuckGoSearchTool()
+            
+            search_result = search_tool.execute(query=query, max_results=3)
+            
+            if search_result.success and search_result.data.get("results"):
+                results = search_result.data.get("results", [])
+                search_context = "\n\n以下是搜索到的相关信息：\n"
+                for i, r in enumerate(results, 1):
+                    search_context += f"{i}. {r.get('title', '')}\n"
+                    search_context += f"   {r.get('snippet', '')[:200]}...\n"
+                
+                logger.info_ctx(f"搜索增强成功，获取 {len(results)} 条结果", session_id=session_id)
+                
+        except ImportError:
+            logger.warning_ctx("搜索工具未安装，使用纯 LLM 知识回答", session_id=session_id)
+        except Exception as e:
+            logger.warning_ctx(f"搜索失败: {e}, 使用纯 LLM 知识回答", session_id=session_id)
+        
+        fallback_prompt = f"""你是一个 Dota 2 游戏专家助手。由于数据 API 暂时不可用，请根据你的游戏知识回答用户问题。
+{search_context}
+用户问题：{query}
+
+请提供专业、详细的回答，包括：
+1. 直接回答用户的核心问题
+2. 给出合理的理由和分析
+3. 如果涉及英雄推荐，说明推荐理由和战术思路
+
+注意：这是基于游戏知识和搜索信息的回答，不是基于实时数据的分析。"""
+
+        try:
+            response = self.llm.chat(
+                messages=[{"role": "user", "content": fallback_prompt}],
+                temperature=0.7,
+                max_tokens=1024
+            )
+            
+            if "error" in response:
+                logger.error_ctx(f"LLM fallback 调用失败: {response['error']}", session_id=session_id)
+                return None
+            
+            content = response['choices'][0]['message']['content']
+            return content
+            
+        except Exception as e:
+            logger.error_ctx(f"LLM fallback 异常: {e}", session_id=session_id)
+            return None
 
     def _observe(self, thought: AgentThought) -> None:
         """Observe 步骤 - 观察和分析结果
@@ -814,15 +971,33 @@ class AgentController:
                     "source": "error"
                 })
         elif thought.observations:
-            # 合并所有观察结果
-            final_data = self._merge_observations(thought.observations)
-            thought.set_complete({
-                "answer": final_data,
-                "reasoning": thought.reasoning_steps,
-                "actions": thought.actions_taken,
-                "confidence": self._evaluate_result_quality(thought)
-            })
-            logger.info_ctx("观察结果合并完成", session_id=session_id)
+            # 检查是否是 LLM fallback 回答
+            llm_fallback = None
+            for obs in thought.observations:
+                if isinstance(obs, dict) and "llm_fallback_answer" in obs:
+                    llm_fallback = obs["llm_fallback_answer"]
+                    break
+            
+            if llm_fallback:
+                # 使用 LLM fallback 回答
+                thought.set_complete({
+                    "answer": {"message": llm_fallback},
+                    "reasoning": thought.reasoning_steps,
+                    "actions": thought.actions_taken,
+                    "confidence": 0.7,
+                    "source": "llm_fallback"
+                })
+                logger.info_ctx("使用 LLM fallback 回答", session_id=session_id)
+            else:
+                # 合并所有观察结果
+                final_data = self._merge_observations(thought.observations)
+                thought.set_complete({
+                    "answer": final_data,
+                    "reasoning": thought.reasoning_steps,
+                    "actions": thought.actions_taken,
+                    "confidence": self._evaluate_result_quality(thought)
+                })
+                logger.info_ctx("观察结果合并完成", session_id=session_id)
         else:
             thought.set_complete({
                 "answer": {"message": "无法获取有效数据"},

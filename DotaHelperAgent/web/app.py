@@ -25,6 +25,7 @@ from core.agent_controller import AgentController
 from core.tool_registry import ToolRegistry
 from core.conversation_manager import ConversationManager
 from tools.agent_tools import create_all_tools
+from tools.search_tools import create_search_tools
 from core.config import AgentConfig, LLMConfig
 from utils.localization import DotaLocalizer
 from utils.llm_client import LLMClient
@@ -34,6 +35,8 @@ from utils.trace_context import (
     TraceContext, TraceSpan, set_current_trace, get_current_trace,
     generate_trace_id, get_current_trace_info
 )
+from managers.matchup_data_manager import MatchupDataManager
+from cache.cache_manager import get_cache
 
 # Langfuse 监控（可选）
 try:
@@ -64,6 +67,7 @@ agent = None
 agent_controller = None
 llm_client = None
 conversation_manager = None
+matchup_manager = None
 cache_warming = False
 cache_ready = False
 localizer = DotaLocalizer()
@@ -410,7 +414,7 @@ def start_cache_scheduler() -> None:
 
 def initialize_agent_controller() -> None:
     """初始化 Agent 和 Agent Controller"""
-    global agent, agent_controller, conversation_manager
+    global agent, agent_controller, conversation_manager, matchup_manager
     
     if agent_controller is not None:
         return agent_controller
@@ -435,6 +439,20 @@ def initialize_agent_controller() -> None:
             memory_dir="memory"
         )
         
+        # 创建 MatchupDataManager
+        try:
+            cache = get_cache()
+            matchup_manager = MatchupDataManager(
+                cache_manager=cache,
+                api_client=agent.client,
+                llm_client=get_llm_client(),
+                auto_load_on_startup=True
+            )
+            agent.hero_analyzer.set_matchup_manager(matchup_manager)
+            app_logger.info("MatchupDataManager 初始化完成")
+        except Exception as e:
+            app_logger.warning(f"MatchupDataManager 初始化失败: {e}, 使用默认数据源")
+        
         # 创建 Tool Registry
         registry = ToolRegistry()
         
@@ -448,6 +466,15 @@ def initialize_agent_controller() -> None:
         
         # 注册所有 Tools
         registry.register_batch(tools)
+        
+        # 注册搜索工具
+        try:
+            search_tools = create_search_tools()
+            registry.register_batch(search_tools)
+            app_logger.info(f"已注册 {len(search_tools)} 个搜索工具")
+        except Exception as e:
+            app_logger.warning(f"搜索工具注册失败: {e}")
+        
         app_logger.info(f"已注册 {len(registry)} 个 Agent Tools")
         
         # 获取 LLM 客户端
@@ -1880,8 +1907,57 @@ def _execute_single_goal_streaming(controller, thought, sub_goal, start_time: fl
             thought.state = AgentState.OBSERVING
             thought.add_reasoning(f"收集到 {len(thought.actions_taken)} 条观察结果")
 
+            # 检查是否有有效数据（非空）
+            has_valid_data = False
+            for action in thought.actions_taken:
+                result = action.get('result')
+                app_logger.debug(f"检查 action result: {type(result)}, hasattr data: {hasattr(result, 'data')}")
+                
+                if result:
+                    if hasattr(result, 'data'):
+                        data = result.data
+                    elif isinstance(result, dict):
+                        data = result.get('data', result)
+                    else:
+                        data = result
+                    
+                    app_logger.debug(f"提取的 data: {type(data)}, 内容: {str(data)[:200]}")
+                    
+                    if isinstance(data, dict) and len(data) > 0:
+                        has_valid_data = True
+                        app_logger.debug(f"检测到有效 dict 数据")
+                        break
+                    elif isinstance(data, list) and len(data) > 0:
+                        has_valid_data = True
+                        app_logger.debug(f"检测到有效 list 数据")
+                        break
+                    elif data is not None and data != "":
+                        has_valid_data = True
+                        app_logger.debug(f"检测到有效其他数据")
+                        break
+                    else:
+                        app_logger.debug(f"数据为空或无效")
+
+            app_logger.info(f"has_valid_data: {has_valid_data}")
+
+            # 如果没有有效数据，使用 LLM fallback
+            if not has_valid_data:
+                thought.add_reasoning("工具返回空数据，使用 LLM fallback")
+                yield f"event: think\ndata: {json.dumps({'step': 'think', 'content': '工具返回空数据，启用 LLM fallback'})}\n\n"
+                
+                try:
+                    fallback_response = controller._llm_fallback_answer(thought)
+                    if fallback_response:
+                        thought.add_reasoning("LLM fallback 回答成功")
+                        thought.set_complete({"llm_fallback_answer": fallback_response})
+                        msg_preview = fallback_response[:200] + "..."
+                        yield f"event: observation\ndata: {json.dumps({'step': 'observation', 'tool': 'llm_fallback', 'result': {'message': msg_preview}})}\n\n"
+                except Exception as e:
+                    thought.add_reasoning(f"LLM fallback 失败: {str(e)}")
+                    yield f"event: error\ndata: {json.dumps({'error': f'LLM fallback 失败: {str(e)}'})}\n\n"
+
             # 5. Reflect - 反思
-            if controller.enable_reflection:
+            if controller.enable_reflection and thought.state != AgentState.COMPLETE:
                 thought.state = AgentState.REFLECTING
                 has_result = len(thought.actions_taken) > 0 and any(a.get('result') for a in thought.actions_taken)
                 
@@ -2034,8 +2110,46 @@ def _execute_sub_goal_streaming(controller, thought, sub_goal, trace_ctx=None):
             sub_thought.state = AgentState.OBSERVING
             sub_thought.add_reasoning(f"收集到 {len(sub_thought.actions_taken)} 条观察结果")
 
+            # 检查是否有有效数据（非空）
+            has_valid_data = False
+            for action in sub_thought.actions_taken:
+                result = action.get('result')
+                if result:
+                    if hasattr(result, 'data'):
+                        data = result.data
+                    elif isinstance(result, dict):
+                        data = result.get('data', result)
+                    else:
+                        data = result
+                    
+                    if isinstance(data, dict) and len(data) > 0:
+                        has_valid_data = True
+                        break
+                    elif isinstance(data, list) and len(data) > 0:
+                        has_valid_data = True
+                        break
+                    elif data is not None and data != "":
+                        has_valid_data = True
+                        break
+
+            # 如果没有有效数据，使用 LLM fallback
+            if not has_valid_data:
+                sub_thought.add_reasoning("工具返回空数据，使用 LLM fallback")
+                yield f"event: think\ndata: {json.dumps({'step': 'think', 'content': '工具返回空数据，启用 LLM fallback'})}\n\n"
+                
+                try:
+                    fallback_response = controller._llm_fallback_answer(sub_thought)
+                    if fallback_response:
+                        sub_thought.add_reasoning("LLM fallback 回答成功")
+                        sub_thought.set_complete({"llm_fallback_answer": fallback_response})
+                        msg_preview = fallback_response[:200] + "..."
+                        yield f"event: observation\ndata: {json.dumps({'step': 'observation', 'tool': 'llm_fallback', 'result': {'message': msg_preview}})}\n\n"
+                except Exception as e:
+                    sub_thought.add_reasoning(f"LLM fallback 失败: {str(e)}")
+                    yield f"event: error\ndata: {json.dumps({'error': f'LLM fallback 失败: {str(e)}'})}\n\n"
+
             # 5. Reflect - 反思（可选）
-            if controller.enable_reflection:
+            if controller.enable_reflection and sub_thought.state != AgentState.COMPLETE:
                 sub_thought.state = AgentState.REFLECTING
                 has_result = len(sub_thought.actions_taken) > 0 and any(a.get('result') for a in sub_thought.actions_taken)
                 
@@ -2075,15 +2189,18 @@ def _execute_sub_goal_streaming(controller, thought, sub_goal, trace_ctx=None):
             if sub_thought.state == AgentState.COMPLETE:
                 # 只返回结果，不修改主 thought 的状态
                 sub_goal.result = sub_thought.final_answer
+                yield f"event: sub_goal_complete\ndata: {json.dumps({'step': 'sub_goal_complete', 'sub_goal_id': sub_goal.id, 'status': 'completed'})}\n\n"
                 return True
 
             if controller._should_finalize(sub_thought):
                 controller._finalize(sub_thought)
                 if sub_thought.state == AgentState.COMPLETE:
                     sub_goal.result = sub_thought.final_answer
+                    yield f"event: sub_goal_complete\ndata: {json.dumps({'step': 'sub_goal_complete', 'sub_goal_id': sub_goal.id, 'status': 'completed'})}\n\n"
                     return True
                 else:
-                    sub_goal.error = sub_thought.error
+                    sub_goal.error = sub_thought.error or "执行失败"
+                    yield f"event: sub_goal_failed\ndata: {json.dumps({'step': 'sub_goal_failed', 'sub_goal_id': sub_goal.id, 'status': 'failed', 'error': sub_goal.error})}\n\n"
                     return False
 
         # 强制结束
@@ -2092,14 +2209,18 @@ def _execute_sub_goal_streaming(controller, thought, sub_goal, trace_ctx=None):
 
         if sub_thought.state == AgentState.COMPLETE:
             sub_goal.result = sub_thought.final_answer
+            yield f"event: sub_goal_complete\ndata: {json.dumps({'step': 'sub_goal_complete', 'sub_goal_id': sub_goal.id, 'status': 'completed'})}\n\n"
             return True
         else:
-            sub_goal.error = sub_thought.error
+            sub_goal.error = sub_thought.error or "执行失败"
+            yield f"event: sub_goal_failed\ndata: {json.dumps({'step': 'sub_goal_failed', 'sub_goal_id': sub_goal.id, 'status': 'failed', 'error': sub_goal.error})}\n\n"
             return False
 
     except Exception as e:
         sub_thought.set_failed(str(e))
         thought.set_failed(str(e))
+        sub_goal.error = str(e)
+        yield f"event: sub_goal_failed\ndata: {json.dumps({'step': 'sub_goal_failed', 'sub_goal_id': sub_goal.id, 'status': 'failed', 'error': str(e)})}\n\n"
         return False
 
 
@@ -2349,6 +2470,200 @@ def clear_logs() -> Response:
     memory_handler.clear(session_id)
     app_logger.info_ctx("日志已清空", session_id=session_id)
     return jsonify({"success": True})
+
+
+# === 缓存管理 API 接口 ===
+
+@app.route('/api/cache/warmup', methods=['POST'])
+def warmup_cache() -> Response:
+    """手动触发缓存预热"""
+    global cache_warming, cache_ready
+    
+    data = request.get_json() or {}
+    full_warmup = data.get('full_warmup', False)
+    
+    if cache_warming:
+        return jsonify({"success": False, "message": "缓存正在预热中，请稍候"})
+    
+    if cache_ready and not full_warmup:
+        return jsonify({"success": True, "message": "缓存已预热完成"})
+    
+    try:
+        if full_warmup:
+            refresh_all_heroes_cache()
+            return jsonify({"success": True, "message": "全量缓存预热完成"})
+        else:
+            warm_cache()
+            return jsonify({"success": True, "message": "缓存预热完成"})
+    except Exception as e:
+        return jsonify({"success": False, "message": f"缓存预热失败: {str(e)}"})
+
+
+@app.route('/api/cache/status', methods=['GET'])
+def get_cache_status() -> Response:
+    """获取缓存状态"""
+    try:
+        agt = get_agent_safe()
+        if agt and agt.client:
+            stats = agt.client.cache.get_stats()
+            return jsonify({
+                "success": True,
+                "cache_ready": cache_ready,
+                "cache_warming": cache_warming,
+                "stats": stats
+            })
+        return jsonify({"success": False, "message": "Agent 未初始化"})
+    except Exception as e:
+        return jsonify({"success": False, "message": f"获取缓存状态失败: {str(e)}"})
+
+
+# === Matchup 数据管理 API 接口 ===
+
+@app.route('/api/matchup/status', methods=['GET'])
+def get_matchup_status() -> Response:
+    """获取 Matchup 数据状态
+    
+    Returns:
+        {
+            "success": True,
+            "status": {
+                "total_heroes": 124,
+                "loaded_heroes": 80,
+                "missing_heroes": 44,
+                "progress": "80/124",
+                "is_loading": True,
+                "last_update": "2026-05-27T00:00:00"
+            }
+        }
+    """
+    global matchup_manager
+    
+    try:
+        if matchup_manager is None:
+            return jsonify({
+                "success": False,
+                "message": "MatchupDataManager 未初始化"
+            })
+        
+        status = matchup_manager.get_status()
+        return jsonify({
+            "success": True,
+            "status": status,
+            "data_ready": matchup_manager.is_data_ready()
+        })
+        
+    except Exception as e:
+        app_logger.error(f"获取 Matchup 状态失败: {e}")
+        return jsonify({"success": False, "message": f"获取状态失败: {str(e)}"})
+
+
+@app.route('/api/matchup/load-all', methods=['POST'])
+def load_all_matchup() -> Response:
+    """强制全量加载所有 Matchup 数据
+    
+    Returns:
+        {"success": True, "message": "后台加载已启动"}
+    """
+    global matchup_manager
+    
+    try:
+        if matchup_manager is None:
+            return jsonify({
+                "success": False,
+                "message": "MatchupDataManager 未初始化"
+            })
+        
+        status = matchup_manager.get_status()
+        if status.get("is_loading"):
+            return jsonify({
+                "success": False,
+                "message": "后台加载正在进行中，请稍候"
+            })
+        
+        matchup_manager.force_load_all()
+        
+        return jsonify({
+            "success": True,
+            "message": "后台全量加载已启动",
+            "missing_heroes": status.get("missing_heroes", 0)
+        })
+        
+    except Exception as e:
+        app_logger.error(f"启动全量加载失败: {e}")
+        return jsonify({"success": False, "message": f"启动加载失败: {str(e)}"})
+
+
+@app.route('/api/matchup/hero/<int:hero_id>', methods=['GET'])
+def get_hero_matchup(hero_id: int) -> Response:
+    """获取单个英雄的 Matchup 数据
+    
+    Args:
+        hero_id: 英雄 ID
+        
+    Returns:
+        {
+            "success": True,
+            "hero_id": 1,
+            "data": [...],
+            "source": "cache|local|api"
+        }
+    """
+    global matchup_manager
+    
+    try:
+        if matchup_manager is None:
+            return jsonify({
+                "success": False,
+                "message": "MatchupDataManager 未初始化"
+            })
+        
+        data = matchup_manager.get_matchup(hero_id)
+        
+        if data is None:
+            return jsonify({
+                "success": False,
+                "hero_id": hero_id,
+                "message": "数据不存在，已触发后台加载"
+            })
+        
+        return jsonify({
+            "success": True,
+            "hero_id": hero_id,
+            "data": data,
+            "total_matchups": len(data)
+        })
+        
+    except Exception as e:
+        app_logger.error(f"获取英雄 {hero_id} Matchup 数据失败: {e}")
+        return jsonify({"success": False, "message": f"获取数据失败: {str(e)}"})
+
+
+@app.route('/api/matchup/stop-load', methods=['POST'])
+def stop_matchup_load() -> Response:
+    """停止后台加载
+    
+    Returns:
+        {"success": True, "message": "后台加载已停止"}
+    """
+    global matchup_manager
+    
+    try:
+        if matchup_manager is None:
+            return jsonify({
+                "success": False,
+                "message": "MatchupDataManager 未初始化"
+            })
+        
+        matchup_manager.stop_background_load()
+        
+        return jsonify({
+            "success": True,
+            "message": "后台加载已停止"
+        })
+        
+    except Exception as e:
+        app_logger.error(f"停止后台加载失败: {e}")
+        return jsonify({"success": False, "message": f"停止加载失败: {str(e)}"})
 
 
 # === Trace 追踪 API 接口 ===

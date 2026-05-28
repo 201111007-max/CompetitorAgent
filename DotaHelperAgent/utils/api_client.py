@@ -95,27 +95,65 @@ class OpenDotaClient:
         # 本地化工具实例
         self._localizer = DotaLocalizer()
 
-    def _make_request(self, endpoint: str, params: Optional[Dict] = None) -> Any:
-        """发送 API 请求（带速率限制）"""
-        # 速率限制：确保请求间隔
-        elapsed = time.time() - self._last_request_time
-        if elapsed < self.rate_limit_delay:
-            time.sleep(self.rate_limit_delay - elapsed)
-
+    def _make_request(self, endpoint: str, params: Optional[Dict] = None, max_retries: int = 3) -> Any:
+        """发送 API 请求（带速率限制和 429 重试）"""
+        retries = 0
         url = f"{self.BASE_URL}{endpoint}"
         request_params = params or {}
         if self.api_key:
             request_params["api_key"] = self.api_key
+        
+        start_time = time.time()
+        logger.info(f"[API_REQUEST] 开始请求: endpoint={endpoint}, params={params}, retry=0")
+        
+        while retries < max_retries:
+            elapsed = time.time() - self._last_request_time
+            if elapsed < self.rate_limit_delay:
+                wait_time = self.rate_limit_delay - elapsed
+                logger.debug(f"[API_RATE_LIMIT] 等待 {wait_time:.2f}s 以满足速率限制")
+                time.sleep(wait_time)
 
-        try:
-            timeout = self.config.rate_limit.timeout_seconds if self.config else 10
-            response = self.session.get(url, params=request_params, timeout=timeout)
-            self._last_request_time = time.time()
-            response.raise_for_status()
-            return response.json()
-        except requests.exceptions.RequestException as e:
-            logger.error(f"API 请求失败：{e}")
-            return None
+            try:
+                request_start = time.time()
+                timeout = self.config.rate_limit.timeout_seconds if self.config else 10
+                response = self.session.get(url, params=request_params, timeout=timeout)
+                self._last_request_time = time.time()
+                request_elapsed = time.time() - request_start
+                
+                if response.status_code == 429:
+                    retries += 1
+                    wait_time = 60 + retries * 10
+                    logger.warning(f"[API_429] 速率限制触发: endpoint={endpoint}, status=429, retry={retries}/{max_retries}, wait={wait_time}s")
+                    if retries >= max_retries:
+                        total_elapsed = time.time() - start_time
+                        logger.error(f"[API_FAILED] 速率限制失败: endpoint={endpoint}, total_time={total_elapsed:.2f}s, retries={max_retries}")
+                        return None
+                    time.sleep(wait_time)
+                    continue
+                
+                response.raise_for_status()
+                data = response.json()
+                total_elapsed = time.time() - start_time
+                data_size = len(response.text) if response.text else 0
+                
+                logger.info(f"[API_SUCCESS] 请求成功: endpoint={endpoint}, status={response.status_code}, time={request_elapsed:.2f}s, total_time={total_elapsed:.2f}s, size={data_size}bytes")
+                return data
+                
+            except requests.exceptions.RequestException as e:
+                retries += 1
+                request_elapsed = time.time() - request_start
+                if retries < max_retries:
+                    wait_time = 30 + retries * 10
+                    logger.warning(f"[API_ERROR] 请求失败: endpoint={endpoint}, error={type(e).__name__}, time={request_elapsed:.2f}s, retry={retries}/{max_retries}, wait={wait_time}s")
+                    time.sleep(wait_time)
+                    continue
+                total_elapsed = time.time() - start_time
+                logger.error(f"[API_FAILED] 请求最终失败: endpoint={endpoint}, error={str(e)}, total_time={total_elapsed:.2f}s, retries={max_retries}")
+                return None
+        
+        total_elapsed = time.time() - start_time
+        logger.error(f"[API_FAILED] 请求失败: endpoint={endpoint}, total_time={total_elapsed:.2f}s")
+        return None
 
     def get_heroes(self, use_cache: bool = True) -> List[Dict]:
         """获取所有英雄列表（带缓存）"""
@@ -160,6 +198,9 @@ class OpenDotaClient:
 
     def get_hero_matchups(self, hero_id: int, use_cache: bool = True) -> Optional[List[Dict]]:
         """获取英雄克制关系数据（带缓存）"""
+        start_time = time.time()
+        cache_key = f"hero_matchups_{hero_id}"
+        
         # 获取 Langfuse 客户端
         langfuse_client = LangfuseClient.get_instance() if LANGFUSE_AVAILABLE else None
         
@@ -176,21 +217,26 @@ class OpenDotaClient:
             span = NoOpSpan()
         
         with span:
-            cache_key = f"hero_matchups_{hero_id}"
-            
             # 尝试缓存
             if use_cache:
                 cached = self.cache.get(cache_key)
                 if cached is not None:
-                    span.update(metadata={"cache_hit": True})
+                    elapsed = time.time() - start_time
+                    logger.info(f"[CACHE_HIT] 英雄 matchup 缓存命中: hero_id={hero_id}, time={elapsed:.3f}s, size={len(cached)}items")
+                    span.update(metadata={"cache_hit": True, "elapsed": elapsed})
                     return cached
+            
+            logger.debug(f"[CACHE_MISS] 英雄 matchup 缓存未命中: hero_id={hero_id}, 调用 API")
             
             # API 请求
             result = self._make_request(f"/heroes/{hero_id}/matchups")
+            elapsed = time.time() - start_time
+            
             if result is not None and use_cache:
                 self.cache.set(cache_key, result)
+                logger.info(f"[API_CACHE_SET] 英雄 matchup 已缓存: hero_id={hero_id}, time={elapsed:.2f}s, size={len(result)}items")
             
-            span.update(output={"result_type": type(result).__name__})
+            span.update(output={"result_type": type(result).__name__, "elapsed": elapsed})
             return result
 
     def get_hero_item_popularity(self, hero_id: int, use_cache: bool = True) -> Optional[Dict]:

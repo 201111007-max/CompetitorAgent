@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 import time
 import json
 import traceback
+from datetime import datetime
 
 try:
     from ..tools.base import Tool, ToolResult, ToolStatus
@@ -19,6 +20,15 @@ except ImportError:
 
 from utils.log_config import get_logger
 from utils.trace_context import get_current_trace
+
+# Langfuse 监控（可选）
+try:
+    from utils.langfuse_adapter import LangfuseClient, NoOpObservation
+    LANGFUSE_AVAILABLE = True
+except ImportError:
+    LANGFUSE_AVAILABLE = False
+    LangfuseClient = None
+    NoOpObservation = None
 
 logger = get_logger("tool_registry", component="core")
 
@@ -101,12 +111,33 @@ class ToolRegistry:
         return list(self._tools_by_category.keys())
 
     def execute(self, tool_name: str, **kwargs) -> ToolResult:
-        """执行 Tool"""
+        """执行 Tool（带 Langfuse 监控）"""
         trace_ctx = get_current_trace()
+        
+        # 获取 Langfuse 客户端
+        langfuse_client = LangfuseClient.get_instance() if LANGFUSE_AVAILABLE else None
+        
+        # 创建工具 Span (Langfuse)
+        if langfuse_client and langfuse_client.enabled:
+            tool_span = langfuse_client.observation(
+                name=f"tool_{tool_name}",
+                as_type="tool",
+                input=kwargs,
+                metadata={
+                    "trace_id": trace_ctx.trace_id if trace_ctx else None,
+                    "tool_name": tool_name,
+                    "category": self._tools.get(tool_name).category if tool_name in self._tools else None,
+                    "description": self._tools.get(tool_name).description[:100] if tool_name in self._tools and self._tools[tool_name].description else None,
+                    "start_time": datetime.now().isoformat()
+                }
+            )
+        else:
+            tool_span = NoOpObservation() if NoOpObservation else None
+        
         logger.info_ctx(
             "执行工具",
             session_id=trace_ctx.session_id if trace_ctx else None,
-            extra_data={"tool_name": tool_name, "params": kwargs}
+            extra_data={"tool_name": tool_name, "params": kwargs, "langfuse_enabled": langfuse_client.enabled if langfuse_client else False}
         )
         
         tool = self.get(tool_name)
@@ -116,6 +147,12 @@ class ToolRegistry:
                 session_id=trace_ctx.session_id if trace_ctx else None,
                 extra_data={"tool_name": tool_name}
             )
+            # 更新 Langfuse Span
+            if tool_span and hasattr(tool_span, 'update'):
+                tool_span.update(
+                    output={"success": False, "error": f"Tool '{tool_name}' not found"},
+                    metadata={"error_type": "ToolNotFound"}
+                )
             return ToolResult(
                 tool_name=tool_name,
                 status=ToolStatus.FAILURE,
@@ -135,6 +172,29 @@ class ToolRegistry:
         try:
             result = tool.execute(**kwargs)
             execution_time = time.time() - start_time
+            
+            # 更新 Langfuse Span
+            if tool_span and hasattr(tool_span, 'update'):
+                tool_span.update(
+                    output={
+                        "success": result.is_success(),
+                        "status": result.status.value,
+                        "data_preview": str(result.data)[:200] if result.data else None
+                    },
+                    metadata={
+                        "execution_time_ms": round(execution_time * 1000, 2),
+                        "end_time": datetime.now().isoformat()
+                    }
+                )
+                
+                # 记录工具评分
+                if hasattr(tool_span, 'score'):
+                    tool_span.score(
+                        name="tool_success",
+                        value=1.0 if result.is_success() else 0.0,
+                        comment="工具执行成功" if result.is_success() else f"工具执行失败: {result.error}"
+                    )
+            
             logger.info_ctx(
                 "工具执行完成",
                 session_id=trace_ctx.session_id if trace_ctx else None,
@@ -147,6 +207,25 @@ class ToolRegistry:
             )
         except Exception as e:
             execution_time = time.time() - start_time
+            
+            # 更新 Langfuse Span
+            if tool_span and hasattr(tool_span, 'update'):
+                tool_span.update(
+                    output={"success": False, "error": str(e)},
+                    metadata={
+                        "execution_time_ms": round(execution_time * 1000, 2),
+                        "end_time": datetime.now().isoformat(),
+                        "error_type": type(e).__name__
+                    }
+                )
+                
+                if hasattr(tool_span, 'score'):
+                    tool_span.score(
+                        name="tool_success",
+                        value=0.0,
+                        comment=f"工具执行异常: {str(e)}"
+                    )
+            
             logger.error_ctx(
                 "工具执行异常",
                 session_id=trace_ctx.session_id if trace_ctx else None,
