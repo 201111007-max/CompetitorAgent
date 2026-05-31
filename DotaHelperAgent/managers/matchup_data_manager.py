@@ -6,6 +6,10 @@
 3. Local JSON File（本地存储）
 4. LLM Knowledge（兜底）
 5. OpenDota API（后台异步更新）
+
+新增特性：
+- 数据过期机制（TTL）
+- 数据完整性校验
 """
 
 import json
@@ -13,7 +17,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Callable
-from datetime import datetime
+from datetime import datetime, timedelta
 
 try:
     from ..cache.cache_manager import CacheManager
@@ -36,6 +40,8 @@ class MatchupDataManager:
     - 后台异步加载缺失数据
     - 本地 JSON 持久化存储
     - 线程安全
+    - 数据过期机制（TTL）
+    - 数据完整性校验
     """
     
     TOTAL_HEROES = 124
@@ -46,7 +52,8 @@ class MatchupDataManager:
         api_client,
         llm_client=None,
         data_dir: str = "data/matchups",
-        auto_load_on_startup: bool = True
+        auto_load_on_startup: bool = True,
+        ttl_days: int = 7
     ):
         """初始化 Matchup 数据管理器
         
@@ -56,10 +63,12 @@ class MatchupDataManager:
             llm_client: LLM 客户端（可选，用于 fallback）
             data_dir: 本地 JSON 存储目录
             auto_load_on_startup: 启动时是否自动加载已有数据到缓存
+            ttl_days: 数据过期时间（天数），默认7天
         """
         self.cache = cache_manager
         self.api_client = api_client
         self.llm_client = llm_client
+        self.ttl_days = ttl_days
         
         self.data_dir = Path(data_dir)
         if not self.data_dir.is_absolute():
@@ -73,7 +82,9 @@ class MatchupDataManager:
             "loaded_heroes": 0,
             "missing_heroes": [],
             "last_update": None,
-            "is_loading": False
+            "is_loading": False,
+            "expired_heroes": 0,
+            "invalid_heroes": 0
         }
         
         if auto_load_on_startup:
@@ -134,6 +145,98 @@ class MatchupDataManager:
         """生成缓存键"""
         return f"matchup_hero_{hero_id}"
     
+    def _is_data_expired(self, data: Dict[str, Any]) -> bool:
+        """检查数据是否过期
+        
+        Args:
+            data: matchup 数据
+            
+        Returns:
+            是否过期
+        """
+        if not isinstance(data, dict):
+            return True
+        
+        metadata = data.get("_metadata", {})
+        created_at = metadata.get("created_at")
+        
+        if not created_at:
+            return True
+        
+        try:
+            created_time = datetime.fromisoformat(created_at)
+            expired_time = created_time + timedelta(days=self.ttl_days)
+            return datetime.now() > expired_time
+        except Exception:
+            return True
+    
+    def _validate_data_integrity(self, data: Dict[str, Any]) -> bool:
+        """校验数据完整性
+        
+        Args:
+            data: matchup 数据
+            
+        Returns:
+            数据是否完整有效
+        """
+        if not isinstance(data, dict):
+            return False
+        
+        if not isinstance(data.get("matchup_data"), list):
+            return False
+        
+        matchup_list = data.get("matchup_data", [])
+        if len(matchup_list) == 0:
+            return False
+        
+        for matchup in matchup_list[:5]:
+            if not isinstance(matchup, dict):
+                return False
+            
+            required_fields = ["hero_id", "wins", "games_played"]
+            for field in required_fields:
+                if field not in matchup:
+                    return False
+                
+                if matchup.get("games_played", 0) < 10:
+                    return False
+        
+        return True
+    
+    def _delete_expired_data(self, hero_id: int) -> None:
+        """删除过期数据
+        
+        Args:
+            hero_id: 英雄 ID
+        """
+        with self._lock:
+            cache_key = self._get_cache_key(hero_id)
+            self.cache.delete(cache_key)
+            
+            file_path = self.data_dir / f"hero_{hero_id}.json"
+            if file_path.exists():
+                file_path.unlink()
+            
+            self._data_status["expired_heroes"] += 1
+            logger.info(f"[MATCHUP_EXPIRED] 数据已过期并删除: hero_id={hero_id}, ttl_days={self.ttl_days}")
+    
+    def _delete_invalid_data(self, hero_id: int) -> None:
+        """删除无效数据
+        
+        Args:
+            hero_id: 英雄 ID
+        """
+        with self._lock:
+            cache_key = self._get_cache_key(hero_id)
+            self.cache.delete(cache_key)
+            
+            file_path = self.data_dir / f"hero_{hero_id}.json"
+            if file_path.exists():
+                file_path.unlink()
+            
+            self._data_status["invalid_heroes"] += 1
+            logger.warning(f"[MATCHUP_INVALID] 数据不完整已删除: hero_id={hero_id}")
+    
     def _start_background_load(self) -> None:
         """启动后台异步加载"""
         if self._background_loader is None:
@@ -161,8 +264,12 @@ class MatchupDataManager:
         2. SQLite Cache  
         3. Local JSON File
         
+        新增检查：
+        - 数据过期检查（TTL）
+        - 数据完整性校验
+        
         Returns:
-            matchup 数据，如果不存在返回 None
+            matchup 数据，如果不存在或过期返回 None
         """
         start_time = time.time()
         
@@ -171,20 +278,39 @@ class MatchupDataManager:
             
             data = self.cache.get(cache_key)
             if data:
-                elapsed = time.time() - start_time
-                logger.info(f"[MATCHUP_CACHE_HIT] 从缓存获取: hero_id={hero_id}, source=memory_cache, time={elapsed:.3f}s, size={len(data)}items")
-                return data
+                if self._is_data_expired(data):
+                    elapsed = time.time() - start_time
+                    logger.info(f"[MATCHUP_EXPIRED_CACHE] 缓存数据已过期: hero_id={hero_id}, time={elapsed:.3f}s")
+                    self._delete_expired_data(hero_id)
+                elif not self._validate_data_integrity(data):
+                    elapsed = time.time() - start_time
+                    logger.warning(f"[MATCHUP_INVALID_CACHE] 缓存数据不完整: hero_id={hero_id}, time={elapsed:.3f}s")
+                    self._delete_invalid_data(hero_id)
+                else:
+                    elapsed = time.time() - start_time
+                    logger.info(f"[MATCHUP_CACHE_HIT] 从缓存获取: hero_id={hero_id}, source=memory_cache, time={elapsed:.3f}s, size={len(data.get('matchup_data', []))}items")
+                    return data
             
             file_path = self.data_dir / f"hero_{hero_id}.json"
             if file_path.exists():
                 try:
                     file_start = time.time()
                     data = json.loads(file_path.read_text(encoding="utf-8"))
-                    self.cache.set(cache_key, data)
-                    elapsed = time.time() - start_time
-                    file_elapsed = time.time() - file_start
-                    logger.info(f"[MATCHUP_FILE_HIT] 从本地文件获取: hero_id={hero_id}, source=local_json, time={elapsed:.3f}s, file_read={file_elapsed:.3f}s, size={len(data)}items")
-                    return data
+                    
+                    if self._is_data_expired(data):
+                        elapsed = time.time() - start_time
+                        logger.info(f"[MATCHUP_EXPIRED_FILE] 文件数据已过期: hero_id={hero_id}, time={elapsed:.3f}s")
+                        self._delete_expired_data(hero_id)
+                    elif not self._validate_data_integrity(data):
+                        elapsed = time.time() - start_time
+                        logger.warning(f"[MATCHUP_INVALID_FILE] 文件数据不完整: hero_id={hero_id}, time={elapsed:.3f}s")
+                        self._delete_invalid_data(hero_id)
+                    else:
+                        self.cache.set(cache_key, data)
+                        elapsed = time.time() - start_time
+                        file_elapsed = time.time() - file_start
+                        logger.info(f"[MATCHUP_FILE_HIT] 从本地文件获取: hero_id={hero_id}, source=local_json, time={elapsed:.3f}s, file_read={file_elapsed:.3f}s, size={len(data.get('matchup_data', []))}items")
+                        return data
                 except Exception as e:
                     elapsed = time.time() - start_time
                     logger.warning(f"[MATCHUP_FILE_ERROR] 读取本地文件失败: hero_id={hero_id}, error={str(e)}, time={elapsed:.3f}s")
@@ -216,7 +342,7 @@ class MatchupDataManager:
         
         Args:
             hero_id: 英雄 ID
-            data: matchup 数据
+            data: matchup 数据（可以是原始列表或包装后的字典）
             
         Returns:
             是否成功保存
@@ -225,13 +351,15 @@ class MatchupDataManager:
         
         with self._lock:
             try:
+                wrapped_data = self._wrap_data_with_metadata(data)
+                
                 cache_key = self._get_cache_key(hero_id)
-                self.cache.set(cache_key, data)
+                self.cache.set(cache_key, wrapped_data)
                 
                 file_path = self.data_dir / f"hero_{hero_id}.json"
-                data_size = len(json.dumps(data))
+                data_size = len(json.dumps(wrapped_data))
                 file_path.write_text(
-                    json.dumps(data, ensure_ascii=False, indent=2),
+                    json.dumps(wrapped_data, ensure_ascii=False, indent=2),
                     encoding="utf-8"
                 )
                 
@@ -245,6 +373,59 @@ class MatchupDataManager:
                 elapsed = time.time() - start_time
                 logger.error(f"[MATCHUP_SAVE_ERROR] 数据保存失败: hero_id={hero_id}, error={str(e)}, time={elapsed:.3f}s")
                 return False
+    
+    def _wrap_data_with_metadata(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """将数据包装为包含 metadata 的结构
+        
+        Args:
+            data: 原始 matchup 数据
+            
+        Returns:
+            包装后的数据（包含 _metadata 和 matchup_data）
+        """
+        if isinstance(data, list):
+            return {
+                "matchup_data": data,
+                "_metadata": {
+                    "created_at": datetime.now().isoformat(),
+                    "ttl_days": self.ttl_days,
+                    "version": "1.0",
+                    "source": "opendota_api"
+                }
+            }
+        elif isinstance(data, dict):
+            if "matchup_data" in data and "_metadata" in data:
+                return data
+            elif "matchup_data" not in data:
+                return {
+                    "matchup_data": data.get("matchup_data", data),
+                    "_metadata": {
+                        "created_at": datetime.now().isoformat(),
+                        "ttl_days": self.ttl_days,
+                        "version": "1.0",
+                        "source": "opendota_api"
+                    }
+                }
+            else:
+                return {
+                    "matchup_data": data,
+                    "_metadata": {
+                        "created_at": datetime.now().isoformat(),
+                        "ttl_days": self.ttl_days,
+                        "version": "1.0",
+                        "source": "opendota_api"
+                    }
+                }
+        else:
+            return {
+                "matchup_data": [],
+                "_metadata": {
+                    "created_at": datetime.now().isoformat(),
+                    "ttl_days": self.ttl_days,
+                    "version": "1.0",
+                    "source": "unknown"
+                }
+            }
     
     def _update_status(self, hero_id: int) -> None:
         """更新数据状态"""
@@ -266,7 +447,10 @@ class MatchupDataManager:
             "missing_hero_ids": self._data_status["missing_heroes"][:10],
             "last_update": self._data_status["last_update"],
             "is_loading": self._data_status["is_loading"],
-            "progress": f"{self._data_status['loaded_heroes']}/{self._data_status['total_heroes']}"
+            "progress": f"{self._data_status['loaded_heroes']}/{self._data_status['total_heroes']}",
+            "expired_heroes": self._data_status["expired_heroes"],
+            "invalid_heroes": self._data_status["invalid_heroes"],
+            "ttl_days": self.ttl_days
         }
     
     def is_data_ready(self) -> bool:

@@ -1,16 +1,81 @@
 """配置管理模块
 
 支持从 YAML 配置文件加载配置，也支持代码中直接配置
+支持环境变量覆盖配置
 """
 
 from dataclasses import dataclass, field
 from typing import List, Optional
 from pathlib import Path
+import os
 import yaml
 
 from utils.log_config import get_logger
 
 logger = get_logger("config", component="core")
+
+
+def get_api_key_from_env() -> Optional[str]:
+    """从环境变量获取 API Key
+    
+    优先级：DEEPSEEK_API_KEY > LLM_API_KEY
+    
+    Returns:
+        API Key 或 None
+    """
+    return os.environ.get('DEEPSEEK_API_KEY') or os.environ.get('LLM_API_KEY')
+
+
+def get_llm_config_from_env() -> dict:
+    """从环境变量获取 LLM 配置
+    
+    支持的环境变量：
+    - DEEPSEEK_API_KEY / LLM_API_KEY: API Key
+    - LLM_BASE_URL: API 基础 URL
+    - LLM_MODEL_ID: 模型名称
+    - LLM_TEMPERATURE: 温度参数
+    - LLM_MAX_TOKENS: 最大 token 数
+    - LLM_TIMEOUT: 超时时间
+    
+    Returns:
+        配置字典
+    """
+    config = {}
+    
+    api_key = get_api_key_from_env()
+    if api_key:
+        config['api_key'] = api_key
+    
+    base_url = os.environ.get('LLM_BASE_URL')
+    if base_url:
+        config['base_url'] = base_url
+    
+    model = os.environ.get('LLM_MODEL_ID')
+    if model:
+        config['model'] = model
+    
+    temperature = os.environ.get('LLM_TEMPERATURE')
+    if temperature:
+        try:
+            config['temperature'] = float(temperature)
+        except ValueError:
+            pass
+    
+    max_tokens = os.environ.get('LLM_MAX_TOKENS')
+    if max_tokens:
+        try:
+            config['max_tokens'] = int(max_tokens)
+        except ValueError:
+            pass
+    
+    timeout = os.environ.get('LLM_TIMEOUT')
+    if timeout:
+        try:
+            config['timeout'] = int(timeout)
+        except ValueError:
+            pass
+    
+    return config
 
 
 def load_llm_config_from_yaml(config_path: Optional[str] = None) -> dict:
@@ -52,31 +117,30 @@ class LLMConfig:
     """LLM 配置
     
     支持从 YAML 配置文件加载，也支持代码中直接配置
-    优先级：代码配置 > YAML 配置文件 > 默认值
+    支持环境变量覆盖
+    优先级：环境变量 > 代码配置 > YAML 配置文件 > 默认值
     """
     
-    # 是否启用 LLM
     enabled: bool = True
     
-    # API 基础 URL（本地部署）
-    base_url: str = "http://127.0.0.1:1234/v1"
+    base_url: str = "https://api.deepseek.com"
     
-    # 模型名称
-    model: str = "qwen3.5-9b"
+    model: str = "deepseek-v4-pro"
     
-    # API Key（本地部署通常不需要）
     api_key: Optional[str] = None
     
-    # 生成参数
     temperature: float = 0.7
     max_tokens: int = 2048
     top_p: float = 0.9
     
-    # 超时时间（秒）
-    timeout: int = 60
+    timeout: int = 120
     
-    # 是否启用流式输出
     stream: bool = False
+    
+    def __post_init__(self):
+        """初始化后处理：从环境变量读取 API Key"""
+        if self.api_key is None:
+            self.api_key = get_api_key_from_env()
     
     @classmethod
     def from_yaml(cls, config_path: Optional[str] = None, **overrides) -> 'LLMConfig':
@@ -84,16 +148,17 @@ class LLMConfig:
         
         Args:
             config_path: 配置文件路径，如果为 None 则使用默认路径
-            overrides: 覆盖参数，优先级高于配置文件
+            overrides: 覆盖参数
             
         Returns:
             LLMConfig 实例
+            
+        优先级：环境变量 > overrides > YAML 配置文件 > 默认值
         """
-        # 从配置文件加载
         yaml_config = load_llm_config_from_yaml(config_path)
+        env_config = get_llm_config_from_env()
         
-        # 合并配置（overrides 优先级最高）
-        merged = {**yaml_config, **overrides}
+        merged = {**yaml_config, **overrides, **env_config}
         
         return cls(
             enabled=merged.get('enabled', cls.enabled),

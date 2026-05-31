@@ -79,13 +79,14 @@ class HeroAnalyzer:
         """
         self._strategies.append(strategy)
     
-    def _get_matchup_data(self, hero_id: int) -> Optional[List[Dict]]:
+    def _get_matchup_data(self, hero_id: int, allow_api: bool = True) -> Optional[List[Dict]]:
         """获取英雄 matchup 数据
         
         优先使用 MatchupDataManager，如果没有则使用 api_client
         
         Args:
             hero_id: 英雄 ID
+            allow_api: 是否允许调用 API（默认 True，但在批量分析时设为 False 避免 120s 超时阻塞）
             
         Returns:
             matchup 数据列表
@@ -93,25 +94,40 @@ class HeroAnalyzer:
         if self.matchup_manager:
             data = self.matchup_manager.get_matchup(hero_id)
             if data:
-                return data
+                if isinstance(data, dict) and "matchup_data" in data:
+                    return data.get("matchup_data")
+                elif isinstance(data, list):
+                    return data
         
-        return self.client.get_hero_matchups(hero_id)
+        if not allow_api:
+            return None
+        
+        result = self.client.get_hero_matchups(hero_id)
+        if result:
+            if isinstance(result, dict) and "matchup_data" in result:
+                return result.get("matchup_data")
+            elif isinstance(result, list):
+                return result
+        
+        return None
     
     def _analyze_single_matchup(
         self,
         hero_id: int,
-        enemy_id: int
+        enemy_id: int,
+        allow_api: bool = False
     ) -> Tuple[float, List[str]]:
         """分析单个克制关系
         
         Args:
             hero_id: 英雄 ID
             enemy_id: 敌方英雄 ID
+            allow_api: 是否允许调用 API（批量分析时默认 False 避免 120s 超时阻塞）
             
         Returns:
             (score, reasons): 得分和理由列表
         """
-        matchup_data = self._get_matchup_data(hero_id)
+        matchup_data = self._get_matchup_data(hero_id, allow_api=allow_api)
         if not matchup_data:
             return 0.0, []
         
@@ -251,7 +267,7 @@ class HeroAnalyzer:
         
         # 1. 分析对敌方英雄的克制（加分）
         for enemy_id in enemy_hero_ids:
-            score, reasons = self._analyze_single_matchup(hero_id, enemy_id)
+            score, reasons = self._analyze_single_matchup(hero_id, enemy_id, allow_api=False)
             if score > 0:
                 enemy_name = self._get_hero_name_cn(enemy_id)
                 total_score += score
@@ -351,7 +367,7 @@ class HeroAnalyzer:
             if hero_id == target_id:
                 continue
             
-            score, reasons = self._analyze_single_matchup(hero_id, target_id)
+            score, reasons = self._analyze_single_matchup(hero_id, target_id, allow_api=False)
             if score > 0:
                 counters.append({
                     "hero_id": hero_id,

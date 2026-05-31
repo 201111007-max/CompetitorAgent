@@ -6,6 +6,15 @@
 
 import sys
 from pathlib import Path
+
+try:
+    from dotenv import load_dotenv
+    env_path = Path(__file__).parent.parent.parent / ".env"
+    if env_path.exists():
+        load_dotenv(env_path)
+except ImportError:
+    pass
+
 from flask import Flask, request, jsonify, Response, g, stream_with_context
 from flask_cors import CORS
 import json
@@ -1130,7 +1139,9 @@ def _format_answer_for_stream(answer_data) -> str:
                 formatted.append(f"主加：{skills['primary']}")
             return "\n".join(formatted)
     
-    # 处理纯文本答案
+    if "llm_fallback_answer" in actual_answer and isinstance(actual_answer["llm_fallback_answer"], str):
+        return actual_answer["llm_fallback_answer"]
+    
     if "answer" in actual_answer and isinstance(actual_answer["answer"], str):
         return actual_answer["answer"]
     

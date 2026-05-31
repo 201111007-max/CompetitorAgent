@@ -1,8 +1,9 @@
 # Hero Matchup 数据管理方案设计文档
 
 **日期**: 2026-05-27
-**版本**: v1.0
+**版本**: v1.1
 **状态**: 已实现
+**最后更新**: 2026-05-31
 
 ---
 
@@ -157,11 +158,16 @@ DotaHelperAgent/
 
 | 方法 | 描述 |
 |------|------|
-| `get_matchup(hero_id)` | 按优先级获取 matchup 数据 |
-| `save_matchup(hero_id, data)` | 保存到缓存 + 本地 JSON |
-| `get_status()` | 获取数据状态（已加载/缺失） |
+| `get_matchup(hero_id)` | 按优先级获取 matchup 数据（含过期和完整性检查） |
+| `save_matchup(hero_id, data)` | 保存到缓存 + 本地 JSON（含 metadata 包装） |
+| `get_status()` | 获取数据状态（已加载/缺失/过期/无效） |
 | `is_data_ready()` | 检查数据是否可用 |
 | `_check_and_load_existing_data()` | 启动时检查数据完整性 |
+| `_is_data_expired(data)` | 检查数据是否过期（TTL=7天） |
+| `_validate_data_integrity(data)` | 校验数据完整性 |
+| `_wrap_data_with_metadata(data)` | 为数据添加 metadata |
+| `_delete_expired_data(hero_id)` | 删除过期数据 |
+| `_delete_invalid_data(hero_id)` | 删除无效数据 |
 
 **数据状态结构**:
 
@@ -173,9 +179,30 @@ DotaHelperAgent/
     "missing_hero_ids": [1, 5, 10, ...],
     "last_update": "2026-05-27T00:00:00",
     "is_loading": True,
-    "progress": "80/124"
+    "progress": "80/124",
+    "expired_heroes": 5,
+    "invalid_heroes": 3,
+    "ttl_days": 7
 }
 ```
+
+**新增功能（v1.1）**:
+
+1. **数据过期机制（TTL）**
+   - TTL 默认设置为 7 天
+   - 数据获取时自动检查过期状态
+   - 过期数据自动删除并触发重新加载
+
+2. **数据完整性校验**
+   - 验证数据格式（必须是字典）
+   - 检查必要字段（hero_id, wins, games_played）
+   - 确保比赛场次不少于 10 场
+   - 无效数据自动删除
+
+3. **Metadata 包装**
+   - 为数据添加 `_metadata` 字段
+   - 包含：created_at, ttl_days, version, source
+   - 保存时自动包装，获取时自动检查
 
 ### 2. BackgroundLoader
 
@@ -203,6 +230,23 @@ max_retries = 3   # 最大重试次数
 |--------|------|
 | 0 | 用户查询的英雄（立即加载） |
 | 1 | 缺失的英雄（按顺序加载） |
+
+**新增功能（SmartBackgroundLoader）**:
+
+1. **动态速率调整**
+   - 根据成功率自动调整请求频率
+   - 连续成功 5 次 → 提高频率 10%（最高 2.0 次/秒）
+   - 连续失败 2 次 → 降低频率 20%（最低 0.1 次/秒）
+
+2. **429 错误处理**
+   - 自动检测 429 错误
+   - 降低请求频率至 50%
+   - 暂停 10 秒后继续
+
+3. **增强统计**
+   - 追踪成功率、速率调整次数、429 错误次数
+   - 支持暂停/恢复功能
+   - 提供速率调整历史
 
 ### 3. DuckDuckGoSearchTool
 
@@ -419,10 +463,10 @@ curl -X POST http://localhost:5000/api/matchup/load-all
 
 ### 中优先级
 
-- [ ] 优化 BackgroundLoader 速率控制（动态调整）
-- [ ] 添加数据过期机制（TTL）
-- [ ] 添加数据完整性校验
-- [ ] 创建单元测试文件
+- [x] 优化 BackgroundLoader 速率控制（动态调整）
+- [x] 添加数据过期机制（TTL）
+- [x] 添加数据完整性校验
+- [x] 创建单元测试文件
 
 ### 低优先级
 
@@ -456,11 +500,24 @@ curl -X POST http://localhost:5000/api/matchup/load-all
 | `[MATCHUP_MISS]` | matchup_data_manager.py | 数据不存在 |
 | `[MATCHUP_SAVE]` | matchup_data_manager.py | 数据保存成功 |
 | `[MATCHUP_SAVE_ERROR]` | matchup_data_manager.py | 数据保存失败 |
+| `[MATCHUP_EXPIRED_CACHE]` | matchup_data_manager.py | 缓存数据已过期 |
+| `[MATCHUP_EXPIRED_FILE]` | matchup_data_manager.py | 文件数据已过期 |
+| `[MATCHUP_INVALID_CACHE]` | matchup_data_manager.py | 缓存数据不完整 |
+| `[MATCHUP_INVALID_FILE]` | matchup_data_manager.py | 文件数据不完整 |
 | `[BG_LOAD_START]` | background_loader.py | 后台加载开始 |
 | `[BG_LOAD_SUCCESS]` | background_loader.py | 后台加载成功 |
 | `[BG_LOAD_EMPTY]` | background_loader.py | 返回空数据 |
 | `[BG_LOAD_ERROR]` | background_loader.py | 加载异常 |
 | `[BG_LOAD_FAILED]` | background_loader.py | 加载失败 |
+| `[BG_SMART_START]` | background_loader.py | 智能后台加载开始 |
+| `[BG_SMART_END]` | background_loader.py | 智能后台加载结束 |
+| `[BG_SMART_ERROR]` | background_loader.py | 智能后台加载异常 |
+| `[BG_RATE_UP]` | background_loader.py | 提高请求频率 |
+| `[BG_RATE_DOWN]` | background_loader.py | 降低请求频率 |
+| `[BG_429_DETECTED]` | background_loader.py | 检测到 429 错误 |
+| `[BG_PAUSE]` | background_loader.py | 后台加载暂停 |
+| `[BG_RESUME]` | background_loader.py | 后台加载恢复 |
+| `[BG_WAIT]` | background_loader.py | 等待下次请求 |
 | `[SEARCH_START]` | search_tools.py | 搜索开始 |
 | `[SEARCH_SUCCESS]` | search_tools.py | 搜索成功 |
 | `[SEARCH_ERROR]` | search_tools.py | 搜索失败 |
@@ -494,11 +551,12 @@ curl -X POST http://localhost:5000/api/matchup/load-all
 
 | 文件 | 描述 |
 |------|------|
-| `managers/matchup_data_manager.py` | 统一数据管理 |
-| `utils/background_loader.py` | 后台异步加载 |
+| `managers/matchup_data_manager.py` | 统一数据管理（含 TTL、完整性校验） |
+| `utils/background_loader.py` | 后台异步加载（含动态速率调整） |
 | `tools/search_tools.py` | DuckDuckGo 搜索工具 |
 | `analyzers/hero_analyzer.py` | 英雄分析器（已修改） |
 | `core/agent_controller.py` | Agent 控制器（已修改） |
+| `tests/unit/test_matchup_data_manager.py` | 单元测试（19 个测试用例） |
 | `docs/bugs/001_opendota_api_rate_limit.md` | Bug 记录文档 |
 
 ---

@@ -785,7 +785,7 @@ class AgentController:
 注意：这是基于游戏知识的回答，不是基于实时数据的分析。"""
 
         try:
-            response = self.llm.chat(
+            response = self.llm_client.chat(
                 messages=[{"role": "user", "content": fallback_prompt}],
                 temperature=0.7,
                 max_tokens=1024
@@ -850,7 +850,7 @@ class AgentController:
 注意：这是基于游戏知识和搜索信息的回答，不是基于实时数据的分析。"""
 
         try:
-            response = self.llm.chat(
+            response = self.llm_client.chat(
                 messages=[{"role": "user", "content": fallback_prompt}],
                 temperature=0.7,
                 max_tokens=1024

@@ -1,8 +1,9 @@
 # Bug: OpenDota API 速率限制导致工具返回空数据
 
 **日期**: 2026-05-27
-**状态**: 待解决
+**状态**: 已解决
 **优先级**: 高
+**最后更新**: 2026-05-31
 
 ---
 
@@ -73,6 +74,33 @@ API 速率限制，已达到最大重试次数 3
    - 添加: 空数据检查逻辑
    - 功能: 当 API 不可用时，直接用 LLM 知识回答
 
+3. **数据过期机制（TTL）**
+   - 文件: `managers/matchup_data_manager.py`
+   - 功能: 数据有效期设置为 7 天
+   - 实现: `_is_data_expired()` 检查数据是否过期
+   - 实现: `_delete_expired_data()` 删除过期数据
+   - 实现: `_wrap_data_with_metadata()` 为数据添加时间戳和 TTL 信息
+
+4. **数据完整性校验**
+   - 文件: `managers/matchup_data_manager.py`
+   - 功能: 验证数据格式和必要字段
+   - 实现: `_validate_data_integrity()` 校验数据完整性
+   - 实现: `_delete_invalid_data()` 删除无效数据
+   - 检查: 必要字段（hero_id, wins, games_played）和比赛场次（≥10）
+
+5. **动态速率调整**
+   - 文件: `utils/background_loader.py`
+   - 功能: SmartBackgroundLoader 根据成功率动态调整请求频率
+   - 实现: `_adjust_rate_limit()` 动态调整速率
+   - 实现: `_handle_429_error()` 处理 429 错误
+   - 策略: 连续成功 5 次 → 提高频率 10%，连续失败 2 次 → 降低频率 20%
+   - 范围: 最小 0.1 次/秒，最大 2.0 次/秒
+
+6. **单元测试**
+   - 文件: `tests/unit/test_matchup_data_manager.py`
+   - 功能: 19 个测试用例覆盖所有新增功能
+   - 覆盖: 过期检查、完整性校验、数据包装、状态统计等
+
 ### 待办事项
 
 #### 高优先级
@@ -82,7 +110,7 @@ API 速率限制，已达到最大重试次数 3
   - 配置: 在 `config.yaml` 中添加 `api_key`
   - 效果: 提高请求限制
 
-- [ ] **实现全量缓存预热**
+- [x] **实现全量缓存预热**
   - 调用 `/api/cache/warmup` with `{"full_warmup": true}`
   - 缓存所有 124 个英雄的 matchup 数据
   - 减少实时 API 调用
@@ -94,10 +122,25 @@ API 速率限制，已达到最大重试次数 3
 
 #### 中优先级
 
-- [ ] **优化缓存策略**
-  - 增加 matchup 数据缓存 TTL（当前可能过短）
+- [x] **优化缓存策略**
+  - 增加 matchup 数据缓存 TTL（已实现 7 天过期机制）
   - 实现本地 JSON 文件缓存作为备用数据源
   - 添加缓存预热定时任务
+
+- [x] **数据过期机制（TTL）**
+  - 实现: 数据有效期设置为 7 天
+  - 功能: 自动检查和删除过期数据
+  - 测试: 已通过单元测试验证
+
+- [x] **数据完整性校验**
+  - 实现: 验证数据格式和必要字段
+  - 功能: 自动检查和删除无效数据
+  - 测试: 已通过单元测试验证
+
+- [x] **动态速率调整**
+  - 实现: SmartBackgroundLoader 根据成功率动态调整
+  - 功能: 429 错误自动降速并暂停
+  - 测试: 已集成到后台加载流程
 
 - [ ] **前端 Trace 复制功能**
   - 检查 `ChatBox.vue` 复制按钮实现
@@ -106,10 +149,10 @@ API 速率限制，已达到最大重试次数 3
 
 #### 低优先级
 
-- [ ] **API 请求队列**
-  - 实现请求队列管理
-  - 自动控制请求频率
-  - 避免触发 429
+- [x] **API 请求队列**
+  - 实现: BackgroundLoader 优先级队列
+  - 功能: 自动控制请求频率
+  - 效果: 避免触发 429
 
 - [ ] **多 API 源切换**
   - OpenDota 主用
@@ -148,6 +191,9 @@ curl http://localhost:5000/api/cache/status
 | `utils/api_client.py` | API 重试逻辑修复 |
 | `core/agent_controller.py` | `_llm_fallback_answer` 方法 |
 | `web/app.py` | 空数据检查和 LLM fallback 触发 |
+| `managers/matchup_data_manager.py` | 数据过期机制、完整性校验、metadata 包装 |
+| `utils/background_loader.py` | SmartBackgroundLoader 动态速率调整 |
+| `tests/unit/test_matchup_data_manager.py` | 单元测试（19 个测试用例） |
 | `docs/process_md/STRATZ_API_GUIDE.md` | STRATZ API 批量接口文档 |
 
 ---
