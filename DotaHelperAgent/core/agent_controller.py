@@ -759,13 +759,14 @@ class AgentController:
             except Exception as e:
                 logger.error_ctx(f"LLM fallback 失败: {e}", session_id=session_id)
 
-    def _llm_fallback_answer(self, thought: AgentThought) -> Optional[str]:
+    def _llm_fallback_answer(self, thought: AgentThought, query_type: str = "dota_query") -> Optional[str]:
         """LLM fallback 回答
         
         当工具执行失败时，直接使用 LLM 的知识回答问题
         
         Args:
             thought: Agent 思考状态
+            query_type: 查询类型（"general_chat" 或 "dota_query"）
             
         Returns:
             LLM 回答内容
@@ -773,7 +774,15 @@ class AgentController:
         query = thought.query or thought.context.get('query', '')
         session_id = thought.context.get('session_id')
         
-        fallback_prompt = f"""你是一个 Dota 2 游戏专家助手。由于数据 API 暂时不可用，请直接根据你的游戏知识回答用户问题。
+        # 根据查询类型使用不同的 prompt
+        if query_type == "general_chat":
+            fallback_prompt = f"""你是一个 Dota 2 游戏助手，同时也是一个通用的 AI 助手。请直接回答用户的问题。
+
+用户问题：{query}
+
+请提供友好、专业、详细的回答。如果问题涉及 Dota 2，请结合你的游戏知识给出建议；如果是通用问题，请给出通用的回答。"""
+        else:
+            fallback_prompt = f"""你是一个 Dota 2 游戏专家助手。由于数据 API 暂时不可用，请直接根据你的游戏知识回答用户问题。
 
 用户问题：{query}
 
@@ -989,15 +998,54 @@ class AgentController:
                 })
                 logger.info_ctx("使用 LLM fallback 回答", session_id=session_id)
             else:
-                # 合并所有观察结果
-                final_data = self._merge_observations(thought.observations)
-                thought.set_complete({
-                    "answer": final_data,
-                    "reasoning": thought.reasoning_steps,
-                    "actions": thought.actions_taken,
-                    "confidence": self._evaluate_result_quality(thought)
-                })
-                logger.info_ctx("观察结果合并完成", session_id=session_id)
+                # 检查是否是阵容分析结果，需要生成推荐答案
+                composition_analysis = None
+                for obs in thought.observations:
+                    if isinstance(obs, dict) and self._is_composition_analysis(obs):
+                        composition_analysis = obs
+                        break
+                
+                if composition_analysis and self._should_generate_recommendation(thought.query):
+                    # 基于阵容分析结果生成推荐英雄答案
+                    logger.info_ctx("检测到阵容分析结果，生成推荐答案", session_id=session_id)
+                    try:
+                        recommendation = self._generate_hero_recommendation(
+                            thought.query, 
+                            composition_analysis, 
+                            thought.context
+                        )
+                        thought.set_complete({
+                            "answer": {"message": recommendation},
+                            "reasoning": thought.reasoning_steps,
+                            "actions": thought.actions_taken,
+                            "confidence": 0.8,
+                            "source": "hero_recommendation"
+                        })
+                        logger.info_ctx("推荐英雄答案生成成功", session_id=session_id)
+                    except Exception as e:
+                        logger.error_ctx(
+                            f"推荐英雄答案生成失败: {e}",
+                            session_id=session_id,
+                            extra_data={"error": str(e)}
+                        )
+                        # 失败时使用合并的观察结果
+                        final_data = self._merge_observations(thought.observations)
+                        thought.set_complete({
+                            "answer": final_data,
+                            "reasoning": thought.reasoning_steps,
+                            "actions": thought.actions_taken,
+                            "confidence": self._evaluate_result_quality(thought)
+                        })
+                else:
+                    # 合并所有观察结果
+                    final_data = self._merge_observations(thought.observations)
+                    thought.set_complete({
+                        "answer": final_data,
+                        "reasoning": thought.reasoning_steps,
+                        "actions": thought.actions_taken,
+                        "confidence": self._evaluate_result_quality(thought)
+                    })
+                    logger.info_ctx("观察结果合并完成", session_id=session_id)
         else:
             thought.set_complete({
                 "answer": {"message": "无法获取有效数据"},
@@ -1038,6 +1086,125 @@ class AgentController:
             raise Exception(response["error"])
 
         return response['choices'][0]['message']['content']
+
+    def _is_composition_analysis(self, observation: Dict[str, Any]) -> bool:
+        """检查观察结果是否是阵容分析结果
+        
+        Args:
+            observation: 观察结果
+            
+        Returns:
+            bool: 是否是阵容分析结果
+        """
+        composition_keys = {'our_advantages', 'enemy_advantages', 'overall_advantage', 'conclusion'}
+        return isinstance(observation, dict) and any(key in observation for key in composition_keys)
+
+    def _should_generate_recommendation(self, query: str) -> bool:
+        """检查查询是否需要生成推荐答案
+        
+        Args:
+            query: 用户查询
+            
+        Returns:
+            bool: 是否需要生成推荐答案
+        """
+        recommendation_keywords = ['推荐', '建议', '选什么', '用什么', '适合']
+        return any(keyword in query for keyword in recommendation_keywords)
+
+    def _generate_hero_recommendation(
+        self, 
+        query: str, 
+        composition_analysis: Dict[str, Any], 
+        context: Dict[str, Any]
+    ) -> str:
+        """基于阵容分析结果生成推荐英雄答案
+        
+        Args:
+            query: 用户查询
+            composition_analysis: 阵容分析结果
+            context: 上下文信息
+            
+        Returns:
+            str: 推荐英雄答案
+        """
+        session_id = context.get('session_id')
+        
+        # 提取阵容信息
+        our_heroes = context.get('our_heroes', [])
+        enemy_heroes = context.get('enemy_heroes', [])
+        
+        # 构造推荐提示
+        system_prompt = """你是一个 Dota 2 游戏专家助手。根据阵容分析结果，为用户推荐合适的英雄。
+
+推荐要求：
+1. 基于阵容分析结果（优势、劣势、整体评估）
+2. 考虑我方已有英雄的协同性和阵容平衡
+3. 如果有敌方英雄，考虑克制关系
+4. 如果有强势英雄列表，优先推荐强势英雄中适合的英雄
+5. 给出明确的推荐英雄和理由
+6. 理由要简洁明了，包含：
+   - 为什么推荐这个英雄（协同性、克制性、补位需求、强势程度等）
+   - 这个英雄如何弥补阵容短板
+   - 这个英雄如何增强阵容优势"""
+
+        # 提取强势英雄列表（如果有）
+        meta_heroes = context.get('meta_heroes', [])
+        meta_heroes_info = ""
+        if meta_heroes and len(meta_heroes) > 0:
+            # 只显示前10个强势英雄，避免信息过长
+            top_meta_heroes = meta_heroes[:10]
+            meta_heroes_names = [h.get('hero_name', '未知') for h in top_meta_heroes]
+            meta_heroes_info = f"\n当前版本强势英雄（前10）：{', '.join(meta_heroes_names)}"
+
+        # 构造用户消息
+        user_message = f"""用户查询：{query}
+
+我方英雄：{', '.join(our_heroes) if our_heroes else '未提供'}
+敌方英雄：{', '.join(enemy_heroes) if enemy_heroes else '未提供'}
+{meta_heroes_info}
+
+阵容分析结果：
+- 我方优势：{composition_analysis.get('our_advantages', [])}
+- 敌方优势：{composition_analysis.get('enemy_advantages', [])}
+- 整体评估：{composition_analysis.get('overall_advantage', 0)}
+- 结论：{composition_analysis.get('conclusion', '未分析')}
+
+请基于以上信息，推荐合适的英雄并给出理由。"""
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message}
+        ]
+
+        try:
+            response = self.llm_client.chat(
+                messages=messages,
+                temperature=0.7,
+                max_tokens=1024
+            )
+
+            if "error" in response:
+                logger.error_ctx(
+                    f"LLM 推荐生成失败: {response['error']}",
+                    session_id=session_id
+                )
+                raise Exception(response["error"])
+
+            recommendation = response['choices'][0]['message']['content']
+            logger.info_ctx(
+                "推荐英雄答案生成成功",
+                session_id=session_id,
+                extra_data={"recommendation_length": len(recommendation)}
+            )
+            return recommendation
+
+        except Exception as e:
+            logger.error_ctx(
+                f"推荐英雄答案生成异常: {e}",
+                session_id=session_id,
+                extra_data={"error": str(e)}
+            )
+            raise
 
     def _finalize(self, thought: AgentThought) -> None:
         """Finalize 步骤 - 强制结束
@@ -2027,22 +2194,59 @@ class AgentController:
             "sub_goals_results": results
         }
         
-        # 如果有成功的子目标，尝试提取主要答案
-        if results:
-            # 优先使用最后一个子目标的结果作为主要答案
-            last_result = results[-1].get("result", {})
+        # 检查是否需要生成推荐答案
+        if results and self._should_generate_recommendation(goal_plan.original_query):
+            # 检查是否有阵容分析结果和强势英雄列表
+            composition_analysis = None
+            meta_heroes = None
             
-            if isinstance(last_result, dict) and "answer" in last_result:
-                final_answer["answer"] = last_result["answer"]
-            elif isinstance(last_result, dict):
-                final_answer["answer"] = last_result
-            elif isinstance(last_result, list):
-                # 如果结果是列表（如英雄推荐列表），直接作为 answer
-                final_answer["answer"] = last_result
+            for result in results:
+                result_data = result.get("result", {})
+                if isinstance(result_data, dict):
+                    if self._is_composition_analysis(result_data):
+                        composition_analysis = result_data
+                    elif "meta_heroes" in result_data:
+                        meta_heroes = result_data.get("meta_heroes")
+            
+            # 如果有阵容分析结果，生成推荐答案
+            if composition_analysis:
+                logger.info_ctx(
+                    "检测到阵容分析结果，生成推荐答案",
+                    session_id=None,
+                    extra_data={"has_meta_heroes": meta_heroes is not None}
+                )
+                try:
+                    # 构造上下文信息
+                    context = {
+                        "our_heroes": goal_plan.original_query.split("我方英雄有")[1].split("，")[0].split(",") if "我方英雄有" in goal_plan.original_query else [],
+                        "enemy_heroes": goal_plan.original_query.split("敌方英雄有")[1].split("，")[0].split(",") if "敌方英雄有" in goal_plan.original_query else [],
+                        "meta_heroes": meta_heroes
+                    }
+                    
+                    recommendation = self._generate_hero_recommendation(
+                        goal_plan.original_query,
+                        composition_analysis,
+                        context
+                    )
+                    final_answer["answer"] = {"message": recommendation}
+                    logger.info_ctx("推荐英雄答案生成成功", session_id=None)
+                except Exception as e:
+                    logger.error_ctx(
+                        f"推荐英雄答案生成失败: {e}",
+                        session_id=None,
+                        extra_data={"error": str(e)}
+                    )
+                    # 失败时使用原有逻辑
+                    final_answer["answer"] = self._extract_answer_from_results(results)
             else:
-                final_answer["answer"] = {"message": str(last_result)}
+                # 没有阵容分析结果，使用原有逻辑
+                final_answer["answer"] = self._extract_answer_from_results(results)
         else:
-            final_answer["answer"] = {"message": "未能完成任何子目标"}
+            # 不需要生成推荐答案，使用原有逻辑
+            if results:
+                final_answer["answer"] = self._extract_answer_from_results(results)
+            else:
+                final_answer["answer"] = {"message": "未能完成任何子目标"}
         
         logger.info_ctx(
             "子目标结果合并完成",
@@ -2055,3 +2259,27 @@ class AgentController:
         )
         
         return final_answer
+    
+    def _extract_answer_from_results(self, results: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """从子目标结果中提取答案
+        
+        Args:
+            results: 子目标结果列表
+            
+        Returns:
+            Dict: 提取的答案
+        """
+        if not results:
+            return {"message": "未能完成任何子目标"}
+        
+        # 优先使用最后一个子目标的结果作为主要答案
+        last_result = results[-1].get("result", {})
+        
+        if isinstance(last_result, dict) and "answer" in last_result:
+            return last_result["answer"]
+        elif isinstance(last_result, dict):
+            return last_result
+        elif isinstance(last_result, list):
+            return last_result
+        else:
+            return {"message": str(last_result)}

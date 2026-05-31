@@ -1731,6 +1731,25 @@ def chat_stream() -> Response:
     })
 
 
+def _emit_sse_event(event_type: str, data: dict, trace_ctx=None) -> str:
+    """生成 SSE 事件字符串
+    
+    Args:
+        event_type: 事件类型
+        data: 事件数据
+        trace_ctx: Trace 上下文
+        
+    Returns:
+        SSE 事件字符串
+    """
+    if trace_ctx:
+        trace_dict = trace_ctx.to_dict() if hasattr(trace_ctx, 'to_dict') else trace_ctx
+        if isinstance(trace_dict, dict):
+            data['trace'] = trace_dict
+    
+    return f"event: {event_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
 def _execute_streaming(controller, query: str, context: dict, start_time: float, trace_ctx=None):
     """真正的流式执行 ReAct 循环（支持目标分解，带 Trace 支持）"""
     from core.agent_controller import AgentThought, AgentState
@@ -1759,11 +1778,42 @@ def _execute_streaming(controller, query: str, context: dict, start_time: float,
         goal_decomposition_data = {
             'step': 'goal_decomposition_result',
             'main_goal': goal_plan.main_goal,
+            'query_type': goal_plan.query_type,
             'sub_goals': [sg.to_dict() for sg in goal_plan.sub_goals]
         }
         yield f"event: goal_decomposition_result\ndata: {json.dumps(goal_decomposition_data)}\n\n"
         
         thought.add_reasoning(f"目标分解完成: {goal_plan.main_goal}")
+        thought.add_reasoning(f"查询类型: {goal_plan.query_type}")
+        
+        # 如果是通用问答，直接调用 LLM 回答
+        if goal_plan.query_type == "general_chat":
+            app_logger.info("通用问答查询，直接调用 LLM 回答")
+            yield f"event: think\ndata: {json.dumps({'step': 'think', 'content': '通用问答查询，直接使用 LLM 回答'})}\n\n"
+            
+            try:
+                # 直接调用 LLM fallback
+                fallback_response = controller._llm_fallback_answer(thought, query_type="general_chat")
+                if fallback_response:
+                    thought.add_reasoning("LLM 回答成功")
+                    thought.set_complete({"llm_fallback_answer": fallback_response})
+                    
+                    # 输出最终答案
+                    answer_text = _format_answer_for_stream(fallback_response)
+                    yield f"event: synthesize\ndata: {json.dumps({'step': 'synthesize', 'answer': answer_text})}\n\n"
+                    
+                    app_logger.info("通用问答回答完成")
+                else:
+                    error_msg = "LLM 回答失败"
+                    thought.set_failed(error_msg)
+                    yield f"event: error\ndata: {json.dumps({'error': error_msg})}\n\n"
+            except Exception as e:
+                error_msg = f"LLM 回答异常: {str(e)}"
+                thought.set_failed(error_msg)
+                yield f"event: error\ndata: {json.dumps({'error': error_msg})}\n\n"
+            
+            return
+        
         thought.add_reasoning(f"子目标数量: {len(goal_plan.sub_goals)}")
         
         # 如果只有一个子目标，使用传统 ReAct 循环
@@ -1999,8 +2049,15 @@ def _execute_single_goal_streaming(controller, thought, sub_goal, start_time: fl
                         thought.set_complete({"llm_fallback_answer": fallback_response})
                         msg_preview = fallback_response[:200] + "..."
                         yield f"event: observation\ndata: {json.dumps({'step': 'observation', 'tool': 'llm_fallback', 'result': {'message': msg_preview}})}\n\n"
+                    else:
+                        # 即使失败也标记为完成，避免重复执行
+                        thought.add_reasoning("LLM fallback 返回空内容，使用默认回答")
+                        thought.set_complete({"llm_fallback_answer": "抱歉，暂时无法获取相关信息。"})
+                        yield f"event: observation\ndata: {json.dumps({'step': 'observation', 'tool': 'llm_fallback', 'result': {'message': '使用默认回答'}})}\n\n"
                 except Exception as e:
                     thought.add_reasoning(f"LLM fallback 失败: {str(e)}")
+                    # 异常时也标记为失败，避免重复执行
+                    thought.set_failed(f"LLM fallback 失败: {str(e)}")
                     yield f"event: error\ndata: {json.dumps({'error': f'LLM fallback 失败: {str(e)}'})}\n\n"
 
             # 5. Reflect - 反思
@@ -2191,8 +2248,15 @@ def _execute_sub_goal_streaming(controller, thought, sub_goal, trace_ctx=None):
                         sub_thought.set_complete({"llm_fallback_answer": fallback_response})
                         msg_preview = fallback_response[:200] + "..."
                         yield f"event: observation\ndata: {json.dumps({'step': 'observation', 'tool': 'llm_fallback', 'result': {'message': msg_preview}})}\n\n"
+                    else:
+                        # 即使失败也标记为完成，避免重复执行
+                        sub_thought.add_reasoning("LLM fallback 返回空内容，使用默认回答")
+                        sub_thought.set_complete({"llm_fallback_answer": "抱歉，暂时无法获取相关信息。"})
+                        yield f"event: observation\ndata: {json.dumps({'step': 'observation', 'tool': 'llm_fallback', 'result': {'message': '使用默认回答'}})}\n\n"
                 except Exception as e:
                     sub_thought.add_reasoning(f"LLM fallback 失败: {str(e)}")
+                    # 异常时也标记为失败，避免重复执行
+                    sub_thought.set_failed(f"LLM fallback 失败: {str(e)}")
                     yield f"event: error\ndata: {json.dumps({'error': f'LLM fallback 失败: {str(e)}'})}\n\n"
 
             # 5. Reflect - 反思（可选）

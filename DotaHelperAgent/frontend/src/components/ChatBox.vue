@@ -102,14 +102,16 @@ watch(
   () => scrollToBottom()
 )
 
-const sendMessage = async (externalQuery?: string) => {
-  const query = externalQuery || inputText.value.trim()
+const sendMessage = async (externalQuery?: string | KeyboardEvent) => {
+  const query = typeof externalQuery === 'string' 
+    ? externalQuery 
+    : inputText.value.trim()
   
   if (!query || chatStore.isStreaming) {
     return
   }
 
-  if (!externalQuery) {
+  if (typeof externalQuery !== 'string') {
     inputText.value = ''
   }
 

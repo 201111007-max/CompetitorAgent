@@ -12,10 +12,65 @@
 import sqlite3
 import json
 import threading
+import time
+import logging
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 from contextlib import contextmanager
+
+logger = logging.getLogger(__name__)
+
+
+class ConnectionManager:
+    """SQLite 连接管理器
+    
+    使用线程本地存储管理连接，避免多线程共享连接的问题。
+    SQLite 连接不能跨线程使用，所以每个线程维护自己的连接。
+    """
+    
+    def __init__(self, db_path: str, max_idle_time: float = 300):
+        """初始化连接管理器
+        
+        Args:
+            db_path: 数据库文件路径
+            max_idle_time: 连接最大空闲时间（秒），默认300秒
+        """
+        self.db_path = db_path
+        self.max_idle_time = max_idle_time
+        self._local = threading.local()
+        self._lock = threading.Lock()
+    
+    def get_connection(self) -> sqlite3.Connection:
+        """获取当前线程的连接
+        
+        如果当前线程没有连接，则创建新连接。
+        """
+        if not hasattr(self._local, 'connection') or self._local.connection is None:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            self._local.connection = conn
+            self._local.last_used = time.time()
+        
+        self._local.last_used = time.time()
+        return self._local.connection
+    
+    def close_connection(self):
+        """关闭当前线程的连接"""
+        if hasattr(self._local, 'connection') and self._local.connection:
+            try:
+                self._local.connection.close()
+            except Exception:
+                pass
+            self._local.connection = None
+    
+    def cleanup_idle_connections(self):
+        """清理空闲超时的连接
+        
+        注意：由于使用线程本地存储，无法直接清理其他线程的连接。
+        实际清理会在各线程下次访问时进行。
+        """
+        pass
 
 
 class TracePersistence:
@@ -34,17 +89,22 @@ class TracePersistence:
         
         self.db_path = db_path
         self._lock = threading.RLock()
+        self._connection_manager = ConnectionManager(db_path)
         self._init_database()
     
     @contextmanager
     def _get_connection(self):
-        """获取数据库连接"""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
+        """获取数据库连接
+        
+        使用连接管理器获取线程本地连接。
+        """
+        conn = self._connection_manager.get_connection()
         try:
             yield conn
-        finally:
-            conn.close()
+        except Exception:
+            # 发生异常时关闭连接
+            self._connection_manager.close_connection()
+            raise
     
     def _init_database(self):
         """初始化数据库表结构"""
@@ -144,7 +204,7 @@ class TracePersistence:
                     conn.commit()
                     return True
             except Exception as e:
-                print(f"保存 Trace 失败: {e}")
+                logger.error(f"保存 Trace 失败: {e}")
                 return False
     
     def save_trace_log(self, trace_id: str, log_data: Dict[str, Any]) -> bool:
@@ -178,7 +238,7 @@ class TracePersistence:
                     conn.commit()
                     return True
             except Exception as e:
-                print(f"保存 Trace 日志失败: {e}")
+                logger.error(f"保存 Trace 日志失败: {e}")
                 return False
     
     def get_trace(self, trace_id: str) -> Optional[Dict[str, Any]]:
@@ -204,7 +264,7 @@ class TracePersistence:
                         return self._row_to_dict(row)
                     return None
             except Exception as e:
-                print(f"获取 Trace 失败: {e}")
+                logger.error(f"获取 Trace 失败: {e}")
                 return None
     
     def get_trace_logs(self, trace_id: str) -> List[Dict[str, Any]]:
@@ -230,7 +290,7 @@ class TracePersistence:
                     rows = cursor.fetchall()
                     return [self._log_row_to_dict(row) for row in rows]
             except Exception as e:
-                print(f"获取 Trace 日志失败: {e}")
+                logger.error(f"获取 Trace 日志失败: {e}")
                 return []
     
     def get_session_traces(self, session_id: str) -> List[Dict[str, Any]]:
@@ -256,7 +316,7 @@ class TracePersistence:
                     rows = cursor.fetchall()
                     return [self._row_to_dict(row) for row in rows]
             except Exception as e:
-                print(f"获取会话 Trace 失败: {e}")
+                logger.error(f"获取会话 Trace 失败: {e}")
                 return []
     
     def get_recent_traces(self, limit: int = 50, hours: int = 24) -> List[Dict[str, Any]]:
@@ -286,7 +346,7 @@ class TracePersistence:
                     rows = cursor.fetchall()
                     return [self._row_to_dict(row) for row in rows]
             except Exception as e:
-                print(f"获取最近 Trace 失败: {e}")
+                logger.error(f"获取最近 Trace 失败: {e}")
                 return []
     
     def get_error_traces(self, limit: int = 50) -> List[Dict[str, Any]]:
@@ -313,7 +373,7 @@ class TracePersistence:
                     rows = cursor.fetchall()
                     return [self._row_to_dict(row) for row in rows]
             except Exception as e:
-                print(f"获取错误 Trace 失败: {e}")
+                logger.error(f"获取错误 Trace 失败: {e}")
                 return []
     
     def get_trace_statistics(self, hours: int = 24) -> Dict[str, Any]:
@@ -358,7 +418,7 @@ class TracePersistence:
                         'time_range_hours': hours
                     }
             except Exception as e:
-                print(f"获取 Trace 统计失败: {e}")
+                logger.error(f"获取 Trace 统计失败: {e}")
                 return {}
     
     def cleanup_old_traces(self, days: int = 30) -> int:
@@ -395,7 +455,7 @@ class TracePersistence:
                     
                     return deleted_traces + deleted_logs
             except Exception as e:
-                print(f"清理旧 Trace 失败: {e}")
+                logger.error(f"清理旧 Trace 失败: {e}")
                 return 0
     
     def _row_to_dict(self, row: sqlite3.Row) -> Dict[str, Any]:

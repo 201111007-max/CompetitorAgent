@@ -89,6 +89,7 @@ class GoalPlan:
     """
     original_query: str
     main_goal: str
+    query_type: str = "dota_query"  # "general_chat" 或 "dota_query"
     sub_goals: List[SubGoal] = field(default_factory=list)
     created_at: float = field(default_factory=lambda: __import__('time').time())
     
@@ -148,6 +149,7 @@ class GoalPlan:
         return {
             "original_query": self.original_query,
             "main_goal": self.main_goal,
+            "query_type": self.query_type,
             "sub_goals": [g.to_dict() for g in self.sub_goals],
             "created_at": self.created_at,
             "is_complete": self.is_complete(),
@@ -164,10 +166,13 @@ class GoalPlanner:
     GOAL_DECOMPOSITION_PROMPT = """你是一个 Dota 2 游戏助手，负责将用户的复杂查询分解为可执行的子目标。
 
 ## 任务
-分析用户查询，将其分解为一系列子目标。每个子目标应该：
-1. 有明确的描述
-2. 对应一个具体的工具（如果需要）
-3. 可能有依赖关系（某些子目标需要先完成其他子目标）
+首先判断用户查询的类型，然后根据类型进行相应的处理：
+
+1. **通用问答查询**：如"介绍下你自己"、"你好"、"什么是..."、"帮我..."等不涉及 Dota 2 具体内容的查询
+   - 直接标记为 general_chat 类型，不需要分解子目标
+   
+2. **Dota 相关查询**：涉及英雄推荐、物品建议、技能加点、克制关系等 Dota 2 具体内容的查询
+   - 分解为一系列子目标，每个子目标对应一个具体的工具
 
 ## 可用工具
 
@@ -187,6 +192,7 @@ class GoalPlanner:
 
 ```json
 {{
+    "query_type": "general_chat 或 dota_query",
     "main_goal": "主目标描述",
     "sub_goals": [
         {{
@@ -213,11 +219,12 @@ class GoalPlanner:
 
 ## 注意事项
 
-1. 只分解必要的子目标，不要过度分解
-2. 工具名称必须从可用工具列表中选择
-3. 参数值从用户查询中提取，不要编造
-4. 合理安排依赖关系，确保执行顺序正确
-5. 必须返回有效的 JSON，不要添加额外内容"""
+1. **查询类型判断优先**：首先判断 query_type，如果是通用问答，sub_goals 可以为空数组
+2. 只分解必要的子目标，不要过度分解
+3. 工具名称必须从可用工具列表中选择
+4. 参数值从用户查询中提取，不要编造
+5. 合理安排依赖关系，确保执行顺序正确
+6. 必须返回有效的 JSON，不要添加额外内容"""
     
     def __init__(self, llm_client, tool_registry):
         """初始化目标规划器
@@ -280,7 +287,30 @@ class GoalPlanner:
             content = response['choices'][0]['message']['content']
             plan_data = self._parse_plan(content)
             
-            # 创建 GoalPlan
+            # 获取查询类型
+            query_type = plan_data.get("query_type", "dota_query")
+            
+            # 如果是通用问答，创建特殊的 GoalPlan
+            if query_type == "general_chat":
+                goal_plan = GoalPlan(
+                    original_query=query,
+                    main_goal=plan_data.get("main_goal", "直接回答用户问题"),
+                    query_type="general_chat",
+                    sub_goals=[]  # 通用问答不需要子目标
+                )
+                
+                logger.info_ctx(
+                    "识别为通用问答查询",
+                    session_id=trace_ctx.session_id if trace_ctx else None,
+                    extra_data={
+                        "query_type": "general_chat",
+                        "main_goal": goal_plan.main_goal
+                    }
+                )
+                
+                return goal_plan
+            
+            # Dota 相关查询，正常分解子目标
             sub_goals = [
                 SubGoal(
                     id=g["id"],
@@ -299,6 +329,7 @@ class GoalPlanner:
             goal_plan = GoalPlan(
                 original_query=query,
                 main_goal=plan_data.get("main_goal", query),
+                query_type="dota_query",
                 sub_goals=sub_goals
             )
             
@@ -306,6 +337,7 @@ class GoalPlanner:
                 "目标分解完成",
                 session_id=trace_ctx.session_id if trace_ctx else None,
                 extra_data={
+                    "query_type": "dota_query",
                     "main_goal": goal_plan.main_goal,
                     "sub_goals_count": len(goal_plan.sub_goals),
                     "sub_goals": [{"id": sg.id, "description": sg.description, "dependencies": sg.dependencies} for sg in goal_plan.sub_goals]

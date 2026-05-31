@@ -15,6 +15,8 @@ from datetime import datetime
 class MemoryLogHandler(logging.Handler):
     """
     内存日志处理器 - 缓存最近 N 条日志，支持实时推送和持久化
+    
+    使用相对索引（deque 中的位置）而非全局计数器，避免计数器无限增长。
     """
 
     def __init__(self, max_entries: int = 1000, enable_persistence: bool = False):
@@ -24,9 +26,9 @@ class MemoryLogHandler(logging.Handler):
         self._logs: deque = deque(maxlen=max_entries)
         self._session_logs: Dict[str, deque] = {}
         
+        # 使用相对索引，不需要全局计数器
         self._trace_index: Dict[str, List[int]] = {}
         self._error_index: List[int] = []
-        self._log_counter = 0
         
         self._lock = threading.RLock()
         self._subscribers: List[Callable] = []
@@ -34,16 +36,30 @@ class MemoryLogHandler(logging.Handler):
         self._running = True
         
         self._persistence = None
+        self._persistence_queue = None
+        self._persistence_worker = None
+        
         if enable_persistence:
             try:
                 from utils.trace_persistence import get_trace_persistence
                 self._persistence = get_trace_persistence()
+                
+                # 创建持久化队列和后台线程
+                self._persistence_queue = queue.Queue()
+                self._persistence_worker = threading.Thread(
+                    target=self._process_persistence_queue, daemon=True
+                )
+                self._persistence_worker.start()
             except Exception as e:
-                print(f"初始化 Trace 持久化失败: {e}")
+                self._get_logger().error(f"初始化 Trace 持久化失败: {e}")
                 self.enable_persistence = False
 
         self._worker = threading.Thread(target=self._process_queue, daemon=True)
         self._worker.start()
+    
+    def _get_logger(self):
+        """获取 logger 实例"""
+        return logging.getLogger(__name__)
 
     def emit(self, record: logging.LogRecord):
         """接收日志记录"""
@@ -56,6 +72,22 @@ class MemoryLogHandler(logging.Handler):
             try:
                 record = self._queue.get(timeout=1)
                 self._store_log(record)
+            except queue.Empty:
+                continue
+    
+    def _process_persistence_queue(self):
+        """后台处理持久化队列
+        
+        异步处理持久化任务，避免阻塞日志处理。
+        """
+        while self._running:
+            try:
+                trace_id, log_entry = self._persistence_queue.get(timeout=1)
+                if self._persistence:
+                    try:
+                        self._persistence.save_trace_log(trace_id, log_entry)
+                    except Exception as e:
+                        self._get_logger().error(f"持久化 Trace 日志失败: {e}")
             except queue.Empty:
                 continue
 
@@ -74,37 +106,72 @@ class MemoryLogHandler(logging.Handler):
         
         return None
 
-    def _store_log(self, record: logging.LogRecord):
-        """存储日志并建立索引"""
-        log_entry = self._format_record(record)
-
-        with self._lock:
-            idx = self._log_counter
-            
-            self._logs.append(log_entry)
-            self._log_counter += 1
-            
-            trace_id = self._extract_trace_id(log_entry)
+    def _cleanup_invalid_indices(self):
+        """清理失效的索引
+        
+        当 deque 滚动时，所有旧索引都会失效。
+        由于使用相对索引（deque 中的位置），当添加新日志导致旧日志被删除时，
+        需要将所有索引减 1（相当于所有日志向前移动了一位）。
+        
+        优化策略：当 deque 滚动时，清空所有索引并重建。
+        """
+        # 清空所有索引
+        self._trace_index.clear()
+        self._error_index.clear()
+        
+        # 重建索引
+        for i, log in enumerate(self._logs):
+            trace_id = self._extract_trace_id(log)
             if trace_id:
                 if trace_id not in self._trace_index:
                     self._trace_index[trace_id] = []
-                self._trace_index[trace_id].append(idx)
-                
-                if self.enable_persistence and self._persistence:
-                    try:
-                        self._persistence.save_trace_log(trace_id, log_entry)
-                    except Exception as e:
-                        print(f"持久化 Trace 日志失败: {e}")
+                self._trace_index[trace_id].append(i)
             
-            if log_entry.get('level') == 'ERROR':
-                self._error_index.append(idx)
+            if log.get('level') == 'ERROR':
+                self._error_index.append(i)
+
+    def _store_log(self, record: logging.LogRecord):
+        """存储日志并建立索引
+        
+        使用相对索引（deque 中的位置），避免全局计数器无限增长。
+        """
+        log_entry = self._format_record(record)
+
+        with self._lock:
+            old_len = len(self._logs)
+            
+            # 使用当前 deque 长度作为新日志的索引
+            idx = len(self._logs)
+            
+            self._logs.append(log_entry)
+            new_len = len(self._logs)
+            
+            # 如果 deque 滚动（满了），需要重建索引
+            if new_len < old_len + 1:
+                self._cleanup_invalid_indices()
+            else:
+                # 正常添加，建立索引
+                trace_id = self._extract_trace_id(log_entry)
+                if trace_id:
+                    if trace_id not in self._trace_index:
+                        self._trace_index[trace_id] = []
+                    self._trace_index[trace_id].append(idx)
+                    
+                    # 异步持久化（如果启用）
+                    if self.enable_persistence and self._persistence_queue:
+                        self._persistence_queue.put((trace_id, log_entry))
+                
+                if log_entry.get('level') == 'ERROR':
+                    self._error_index.append(idx)
             
             session_id = getattr(record, 'session_id', 'global')
             if session_id not in self._session_logs:
                 self._session_logs[session_id] = deque(maxlen=self.max_entries)
             self._session_logs[session_id].append(log_entry)
 
-        for callback in self._subscribers:
+        # 锁外调用回调，避免阻塞
+        subscribers = list(self._subscribers)
+        for callback in subscribers:
             try:
                 callback(log_entry)
             except Exception:
@@ -192,11 +259,18 @@ class MemoryLogHandler(logging.Handler):
         """
         with self._lock:
             indices = self._trace_index.get(trace_id, [])
+            if not indices:
+                return []
+            
             logs = []
-            all_logs = list(self._logs)
+            # 直接使用索引访问 deque（索引就是 deque 中的位置）
             for idx in indices:
-                if idx < len(all_logs):
-                    logs.append(all_logs[idx])
+                try:
+                    logs.append(self._logs[idx])
+                except IndexError:
+                    # 索引失效，跳过
+                    pass
+            
             return logs
     
     def get_errors(self, limit: int = 50) -> List[Dict[str, Any]]:
@@ -209,11 +283,21 @@ class MemoryLogHandler(logging.Handler):
             最近的错误日志列表
         """
         with self._lock:
-            all_logs = list(self._logs)
+            if not self._error_index:
+                return []
+            
             errors = []
-            for idx in self._error_index[-limit:]:
-                if idx < len(all_logs):
-                    errors.append(all_logs[idx])
+            # 只取最近的 limit 条错误索引
+            recent_error_indices = self._error_index[-limit:]
+            
+            # 直接使用索引访问 deque（索引就是 deque 中的位置）
+            for idx in recent_error_indices:
+                try:
+                    errors.append(self._logs[idx])
+                except IndexError:
+                    # 索引失效，跳过
+                    pass
+            
             return errors
     
     def persist_trace(self, trace_data: Dict[str, Any]) -> bool:
@@ -231,7 +315,7 @@ class MemoryLogHandler(logging.Handler):
         try:
             return self._persistence.save_trace(trace_data)
         except Exception as e:
-            print(f"持久化 Trace 失败: {e}")
+            self._get_logger().error(f"持久化 Trace 失败: {e}")
             return False
     
     def get_persisted_trace(self, trace_id: str) -> Optional[Dict[str, Any]]:
@@ -249,7 +333,7 @@ class MemoryLogHandler(logging.Handler):
         try:
             return self._persistence.get_trace(trace_id)
         except Exception as e:
-            print(f"获取持久化 Trace 失败: {e}")
+            self._get_logger().error(f"获取持久化 Trace 失败: {e}")
             return None
     
     def get_persisted_trace_logs(self, trace_id: str) -> List[Dict[str, Any]]:
@@ -267,7 +351,7 @@ class MemoryLogHandler(logging.Handler):
         try:
             return self._persistence.get_trace_logs(trace_id)
         except Exception as e:
-            print(f"获取持久化 Trace 日志失败: {e}")
+            self._get_logger().error(f"获取持久化 Trace 日志失败: {e}")
             return []
 
     def subscribe(self, callback: Callable[[Dict[str, Any]], None]):
@@ -287,24 +371,59 @@ class MemoryLogHandler(logging.Handler):
             return []
 
     def clear(self, session_id: Optional[str] = None):
-        """清空日志和索引"""
+        """清空日志和索引
+        
+        Args:
+            session_id: 会话 ID，如果指定则只清空该会话的日志和索引
+        """
         with self._lock:
             if session_id:
+                # 只清空指定 session 的日志和索引
+                
+                # 1. 删除该 session 的会话日志
                 if session_id in self._session_logs:
-                    self._session_logs[session_id].clear()
+                    del self._session_logs[session_id]
                 
-                self._trace_index.clear()
-                self._error_index.clear()
+                # 2. 找出该 session 相关的所有 trace_id
+                session_trace_ids = set()
                 
+                for i in range(len(self._logs)):
+                    log = self._logs[i]
+                    if log.get('session_id') == session_id:
+                        trace_id = self._extract_trace_id(log)
+                        if trace_id:
+                            session_trace_ids.add(trace_id)
+                
+                # 3. 只删除该 session 相关的 trace 索引
+                for trace_id in session_trace_ids:
+                    if trace_id in self._trace_index:
+                        del self._trace_index[trace_id]
+                
+                # 4. 重建错误索引（排除该 session）
+                new_error_index = []
+                for idx in self._error_index:
+                    try:
+                        log = self._logs[idx]
+                        if log.get('session_id') != session_id:
+                            new_error_index.append(idx)
+                    except IndexError:
+                        pass
+                self._error_index = new_error_index
+                
+                # 5. 删除该 session 的日志（从主 deque）
                 filtered_logs = [log for log in self._logs if log.get('session_id') != session_id]
                 self._logs.clear()
                 self._logs.extend(filtered_logs)
+                
+                # 6. 重建所有索引（因为 deque 中的位置已改变）
+                self._cleanup_invalid_indices()
+                
             else:
+                # 清空所有日志和索引
                 self._logs.clear()
                 self._session_logs.clear()
                 self._trace_index.clear()
                 self._error_index.clear()
-                self._log_counter = 0
 
     def close(self):
         """关闭处理器"""
