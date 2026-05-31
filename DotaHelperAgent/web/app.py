@@ -42,7 +42,7 @@ from utils.log_config import setup_logging_with_memory, get_logger
 from utils.memory_log_handler import get_memory_handler
 from utils.trace_context import (
     TraceContext, TraceSpan, set_current_trace, get_current_trace,
-    generate_trace_id, get_current_trace_info
+    generate_trace_id, generate_span_id, get_current_trace_info
 )
 from managers.matchup_data_manager import MatchupDataManager
 from cache.cache_manager import get_cache
@@ -1623,11 +1623,19 @@ def chat_stream() -> Response:
     session_id = data.get('session_id', str(uuid.uuid4()))
     context = data.get('context', {})
     
-    # 获取当前 Trace 上下文（在请求上下文中获取）
     trace_ctx = get_current_trace()
     trace_id = trace_ctx.trace_id if trace_ctx else generate_trace_id()
+    
+    if not trace_ctx:
+        trace_ctx = TraceContext(
+            trace_id=trace_id,
+            span_id=generate_span_id(),
+            session_id=session_id,
+            operation="chat_stream"
+        )
+    
+    g.trace_ctx = trace_ctx
 
-    # 更新 Langfuse observation 的 input
     if hasattr(g, 'langfuse_trace') and g.langfuse_trace:
         try:
             g.langfuse_trace.update(
@@ -1639,30 +1647,52 @@ def chat_stream() -> Response:
             app_logger.warning(f"更新 Langfuse input 失败: {e}")
 
     def generate():
-        # 在生成器中恢复 Trace 上下文
+        trace_dict = trace_ctx.to_dict() if trace_ctx else None
+        
         if trace_ctx:
             set_current_trace(trace_ctx)
             
         start_time = time.time()
         final_result = None
 
-        yield f"event: start\ndata: {json.dumps({'timestamp': int(start_time), 'trace_id': trace_id})}\n\n"
+        start_data = {'timestamp': int(start_time), 'trace_id': trace_id}
+        if trace_dict:
+            start_data['trace'] = trace_dict
+        yield f"event: start\ndata: {json.dumps(start_data)}\n\n"
 
         if not query.strip():
-            yield f"event: error\ndata: {json.dumps({'error': 'Query cannot be empty'})}\n\n"
-            yield f"event: complete\ndata: {json.dumps({'timestamp': int(time.time()), 'total_time': 0})}\n\n"
+            error_data = {'error': 'Query cannot be empty'}
+            if trace_dict:
+                error_data['trace'] = trace_dict
+            yield f"event: error\ndata: {json.dumps(error_data)}\n\n"
+            complete_data = {'timestamp': int(time.time()), 'total_time': 0}
+            if trace_dict:
+                complete_data['trace'] = trace_dict
+            yield f"event: complete\ndata: {json.dumps(complete_data)}\n\n"
             return
 
-        # 如果没有 Agent Controller，回退到简单流式
         if agent_controller is None:
-            yield from _generate_stream_legacy(query, context, start_time)
+            yield from _generate_stream_legacy(query, context, start_time, trace_dict)
             return
 
         try:
-            # 使用流式执行（传递 Trace 上下文）
             for event in _execute_streaming(agent_controller, query, context, start_time, trace_ctx):
-                yield event
-                # 捕获最终结果
+                if trace_dict and 'data: ' in event:
+                    try:
+                        event_lines = event.split('\n')
+                        for i, line in enumerate(event_lines):
+                            if line.startswith('data: '):
+                                event_data_str = line[6:]
+                                event_data = json.loads(event_data_str)
+                                if 'trace' not in event_data:
+                                    event_data['trace'] = trace_dict
+                                event_lines[i] = f"data: {json.dumps(event_data, ensure_ascii=False)}"
+                        yield '\n'.join(event_lines) + '\n\n'
+                    except:
+                        yield event
+                else:
+                    yield event
+                
                 if event.startswith("event: synthesize"):
                     try:
                         event_data = json.loads(event.split("data: ")[1])
@@ -1671,10 +1701,15 @@ def chat_stream() -> Response:
                         pass
 
         except Exception as e:
-            yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
-            yield f"event: complete\ndata: {json.dumps({'timestamp': int(time.time()), 'total_time': time.time() - start_time})}\n\n"
+            error_data = {'error': str(e)}
+            if trace_dict:
+                error_data['trace'] = trace_dict
+            yield f"event: error\ndata: {json.dumps(error_data)}\n\n"
+            complete_data = {'timestamp': int(time.time()), 'total_time': time.time() - start_time}
+            if trace_dict:
+                complete_data['trace'] = trace_dict
+            yield f"event: complete\ndata: {json.dumps(complete_data)}\n\n"
         
-        # 更新 Langfuse observation 的 output 并结束
         if hasattr(g, 'langfuse_trace') and g.langfuse_trace:
             try:
                 g.langfuse_trace.update(
@@ -1691,7 +1726,8 @@ def chat_stream() -> Response:
 
     return Response(stream_with_context(generate()), mimetype='text/event-stream', headers={
         'Cache-Control': 'no-cache',
-        'X-Accel-Buffering': 'no'
+        'X-Accel-Buffering': 'no',
+        'X-Trace-Id': trace_id
     })
 
 
@@ -2235,12 +2271,19 @@ def _execute_sub_goal_streaming(controller, thought, sub_goal, trace_ctx=None):
         return False
 
 
-def _generate_stream_legacy(query: str, context: Dict[str, Any], start_time: float) -> Generator:
+def _generate_stream_legacy(query: str, context: Dict[str, Any], start_time: float, trace_dict: Optional[Dict] = None) -> Generator:
     """旧版流式生成（回退用）"""
     agt = get_agent_safe()
     
-    yield f"event: think\ndata: {json.dumps({'step': 'think', 'content': f'用户查询：{query}'})}\n\n"
-    yield f"event: plan\ndata: {json.dumps({'step': 'plan', 'actions': [{'tool': 'recommend_heroes', 'purpose': '分析克制关系'}]})}\n\n"
+    think_data = {'step': 'think', 'content': f'用户查询：{query}'}
+    if trace_dict:
+        think_data['trace'] = trace_dict
+    yield f"event: think\ndata: {json.dumps(think_data, ensure_ascii=False)}\n\n"
+    
+    plan_data = {'step': 'plan', 'actions': [{'tool': 'recommend_heroes', 'purpose': '分析克制关系'}]}
+    if trace_dict:
+        plan_data['trace'] = trace_dict
+    yield f"event: plan\ndata: {json.dumps(plan_data, ensure_ascii=False)}\n\n"
     
     try:
         our_heroes = context.get('our_heroes', [])
@@ -2251,17 +2294,29 @@ def _generate_stream_legacy(query: str, context: Dict[str, Any], start_time: flo
             our_heroes = parsed.get('our_heroes', [])
             enemy_heroes = parsed.get('enemy_heroes', [])
         
-        yield f"event: action\ndata: {json.dumps({'step': 'action', 'tool': 'recommend_heroes', 'status': 'started'})}\n\n"
+        action_data = {'step': 'action', 'tool': 'recommend_heroes', 'status': 'started'}
+        if trace_dict:
+            action_data['trace'] = trace_dict
+        yield f"event: action\ndata: {json.dumps(action_data, ensure_ascii=False)}\n\n"
         
         if our_heroes or enemy_heroes:
             rec = agt.recommend_heroes(our_heroes, enemy_heroes)
-            yield f"event: observation\ndata: {json.dumps({'step': 'observation', 'result': rec})}\n\n"
+            observation_data = {'step': 'observation', 'result': rec}
+            if trace_dict:
+                observation_data['trace'] = trace_dict
+            yield f"event: observation\ndata: {json.dumps(observation_data, ensure_ascii=False)}\n\n"
         
         total_time = time.time() - start_time
-        yield f"event: complete\ndata: {json.dumps({'timestamp': int(time.time()), 'total_time': round(total_time, 2)})}\n\n"
+        complete_data = {'timestamp': int(time.time()), 'total_time': round(total_time, 2)}
+        if trace_dict:
+            complete_data['trace'] = trace_dict
+        yield f"event: complete\ndata: {json.dumps(complete_data, ensure_ascii=False)}\n\n"
     
     except Exception as e:
-        yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+        error_data = {'error': str(e)}
+        if trace_dict:
+            error_data['trace'] = trace_dict
+        yield f"event: error\ndata: {json.dumps(error_data, ensure_ascii=False)}\n\n"
 
 
 @app.route('/api/sessions', methods=['GET'])
@@ -2689,37 +2744,31 @@ def get_trace_logs(trace_id: str):
     Returns:
         包含该 trace_id 的所有日志和 Span 树
     """
-    # 从内存处理器获取所有日志
-    all_logs = memory_handler.get_logs(limit=10000)
+    trace_logs = memory_handler.get_trace_logs(trace_id)
     
-    # 过滤包含该 trace_id 的日志
-    def has_trace_id(log, tid):
-        """检查日志是否包含指定的 trace_id"""
-        # 直接检查 trace_id 字段
-        if log.get('trace_id') == tid:
-            return True
-        # 检查 trace 对象中的 trace_id
-        trace = log.get('trace')
-        if trace and isinstance(trace, dict) and trace.get('trace_id') == tid:
-            return True
-        # 检查 extra_data 中的 trace_id
-        extra = log.get('extra_data') or {}
-        if isinstance(extra, dict) and extra.get('trace_id') == tid:
-            return True
-        return False
+    if not trace_logs:
+        all_logs = memory_handler.get_logs(limit=10000)
+        
+        def has_trace_id(log, tid):
+            if log.get('trace_id') == tid:
+                return True
+            trace = log.get('trace')
+            if trace and isinstance(trace, dict) and trace.get('trace_id') == tid:
+                return True
+            extra = log.get('extra_data') or {}
+            if isinstance(extra, dict) and extra.get('trace_id') == tid:
+                return True
+            return False
+        
+        trace_logs = [
+            log for log in all_logs 
+            if has_trace_id(log, trace_id)
+        ]
     
-    trace_logs = [
-        log for log in all_logs 
-        if has_trace_id(log, trace_id)
-    ]
-    
-    # 按时间排序
     trace_logs.sort(key=lambda x: x.get('timestamp', ''))
     
-    # 构建 Span 树
     span_tree = build_span_tree(trace_logs)
     
-    # 获取相关 session_id
     session_ids = set()
     for log in trace_logs:
         session_id = log.get('session_id') or log.get('trace', {}).get('session_id')
@@ -2803,6 +2852,198 @@ def build_span_tree(logs: list) -> dict:
         'spans': spans,
         'total_spans': len(spans)
     }
+
+
+@app.route('/api/errors', methods=['GET'])
+def get_errors():
+    """获取最近的错误日志
+    
+    Query Parameters:
+        limit: 返回条数限制，默认50
+        
+    Returns:
+        错误日志列表
+    """
+    limit = int(request.args.get('limit', 50))
+    errors = memory_handler.get_errors(limit)
+    
+    return jsonify({
+        'success': True,
+        'total': len(errors),
+        'errors': errors
+    })
+
+
+@app.route('/api/trace/<trace_id>/persist', methods=['POST'])
+def persist_trace(trace_id: str):
+    """持久化 Trace 信息
+    
+    Body:
+        trace_data: Trace 数据字典
+        
+    Returns:
+        是否保存成功
+    """
+    if not memory_handler.enable_persistence:
+        return jsonify({
+            'success': False,
+            'error': 'Trace 持久化未启用'
+        }), 400
+    
+    trace_data = request.get_json()
+    trace_data['trace_id'] = trace_id
+    
+    success = memory_handler.persist_trace(trace_data)
+    
+    if success:
+        return jsonify({
+            'success': True,
+            'trace_id': trace_id,
+            'message': 'Trace 已持久化'
+        })
+    else:
+        return jsonify({
+            'success': False,
+            'error': '持久化失败'
+        }), 500
+
+
+@app.route('/api/trace/<trace_id>/history', methods=['GET'])
+def get_trace_history(trace_id: str):
+    """获取历史 Trace 信息（从数据库）
+    
+    Returns:
+        Trace 数据和日志
+    """
+    if not memory_handler.enable_persistence:
+        return jsonify({
+            'success': False,
+            'error': 'Trace 持久化未启用'
+        }), 400
+    
+    trace_data = memory_handler.get_persisted_trace(trace_id)
+    trace_logs = memory_handler.get_persisted_trace_logs(trace_id)
+    
+    if not trace_data:
+        return jsonify({
+            'success': False,
+            'error': 'Trace 不存在'
+        }), 404
+    
+    return jsonify({
+        'success': True,
+        'trace_id': trace_id,
+        'trace': trace_data,
+        'logs': trace_logs,
+        'total_logs': len(trace_logs)
+    })
+
+
+@app.route('/api/traces/recent', methods=['GET'])
+def get_recent_traces():
+    """获取最近的 Trace
+    
+    Query Parameters:
+        limit: 返回数量限制，默认50
+        hours: 时间范围（小时），默认24
+        
+    Returns:
+        Trace 列表
+    """
+    if not memory_handler.enable_persistence:
+        return jsonify({
+            'success': False,
+            'error': 'Trace 持久化未启用'
+        }), 400
+    
+    limit = int(request.args.get('limit', 50))
+    hours = int(request.args.get('hours', 24))
+    
+    try:
+        from utils.trace_persistence import get_trace_persistence
+        persistence = get_trace_persistence()
+        traces = persistence.get_recent_traces(limit=limit, hours=hours)
+        
+        return jsonify({
+            'success': True,
+            'total': len(traces),
+            'traces': traces,
+            'hours': hours
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/traces/statistics', methods=['GET'])
+def get_trace_statistics():
+    """获取 Trace 统计信息
+    
+    Query Parameters:
+        hours: 统计时间范围（小时），默认24
+        
+    Returns:
+        统计数据
+    """
+    if not memory_handler.enable_persistence:
+        return jsonify({
+            'success': False,
+            'error': 'Trace 持久化未启用'
+        }), 400
+    
+    hours = int(request.args.get('hours', 24))
+    
+    try:
+        from utils.trace_persistence import get_trace_persistence
+        persistence = get_trace_persistence()
+        stats = persistence.get_trace_statistics(hours=hours)
+        
+        return jsonify({
+            'success': True,
+            'statistics': stats
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/traces/errors', methods=['GET'])
+def get_error_traces():
+    """获取错误状态的 Trace
+    
+    Query Parameters:
+        limit: 返回数量限制，默认50
+        
+    Returns:
+        Trace 列表
+    """
+    if not memory_handler.enable_persistence:
+        return jsonify({
+            'success': False,
+            'error': 'Trace 持久化未启用'
+        }), 400
+    
+    limit = int(request.args.get('limit', 50))
+    
+    try:
+        from utils.trace_persistence import get_trace_persistence
+        persistence = get_trace_persistence()
+        traces = persistence.get_error_traces(limit=limit)
+        
+        return jsonify({
+            'success': True,
+            'total': len(traces),
+            'traces': traces
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 
 @app.route('/api/trace/search', methods=['GET'])

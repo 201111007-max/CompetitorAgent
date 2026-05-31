@@ -58,69 +58,72 @@ class JSONFormatter(logging.Formatter):
 class TraceJSONFormatter(logging.Formatter):
     """带 Trace 信息的 JSON 格式化器
     
-    自动从当前 Trace 上下文或日志 record 中提取 trace 信息
+    统一日志格式：
+    - message 字段始终是纯文本
+    - trace 字段位置统一
+    - 所有字段都有明确的类型
     """
     def format(self, record):
         from utils.trace_context import get_current_trace
+        
+        message = record.getMessage()
         
         log_data = {
             "timestamp": datetime.fromtimestamp(record.created).isoformat(),
             "level": record.levelname,
             "logger": record.name,
-            "message": record.getMessage(),
+            "message": message,
             "module": record.module,
             "function": record.funcName,
             "line": record.lineno,
             "component": getattr(record, 'component', 'system')
         }
         
-        # 优先从当前 Trace 上下文获取
+        trace_info = self._extract_trace(record)
+        if trace_info:
+            log_data["trace"] = trace_info
+        
+        if hasattr(record, 'extra_data') and record.extra_data:
+            log_data['extra'] = record.extra_data
+        
+        return json.dumps(log_data, ensure_ascii=False)
+    
+    def _extract_trace(self, record):
+        """统一提取 trace 信息
+        
+        优先级：
+        1. 从当前 Trace 上下文获取
+        2. 从 Flask g 对象获取
+        3. 从 record 属性获取
+        """
+        from utils.trace_context import get_current_trace
+        
         trace_ctx = get_current_trace()
         if trace_ctx:
-            log_data["trace"] = {
-                "trace_id": trace_ctx.trace_id,
-                "span_id": trace_ctx.span_id,
-                "parent_span_id": trace_ctx.parent_span_id,
-                "session_id": trace_ctx.session_id,
-                "operation": trace_ctx.operation,
-                "duration_ms": trace_ctx.get_duration_ms()
-            }
-        else:
-            # 回退：从 Flask g 对象获取（适用于生成器/yield 场景，contextvars 丢失时）
-            try:
-                from flask import has_request_context, g as flask_g
-                if has_request_context():
-                    flask_trace = getattr(flask_g, 'trace_ctx', None)
-                    if flask_trace:
-                        log_data["trace"] = {
-                            "trace_id": flask_trace.trace_id,
-                            "span_id": flask_trace.span_id,
-                            "parent_span_id": flask_trace.parent_span_id,
-                            "session_id": flask_trace.session_id,
-                            "operation": flask_trace.operation,
-                            "duration_ms": flask_trace.get_duration_ms()
-                        }
-            except Exception:
-                pass
-            
-            # 如果 trace 仍未设置，从 record 的 extra 字段获取（兼容旧代码）
-            if "trace" not in log_data:
-                trace_info = {}
-                if hasattr(record, 'trace_id'):
-                    trace_info["trace_id"] = record.trace_id
-                if hasattr(record, 'span_id'):
-                    trace_info["span_id"] = record.span_id
-                if hasattr(record, 'parent_span_id'):
-                    trace_info["parent_span_id"] = record.parent_span_id
-                if hasattr(record, 'session_id'):
-                    trace_info["session_id"] = record.session_id
-                if trace_info:
-                    log_data["trace"] = trace_info
+            return trace_ctx.to_dict()
         
-        if hasattr(record, 'extra_data'):
-            log_data['extra'] = record.extra_data
-            
-        return json.dumps(log_data, ensure_ascii=False)
+        try:
+            from flask import has_request_context, g as flask_g
+            if has_request_context():
+                flask_trace = getattr(flask_g, 'trace_ctx', None)
+                if flask_trace:
+                    return flask_trace.to_dict()
+        except Exception:
+            pass
+        
+        trace_info = {}
+        if hasattr(record, 'trace_id'):
+            trace_info['trace_id'] = record.trace_id
+        if hasattr(record, 'span_id'):
+            trace_info['span_id'] = record.span_id
+        if hasattr(record, 'parent_span_id'):
+            trace_info['parent_span_id'] = record.parent_span_id
+        if hasattr(record, 'session_id'):
+            trace_info['session_id'] = record.session_id
+        if hasattr(record, 'operation'):
+            trace_info['operation'] = record.operation
+        
+        return trace_info if trace_info else None
 
 
 class DailyPartitionRotatingHandler(logging.handlers.RotatingFileHandler):

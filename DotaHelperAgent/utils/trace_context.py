@@ -107,6 +107,43 @@ class TraceContext:
     def get_duration_ms(self) -> int:
         """获取当前 Span 持续时间（毫秒）"""
         return int((time.time() - self.start_time) * 1000)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典，用于序列化
+        
+        Returns:
+            包含所有 trace 信息的字典
+        """
+        return {
+            'trace_id': self.trace_id,
+            'span_id': self.span_id,
+            'parent_span_id': self.parent_span_id,
+            'session_id': self.session_id,
+            'operation': self.operation,
+            'start_time': self.start_time,
+            'duration_ms': self.get_duration_ms(),
+            'metadata': self.metadata
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "TraceContext":
+        """从字典创建 TraceContext
+        
+        Args:
+            data: 包含 trace 信息的字典
+            
+        Returns:
+            TraceContext 实例
+        """
+        return cls(
+            trace_id=data['trace_id'],
+            span_id=data['span_id'],
+            session_id=data['session_id'],
+            operation=data['operation'],
+            start_time=data.get('start_time', time.time()),
+            parent_span_id=data.get('parent_span_id'),
+            metadata=data.get('metadata', {})
+        )
 
 
 def generate_trace_id() -> str:
