@@ -1114,10 +1114,16 @@ def submit_feedback():
 | **P0** | **Agent 执行层监控（Langfuse）** | 中 | 高 | ✅ 已完成 |
 | **P0** | **工具调用层监控（Langfuse）** | 中 | 高 | ✅ 已完成 |
 | **P0** | **Trace 定位与日志追踪体系** | 大 | 高 | ✅ 已完成 |
+| **P1** | **GSI 实时游戏状态监控** | 大 | 高 | ❌ 待实现 |
+| **P1** | **游戏事件提醒系统** | 中 | 中 | ❌ 待实现 |
+| **P1** | **Agent主动推荐机制** | 大 | 高 | ❌ 待实现 |
+| **P1** | **GSI数据与Agent结合方案** | 中 | 高 | ❌ 待实现 |
+| **P1** | **GSI主动推荐功能PRD** | 大 | 高 | ❌ 待实现 |
 | P1 | Prompt 版本管理（Langfuse） | 中 | 中 | ❌ 待实现 |
 | P1 | 工具执行并行化 | 中 | 中 | ❌ 待实现 |
 | P2 | 前端样式优化 | 中 | 中 | ❌ 待实现 |
 | P2 | 用户反馈学习 | 大 | 中 | ❌ 待实现 |
+| P2 | 语音提醒系统 | 中 | 低 | ❌ 待实现 |
 
 #### 已完成的改进项
 
@@ -1563,6 +1569,666 @@ class PromptManager:
 - 用户体验提升
 - 视觉效果优化
 - 交互流畅度提升
+
+---
+
+#### P1-2: GSI 实时游戏状态监控 ❌
+
+**目标**: 集成 Dota 2 游戏状态集成（Game State Integration, GSI）功能，实时监控游戏状态
+
+**参考项目**:
+- `dota2gsipy` - GSI HTTP 服务器实现（轻量级、无外部依赖）
+- `dota2-game-helper` - 游戏状态处理器实现
+
+**实现位置**: 
+- `utils/gsi_client.py` - GSI 客户端（新建）
+- `core/gsi_handler.py` - 游戏状态处理器（新建）
+- `model/gsi/` - GSI 数据模型（新建）
+
+**核心功能**:
+- GSI HTTP 服务器实现（接收 Dota 2 客户端发送的实时游戏数据）
+- 游戏状态数据解析（地图、玩家、英雄、技能、物品）
+- Token 认证机制（确保数据来源安全）
+- 实时数据更新（每次收到请求时更新 game_state 对象）
+- Null 值处理（使用 `defaultdict(lambda: None)` 处理缺失数据）
+
+**数据模型**:
+
+| 模块 | 数据字段 | 说明 |
+|------|---------|------|
+| **Map** | `name`, `match_id`, `game_time`, `clock_time`, `daytime`, `radiant_score`, `dire_score`, `game_state`, `paused`, `win_team`, `ward_purchase_cooldown` | 地图/比赛信息 |
+| **Player** | `steam_id`, `name`, `kills`, `deaths`, `assists`, `last_hits`, `denies`, `gold`, `gold_reliable`, `gold_unreliable`, `gold_from_*`, `gpm`, `xpm` | 玩家数据 |
+| **Hero** | `pos`, `id`, `name`, `level`, `alive`, `respawn_seconds`, `buyback_cost`, `health`, `mana`, `silenced`, `stunned`, `disarmed`, `aghanims_scepter`, `aghanims_shard`, `talents`, `abilities`, `inventory` | 英雄数据 |
+| **Ability** | `name`, `level`, `can_cast`, `passive`, `cooldown`, `ultimate`, `charges` | 技能数据 |
+| **Item** | `name`, `purchaser`, `can_cast`, `cooldown`, `passive`, `charges` | 物品数据 |
+
+**集成方案**:
+
+1. **Agent 工具层新增 GSI 数据访问工具**
+   ```python
+   # tools/gsi_tools.py
+   class GSIDataTool:
+       """GSI 数据访问工具"""
+       
+       def get_current_game_state(self) -> Dict[str, Any]:
+           """获取当前游戏状态"""
+           return self.gsi_client.game_state.to_dict()
+       
+       def get_hero_position(self) -> Tuple[int, int]:
+           """获取英雄当前位置"""
+           return self.gsi_client.game_state.hero.pos
+       
+       def get_hero_health(self) -> Dict[str, int]:
+           """获取英雄生命值"""
+           return {
+               "health": self.gsi_client.game_state.hero.health,
+               "max_health": self.gsi_client.game_state.hero.max_health,
+               "health_percent": self.gsi_client.game_state.hero.health_percent
+           }
+   ```
+
+2. **实时游戏状态监控**
+   ```python
+   # core/gsi_handler.py
+   class GSIHandler:
+       """游戏状态处理器"""
+       
+       def on_game_state_update(self, game_state: GameState):
+           """游戏状态更新回调"""
+           # 检查游戏状态变化
+           if game_state.map.game_state == GameStateEnum.DOTA_GAMERULES_STATE_GAME_IN_PROGRESS:
+               # 游戏进行中，触发事件提醒
+               self.check_game_events(game_state)
+   ```
+
+**预期收益**:
+- 实时游戏状态监控（了解当前游戏情况）
+- 基于实时数据的智能推荐（根据当前英雄状态推荐出装、技能加点）
+- 游戏事件提醒（堆野、符文、中立物品等）
+- 增强用户体验（实时交互）
+
+---
+
+#### P1-3: 游戏事件提醒系统 ❌
+
+**目标**: 基于游戏状态监控，提供游戏事件提醒功能
+
+**参考项目**: `dota2-game-helper` - 游戏事件处理器实现
+
+**实现位置**: `core/gsi_handler.py` - 游戏状态处理器（扩展）
+
+**核心功能**:
+- 堆野提醒（每分钟堆野时间点提醒）
+- 符文提醒（中符、赏金符、智慧符、莲花）
+- 中立物品提醒（中立物品刷新时间点提醒）
+- 白天/夜晚切换提醒（昼夜切换提醒）
+- 肉山复活提醒（肉山死亡后复活时间提醒）
+- Tormentor 提醒（第一波 Tormentor 时间点提醒）
+- Shard 提醒（Shard 可用时间点提醒）
+- Ward purchase 提醒（眼购买冷却结束提醒）
+
+**事件处理逻辑**:
+
+```python
+# core/gsi_handler.py
+class GameStateHandler:
+    """游戏状态处理器"""
+    
+    def __init__(self):
+        self.game_start_alarmed = False
+        self.daytime_alarmed = False
+        self.nighttime_alarmed = False
+        self.last_roshan_dead_time = None
+        self.past_event_keys = set()
+    
+    def handle_stack(self, game_time: int):
+        """堆野提醒"""
+        stack_time = 60  # 每分钟堆野
+        stack_alarm_time = stack_time - self.config.stack_delay
+        if (game_time - stack_alarm_time) % stack_time == 0:
+            self.trigger_event("stack")
+    
+    def handle_mid_runes(self, game_time: int):
+        """中符提醒"""
+        mid_runes_time = 120  # 每2分钟中符
+        mid_runes_alarm_time = mid_runes_time - self.config.mid_runes_delay
+        if (game_time - mid_runes_alarm_time) % mid_runes_time == 0:
+            self.trigger_event("mid_runes")
+    
+    def handle_roshan(self, game_time: int):
+        """肉山复活提醒"""
+        if self.last_roshan_dead_time is not None:
+            roshan_respawn_time = self.last_roshan_dead_time + random.randint(480, 720)  # 8-12分钟
+            if game_time >= roshan_respawn_time:
+                self.trigger_event("roshan_respawn")
+                self.last_roshan_dead_time = None
+```
+
+**配置化管理**:
+
+```python
+# config/gsi_config.yaml
+gsi:
+  enabled: true
+  events:
+    stack_active: true
+    stack_delay: 10  # 提前10秒提醒
+    mid_runes_active: true
+    mid_runes_delay: 15
+    bounty_runes_active: true
+    wisdom_runes_active: true
+    lotus_active: true
+    neutral_items_active: [true, true, true]  # 三波中立物品
+    daytime_active: true
+    roshan_active: true
+    first_tormentor_active: true
+    shard_active: true
+    ward_purchase_active: true
+```
+
+**预期收益**:
+- 游戏节奏提醒（帮助玩家掌握游戏节奏）
+- 资源获取提醒（符文、中立物品、肉山等）
+- 时间管理优化（堆野、昼夜切换等）
+
+---
+
+#### P2-2: 语音提醒系统 ❌
+
+**目标**: 提供语音提醒功能，增强游戏事件提醒的感知度
+
+**参考项目**: `dota2-game-helper` - 语音播放实现
+
+**实现位置**: `utils/voice_player.py` - 语音播放器（新建）
+
+**核心功能**:
+- 语音播放功能（播放预录制的语音文件）
+- 可配置化的提醒开关（用户可选择开启/关闭特定提醒）
+- 多语言支持（中文、英文）
+
+**语音资源**:
+
+| 事件类型 | 语音文件 | 说明 |
+|---------|---------|------|
+| 游戏开始 | `prologue.wav` | 游戏开始提醒 |
+| 堆野 | `alarm_stack.wav` | 堆野提醒 |
+| 中符 | `alarm_mid_runes.wav` | 中符刷新提醒 |
+| 财神符 | `alarm_bounty_runes.wav` | 财神符刷新提醒 |
+| 智慧符 | `alarm_wisdom_runes.wav` | 智慧符刷新提醒 |
+| 莲花 | `alarm_lotus.wav` | 莲花刷新提醒 |
+| 中立物品 | `alarm_neutral_items.wav` | 中立物品刷新提醒 |
+| 白天 | `alarm_daytime.wav` | 白天切换提醒 |
+| 夜晚 | `alarm_night_time.wav` | 夜晚切换提醒 |
+| 肉山 | `alarm_roshan.wav` | 肉山复活提醒 |
+| Tormentor | `alarm_first_tormentor.wav` | Tormentor 提醒 |
+| Shard | `alarm_shard.wav` | Shard 提醒 |
+| 眼购买 | `alarm_ward_purchase.wav` | 眼购买冷却结束提醒 |
+
+**实现方案**:
+
+```python
+# utils/voice_player.py
+import pygame
+import os
+
+class VoicePlayer:
+    """语音播放器"""
+    
+    def __init__(self, resources_dir: str = "resources/"):
+        self.resources_dir = resources_dir
+        pygame.mixer.init()
+    
+    def play(self, voice_type: str):
+        """播放语音"""
+        voice_file = os.path.join(self.resources_dir, f"{voice_type}.wav")
+        if os.path.exists(voice_file):
+            pygame.mixer.Sound(voice_file).play()
+        else:
+            logging.warning(f"Voice file not found: {voice_file}")
+```
+
+**预期收益**:
+- 提醒感知度增强（语音比文字更直观）
+- 游戏节奏掌握优化（及时响应游戏事件）
+- 用户体验提升（多感官交互）
+
+---
+
+#### P1-4: Agent主动推荐机制 ❌
+
+**目标**: 在游戏过程中，Agent自动推送建议，无需用户主动输入问题
+
+**核心思路**:
+
+| 推荐模式 | 触发条件 | 推送内容示例 |
+|---------|---------|-------------|
+| **基于游戏事件** | 堆野、符文、肉山等关键事件 | "堆野时间到了！建议前往野区堆野" |
+| **基于状态变化** | 血量<30%、金钱>=装备价格、技能冷却结束 | "血量过低！建议立即回城补给" |
+| **基于游戏阶段** | 对线期、中期、后期、决胜期 | "中期！建议参团，协助团队推进" |
+| **基于团队状态** | 团队领先/劣势、团队状态良好/不佳 | "团队领先！建议主动推塔，扩大优势" |
+| **基于用户行为** | 用户连续3次错过堆野/符文 | "你最近3次都忘记堆野了，建议这次去堆野" |
+
+**技术实现**:
+- WebSocket实时推送（双向通信）
+- SSE流式推送（单向推送）
+- 桌面通知推送（Windows通知）
+
+**预期变化**:
+- Agent从"被动响应"升级为"主动推送"
+- 用户无需主动输入问题，Agent自动推送建议
+- 实时游戏状态监控，主动推送策略建议
+- 基于用户行为模式提供个性化建议
+- 大幅提升用户体验和实用性
+
+---
+
+#### P1-5: GSI数据与Agent结合方案 ❌
+
+**目标**: 将GSI实时数据与Agent工具结合，提供实时问答和策略建议
+
+**核心思路**:
+
+| 结合方式 | 用户查询示例 | Agent回答示例（基于GSI数据） |
+|---------|-------------|----------------------------|
+| **实时数据驱动** | "我血量只有30%，该怎么办？" | "建议回城补给，或使用治疗药膏/魔瓶" |
+| **游戏事件策略** | "堆野时间到了！" | "建议前往野区堆野，优先堆大野点（距离500码）" |
+| **实时问答** | "我现在等级多少？" | "你当前等级：12级，经验值：8500/10000" |
+| **整体策略建议** | "我现在应该做什么？" | "根据当前状态（等级12、金钱2500、血量80%），建议：1.购买BKB；2.前往中符位置；3.准备团战" |
+
+**新增工具**:
+- `GSIDataTool` - 获取英雄状态、游戏时间、玩家数据、技能冷却、物品状态
+- `GameEventStrategyTool` - 堆野策略、符文策略、肉山策略建议
+- `OverallStrategyTool` - 根据综合状态提供整体策略建议
+
+**预期变化**:
+- Agent从"静态问答助手"升级为"实时游戏助手"
+- 实时交互能力增强，根据游戏状态回答问题
+- 个性化建议，根据用户当前状态提供建议
+- 游戏节奏掌握优化，帮助用户掌握游戏节奏
+
+---
+
+#### P1-6: GSI主动推荐功能PRD ❌
+
+**目标**: 实现基于GSI的Agent主动推荐系统，提供游戏过程中的智能建议推送
+
+---
+
+## **Problem Statement**
+
+**问题**: 在Dota 2游戏过程中，用户很少会主动打字或语音输入问题，导致Agent无法及时提供帮助。用户需要一种机制，让Agent能够自动感知游戏状态并主动推送建议，而不是等待用户触发。
+
+**用户视角**: "我在游戏时很忙，没时间打字问问题。我希望Agent能自动告诉我什么时候该堆野、什么时候该去抢符、什么时候该参团，而不是我每次都要主动问。"
+
+---
+
+## **Solution**
+
+**解决方案**: 实现基于GSI（Game State Integration）的Agent主动推荐系统，通过Dota 2客户端实时发送游戏状态数据，Agent自动监控游戏事件、游戏阶段、团队状态，并**使用LLM生成个性化建议**，通过桌面通知和语音提醒主动推送。
+
+**核心特点**:
+- **LLM智能生成建议**: 建议内容由LLM根据当前游戏状态、用户行为模式、英雄类型、游戏风格等动态生成，而非固定模板
+- **个性化建议**: 根据用户历史行为（如经常忘记堆野）、当前状态（血量、金钱、技能）、英雄类型（核心/辅助）、游戏风格（打钱型/参团型）提供针对性建议
+- **自然语言表达**: 建议内容自然、流畅，符合用户语言习惯，而非机械的固定文字
+
+**用户视角**: "Agent现在会自动提醒我堆野、抢符、参团等关键事件，还会根据我的游戏风格和英雄类型提供个性化建议。建议内容很自然，就像有个专业教练在旁边指导我一样。我再也不用担心错过关键游戏节奏了。"
+
+---
+
+## **User Stories**
+
+### **游戏事件提醒**
+
+1. As a Dota 2 player, I want Agent to remind me to stack camps every minute, so that I can improve my economy and jungle efficiency.
+2. As a Dota 2 player, I want Agent to remind me when runes spawn (mid runes, bounty runes, wisdom runes, lotus), so that I can collect runes and gain advantages.
+3. As a Dota 2 player, I want Agent to remind me when neutral items spawn (5/10/15/20/25/30 minutes), so that I can get powerful neutral items.
+4. As a Dota 2 player, I want Agent to remind me when Roshan respawns (8-12 minutes after death), so that I can contest Roshan and get Aegis.
+5. As a Dota 2 player, I want Agent to remind me when Tormentor spawns (20 minutes), so that I can get Aghanim's Shard/Scepter upgrade.
+
+### **游戏阶段提醒**
+
+6. As a Dota 2 player, I want Agent to remind me during laning phase (0-10 minutes) to focus on farming and buying core items, so that I can establish a strong foundation.
+7. As a Dota 2 player, I want Agent to remind me during mid game (10-20 minutes) to participate in teamfights and push towers, so that I can expand our team's advantage.
+8. As a Dota 2 player, I want Agent to remind me during late game (20-40 minutes) to stay with my team and prepare for key teamfights, so that I can contribute to team success.
+9. As a Dota 2 player, I want Agent to remind me during decisive phase (40+ minutes) to group up and prepare for the final teamfight, so that I can secure victory.
+
+### **团队状态提醒**
+
+10. As a Dota 2 player, I want Agent to remind me when my team is leading (+5 kills) to push towers and expand advantage, so that I can capitalize on our lead.
+11. As a Dota 2 player, I want Agent to remind me when my team is losing (-5 kills) to defend and farm, so that I can wait for opportunities to counterattack.
+12. As a Dota 2 player, I want Agent to remind me when my team's health is good (>80% average) to group up and push, so that I can take advantage of our strong state.
+13. As a Dota 2 player, I want Agent to remind me when my team's health is bad (<50% average) to heal first before teamfight, so that I can avoid unnecessary deaths.
+
+### **个性化建议**
+
+14. As a Dota 2 player, I want Agent to provide personalized suggestions based on my behavior pattern (e.g., "You missed stacking 3 times, suggest stacking this time"), so that I can improve my gameplay habits.
+15. As a Dota 2 player, I want Agent to provide personalized suggestions based on my current game state (health, gold, skills), so that I can make better decisions.
+16. As a Dota 2 player, I want Agent to provide personalized suggestions based on my hero type (core/support), so that I can play my role more effectively.
+17. As a Dota 2 player, I want Agent to provide personalized suggestions based on my playstyle (farming-oriented/teamfight-oriented), so that I can optimize my strategy.
+
+### **推送方式**
+
+18. As a Dota 2 player, I want Agent to send desktop notifications that auto-dismiss after configurable time, so that I can see suggestions without interrupting my game.
+19. As a Dota 2 player, I want Agent to play voice reminders in Chinese, so that I can hear suggestions while playing.
+20. As a Dota 2 player, I want Agent to play voice reminders in English, so that I can understand suggestions in my preferred language.
+21. As a Dota 2 player, I want Agent to support multiple languages for voice reminders, so that I can choose my preferred language.
+22. As a Dota 2 player, I want Agent to allow custom voice recordings, so that I can use my own voice for reminders.
+
+### **用户控制**
+
+23. As a Dota 2 player, I want to toggle specific reminder types on/off (e.g., stack reminders, rune reminders), so that I can customize which reminders I receive.
+24. As a Dota 2 player, I want to adjust reminder delay (e.g., stack reminder 10 seconds before spawn), so that I can set reminders at my preferred timing.
+25. As a Dota 2 player, I want to set reminder frequency (e.g., remind every minute for stacking), so that I can control how often I receive reminders.
+26. As a Dota 2 player, I want to set reminder priority (e.g., only receive high-priority reminders), so that I can focus on the most important suggestions.
+
+---
+
+## **Implementation Decisions**
+
+### **模块设计**
+
+- **GSI HTTP Server**: Flask-based HTTP server to receive GSI data from Dota 2 client (port: 5001)
+- **GSI Data Parser**: Parse raw GSI JSON data into structured GameState object
+- **Game Event Detector**: Detect game events (stack, runes, neutral items, Roshan, Tormentor) based on game time
+- **Game Phase Determiner**: Determine game phase (laning, mid, late, decisive) based on game time
+- **Team State Evaluator**: Evaluate team state (leading, losing, good health, bad health) based on kill score and health average
+- **Context Builder**: Build comprehensive context for LLM (event type, game state, user profile, behavior pattern)
+- **LLM Suggestion Generator**: **核心模块** - Use LLM to generate natural language suggestions based on context
+- **Personalization Engine**: Personalize suggestions based on user behavior pattern, current state, hero type, and playstyle
+- **Desktop Notification Sender**: Send Windows desktop notifications with configurable duration and icons
+- **Voice Player**: Play voice reminders in multiple languages (Chinese, English, custom)
+- **Push Scheduler**: Manage push frequency, priority, and delay
+- **Config Manager**: Manage reminder toggle, delay, frequency, and priority settings
+- **User Preference Manager**: Manage user personalization settings
+- **Voice Resource Manager**: Manage voice files and language settings
+- **Behavior Data Collector**: Record user game behaviors (stack, rune, teamfight participation)
+- **Behavior Pattern Analyzer**: Analyze user behavior patterns (missed stacks, missed runes, playstyle)
+- **Behavior History Storage**: Store user behavior history in SQLite
+
+### **建议生成流程**
+
+```
+游戏事件触发
+    │
+    ▼
+┌─────────────────┐
+│  事件检测器      │
+│  - 检测事件类型  │
+│  - 提取游戏时间  │
+└─────────────────┘
+    │
+    ▼
+┌─────────────────┐
+│  上下文构建器    │
+│  - 游戏状态数据  │
+│  - 用户行为模式  │
+│  - 英雄类型      │
+│  - 游戏风格      │
+└─────────────────┘
+    │
+    ▼
+┌─────────────────┐
+│  LLM建议生成器   │  ⭐ 核心模块
+│  - 构造Prompt    │
+│  - 调用LLM       │
+│  - 解析建议内容  │
+└─────────────────┘
+    │
+    ▼
+┌─────────────────┐
+│  个性化引擎      │
+│  - 调整建议语气  │
+│  - 优化建议内容  │
+└─────────────────┘
+    │
+    ▼
+┌─────────────────┐
+│  推送调度器      │
+│  - 确定优先级    │
+│  - 设置延迟      │
+│  - 调度推送      │
+└─────────────────┘
+    │
+    ▼
+┌─────────────────┐
+│  推送执行        │
+│  - 桌面通知      │
+│  - 语音播放      │
+└─────────────────┘
+```
+
+**LLM Prompt示例**:
+
+```python
+# 堆野建议Prompt
+STACK_PROMPT = """你是一个Dota 2游戏教练，正在指导玩家堆野。
+
+## 当前游戏状态
+- 游戏时间：{game_time}秒
+- 英雄：{hero_name}（{hero_type}）
+- 血量：{health_percent}%
+- 金钱：{gold}
+- 位置：{hero_position}
+
+## 用户行为模式
+- 最近3次堆野：{stack_behavior}（成功/失败/错过）
+- 游戏风格：{playstyle}（打钱型/参团型）
+
+## 任务
+根据以上信息，生成一个堆野建议（不超过20字），要求：
+1. 根据用户行为模式提供针对性建议
+2. 根据英雄类型调整建议重点
+3. 根据游戏风格优化建议语气
+4. 使用自然、流畅的语言
+
+## 示例输出
+- "堆野时间到了！你最近3次都错过堆野了，建议这次去堆野提升经济"
+- "堆野提醒！作为核心英雄，建议优先堆大野点，提升打钱效率"
+- "堆野时间！血量充足（80%），建议前往野区堆野"
+"""
+
+# 符文建议Prompt
+RUNE_PROMPT = """你是一个Dota 2游戏教练，正在指导玩家抢符。
+
+## 当前游戏状态
+- 游戏时间：{game_time}秒
+- 英雄：{hero_name}（{hero_type}）
+- 血量：{health_percent}%
+- 符文类型：{rune_type}（中符/财神符/智慧符/莲花）
+- 符文位置：{rune_position}
+
+## 用户行为模式
+- 最近3次抢符：{rune_behavior}（成功/失败/错过）
+- 游戏风格：{playstyle}（打钱型/参团型）
+
+## 任务
+根据以上信息，生成一个符文建议（不超过20字），要求：
+1. 根据用户行为模式提供针对性建议
+2. 根据符文类型调整建议重点
+3. 根据英雄类型优化建议语气
+4. 使用自然、流畅的语言
+
+## 示例输出
+- "中符即将刷新！你最近3次都错过符文了，建议这次去抢符提升能力"
+- "财神符刷新了！作为辅助英雄，建议团队分头收集，提升经济"
+- "智慧符刷新！血量充足（80%），建议去抢符获取经验加成"
+"""
+```
+
+### **接口设计**
+
+- `POST /gsi` - Receive GSI data from Dota 2 client
+- `parse_gsi_data(raw_data: Dict) -> GameState` - Parse GSI data
+- `detect_game_events(game_state: GameState) -> List[GameEvent]` - Detect game events
+- `determine_game_phase(game_time: int) -> GamePhase` - Determine game phase
+- `evaluate_team_state(game_state: GameState) -> TeamState` - Evaluate team state
+- `build_context(event_type: str, game_state: GameState, user_profile: UserProfile) -> Dict` - Build context for LLM
+- `generate_llm_suggestion(context: Dict) -> str` - **核心接口** - Generate suggestion using LLM
+- `personalize_suggestion(suggestion: str, user_profile: UserProfile) -> str` - Personalize suggestion
+- `send_notification(title: str, message: str, icon: str, duration: int) -> None` - Send desktop notification
+- `play_voice(voice_type: str, language: str) -> None` - Play voice reminder
+- `schedule_push(suggestion: str, priority: int, delay: int) -> None` - Schedule push
+- `load_config() -> Config` - Load configuration
+- `save_config(config: Config) -> None` - Save configuration
+- `get_user_preference(user_id: str) -> UserPreference` - Get user preference
+- `set_user_preference(user_id: str, preference: UserPreference) -> None` - Set user preference
+- `load_voice_file(voice_type: str, language: str) -> str` - Load voice file path
+- `record_user_behavior(behavior_type: str, timestamp: int) -> None` - Record user behavior
+- `analyze_user_pattern(user_id: str) -> UserPattern` - Analyze user pattern
+- `save_behavior_history(user_id: str, behavior_data: Dict) -> None` - Save behavior history
+
+### **数据模型**
+
+- **GameState**: Map data, Player data, Hero data, Ability data, Item data
+- **GameEvent**: Event type, game time, trigger condition
+- **GamePhase**: Phase name, time range, strategy suggestion
+- **TeamState**: Kill score difference, health average, state type
+- **Suggestion**: Content, priority, personalization factors
+- **UserProfile**: Behavior pattern, hero type, playstyle, preferences
+- **Config**: Reminder toggle, delay, frequency, priority
+- **UserPreference**: Language, notification duration, reminder types
+- **UserPattern**: Missed stacks count, missed runes count, playstyle type
+
+### **技术选型**
+
+- **GSI Server**: Flask (lightweight, easy to integrate with existing Flask app)
+- **Desktop Notification**: win10toast (Windows 10 notification library)
+- **Voice Player**: pygame (cross-platform audio playback)
+- **LLM Integration**: Existing LLMClient (reuse current LLM infrastructure)
+- **Storage**: SQLite (reuse existing SQLite infrastructure)
+- **Configuration**: YAML (reuse existing YAML configuration system)
+
+---
+
+## **Testing Decisions**
+
+### **测试原则**
+
+- Only test external behavior, not implementation details
+- Test modules with simple, testable interfaces
+- Mock external dependencies (Dota 2 client, LLM, voice files)
+
+### **测试模块**
+
+- **GSI Data Parser**: Test parsing raw GSI data into GameState object
+- **Game Event Detector**: Test detecting game events at specific game times
+- **Game Phase Determiner**: Test determining game phase based on game time
+- **Team State Evaluator**: Test evaluating team state based on kill score and health
+- **Suggestion Generator**: Test generating suggestions for different event types
+- **Personalization Engine**: Test personalizing suggestions based on user profile
+- **Desktop Notification Sender**: Test sending notifications with different parameters
+- **Voice Player**: Test playing voice files in different languages
+- **Push Scheduler**: Test scheduling pushes with different priorities and delays
+- **Config Manager**: Test loading and saving configuration
+- **Behavior Pattern Analyzer**: Test analyzing user behavior patterns
+
+### **测试类型**
+
+- **Unit Tests**: Test individual modules in isolation
+- **Integration Tests**: Test module interactions (e.g., GSI Parser → Event Detector → Suggestion Generator)
+- **E2E Tests**: Test full workflow (GSI data → Suggestion → Push → User receives notification)
+
+---
+
+## **Out of Scope**
+
+- **WebSocket Push**: Not implementing WebSocket push (using desktop notifications and voice instead)
+- **SSE Push**: Not implementing SSE push (using desktop notifications and voice instead)
+- **State Change Reminders**: Not implementing state change reminders (health, gold, skill cooldown, level up) - focusing on game events, game phases, and team states only
+- **STRATZ API Integration**: Not integrating STRATZ API for game data (using Dota 2 client GSI only)
+- **Mobile Notifications**: Not implementing mobile notifications (Windows desktop only)
+- **Multi-user Support**: Not implementing multi-user support (single-user mode only)
+- **Cloud Storage**: Not implementing cloud storage for behavior history (SQLite local storage only)
+
+---
+
+## **Further Notes**
+
+### **LLM建议生成核心设计**
+
+**为什么使用LLM生成建议？**
+- **个性化**: 根据用户行为模式、当前状态、英雄类型、游戏风格生成针对性建议
+- **自然性**: 建议内容自然、流畅，符合用户语言习惯，而非机械的固定文字
+- **智能性**: 根据上下文动态调整建议内容、语气、重点
+- **适应性**: 可以处理各种复杂的游戏场景，而非预定义的固定模板
+
+**LLM建议生成优势对比**:
+
+| 维度 | 固定模板 | LLM生成 |
+|------|---------|---------|
+| **个性化** | ❌ 无法个性化 | ✅ 根据用户行为模式、当前状态个性化 |
+| **自然性** | ❌ 机械、固定 | ✅ 自然、流畅、符合语言习惯 |
+| **智能性** | ❌ 无法动态调整 | ✅ 根据上下文动态调整内容、语气、重点 |
+| **适应性** | ❌ 只能处理预定义场景 | ✅ 可以处理各种复杂游戏场景 |
+| **维护成本** | ❌ 需要维护大量模板 | ✅ 只需维护Prompt模板 |
+
+**LLM建议生成示例对比**:
+
+| 场景 | 固定模板 | LLM生成 |
+|------|---------|---------|
+| **堆野提醒** | "堆野时间到了！建议前往野区堆野" | "堆野时间到了！你最近3次都错过堆野了，作为核心英雄，建议优先堆大野点提升打钱效率" |
+| **符文提醒** | "中符即将刷新！建议去抢符" | "中符即将刷新！血量充足（80%），你最近3次都错过符文了，建议这次去抢符提升能力" |
+| **团队领先** | "团队领先！建议主动推塔" | "团队领先（+7杀）！团队状态良好（平均血量85%），建议集合推进，扩大优势" |
+
+### **GSI Configuration File**
+
+Dota 2 client requires a GSI configuration file to send data to Agent server:
+
+```
+"Dota 2 GSI Configuration File"
+{
+    "uri": "http://localhost:5001/gsi"
+    "timeout": "5.0"
+    "buffer": "0.0"
+    "throttle": "0.0"
+    "data": {
+        "provider": "1"
+        "map": "1"
+        "player": "1"
+        "hero": "1"
+        "abilities": "1"
+        "items": "1"
+    }
+}
+```
+
+### **Voice Resources**
+
+Voice files need to be prepared for each event type and language:
+
+- `stack_zh.wav` - Chinese stack reminder
+- `stack_en.wav` - English stack reminder
+- `rune_zh.wav` - Chinese rune reminder
+- `rune_en.wav` - English rune reminder
+- ... (total 13 event types × 2 languages = 26 voice files)
+
+**注意**: 语音提醒是可选功能，主要推送方式是桌面通知（显示LLM生成的建议内容）。语音提醒可以播放预录制的语音文件，也可以使用TTS（Text-to-Speech）技术将LLM生成的建议转换为语音。
+
+### **Priority Settings**
+
+Suggestion priority levels:
+
+- **P0 (Critical)**: Roshan respawn, Tormentor spawn - game-changing events
+- **P1 (High)**: Stack, runes, neutral items - important resource events
+- **P2 (Medium)**: Game phase transitions - strategic guidance
+- **P3 (Low)**: Team state updates - situational awareness
+
+### **Personalization Factors**
+
+Personalization engine considers:
+
+- **Behavior Pattern**: Missed stacks count, missed runes count, playstyle type
+- **Current State**: Health, gold, skill cooldowns, level
+- **Hero Type**: Core (farming priority), Support (teamfight priority)
+- **Playstyle**: Farming-oriented (focus on economy), Teamfight-oriented (focus on team coordination)
+
+### **LLM Prompt Template Management**
+
+建议使用Langfuse管理LLM Prompt模板，支持：
+- **版本管理**: 不同版本的Prompt模板（如堆野提醒v1、v2）
+- **A/B测试**: 测试不同Prompt模板的效果
+- **性能监控**: 监控LLM生成建议的质量和响应时间
+- **迭代优化**: 根据用户反馈优化Prompt模板
 
 ---
 
