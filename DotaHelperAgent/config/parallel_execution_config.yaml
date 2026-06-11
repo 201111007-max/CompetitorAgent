@@ -1,0 +1,23 @@
+# 并行执行配置
+parallel_execution:
+  enabled: true  # 是否启用并行执行
+  
+  # 并发控制
+  max_concurrency: 5  # 最大并发数（建议5-10）
+  timeout: 30  # 单个工具超时时间（秒）
+  
+  # 依赖分析
+  dependency_analysis:
+    enabled: true  # 是否启用依赖分析
+    fallback_to_sequential: true  # 依赖分析失败时是否降级到顺序执行
+    
+  # 异步执行
+  async_execution:
+    enabled: true  # 是否启用异步执行
+    fallback_to_sync: true  # 异步执行失败时是否降级到同步执行
+    
+  # 性能监控
+  performance_monitoring:
+    enabled: true  # 是否启用性能监控
+    log_execution_time: true  # 是否记录执行时间
+    log_parallel_groups: true  # 是否记录并行分组
