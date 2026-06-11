@@ -231,6 +231,28 @@ class AgentController:
         # 加载已知英雄列表到上下文增强器
         self._load_known_heroes_to_augmenter()
 
+        # 初始化并行执行组件
+        from core.parallel_execution_config import ParallelExecutionConfig
+        from core.dependency_analyzer import DependencyAnalyzer
+        from core.parallel_executor import ParallelExecutor
+
+        self.parallel_config = ParallelExecutionConfig()
+        self.dependency_analyzer = DependencyAnalyzer()
+        self.parallel_executor = ParallelExecutor(
+            tool_registry=tool_registry,
+            max_concurrency=self.parallel_config.get_max_concurrency(),
+            timeout=self.parallel_config.get_timeout()
+        )
+
+        logger.info_ctx(
+            "并行执行组件已初始化",
+            extra_data={
+                "parallel_enabled": self.parallel_config.is_enabled(),
+                "max_concurrency": self.parallel_config.get_max_concurrency(),
+                "timeout": self.parallel_config.get_timeout()
+            }
+        )
+
     def solve(
         self, 
         query: str, 
@@ -758,6 +780,141 @@ class AgentController:
                     logger.info_ctx("LLM fallback 回答成功", session_id=session_id)
             except Exception as e:
                 logger.error_ctx(f"LLM fallback 失败: {e}", session_id=session_id)
+
+    async def _execute_async(self, thought: AgentThought) -> None:
+        """Execute 步骤 - 异步执行工具调用（支持并行执行）
+
+        使用 asyncio 并行执行工具调用，提升性能
+        """
+        import asyncio
+
+        thought.state = AgentState.ACTING
+
+        planned_tools = thought.context.get('planned_tools', [])
+        tool_params = thought.context.get('tool_params', {})
+        session_id = thought.context.get('session_id')
+
+        logger.info_ctx(
+            "开始异步执行工具",
+            session_id=session_id,
+            extra_data={
+                "planned_tools": planned_tools,
+                "parallel_enabled": self.parallel_config.is_enabled()
+            }
+        )
+
+        # 检查是否启用并行执行
+        if not self.parallel_config.is_enabled():
+            # 降级到同步执行
+            logger.info_ctx("并行执行未启用，降级到同步执行", session_id=session_id)
+            self._execute(thought)
+            return
+
+        # 分析工具依赖关系
+        dependencies = self.dependency_analyzer.analyze_dependencies(planned_tools, tool_params)
+
+        # 获取并行分组
+        parallel_groups = self.dependency_analyzer.get_parallel_groups(planned_tools, dependencies)
+
+        logger.info_ctx(
+            "工具依赖分析完成",
+            session_id=session_id,
+            extra_data={
+                "dependencies": dependencies,
+                "parallel_groups": parallel_groups,
+                "group_count": len(parallel_groups)
+            }
+        )
+
+        # 按组顺序执行
+        for group_index, group in enumerate(parallel_groups):
+            logger.info_ctx(
+                f"开始执行第 {group_index + 1} 组工具",
+                session_id=session_id,
+                extra_data={"group": group, "group_index": group_index}
+            )
+
+            # 并行执行当前组的工具
+            results = await self.parallel_executor.execute_parallel(group, tool_params)
+
+            # 处理执行结果
+            for tool_name, result in results.items():
+                params = tool_params.get(tool_name, {})
+
+                if isinstance(result, Exception):
+                    # 工具执行失败
+                    thought.add_reasoning(f"工具 {tool_name} 执行失败：{str(result)}")
+                    thought.add_action(tool_name, params, None)
+                    logger.error_ctx(
+                        "工具执行失败",
+                        session_id=session_id,
+                        extra_data={"tool_name": tool_name, "error": str(result)}
+                    )
+                else:
+                    # 工具执行成功
+                    thought.add_reasoning(f"执行工具：{tool_name}")
+                    thought.add_action(tool_name, params, result)
+
+                    logger.info_ctx(
+                        "工具执行完成",
+                        session_id=session_id,
+                        extra_data={
+                            "tool_name": tool_name,
+                            "execution_time_ms": round(result.execution_time * 1000, 2),
+                            "success": result.is_success()
+                        }
+                    )
+
+                    if result.is_success():
+                        thought.add_observation(result.data)
+                        logger.info_ctx(
+                            "工具执行成功",
+                            session_id=session_id,
+                            extra_data={
+                                "tool_name": tool_name,
+                                "result_data": result.data
+                            }
+                        )
+                    else:
+                        thought.add_reasoning(f"工具 {tool_name} 执行失败：{result.error}")
+                        logger.error_ctx(
+                            "工具执行失败",
+                            session_id=session_id,
+                            extra_data={"tool_name": tool_name, "error": result.error}
+                        )
+
+            # 如果当前组执行后有足够数据，提前完成
+            if self._has_sufficient_data(thought):
+                logger.info_ctx("已收集足够数据，准备合成结果", session_id=session_id)
+                self._synthesize(thought)
+                return
+
+        # 检查是否有有效的观察结果
+        has_valid_data = False
+        for obs in thought.observations:
+            if isinstance(obs, dict) and len(obs) > 0:
+                has_valid_data = True
+                break
+            elif isinstance(obs, list) and len(obs) > 0:
+                has_valid_data = True
+                break
+            elif obs is not None and obs != "":
+                has_valid_data = True
+                break
+
+        if not has_valid_data:
+            thought.add_reasoning("工具返回空数据，使用 LLM 直接回答作为 fallback")
+            logger.warning_ctx("工具返回空数据，启用 LLM fallback", session_id=session_id)
+
+            try:
+                fallback_response = self._llm_fallback_answer(thought)
+                if fallback_response:
+                    thought.add_observation({"llm_fallback_answer": fallback_response})
+                    thought.add_reasoning("LLM fallback 回答成功")
+                    logger.info_ctx("LLM fallback 回答成功", session_id=session_id)
+            except Exception as e:
+                logger.error_ctx(f"LLM fallback 失败: {e}", session_id=session_id)
+
 
     def _llm_fallback_answer(self, thought: AgentThought, query_type: str = "dota_query") -> Optional[str]:
         """LLM fallback 回答
