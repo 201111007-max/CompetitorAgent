@@ -1,0 +1,18 @@
+[
+  {
+    "id": 1,
+    "name": "幻影刺客",
+    "localized_name": "Phantom Assassin",
+    "description": "幻影刺客是一个高爆发的物理输出英雄，擅长秒杀敌方脆皮英雄",
+    "roles": ["carry", "escape"],
+    "win_rate": 0.52
+  },
+  {
+    "id": 2,
+    "name": "主宰",
+    "localized_name": "Juggernaut",
+    "description": "主宰是一个全能型英雄，拥有强大的输出和生存能力",
+    "roles": ["carry", "pusher"],
+    "win_rate": 0.51
+  }
+]

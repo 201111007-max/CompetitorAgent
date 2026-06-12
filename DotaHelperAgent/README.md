@@ -1,6 +1,57 @@
 # DotaHelperAgent - Dota 2 智能助手
 
-基于 **ReAct Agent** 架构的 Dota 2 英雄推荐助手，支持英雄克制分析、出装推荐、技能加点等智能查询。
+## ⚡ Quick Start
+
+**3 分钟快速体验 DotaHelperAgent：**
+
+### 1️⃣ 配置 LLM（必需）
+
+```bash
+# 复制配置模板
+cp config/llm_config.yaml.example config/llm_config.yaml
+
+# 编辑配置文件，填入你的 API Key
+# 支持 DeepSeek、OpenAI 兼容接口或本地部署
+```
+
+配置示例（DeepSeek）：
+```yaml
+llm:
+  enabled: true
+  base_url: "https://api.deepseek.com"
+  model: "deepseek-v4-pro"
+  # API Key 从环境变量读取：export DEEPSEEK_API_KEY=your_key
+```
+
+### 2️⃣ 启动服务
+
+```bash
+# 安装后端依赖
+pip install -r requirements.txt
+
+# 启动后端（端口 5000）
+python web/app.py
+```
+
+```bash
+# 安装前端依赖
+cd frontend
+npm install
+
+# 启动前端（端口 3000）
+npm run dev
+```
+
+### 3️⃣ 开始使用
+
+打开浏览器访问 **http://localhost:3000**，即可体验：
+
+- 🎯 **英雄克制推荐** - "对面有 PA、火枪，我该选什么？"
+- 🛡️ **出装建议** - "打幻影刺客怎么出装？"
+- 📊 **阵容分析** - "分析一下双方阵容优劣势"
+- 🔥 **版本强势** - "当前版本哪些英雄强势？"
+
+---
 
 ## 架构概述
 
@@ -30,14 +81,31 @@
 │  │   - 并发控制 → 超时管理              │    │
 │  │   - 性能提升 50-80%                 │    │
 │  └─────────────────────────────────────┘    │
+│  ┌─────────────────────────────────────┐    │
+│  │   Metacognition (元认知能力)         │    │
+│  │   - 知识边界评估                    │    │
+│  │   - 置信度计算                      │    │
+│  │   - 澄清请求生成                    │    │
+│  └─────────────────────────────────────┘    │
 └──────────────────────┬──────────────────────┘
                        │
-        ┌──────────────┼──────────────┐
-        ▼              ▼              ▼
-┌──────────────┐ ┌──────────┐ ┌──────────────┐
-│ Tool Registry │ │  Memory   │ │  Reflection  │
-│ (10+ Tools)  │ │ (3 Types) │ │  Evaluator   │
-└──────────────┘ └──────────┘ └──────────────┘
+        ┌──────────────┼──────────────┬──────────────┐
+        ▼              ▼              ▼              ▼
+┌──────────────┐ ┌──────────┐ ┌──────────────┐ ┌──────────────┐
+│ Tool Registry │ │  Memory   │ │  Reflection  │ │  Knowledge   │
+│ (15+ Tools)  │ │ (3 Types) │ │  Evaluator   │ │   System     │
+└──────────────┘ └──────────┘ └──────────────┘ └──────────────┘
+        │                                                      │
+        └──────────────────────────────────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────┐
+│          Cache System (SQLite)               │
+│  cache/cache_manager.py                      │
+│  - 两级缓存（内存 + SQLite）                  │
+│  - LRU 淘汰机制                              │
+│  - 自动过期管理                              │
+└─────────────────────────────────────────────┘
 ```
 
 ## 核心功能
@@ -50,6 +118,8 @@
 | 阵容分析 | 敌我双方阵容综合评估 |
 | 版本强势 | 当前版本热门英雄查询 |
 | 多轮对话 | 上下文理解、指代消解 |
+| 知识查询 | 向量检索、知识融合、多源知识整合 |
+| 智能搜索 | DuckDuckGo 搜索最新 Dota 2 信息（可选） |
 
 ## 技术栈
 
@@ -69,16 +139,25 @@
 - **SSE** - 流式输出
 - **Asyncio** - 异步并行执行（工具并发、依赖分析、拓扑排序）
 
+### 知识管理 (`knowledge/`)
+- **ChromaDB** - 向量数据库
+- **Sentence Transformers** - 向量嵌入
+- **OpenAI API** - 向量嵌入（可选）
+- **知识融合引擎** - 多源知识整合
+
+### 搜索与缓存
+- **DuckDuckGo Search** - 免费搜索（可选）
+- **SQLite Cache** - 两级缓存系统（内存 + 持久化）
+
 ## 项目结构
 
 ```
 DotaHelperAgent/
 ├── frontend/                 # Vue 3 前端
 │   ├── src/
-│   │   ├── components/      # 组件 (chat/, sidebar/, common/)
-│   │   ├── composables/     # 组合式函数 (useSSE, useChat)
-│   │   ├── services/        # API 服务
-│   │   ├── stores/          # Pinia 状态管理
+│   │   ├── components/      # 组件 (ChatBox, HeroPanel, LogPanel)
+│   │   ├── composables/     # 组合式函数 (useChatStream, useHeroQuery, useLogStream)
+│   │   ├── stores/          # Pinia 状态管理 (chat, hero, log)
 │   │   ├── views/           # 页面视图
 │   │   └── types/           # TypeScript 类型
 │   └── vite.config.ts       # Vite 配置
@@ -93,23 +172,50 @@ DotaHelperAgent/
 │   ├── context_augmenter.py # 上下文增强
 │   ├── dependency_analyzer.py   # 依赖分析器
 │   ├── parallel_executor.py     # 并行执行器
-│   └── parallel_execution_config.py  # 并行执行配置
+│   ├── llm_tool_selector.py     # LLM 工具选择器
+│   └── metacognition/       # 元认知能力模块
+│       ├── factory.py       # 工厂
+│       ├── interfaces.py    # 接口定义
+│       ├── llm_based.py     # LLM 驱动实现
+│       └── rule_based.py    # 规则驱动实现
+├── knowledge/                # 知识管理系统
+│   ├── vector_store.py      # 向量数据库
+│   ├── fusion_engine.py     # 知识融合引擎
+│   ├── entity_alignment.py  # 实体对齐
+│   ├── conflict_detector.py # 冲突检测
+│   └── confidence_evaluator.py  # 置信度评估
+├── tools/                    # Agent 工具
+│   ├── base.py              # 工具基类
+│   ├── agent_tools.py       # 工具工厂 (英雄、物品、技能工具)
+│   ├── hero_tools.py        # 英雄分析工具
+│   ├── build_tools.py       # 出装构建工具
+│   ├── knowledge_tools.py   # 知识查询工具
+│   └── search_tools.py      # 搜索工具 (DuckDuckGo)
 ├── analyzers/                # 分析器
 │   ├── hero_analyzer.py     # 英雄分析
+│   ├── hybrid_hero_analyzer.py  # 混合分析器
 │   ├── item_recommender.py  # 物品推荐
 │   └── skill_builder.py     # 技能加点
-├── tools/                    # Agent 工具
-│   └── agent_tools.py       # 工具工厂 (10+ Tools)
 ├── memory/                   # 记忆系统
 │   └── memory.py            # SQLite 持久化
+├── cache/                    # 缓存系统
+│   └── cache_manager.py     # SQLite 缓存管理器
+├── managers/                 # 数据管理器
+│   └── matchup_data_manager.py  # 对局数据管理
 ├── strategies/               # 评分策略
 ├── utils/                    # 工具函数
 │   ├── api_client.py        # OpenDota API 客户端
 │   ├── llm_client.py        # LLM 客户端
 │   └── localization.py      # 本地化 (中英)
 ├── config/                   # 配置文件
-│   └── llm_config.yaml      # LLM 配置
+│   ├── llm_config.yaml      # LLM 配置
+│   ├── knowledge_config.yaml # 知识管理配置
+│   └── parallel_execution_config.yaml  # 并行执行配置
 ├── data/                     # 数据文件
+│   ├── heroes_cn.json       # 英雄中文名映射
+│   ├── items_cn.json        # 物品中文名映射
+│   ├── matchups/            # 英雄对局数据
+│   └── knowledge_base/      # 知识库数据
 ├── tests/                    # 测试
 └── docs/                     # 文档
 ```
@@ -170,11 +276,14 @@ npm run dev
 | 能力 | 状态 |
 |------|------|
 | Think → Plan → Execute → Observe → Reflect | ✅ |
-| LLM 智能工具选择 (10+ Tools) | ✅ |
+| LLM 智能工具选择 (15+ Tools) | ✅ |
 | 三层记忆系统 (SQLite) | ✅ |
 | 多维度反思评估 | ✅ |
 | 目标分解与追踪 | ✅ |
 | 元认知能力 | ✅ |
+| - 知识边界评估 | ✅ |
+| - 置信度计算 | ✅ |
+| - 澄清请求生成 | ✅ |
 | 多轮对话上下文理解 | ✅ |
 | SSE 流式输出 | ✅ |
 | 混合模式 (LLM优先 + 数据兜底) | ✅ |
@@ -183,6 +292,18 @@ npm run dev
 | - 并发控制与超时管理 | ✅ |
 | - 性能提升 50-80% | ✅ |
 | - 宽松模式（部分失败不影响整体） | ✅ |
+| **知识管理系统** | ✅ |
+| - 向量检索 (ChromaDB) | ✅ |
+| - 知识融合引擎 | ✅ |
+| - 实体对齐与冲突检测 | ✅ |
+| - 置信度评估 | ✅ |
+| **缓存系统** | ✅ |
+| - 两级缓存（内存 + SQLite） | ✅ |
+| - LRU 淘汰机制 | ✅ |
+| - 自动过期管理 | ✅ |
+| **智能搜索** | ✅ |
+| - DuckDuckGo 搜索（免费、无限制） | ✅ |
+| - 自动添加 Dota 2 前缀 | ✅ |
 
 ## 文档
 

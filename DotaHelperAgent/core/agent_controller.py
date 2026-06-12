@@ -253,6 +253,111 @@ class AgentController:
             }
         )
 
+        # 初始化知识管理系统
+        self._init_knowledge_system()
+
+    def _init_knowledge_system(self) -> None:
+        """初始化知识管理系统"""
+        try:
+            from knowledge.vector_store import VectorStore
+            from knowledge.fusion_engine import KnowledgeFusionEngine
+            from tools.knowledge_tools import KnowledgeQueryTool, KnowledgeUpdateTool, create_knowledge_tools
+            import yaml
+
+            # 加载知识管理配置
+            config_path = Path(__file__).parent.parent / "config" / "knowledge_config.yaml"
+            knowledge_config = {}
+
+            if config_path.exists():
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    full_config = yaml.safe_load(f)
+                    knowledge_config = full_config.get('knowledge', {})
+
+            # 检查是否启用知识管理
+            if knowledge_config.get('enabled', True):
+                # 初始化向量数据库
+                vector_store_config = knowledge_config.get('vector_store', {})
+                self.vector_store = VectorStore(vector_store_config)
+
+                # 初始化知识融合引擎
+                fusion_config = knowledge_config.get('fusion', {})
+                self.fusion_engine = KnowledgeFusionEngine(fusion_config)
+
+                # 注册知识工具
+                knowledge_tools = create_knowledge_tools(self.vector_store, self.fusion_engine)
+                for tool in knowledge_tools:
+                    self.tool_registry.register(tool)
+
+                self.knowledge_enabled = True
+                logger.info("知识管理系统初始化完成")
+            else:
+                self.knowledge_enabled = False
+                self.vector_store = None
+                self.fusion_engine = None
+                logger.info("知识管理系统未启用")
+
+        except Exception as e:
+            logger.warning(f"知识管理系统初始化失败: {e}")
+            self.knowledge_enabled = False
+            self.vector_store = None
+            self.fusion_engine = None
+
+    def _analyze_query_for_knowledge(self, query: str) -> Dict[str, Any]:
+        """分析查询是否需要知识库
+
+        Args:
+            query: 用户查询
+
+        Returns:
+            分析结果
+        """
+        # 关键词检测
+        knowledge_keywords = [
+            "攻略", "怎么", "如何", "推荐", "建议", "出装",
+            "技能", "加点", "克制", "counter", "build",
+            "玩法", "技巧", "天赋", "装备"
+        ]
+
+        query_lower = query.lower()
+        needs_knowledge = any(kw in query_lower for kw in knowledge_keywords)
+
+        return {
+            'needs_knowledge': needs_knowledge,
+            'query_type': 'knowledge' if needs_knowledge else 'general'
+        }
+
+    def _query_knowledge(self, query: str, thought: 'AgentThought') -> None:
+        """查询知识库并更新思考状态
+
+        Args:
+            query: 查询文本
+            thought: Agent 思考状态
+        """
+        if not self.knowledge_enabled:
+            return
+
+        try:
+            # 执行知识查询
+            knowledge_result = self.tool_registry.execute_tool(
+                "knowledge_query",
+                query=query,
+                knowledge_type="fused"
+            )
+
+            if knowledge_result.is_success():
+                thought.context['knowledge'] = knowledge_result.data
+                thought.add_reasoning("从知识库检索到相关信息")
+
+                # 记录知识来源
+                if 'fused' in knowledge_result.data:
+                    fused_data = knowledge_result.data['fused']
+                    sources = fused_data.get('sources', [])
+                    confidence = fused_data.get('confidence', 0)
+                    thought.add_reasoning(f"知识来源: {sources}, 置信度: {confidence:.2f}")
+
+        except Exception as e:
+            logger.warning(f"知识查询失败: {e}")
+
     def solve(
         self, 
         query: str, 
@@ -397,6 +502,21 @@ class AgentController:
                                 self._save_conversation_history(session_id, original_query, response, augmented_context)
                             
                             return response
+
+                # 0.5. 知识库查询（新增）
+                if self.knowledge_enabled:
+                    query_analysis = self._analyze_query_for_knowledge(query)
+                    if query_analysis.get('needs_knowledge', False):
+                        with TraceSpan("knowledge_query"):
+                            self._query_knowledge(query, thought)
+                        logger.info_ctx(
+                            "知识库查询完成",
+                            session_id=session_id,
+                            extra_data={
+                                "query_type": query_analysis.get('query_type'),
+                                "has_knowledge": 'knowledge' in thought.context
+                            }
+                        )
 
                 # 1. 目标分解阶段
                 logger.info_ctx("开始目标分解", session_id=session_id)

@@ -1,27 +1,42 @@
 # DotaHelperAgent 待改进事项
 
-> 最后更新：2026-06-11
+> 最后更新：2026-06-12
 
 ## 一、待改进优先级
 
-> 更新时间：2026-05-21
+> 更新时间：2026-06-12
 
-| 优先级 | 改进项 | 预计工作量 | 影响 | 状态 |
-| --- | --- | --- | --- | --- |
-| **P0** | **接入 Langfuse 监控系统** | 中 | 高 | ✅ 已完成 |
-| **P0** | **Agent 执行层监控（Langfuse）** | 中 | 高 | ✅ 已完成 |
-| **P0** | **工具调用层监控（Langfuse）** | 中 | 高 | ✅ 已完成 |
-| **P0** | **Trace 定位与日志追踪体系** | 大 | 高 | ✅ 已完成 |
-| **P1** | **GSI 实时游戏状态监控** | 大 | 高 | ❌ 待实现 |
-| **P1** | **游戏事件提醒系统** | 中 | 中 | ❌ 待实现 |
-| **P1** | **Agent主动推荐机制** | 大 | 高 | ❌ 待实现 |
-| **P1** | **GSI数据与Agent结合方案** | 中 | 高 | ❌ 待实现 |
-| **P1** | **GSI主动推荐功能PRD** | 大 | 高 | ❌ 待实现 |
-| P1 | Prompt 版本管理（Langfuse） | 中 | 中 | ❌ 待实现 |
-| P1 | 工具执行并行化 | 中 | 中 | ❌ 待实现 |
-| P2 | 前端样式优化 | 中 | 中 | ❌ 待实现 |
-| P2 | 用户反馈学习 | 大 | 中 | ❌ 待实现 |
-| P2 | 语音提醒系统 | 中 | 低 | ❌ 待实现 |
+### 1.1 总体架构升级路线图（第十六章）
+
+**目标**: 将 DotaHelperAgent 从"被动查询助手"升级为"智能决策推荐系统"
+
+| 阶段 | 升级方向 | 优先级 | 预计工作量 | 核心内容 | 状态 |
+|------|---------|--------|----------|---------|------|
+| **第一阶段** | **知识管理能力升级** | **P0** | 1-2周 | 向量数据库 + 攻略文档检索 | ❌ 待实现 |
+| **第二阶段** | **GSI 实时数据处理** | **P1** | 2-3周 | GSI服务器 + 状态管理 + 事件处理 | ❌ 待实现 |
+| **第三阶段** | **推理和决策能力增强** | **P1** | 3-4周 | 数据驱动决策 + 混合推理 | ❌ 待实现 |
+| **第四阶段** | **个性化学习能力** | **P2** | 2-3周 | 用户画像 + 在线学习 | ❌ 待实现 |
+| **第五阶段** | **多模态交互能力** | **P2** | 1-2周 | 语音播报 + 数据可视化 | ❌ 待实现 |
+
+### 1.2 详细待办事项清单
+
+| 优先级 | 改进项 | 预计工作量 | 影响 | 所属阶段 | 状态 |
+| --- | --- | --- | --- | --- | --- |
+| **P0** | **接入 Langfuse 监控系统** | 中 | 高 | - | ✅ 已完成 |
+| **P0** | **Agent 执行层监控（Langfuse）** | 中 | 高 | - | ✅ 已完成 |
+| **P0** | **工具调用层监控（Langfuse）** | 中 | 高 | - | ✅ 已完成 |
+| **P0** | **Trace 定位与日志追踪体系** | 大 | 高 | - | ✅ 已完成 |
+| **P0** | **知识管理能力升级** | 中 | 高 | **第一阶段** | ❌ 待实现 |
+| **P1** | **GSI 实时游戏状态监控** | 大 | 高 | **第二阶段** | ❌ 待实现 |
+| **P1** | **游戏事件提醒系统** | 中 | 中 | **第二阶段** | ❌ 待实现 |
+| **P1** | **Agent主动推荐机制** | 大 | 高 | **第三阶段** | ❌ 待实现 |
+| **P1** | **GSI数据与Agent结合方案** | 中 | 高 | **第二阶段** | ❌ 待实现 |
+| **P1** | **GSI主动推荐功能PRD** | 大 | 高 | **第二阶段** | ❌ 待实现 |
+| P1 | Prompt 版本管理（Langfuse） | 中 | 中 | **第三阶段** | ❌ 待实现 |
+| **P1** | **工具执行并行化** | 中 | 中 | - | ✅ 已完成 |
+| P2 | 前端样式优化 | 中 | 中 | **第五阶段** | ❌ 待实现 |
+| P2 | 用户反馈学习 | 大 | 中 | **第四阶段** | ❌ 待实现 |
+| P2 | 语音提醒系统 | 中 | 低 | **第五阶段** | ❌ 待实现 |
 
 ### 已完成的改进项
 
@@ -30,7 +45,68 @@
 | P0 | 工具选择智能化（LLM Function Calling） | 2026-05-17 | `core/llm_tool_selector.py` |
 | P1 | 记忆系统深度集成 | 2026-05-17 | `memory/memory.py` |
 | P1 | 多轮对话上下文 | 2026-05-17 | `core/conversation_manager.py` + `core/context_augmenter.py` |
+| P1 | 工具执行并行化 | 2026-06-10 | `core/parallel_executor.py` + `core/parallel_execution_config.py` |
 | P2 | 反思结果驱动策略调整 | 2026-05-17 | `core/agent_controller.py#_adjust_strategy` |
+
+---
+
+### 1.3 待办项合并与冲突分析
+
+#### 1.3.1 合并关系说明
+
+**第二阶段：GSI 实时数据处理** 整合了以下待办项：
+- ✅ **GSI 实时游戏状态监控**（第八章）→ 第二阶段核心功能
+- ✅ **游戏事件提醒系统**（第九章）→ 第二阶段事件处理器
+- ✅ **GSI数据与Agent结合方案**（第十一章）→ 第二阶段工具层集成
+- ✅ **GSI主动推荐功能PRD**（第十二章）→ 第二阶段产品化方案
+
+**第三阶段：推理和决策能力增强** 整合了以下待办项：
+- ✅ **Agent主动推荐机制**（第十章）→ 第三阶段决策融合器
+- ✅ **Prompt 版本管理**（第六章）→ 第三阶段 Prompt 优化
+
+**第四阶段：个性化学习能力** 整合了以下待办项：
+- ✅ **用户反馈学习**（P2）→ 第四阶段在线学习引擎
+
+**第五阶段：多模态交互能力** 整合了以下待办项：
+- ✅ **语音提醒系统**（P2）→ 第五阶段语音播报功能
+- ✅ **前端样式优化**（P2）→ 第五阶段数据可视化
+
+#### 1.3.2 新增待办项
+
+**第一阶段：知识管理能力升级**（P0，新增）：
+- ❌ **向量数据库集成**（Chroma/FAISS）
+- ❌ **攻略文档向量化存储**
+- ❌ **知识查询工具**
+
+#### 1.3.3 优先级调整建议
+
+| 原优先级 | 改进项 | 新优先级 | 调整原因 |
+|---------|--------|---------|---------|
+| P1 | GSI 实时游戏状态监控 | P1 | 保持不变，属于第二阶段核心 |
+| P1 | 游戏事件提醒系统 | P1 | 保持不变，属于第二阶段 |
+| P1 | Agent主动推荐机制 | P1 | 保持不变，属于第三阶段核心 |
+| P1 | GSI数据与Agent结合方案 | P1 | 保持不变，属于第二阶段 |
+| P1 | GSI主动推荐功能PRD | P1 | 保持不变，属于第二阶段 |
+| P1 | Prompt 版本管理 | P1 | 保持不变，属于第三阶段 |
+| P2 | 用户反馈学习 | P2 | 保持不变，属于第四阶段 |
+| P2 | 语音提醒系统 | P2 | 保持不变，属于第五阶段 |
+| P2 | 前端样式优化 | P2 | 保持不变，属于第五阶段 |
+| - | **知识管理能力升级** | **P0** | **新增，最高优先级** |
+
+#### 1.3.4 实施建议
+
+**推荐实施顺序**：
+1. **第一阶段（P0）**：知识管理能力升级 - 建立知识库基础设施
+2. **第二阶段（P1）**：GSI 实时数据处理 - 实现实时监控能力
+3. **第三阶段（P1）**：推理和决策能力增强 - 提升决策质量
+4. **第四阶段（P2）**：个性化学习能力 - 实现个性化推荐
+5. **第五阶段（P2）**：多模态交互能力 - 提升用户体验
+
+**关键依赖关系**：
+- 第二阶段依赖第一阶段（知识库支持决策推荐）
+- 第三阶段依赖第二阶段（实时数据支持推理）
+- 第四阶段依赖第三阶段（决策能力支持个性化）
+- 第五阶段可并行开发（相对独立）
 
 ---
 
@@ -56,110 +132,7 @@ Langfuse 是一个开源的 LLM 应用可观测性平台，提供：
 
 **官方文档**：https://langfuse.com/docs
 
-### 2.2 实际集成方案
-
-**安装依赖**：
-```bash
-pip install langfuse
-```
-
-**配置文件** (`config/langfuse_config.yaml`):
-```yaml
-langfuse:
-  enabled: true
-  host: "http://localhost:3001"
-  public_key: "${LANGFUSE_PUBLIC_KEY}"
-  secret_key: "${LANGFUSE_SECRET_KEY}"
-  trace:
-    llm_calls: true
-    agent_flow: true
-    tool_calls: true
-    api_calls: true
-  sample_rate: 1.0
-```
-
-**核心实现**：
-
-1. **适配器模式** - `utils/langfuse_adapter.py`
-```python
-class LangfuseClient:
-    """Langfuse 客户端单例 - 可选导入"""
-    
-    @classmethod
-    def get_instance(cls) -> "LangfuseClient":
-        """获取单例实例"""
-        return cls()
-    
-    def init(self, config: Optional[Dict[str, Any]] = None) -> None:
-        """初始化客户端（支持环境变量）"""
-        if not LANGFUSE_AVAILABLE:
-            logger.info("langfuse SDK 未安装，监控功能已禁用")
-            self._enabled = False
-            return
-        
-        # 从配置或环境变量加载密钥
-        public_key = config.get('public_key') or os.getenv('LANGFUSE_PUBLIC_KEY')
-        secret_key = config.get('secret_key') or os.getenv('LANGFUSE_SECRET_KEY')
-        
-        # 初始化 Langfuse 客户端
-        self._client = Langfuse(
-            public_key=public_key,
-            secret_key=secret_key,
-            host=host
-        )
-        
-        # 认证检查
-        if self._client.auth_check():
-            self._enabled = True
-            logger.info(f"Langfuse 客户端初始化成功")
-```
-
-2. **请求级追踪** - `web/app.py`
-```python
-# 初始化 Langfuse 客户端
-if LANGFUSE_AVAILABLE:
-    langfuse_config = LangfuseConfig(config_path="config/langfuse_config.yaml")
-    langfuse_client = LangfuseClient.get_instance()
-    langfuse_client.init(config=langfuse_config.to_dict())
-
-# 在请求中创建 trace
-@app.before_request
-def before_request():
-    if langfuse_client and langfuse_client.enabled:
-        g.langfuse_trace = langfuse_client.observation(
-            name=f"request_{request.path.replace('/', '_')}",
-            as_type="chain",
-            metadata={"trace_id": trace_id, "session_id": session_id}
-        )
-
-# 请求结束后刷新数据
-@app.after_request
-def after_request(response):
-    if langfuse_client:
-        langfuse_client.flush()
-    return response
-```
-
-3. **用户反馈评分** - `web/app.py`
-```python
-@app.route('/api/feedback', methods=['POST'])
-def submit_feedback():
-    """接收用户反馈并记录到 Langfuse"""
-    data = request.get_json()
-    trace_id = data.get('trace_id')
-    score = data.get('score')
-    comment = data.get('comment', '')
-    
-    if langfuse_client and langfuse_client.enabled:
-        langfuse_client.score(
-            name="user_feedback",
-            value=float(score),
-            comment=comment
-        )
-        langfuse_client.flush()
-```
-
-### 2.3 已实现的集成点
+### 2.2 已实现的集成点
 
 | 模块 | 集成内容 | 状态 |
 | --- | --- | --- |
@@ -174,39 +147,17 @@ def submit_feedback():
 | `core/agent_controller.py` | ReAct 循环追踪、会话关联 | ❌ 未集成 |
 | Prompt 管理 | 版本化 Prompt 模板 | ❌ 未集成 |
 
-### 2.4 特性亮点
+### 2.3 特性亮点
 
 1. **可选导入设计** - SDK 未安装时自动降级为 NoOpObservation，不影响项目运行
-   ```python
-   try:
-       from langfuse import Langfuse
-       LANGFUSE_AVAILABLE = True
-   except ImportError:
-       LANGFUSE_AVAILABLE = False
-       Langfuse = None
-   ```
-
 2. **配置化管理** - 支持环境变量和 YAML 配置文件，灵活切换环境
-   ```python
-   # 从环境变量加载
-   if os.getenv('LANGFUSE_PUBLIC_KEY'):
-       config['public_key'] = os.getenv('LANGFUSE_PUBLIC_KEY')
-   
-   # 从 YAML 文件加载
-   with open(config_path, 'r') as f:
-       yaml_config = yaml.safe_load(f)
-   ```
-
 3. **完整的测试覆盖** - 单元测试 + 集成测试
-   - `tests/utils/test_langfuse_adapter.py` - 适配器测试
-   - `tests/utils/test_langfuse_config.py` - 配置测试
-   - `tests/integration/test_langfuse_integration.py` - 集成测试
 
-### 2.5 预期收益
+### 2.4 预期收益
 
 1. **调试效率提升**：快速定位问题请求 ✅
 2. **性能优化**：识别慢查询和瓶颈 ✅（通过 API 调用追踪）
-3. **成本控制**：Token 使用量可视化 ✅（在 llm_client.py 中记录 prompt_tokens, completion_tokens, total_tokens）
+3. **成本控制**：Token 使用量可视化 ✅（在 llm_client.py 中记录）
 4. **质量评估**：用户评分 + 自动评估 ✅
 5. **Prompt 优化**：版本管理和 A/B 测试 ❌（未集成）
 
@@ -226,29 +177,6 @@ def submit_feedback():
 - ✅ 记录输入参数（query, context）和元数据（session_id, max_turns, trace_id）
 - ✅ 创建 Langfuse Span 用于各阶段追踪
 - ✅ 与现有 TraceSpan 系统协同工作
-
-**核心代码**:
-```python
-# core/agent_controller.py - solve() 方法
-# 获取 Langfuse 客户端
-langfuse_client = LangfuseClient.get_instance() if LANGFUSE_AVAILABLE else None
-
-# 创建 Agent Trace (Langfuse)
-if langfuse_client and langfuse_client.enabled:
-    agent_trace = langfuse_client.observation(
-        name="react_agent",
-        as_type="agent",
-        input={"query": query, "context": context},
-        metadata={
-            "session_id": session_id,
-            "max_turns": self.max_turns,
-            "start_time": datetime.now().isoformat(),
-            "trace_id": trace_ctx.trace_id if trace_ctx else None
-        }
-    )
-else:
-    agent_trace = NoOpObservation() if NoOpObservation else None
-```
 
 **预期收益**:
 - ✅ Agent 推理过程可视化
@@ -273,51 +201,6 @@ else:
 - ✅ 记录工具参数和返回值预览
 - ✅ 异常处理和错误记录
 
-**核心代码**:
-```python
-# core/tool_registry.py - execute() 方法
-# 获取 Langfuse 客户端
-langfuse_client = LangfuseClient.get_instance() if LANGFUSE_AVAILABLE else None
-
-# 创建工具 Span (Langfuse)
-if langfuse_client and langfuse_client.enabled:
-    tool_span = langfuse_client.observation(
-        name=f"tool_{tool_name}",
-        as_type="tool",
-        input=kwargs,
-        metadata={
-            "trace_id": trace_ctx.trace_id if trace_ctx else None,
-            "tool_name": tool_name,
-            "category": self._tools.get(tool_name).category if tool_name in self._tools else None,
-            "start_time": datetime.now().isoformat()
-        }
-    )
-else:
-    tool_span = NoOpObservation() if NoOpObservation else None
-
-# 执行工具后更新 Span
-if tool_span and hasattr(tool_span, 'update'):
-    tool_span.update(
-        output={
-            "success": result.is_success(),
-            "status": result.status.value,
-            "data_preview": str(result.data)[:200] if result.data else None
-        },
-        metadata={
-            "execution_time_ms": round(execution_time * 1000, 2),
-            "end_time": datetime.now().isoformat()
-        }
-    )
-
-# 记录工具评分
-if hasattr(tool_span, 'score'):
-    tool_span.score(
-        name="tool_success",
-        value=1.0 if result.is_success() else 0.0,
-        comment="工具执行成功" if result.is_success() else f"工具执行失败: {result.error}"
-    )
-```
-
 **预期收益**:
 - ✅ 工具性能分析
 - ✅ 工具使用统计
@@ -331,7 +214,7 @@ if hasattr(tool_span, 'score'):
 
 **目标**: 建立完整的日志追踪方案，支持根据 trace ID 快速获取完整调用链日志
 
-**实现位置**: 
+**实现位置**:
 - `utils/trace_context.py` - Trace 上下文管理（TraceContext, TraceSpan, @traced 装饰器）
 - `utils/log_config.py` - TraceJSONFormatter 日志格式化器
 - `web/app.py` - Flask 请求级 Trace 初始化与清理、Trace 查询 API
@@ -345,50 +228,11 @@ if hasattr(tool_span, 'score'):
 - ✅ 前端 TraceID 传递（X-Trace-ID Header）
 - ✅ @traced 装饰器（自动为函数添加 Trace 支持）
 
-**核心代码示例**:
-```python
-# utils/trace_context.py
-@dataclass
-class TraceContext:
-    """Trace 上下文 - 贯穿请求全生命周期"""
-    trace_id: str           # 全局唯一追踪ID
-    span_id: str            # 当前操作SpanID
-    parent_span_id: Optional[str] = None  # 父SpanID
-    session_id: str         # 业务会话ID
-    operation: str          # 操作名称
-    start_time: float      # 开始时间戳
-
-# 使用 TraceSpan 上下文管理器
-with TraceSpan("my_operation"):
-    do_something()
-
-# 使用 @traced 装饰器
-@traced("my_function")
-def my_function():
-    do_something()
-
-# 获取当前 Trace 信息
-current = get_current_trace()
-print(f"Trace ID: {current.trace_id}")
-```
-
-**日志输出示例**:
-```json
-{
-    "timestamp": "2026-05-12T10:30:45.123456",
-    "level": "INFO",
-    "logger": "agent_controller",
-    "message": "开始处理查询",
-    "trace": {
-        "trace_id": "trace_a1b2c3d4e5f67890",
-        "span_id": "agent_solve",
-        "parent_span_id": null,
-        "session_id": "sess_abc123",
-        "operation": "agent_solve",
-        "duration_ms": 1250
-    }
-}
-```
+**核心特性**:
+- TraceContext 数据结构：包含 trace_id, span_id, parent_span_id, session_id, operation, start_time
+- TraceSpan 上下文管理器：支持嵌套 Span 追踪
+- @traced 装饰器：自动为函数添加 Trace 支持
+- JSON 格式日志输出：便于解析和分析
 
 **预期收益**:
 - ✅ 快速定位问题（通过 trace_id 一键查询相关日志）
@@ -452,7 +296,41 @@ class PromptManager:
 
 ---
 
-## 七、P1：GSI 实时游戏状态监控 ❌
+## 七、P1：工具执行并行化 ✅
+
+**实现状态**: ✅ 已完成（2026-06-10）
+
+**目标**: 实现工具的并行执行，提升 Agent 响应速度和性能
+
+**实现位置**:
+- `core/parallel_executor.py` - 并行执行器
+- `core/parallel_execution_config.py` - 配置管理器
+- `config/parallel_execution_config.yaml` - 配置文件
+- `tests/integration/test_parallel_execution_integration.py` - 集成测试
+
+**核心功能**:
+- ✅ 并行执行多个独立工具（使用 asyncio.gather）
+- ✅ 并发控制（asyncio.Semaphore 限制最大并发数）
+- ✅ 超时控制（asyncio.wait_for 实现单个工具超时）
+- ✅ 异常处理（宽松模式，一个工具失败不影响其他工具）
+- ✅ 依赖分析（识别工具间依赖关系，按需顺序执行）
+- ✅ 性能监控（记录执行时间、并行分组等）
+- ✅ 配置化管理（支持动态调整并发数、超时时间等参数）
+
+**性能提升**:
+- ⚡ **响应速度提升**：多个独立工具并行执行，总耗时接近最慢工具的耗时
+- 🛡️ **容错能力增强**：一个工具失败不影响其他工具执行
+- 📊 **可观测性提升**：记录执行时间、并行分组等信息，便于性能分析
+- ⚙️ **灵活配置**：支持动态调整并发数、超时时间等参数
+
+**预期收益**:
+- ✅ Agent 响应速度提升 30%-50%（取决于工具数量和独立性）
+- ✅ 系统吞吐量提升（支持更多并发请求）
+- ✅ 用户体验优化（更快的响应时间）
+
+---
+
+## 八、P1：GSI 实时游戏状态监控 ❌
 
 **目标**: 集成 Dota 2 游戏状态集成（Game State Integration, GSI）功能，实时监控游戏状态
 
@@ -529,7 +407,7 @@ class PromptManager:
 
 ---
 
-## 八、P1：游戏事件提醒系统 ❌
+## 九、P1：游戏事件提醒系统 ❌
 
 **目标**: 基于游戏状态监控，提供游戏事件提醒功能
 
@@ -641,7 +519,7 @@ gsi:
 
 ---
 
-## 十、P1：GSI数据与Agent结合方案 ❌
+## 十一、P1：GSI数据与Agent结合方案 ❌
 
 **目标**: 将GSI实时数据与Agent工具结合，提供实时问答和策略建议
 
@@ -667,7 +545,7 @@ gsi:
 
 ---
 
-## 十一、P1：GSI主动推荐功能PRD ❌
+## 十二、P1：GSI主动推荐功能PRD ❌
 
 **目标**: 实现基于GSI的Agent主动推荐系统，提供游戏过程中的智能建议推送
 
@@ -803,23 +681,6 @@ STACK_PROMPT = """你是一个Dota 2游戏教练，正在指导玩家堆野。
 
 ---
 
-## 十二、P1：工具执行并行化 ❌
-
-**目标**: 实现工具并行执行，提升Agent响应速度
-
-**实现位置**: `core/agent_controller.py` - 并行执行器
-
-**核心功能**:
-- 依赖分析（识别哪些工具可以并行执行）
-- 拓扑排序（确定执行顺序）
-- 并发控制（限制并发数量，避免资源耗尽）
-- 超时管理（防止单个工具阻塞整个流程）
-
-**预期收益**:
-- 性能提升 50-80%
-- 响应时间缩短
-- 资源利用率提高
-
 ---
 
 ## 十三、P2：前端样式优化 ❌
@@ -921,3 +782,218 @@ class VoicePlayer:
 - 提醒感知度增强（语音比文字更直观）
 - 游戏节奏掌握优化（及时响应游戏事件）
 - 用户体验提升（多感官交互）
+
+---
+
+## 十六、Agent 架构升级总体思路 ❌
+
+> **状态**: ❌ 待实现
+> **更新时间**: 2026-06-12
+> **说明**: 本章节内容已整合到第一章"待改进优先级"中，作为总体架构升级路线图。详细实施方案请参考各阶段对应的详细文档。
+
+**目标**: 将 DotaHelperAgent 从"被动查询助手"升级为"智能决策推荐系统"
+
+### 16.1 升级背景
+
+当前 DotaHelperAgent 已具备优秀的 ReAct Agent 架构基础：
+- ✅ 完整的推理循环（Think → Plan → Execute → Observe → Reflect）
+- ✅ 元认知能力（自我评估、置信度计算）
+- ✅ 反思机制（多维度质量评估）
+- ✅ 三层记忆系统（短期、长期、情景）
+- ✅ 丰富的工具生态（10+ 工具）
+- ✅ 并行执行能力（性能优化）
+
+但为了实现"智能决策推荐"的核心需求，需要从以下 5 个维度进行系统性升级：
+
+### 16.2 升级方向概览
+
+| 维度 | 当前状态 | 目标状态 | 优先级 | 详细文档 |
+|------|---------|---------|--------|---------|
+| **知识管理能力** | 三层记忆系统（扁平存储） | 知识图谱 + 向量检索系统 | P0 | [KNOWLEDGE_MANAGEMENT_UPGRADE.md](./architecture_upgrade/KNOWLEDGE_MANAGEMENT_UPGRADE.md) |
+| **实时数据处理** | 静态数据查询（OpenDota API） | GSI 实时监控 + 动态决策 | P1 | [REALTIME_DATA_PROCESSING_UPGRADE.md](./architecture_upgrade/REALTIME_DATA_PROCESSING_UPGRADE.md) |
+| **推理决策能力** | 规则推理 + LLM 增强 | 混合推理（规则 + 数据 + LLM） | P1 | [REASONING_DECISION_UPGRADE.md](./architecture_upgrade/REASONING_DECISION_UPGRADE.md) |
+| **个性化学习** | 通用推荐（无个性化） | 用户画像 + 在线学习 | P2 | [PERSONALIZED_LEARNING_UPGRADE.md](./architecture_upgrade/PERSONALIZED_LEARNING_UPGRADE.md) |
+| **多模态交互** | 文本交互 | 文本 + 语音 + 可视化 | P2 | [MULTIMODAL_INTERACTION_UPGRADE.md](./architecture_upgrade/MULTIMODAL_INTERACTION_UPGRADE.md) |
+
+### 16.3 核心架构升级
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Agent 架构升级蓝图                        │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │              多模态交互层（新增）                      │  │
+│  │  - 文本输入/输出                                      │  │
+│  │  - 语音识别/播报                                      │  │
+│  │  - 可视化图表                                         │  │
+│  └──────────────────────────────────────────────────────┘  │
+│                          ▼                                  │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │              个性化推荐层（新增）                      │  │
+│  │  - 用户画像管理                                       │  │
+│  │  - 风格匹配                                           │  │
+│  │  - 在线学习                                           │  │
+│  └──────────────────────────────────────────────────────┘  │
+│                          ▼                                  │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │              混合推理层（增强）                        │  │
+│  │  ┌────────────┐  ┌────────────┐  ┌────────────┐     │  │
+│  │  │ 规则推理   │  │ 数据驱动   │  │ LLM 增强   │     │  │
+│  │  │ 引擎       │  │ 引擎       │  │ 引擎       │     │  │
+│  │  └────────────┘  └────────────┘  └────────────┘     │  │
+│  │         │               │               │            │  │
+│  │         └───────────────┼───────────────┘            │  │
+│  │                         ▼                            │  │
+│  │              ┌──────────────────┐                    │  │
+│  │              │  决策融合器       │                    │  │
+│  │              └──────────────────┘                    │  │
+│  └──────────────────────────────────────────────────────┘  │
+│                          ▼                                  │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │              知识管理层（升级）                        │  │
+│  │  ┌────────────┐  ┌────────────┐  ┌────────────┐     │  │
+│  │  │ 知识图谱   │  │ 向量检索   │  │ 知识融合   │     │  │
+│  │  │ (Neo4j)    │  │ (Chroma)   │  │ 引擎       │     │  │
+│  │  └────────────┘  └────────────┘  └────────────┘     │  │
+│  └──────────────────────────────────────────────────────┘  │
+│                          ▼                                  │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │              实时数据处理层（新增）                    │  │
+│  │  ┌────────────┐  ┌────────────┐  ┌────────────┐     │  │
+│  │  │ GSI 客户端 │  │ 状态管理器 │  │ 事件处理器 │     │  │
+│  │  └────────────┘  └────────────┘  └────────────┘     │  │
+│  └──────────────────────────────────────────────────────┘  │
+│                          ▼                                  │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │              现有 Agent 核心（保留）                   │  │
+│  │  - ReAct 循环                                         │  │
+│  │  - 元认知系统                                         │  │
+│  │  - 反思机制                                           │  │
+│  │  - 工具生态                                           │  │
+│  └──────────────────────────────────────────────────────┘  │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 16.4 实施路线图
+
+#### **第一阶段：知识管理能力升级**（P0，1-2 周）
+
+**目标**: 建立知识库基础设施
+
+**关键任务**:
+1. 集成向量数据库（Chroma/FAISS）
+2. 实现攻略文档的向量化存储和检索
+3. 新增知识查询工具
+
+**预期收益**:
+- 支持攻略文档的语义检索
+- 提升推荐质量（基于攻略知识）
+
+**详细方案**: [KNOWLEDGE_MANAGEMENT_UPGRADE.md](./architecture_upgrade/KNOWLEDGE_MANAGEMENT_UPGRADE.md)
+
+---
+
+#### **第二阶段：GSI 实时数据处理**（P1，2-3 周）
+
+**目标**: 实现实时游戏状态监控
+
+**关键任务**:
+1. 实现 GSI HTTP 服务器
+2. 实现状态管理器
+3. 实现事件处理器
+4. 新增 GSI 数据访问工具
+
+**预期收益**:
+- 实时监控游戏状态
+- 事件驱动的提醒功能
+
+**详细方案**: [REALTIME_DATA_PROCESSING_UPGRADE.md](./REALTIME_DATA_PROCESSING_UPGRADE.md)
+
+---
+
+#### **第三阶段：推理和决策能力增强**（P1，3-4 周）
+
+**目标**: 实现数据驱动的决策推荐
+
+**关键任务**:
+1. 收集和处理历史对局数据
+2. 训练胜率预测模型
+3. 实现决策融合器
+4. 新增数据驱动推荐工具
+
+**预期收益**:
+- 基于历史数据的胜率预测
+- 多源决策融合，提升推荐质量
+
+**详细方案**: [REASONING_DECISION_UPGRADE.md](./REASONING_DECISION_UPGRADE.md)
+
+---
+
+#### **第四阶段：个性化学习能力**（P2，2-3 周）
+
+**目标**: 实现个性化推荐
+
+**关键任务**:
+1. 实现用户画像系统
+2. 实现反馈收集机制
+3. 实现在线学习引擎
+4. 新增个性化推荐工具
+
+**预期收益**:
+- 根据用户风格个性化推荐
+- 持续优化推荐质量
+
+**详细方案**: [PERSONALIZED_LEARNING_UPGRADE.md](./PERSONALIZED_LEARNING_UPGRADE.md)
+
+---
+
+#### **第五阶段：多模态交互能力**（P2，1-2 周）
+
+**目标**: 提升用户体验
+
+**关键任务**:
+1. 实现语音播报功能
+2. 实现数据可视化
+3. 新增多模态输出工具
+
+**预期收益**:
+- 语音提醒，提升游戏体验
+- 可视化展示，更直观的数据呈现
+
+**详细方案**: [MULTIMODAL_INTERACTION_UPGRADE.md](./MULTIMODAL_INTERACTION_UPGRADE.md)
+
+---
+
+### 16.5 技术选型建议
+
+| 组件 | 推荐技术 | 理由 |
+|------|---------|------|
+| 向量数据库 | Chroma / FAISS | 轻量级、易集成、性能好 |
+| 知识图谱 | Neo4j | 成熟、查询能力强、社区活跃 |
+| GSI 服务器 | Flask + WebSocket | 与现有架构一致、实时性好 |
+| 数据分析 | Pandas + Scikit-learn | 成熟、易用、适合中小规模数据 |
+| 语音合成 | Azure TTS / Google TTS | 质量高、支持中文 |
+
+### 16.6 关键成功因素
+
+1. **数据质量**: 攻略文档的质量决定推荐质量
+2. **实时性**: GSI 数据的实时性决定决策时效性
+3. **个性化**: 用户画像的准确性决定推荐满意度
+4. **可解释性**: 推荐理由的清晰度决定用户信任度
+
+### 16.7 预期收益
+
+| 维度 | 当前能力 | 升级后能力 | 收益 |
+|------|---------|-----------|------|
+| **知识管理** | 扁平记忆存储 | 知识图谱 + 向量检索 | 推荐质量提升 30% |
+| **实时决策** | 静态数据查询 | 实时状态监控 | 决策时效性提升 80% |
+| **推理能力** | 规则 + LLM | 混合推理 | 推荐准确率提升 25% |
+| **个性化** | 通用推荐 | 用户画像 + 学习 | 用户满意度提升 40% |
+| **交互体验** | 文本交互 | 多模态交互 | 用户留存率提升 20% |
+
+---
+
+> **文档版本**: v1.0  
+> **最后更新**: 2026-06-12

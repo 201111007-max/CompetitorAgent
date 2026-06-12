@@ -1,0 +1,16 @@
+[
+  {
+    "id": 1,
+    "name": "BKB",
+    "localized_name": "Black King Bar",
+    "description": "黑皇杖，提供魔法免疫，是PA的核心装备",
+    "cost": 4050
+  },
+  {
+    "id": 2,
+    "name": "蝴蝶",
+    "localized_name": "Butterfly",
+    "description": "蝴蝶，提供攻击速度和闪避，增强PA的输出和生存",
+    "cost": 5275
+  }
+]
