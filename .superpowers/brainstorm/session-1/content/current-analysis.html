@@ -1,0 +1,88 @@
+<h2>前端样式优化 - 当前界面分析</h2>
+<p class="subtitle">DotaHelperAgent 当前前端界面存在的问题和改进方向</p>
+
+<div class="section">
+  <h3>当前界面问题</h3>
+  <div class="pros-cons">
+    <div class="cons">
+      <h4>主要问题</h4>
+      <ul>
+        <li><strong>配色过于通用</strong>：渐变紫蓝色（#667eea → #764ba2）和粉红色（#e94560）缺乏 Dota 2 特色</li>
+        <li><strong>布局单调</strong>：单栏聊天 + 侧边栏，缺乏层次感</li>
+        <li><strong>消息展示简陋</strong>：纯文本气泡，无 Markdown 渲染，工具调用过程无结构化展示</li>
+        <li><strong>头部区域浪费空间</strong>：固定标题栏占据空间但信息量低</li>
+        <li><strong>侧边栏交互生硬</strong>：按钮切换式侧边栏，缺乏导航感</li>
+        <li><strong>缺少品牌元素</strong>：无 Dota 2 标志性视觉元素</li>
+        <li><strong>响应式支持差</strong>：min-width: 400px 硬编码，移动端不可用</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Dota 2 官方设计语言</h3>
+  <div class="mockup">
+    <div class="mockup-header">Dota 2 官方网站设计特征</div>
+    <div class="mockup-body" style="padding: 20px;">
+      <div style="display: flex; gap: 24px; flex-wrap: wrap;">
+        <div style="flex: 1; min-width: 200px;">
+          <h4 style="color: #BF2E1A; margin-bottom: 8px;">品牌色</h4>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <div style="width: 60px; height: 40px; background: #BF2E1A; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: white; font-size: 10px;">#BF2E1A</div>
+            <div style="width: 60px; height: 40px; background: #1a1a1a; border-radius: 4px; border: 1px solid #333; display: flex; align-items: center; justify-content: center; color: #999; font-size: 10px;">#1a1a1a</div>
+            <div style="width: 60px; height: 40px; background: #0d0d0d; border-radius: 4px; border: 1px solid #333; display: flex; align-items: center; justify-content: center; color: #999; font-size: 10px;">#0d0d0d</div>
+            <div style="width: 60px; height: 40px; background: #c6a44e; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: #1a1a1a; font-size: 10px;">#c6a44e</div>
+          </div>
+        </div>
+        <div style="flex: 1; min-width: 200px;">
+          <h4 style="color: #c6a44e; margin-bottom: 8px;">设计特征</h4>
+          <ul style="font-size: 13px; line-height: 1.8; color: #ccc;">
+            <li>深黑背景 + 暗红强调色</li>
+            <li>金色/铜色装饰线和分割</li>
+            <li>锐利的边角（非圆角）</li>
+            <li>厚重的字体和阴影</li>
+            <li>石质/金属质感纹理</li>
+            <li>英雄肖像作为视觉焦点</li>
+          </ul>
+        </div>
+        <div style="flex: 1; min-width: 200px;">
+          <h4 style="color: #4ade80; margin-bottom: 8px;">排版风格</h4>
+          <ul style="font-size: 13px; line-height: 1.8; color: #ccc;">
+            <li>大标题 + 粗体无衬线字体</li>
+            <li>全大写英文标题</li>
+            <li>宽行距，强对比</li>
+            <li>暗色背景 + 亮色文字</li>
+            <li>红色/金色高亮关键词</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>优化方向</h3>
+  <div class="options">
+    <div class="option" data-choice="a" onclick="toggleSelect(this)">
+      <div class="letter">A</div>
+      <div class="content">
+        <h3>全面 Dota 2 官方风格</h3>
+        <p>完全复刻 Dota 2 官方网站设计语言：深黑背景、暗红强调、金色装饰、锐利边角、石质纹理。视觉冲击力强，品牌一致性最高。</p>
+      </div>
+    </div>
+    <div class="option" data-choice="b" onclick="toggleSelect(this)">
+      <div class="letter">B</div>
+      <div class="content">
+        <h3>Dota 2 风格 + 现代融合</h3>
+        <p>保留 Dota 2 的核心视觉元素（暗红+金色+深黑），但融入现代 UI 设计：适度圆角、更好的间距、流畅动画。兼顾品牌感和易用性。</p>
+      </div>
+    </div>
+    <div class="option" data-choice="c" onclick="toggleSelect(this)">
+      <div class="letter">C</div>
+      <div class="content">
+        <h3>轻量 Dota 2 主题</h3>
+        <p>以现代暗色 UI 为基础，仅通过配色和少量装饰元素体现 Dota 2 风格。开发成本最低，但品牌辨识度较弱。</p>
+      </div>
+    </div>
+  </div>
+</div>

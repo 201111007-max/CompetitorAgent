@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 import { useChatStore } from '@/stores/chat'
-import type { ChatRequest, SSEEvent } from '@/types/chat'
+import type { ChatRequest } from '@/types/chat'
 
 const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
 
@@ -17,6 +17,9 @@ export function useChatStream() {
       context,
       session_id: chatStore.sessionId || undefined
     }
+
+    // 获取当前助手消息 ID，用于后续事件路由
+    const assistantMsgId = chatStore.lastMessage?.id || ''
 
     try {
       const response = await fetch(`${baseURL}/api/chat/stream`, {
@@ -57,7 +60,7 @@ export function useChatStream() {
             if (data.trim() && currentEvent) {
               try {
                 const parsedData = JSON.parse(data)
-                handleEvent(currentEvent, parsedData)
+                handleEvent(currentEvent, parsedData, assistantMsgId)
               } catch (e) {
                 console.error('Failed to parse SSE data:', data)
               }
@@ -77,19 +80,14 @@ export function useChatStream() {
   /**
    * 处理SSE事件流中的各种事件类型
    * 
-   * 支持的事件类型：
-   * - start: 会话开始，设置trace_id和session_id
-   * - goal_decomposition*: 目标分解相关事件
-   * - think: Agent思考过程（包含工具选择理由）
-   * - plan: 执行计划（要执行的工具列表）
-   * - action: 执行动作（正在执行的工具）
-   * - observation: 观察结果（工具执行结果）
-   * - answer: 中间答案
-   * - synthesize: 最终综合答案
-   * - complete/done: 流式输出完成
-   * - error: 错误信息
+   * 事件路由策略：
+   * - think/plan/action/observation/goal → thinkingSteps（折叠展示）
+   * - answer/synthesize → answerContent（Markdown 渲染）
+   * - start → 设置 trace_id 和 session_id
+   * - complete/done → 结束流式
+   * - error → 错误处理
    */
-  const handleEvent = (eventType: string, data: any) => {
+  const handleEvent = (eventType: string, data: any, msgId: string) => {
     switch (eventType) {
       case 'start':
         if (data.trace_id) {
@@ -105,15 +103,25 @@ export function useChatStream() {
       case 'goal_execution':
       case 'sub_goal_start':
       case 'sub_goal_complete':
-      case 'merge_results':
-        if (data.status || data.main_goal) {
-          const statusMsg = data.status || `目标: ${data.main_goal}`
-          chatStore.appendToLastMessage(`\n📍 ${statusMsg}\n`)
-        }
+      case 'merge_results': {
+        const statusMsg = data.status || `目标: ${data.main_goal || ''}`
+        chatStore.addThinkingStep(msgId, {
+          type: 'goal',
+          content: statusMsg,
+          status: 'done'
+        })
+        // 向后兼容：同时追加到 content
+        chatStore.appendToLastMessage(`\n📍 ${statusMsg}\n`)
         break
+      }
 
       case 'think':
         if (data.content) {
+          chatStore.addThinkingStep(msgId, {
+            type: 'think',
+            content: data.content,
+            status: 'done'
+          })
           chatStore.appendToLastMessage(`\n💭 思考: ${data.content}\n`)
         }
         break
@@ -121,33 +129,66 @@ export function useChatStream() {
       case 'plan':
         if (data.actions) {
           const tools = data.actions.map((a: any) => a.tool).join(', ')
+          chatStore.addThinkingStep(msgId, {
+            type: 'plan',
+            content: `计划执行: ${tools}`,
+            status: 'done'
+          })
           chatStore.appendToLastMessage(`\n📋 计划执行: ${tools}\n`)
         }
         break
 
       case 'action':
         if (data.tool) {
+          chatStore.addThinkingStep(msgId, {
+            type: 'action',
+            content: `执行工具: ${data.tool}`,
+            tool: data.tool,
+            status: 'running'
+          })
           chatStore.appendToLastMessage(`\n🔧 执行工具: ${data.tool}\n`)
         }
         break
 
-      case 'observation':
+      case 'observation': {
+        // 更新最后一个 action 步骤为完成状态
+        const lastMsg = chatStore.lastMessage
+        if (lastMsg && lastMsg.role === 'assistant') {
+          const steps = lastMsg.thinkingSteps
+          for (let i = steps.length - 1; i >= 0; i--) {
+            if (steps[i].type === 'action' && steps[i].status === 'running') {
+              const resultPreview = data.result
+                ? (typeof data.result === 'string'
+                    ? data.result.substring(0, 150)
+                    : JSON.stringify(data.result).substring(0, 150))
+                : ''
+              chatStore.updateThinkingStep(lastMsg.id, i, {
+                status: 'done',
+                result: resultPreview
+              })
+              break
+            }
+          }
+        }
         if (data.result) {
-          const resultPreview = typeof data.result === 'string' 
-            ? data.result.substring(0, 150) 
+          const resultPreview = typeof data.result === 'string'
+            ? data.result.substring(0, 150)
             : JSON.stringify(data.result).substring(0, 150)
           chatStore.appendToLastMessage(`\n👀 观察结果: ${resultPreview}${resultPreview.length >= 150 ? '...' : ''}\n`)
         }
         break
+      }
 
       case 'answer':
         if (data.content) {
+          chatStore.appendToAnswer(msgId, data.content)
           chatStore.appendToLastMessage(data.content)
         }
         break
 
       case 'synthesize':
         if (data.answer) {
+          chatStore.appendToAnswer(msgId, data.answer)
           chatStore.appendToLastMessage(data.answer)
         }
         break

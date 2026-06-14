@@ -1,0 +1,186 @@
+<h2>功能保留 — 英雄生成 & 日志展示</h2>
+<p class="subtitle">在新布局中集成现有功能</p>
+
+<div class="section">
+  <h3>功能映射</h3>
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+    <div style="background: #141414; border: 1px solid #2a2a2a; border-radius: 8px; padding: 14px;">
+      <div style="color: #c6a44e; font-size: 11px; font-weight: 600; margin-bottom: 6px;">现有功能</div>
+      <ul style="font-size: 12px; color: #ccc; line-height: 1.8; margin: 0; padding-left: 16px;">
+        <li>HeroPanel — 随机生成英雄查询</li>
+        <li>HeroPanel — 我方/敌方英雄标签</li>
+        <li>HeroPanel — 发送到聊天</li>
+        <li>HeroPanel — 历史记录</li>
+        <li>LogPanel — 实时日志流</li>
+        <li>LogPanel — 日志级别过滤</li>
+        <li>LogPanel — 连接状态</li>
+      </ul>
+    </div>
+    <div style="background: #141414; border: 1px solid #2a2a2a; border-radius: 8px; padding: 14px;">
+      <div style="color: #BF2E1A; font-size: 11px; font-weight: 600; margin-bottom: 6px;">新布局位置</div>
+      <ul style="font-size: 12px; color: #ccc; line-height: 1.8; margin: 0; padding-left: 16px;">
+        <li>右侧抽屉 → 英雄面板</li>
+        <li>英雄面板内（保留）</li>
+        <li>英雄面板内（保留）</li>
+        <li>英雄面板内（保留）</li>
+        <li>右侧抽屉 → 日志面板</li>
+        <li>日志面板内（保留）</li>
+        <li>日志面板内（保留）</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>英雄面板 — 右侧抽屉</h3>
+  <div class="mockup">
+    <div class="mockup-header">英雄查询面板（右侧抽屉，360px 宽）</div>
+    <div class="mockup-body" style="padding: 0; overflow: hidden;">
+      <div style="width: 360px; height: 440px; background: #111; display: flex; flex-direction: column; border-left: 1px solid #2a2a2a;">
+        <!-- 抽屉头部 -->
+        <div style="height: 44px; background: #0a0a0a; border-bottom: 1px solid #2a2a2a; display: flex; align-items: center; padding: 0 14px; justify-content: space-between;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="color: #c6a44e; font-size: 12px;">⚔</span>
+            <span style="color: #e0e0e0; font-size: 13px; font-weight: 600;">英雄查询助手</span>
+          </div>
+          <div style="width: 24px; height: 24px; background: rgba(255,255,255,0.05); border-radius: 4px; display: flex; align-items: center; justify-content: center; cursor: pointer;">
+            <span style="color: #888; font-size: 14px;">✕</span>
+          </div>
+        </div>
+        <!-- 生成按钮 -->
+        <div style="padding: 14px;">
+          <div style="width: 100%; padding: 12px; background: linear-gradient(135deg, #BF2E1A, #8b1a0e); border: none; border-radius: 8px; color: white; font-size: 13px; font-weight: 500; text-align: center; cursor: pointer; box-shadow: 0 2px 8px rgba(191,46,26,0.3);">
+            ⚡ 随机生成查询
+          </div>
+        </div>
+        <!-- 查询结果 -->
+        <div style="padding: 0 14px 14px; flex: 1; overflow-y: auto;">
+          <div style="background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; padding: 14px;">
+            <div style="font-size: 13px; color: #e0e0e0; line-height: 1.5; margin-bottom: 12px;">
+              对面有帕吉和斧王，我方已有影魔，推荐什么英雄？
+            </div>
+            <!-- 我方英雄 -->
+            <div style="margin-bottom: 10px;">
+              <div style="font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">我方英雄</div>
+              <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                <span style="padding: 3px 10px; background: rgba(74,222,128,0.12); border: 1px solid rgba(74,222,128,0.25); border-radius: 12px; font-size: 11px; color: #4ade80;">影魔</span>
+              </div>
+            </div>
+            <!-- 敌方英雄 -->
+            <div style="margin-bottom: 12px;">
+              <div style="font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">敌方英雄</div>
+              <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                <span style="padding: 3px 10px; background: rgba(248,113,113,0.12); border: 1px solid rgba(248,113,113,0.25); border-radius: 12px; font-size: 11px; color: #f87171;">帕吉</span>
+                <span style="padding: 3px 10px; background: rgba(248,113,113,0.12); border: 1px solid rgba(248,113,113,0.25); border-radius: 12px; font-size: 11px; color: #f87171;">斧王</span>
+              </div>
+            </div>
+            <!-- 操作 -->
+            <div style="display: flex; gap: 8px;">
+              <div style="flex: 1; padding: 8px; background: #BF2E1A; border-radius: 6px; color: white; font-size: 12px; text-align: center; cursor: pointer;">发送到聊天</div>
+              <div style="padding: 8px 14px; background: rgba(255,255,255,0.06); border: 1px solid #333; border-radius: 6px; color: #888; font-size: 12px; cursor: pointer;">清空</div>
+            </div>
+          </div>
+          <!-- 历史记录 -->
+          <div style="margin-top: 14px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <span style="font-size: 12px; color: #888;">历史记录 (3/20)</span>
+              <span style="font-size: 10px; color: #555; cursor: pointer;">清空</span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+              <div style="padding: 8px 10px; background: rgba(255,255,255,0.03); border-radius: 6px; display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                  <div style="font-size: 11px; color: #ccc; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">对面有帕吉和斧王，推荐什么英雄</div>
+                  <div style="font-size: 9px; color: #555; margin-top: 2px;">06/14 14:30</div>
+                </div>
+                <div style="display: flex; gap: 4px;">
+                  <span style="font-size: 10px; color: #555; cursor: pointer;">📋</span>
+                  <span style="font-size: 10px; color: #c6a44e; cursor: pointer;">使用</span>
+                </div>
+              </div>
+              <div style="padding: 8px 10px; background: rgba(255,255,255,0.03); border-radius: 6px; display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                  <div style="font-size: 11px; color: #ccc; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">我方有敌法师，需要什么辅助</div>
+                  <div style="font-size: 9px; color: #555; margin-top: 2px;">06/14 13:15</div>
+                </div>
+                <div style="display: flex; gap: 4px;">
+                  <span style="font-size: 10px; color: #555; cursor: pointer;">📋</span>
+                  <span style="font-size: 10px; color: #c6a44e; cursor: pointer;">使用</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>日志面板 — 右侧抽屉</h3>
+  <div class="mockup">
+    <div class="mockup-header">实时日志面板（右侧抽屉，400px 宽）</div>
+    <div class="mockup-body" style="padding: 0; overflow: hidden;">
+      <div style="width: 400px; height: 380px; background: #111; display: flex; flex-direction: column; border-left: 1px solid #2a2a2a;">
+        <!-- 抽屉头部 -->
+        <div style="height: 44px; background: #0a0a0a; border-bottom: 1px solid #2a2a2a; display: flex; align-items: center; padding: 0 14px; justify-content: space-between;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="color: #c6a44e; font-size: 12px;">📋</span>
+            <span style="color: #e0e0e0; font-size: 13px; font-weight: 600;">实时日志</span>
+          </div>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <!-- 级别过滤 -->
+            <div style="padding: 3px 8px; background: rgba(255,255,255,0.06); border: 1px solid #333; border-radius: 4px; font-size: 10px; color: #888;">ALL ▾</div>
+            <div style="padding: 3px 8px; background: rgba(191,46,26,0.15); border-radius: 4px; font-size: 10px; color: #BF2E1A; cursor: pointer;">清空</div>
+            <div style="width: 24px; height: 24px; background: rgba(255,255,255,0.05); border-radius: 4px; display: flex; align-items: center; justify-content: center; cursor: pointer;">
+              <span style="color: #888; font-size: 14px;">✕</span>
+            </div>
+          </div>
+        </div>
+        <!-- 日志内容 -->
+        <div style="flex: 1; padding: 8px 10px; overflow-y: auto; font-family: 'Consolas', 'Monaco', monospace; font-size: 11px; line-height: 1.7;">
+          <div style="padding: 1px 4px; border-radius: 2px;">
+            <span style="color: #555;">14:32:01</span> <span style="color: #4ade80; font-weight: bold;">[INFO]</span> <span style="color: #60a5fa;">[agent]</span> <span style="color: #ccc;">开始处理查询</span>
+          </div>
+          <div style="padding: 1px 4px; border-radius: 2px;">
+            <span style="color: #555;">14:32:01</span> <span style="color: #4ade80; font-weight: bold;">[INFO]</span> <span style="color: #60a5fa;">[tool]</span> <span style="color: #ccc;">执行工具: hero_counter</span>
+          </div>
+          <div style="padding: 1px 4px; border-radius: 2px;">
+            <span style="color: #555;">14:32:02</span> <span style="color: #fbbf24; font-weight: bold;">[WARN]</span> <span style="color: #60a5fa;">[api]</span> <span style="color: #ccc;">API 请求耗时 1.2s</span>
+          </div>
+          <div style="padding: 1px 4px; border-radius: 2px; background: rgba(251,191,36,0.06);">
+            <span style="color: #555;">14:32:03</span> <span style="color: #4ade80; font-weight: bold;">[INFO]</span> <span style="color: #60a5fa;">[tool]</span> <span style="color: #ccc;">hero_counter 返回 5 个结果</span>
+          </div>
+          <div style="padding: 1px 4px; border-radius: 2px;">
+            <span style="color: #555;">14:32:03</span> <span style="color: #4ade80; font-weight: bold;">[INFO]</span> <span style="color: #60a5fa;">[tool]</span> <span style="color: #ccc;">执行工具: item_recommend</span>
+          </div>
+          <div style="padding: 1px 4px; border-radius: 2px; background: rgba(248,113,113,0.06);">
+            <span style="color: #555;">14:32:04</span> <span style="color: #f87171; font-weight: bold;">[ERROR]</span> <span style="color: #60a5fa;">[api]</span> <span style="color: #f87171;">OpenDota API 超时</span>
+          </div>
+          <div style="padding: 1px 4px; border-radius: 2px;">
+            <span style="color: #555;">14:32:05</span> <span style="color: #4ade80; font-weight: bold;">[INFO]</span> <span style="color: #60a5fa;">[agent]</span> <span style="color: #ccc;">重试中...</span>
+          </div>
+          <div style="padding: 1px 4px; border-radius: 2px;">
+            <span style="color: #555;">14:32:06</span> <span style="color: #888; font-weight: bold;">[DEBUG]</span> <span style="color: #60a5fa;">[tool]</span> <span style="color: #888;">item_recommend 缓存命中</span>
+          </div>
+        </div>
+        <!-- 底部状态 -->
+        <div style="height: 32px; background: #0a0a0a; border-top: 1px solid #2a2a2a; display: flex; align-items: center; padding: 0 14px; justify-content: space-between; font-size: 10px;">
+          <span style="color: #4ade80;">● 已连接</span>
+          <span style="color: #555;">8 条</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>完整交互流程</h3>
+  <div style="background: #141414; border: 1px solid #2a2a2a; border-radius: 8px; padding: 16px; font-size: 12px; color: #ccc; line-height: 2;">
+    <div><span style="color: #c6a44e; font-weight: 600;">1.</span> 左侧面板收起状态 — 点击 ☰ 展开会话列表，点击 + 新建对话</div>
+    <div><span style="color: #c6a44e; font-weight: 600;">2.</span> 左侧底部 ⚔ 图标 — 点击打开右侧英雄抽屉面板</div>
+    <div><span style="color: #c6a44e; font-weight: 600;">3.</span> 英雄面板 — 点击「随机生成查询」→ 查看我方/敌方英雄 → 「发送到聊天」</div>
+    <div><span style="color: #c6a44e; font-weight: 600;">4.</span> 左侧底部 📋 图标 — 点击打开右侧日志抽屉面板</div>
+    <div><span style="color: #c6a44e; font-weight: 600;">5.</span> 英雄/日志面板可同时打开（分屏显示）或互斥切换</div>
+    <div><span style="color: #c6a44e; font-weight: 600;">6.</span> 英雄面板「发送到聊天」后自动关闭抽屉，聚焦聊天区</div>
+  </div>
+</div>

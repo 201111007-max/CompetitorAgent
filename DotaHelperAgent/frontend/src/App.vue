@@ -9,7 +9,7 @@
 </template>
 
 <script setup lang="ts">
-import { darkTheme } from 'naive-ui'
+import { darkTheme, NConfigProvider, NMessageProvider } from 'naive-ui'
 </script>
 
 <style>
@@ -20,15 +20,15 @@ import { darkTheme } from 'naive-ui'
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  font-family: var(--font-sans);
+  background: var(--bg-deepest);
   min-height: 100vh;
-  color: #e0e0e0;
+  color: var(--text-primary);
 }
 
 #app {
   width: 100%;
   height: 100vh;
-  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  background: var(--bg-deepest);
 }
 </style>

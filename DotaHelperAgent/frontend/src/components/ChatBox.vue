@@ -1,10 +1,5 @@
 <template>
   <div class="chat-box">
-    <div class="header">
-      <h1>DotaHelperAgent</h1>
-      <p>Dota 2 智能助手</p>
-    </div>
-
     <div class="messages" ref="messagesContainer">
       <div
         v-for="msg in chatStore.messages"
@@ -12,14 +7,54 @@
         class="message"
         :class="msg.role"
       >
-        <div class="meta">
-          <span class="role">{{ msg.role === 'user' ? '你' : '助手' }}</span>
-          <span class="time">{{ formatTime(msg.timestamp) }}</span>
-        </div>
-        <div class="content">{{ msg.content }}</div>
-      </div>
-      <div v-if="chatStore.isStreaming && !hasAssistantMessage" class="message assistant thinking">
-        <div class="content">思考中...</div>
+        <!-- 用户消息 -->
+        <template v-if="msg.role === 'user'">
+          <div class="user-bubble">
+            <div class="bubble-content">{{ msg.content }}</div>
+            <span class="bubble-time">{{ formatTime(msg.timestamp) }}</span>
+          </div>
+        </template>
+
+        <!-- 助手消息 -->
+        <template v-else>
+          <div class="assistant-bubble">
+            <div class="assistant-avatar">D</div>
+            <div class="assistant-content">
+              <!-- 思考步骤（折叠） -->
+              <ThinkingSteps
+                v-if="msg.thinkingSteps && msg.thinkingSteps.length > 0"
+                :steps="msg.thinkingSteps"
+                :collapsed="true"
+              />
+              <!-- Markdown 回答 -->
+              <div v-if="msg.answerContent" class="answer-content">
+                <MarkdownRenderer :content="msg.answerContent" />
+              </div>
+              <!-- 向后兼容：无 answerContent 时显示 content -->
+              <div v-else-if="msg.content && !msg.thinkingSteps?.length" class="answer-content">
+                <MarkdownRenderer :content="msg.content" />
+              </div>
+              <!-- 思考中占位 -->
+              <div v-else-if="chatStore.isStreaming && !msg.content && !msg.answerContent" class="thinking-placeholder">
+                <span class="typing-dots">
+                  <span class="dot"></span>
+                  <span class="dot"></span>
+                  <span class="dot"></span>
+                </span>
+                <span class="thinking-text">思考中...</span>
+              </div>
+              <!-- 消息操作按钮 -->
+              <MessageActions
+                v-if="msg.content || msg.answerContent"
+                :message-id="msg.id"
+                :role="msg.role"
+                @copy="handleCopy"
+                @regenerate="handleRegenerate"
+                @feedback="handleFeedback"
+              />
+            </div>
+          </div>
+        </template>
       </div>
     </div>
 
@@ -27,32 +62,29 @@
       <input
         v-model="inputText"
         type="text"
+        class="dota-input chat-input"
         placeholder="输入消息，如：对面有帕吉和斧王，推荐什么英雄"
         :disabled="chatStore.isStreaming"
         @keyup.enter="sendMessage"
       />
-      <button @click="sendMessage" :disabled="!inputText.trim() || chatStore.isStreaming">
+      <button
+        class="dota-btn send-btn"
+        @click="sendMessage()"
+        :disabled="!inputText.trim() || chatStore.isStreaming"
+      >
         {{ chatStore.isStreaming ? '发送中...' : '发送' }}
       </button>
-    </div>
-
-    <div class="status-bar">
-      <span :class="chatStore.isStreaming ? 'streaming' : 'ready'">
-        {{ chatStore.isStreaming ? '正在思考...' : '就绪' }}
-      </span>
-      <span v-if="chatStore.traceId" class="trace-id" @click="copyTraceId" title="点击复制">
-        Trace: {{ chatStore.traceId }}
-        <span class="copy-hint">📋</span>
-      </span>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, watch } from 'vue'
-import { message } from '@/utils/message'
+import { ref, nextTick, watch } from 'vue'
 import { useChatStore } from '@/stores/chat'
 import { useChatStream } from '@/composables/useChatStream'
+import ThinkingSteps from './ThinkingSteps.vue'
+import MarkdownRenderer from './MarkdownRenderer.vue'
+import MessageActions from './MessageActions.vue'
 
 const chatStore = useChatStore()
 const { connect } = useChatStream()
@@ -60,28 +92,11 @@ const { connect } = useChatStream()
 const inputText = ref('')
 const messagesContainer = ref<HTMLElement | null>(null)
 
-const hasAssistantMessage = computed(() => {
-  const lastMsg = chatStore.lastMessage
-  return lastMsg && lastMsg.role === 'assistant' && lastMsg.content.length > 0
-})
-
 const formatTime = (timestamp: Date) => {
   return new Date(timestamp).toLocaleTimeString('zh-CN', {
     hour: '2-digit',
     minute: '2-digit'
   })
-}
-
-const copyTraceId = async () => {
-  if (chatStore.traceId) {
-    try {
-      await navigator.clipboard.writeText(chatStore.traceId)
-      message.success('Trace ID 已复制到剪贴板')
-    } catch (e) {
-      console.error('Copy failed:', e)
-      message.error('复制失败')
-    }
-  }
 }
 
 const scrollToBottom = () => {
@@ -102,11 +117,16 @@ watch(
   () => scrollToBottom()
 )
 
+watch(
+  () => chatStore.lastMessage?.answerContent,
+  () => scrollToBottom()
+)
+
 const sendMessage = async (externalQuery?: string | KeyboardEvent) => {
-  const query = typeof externalQuery === 'string' 
-    ? externalQuery 
+  const query = typeof externalQuery === 'string'
+    ? externalQuery
     : inputText.value.trim()
-  
+
   if (!query || chatStore.isStreaming) {
     return
   }
@@ -119,6 +139,8 @@ const sendMessage = async (externalQuery?: string | KeyboardEvent) => {
     id: Date.now().toString(),
     role: 'user',
     content: query,
+    thinkingSteps: [],
+    answerContent: '',
     timestamp: new Date()
   })
 
@@ -126,10 +148,48 @@ const sendMessage = async (externalQuery?: string | KeyboardEvent) => {
     id: (Date.now() + 1).toString(),
     role: 'assistant',
     content: '',
+    thinkingSteps: [],
+    answerContent: '',
     timestamp: new Date()
   })
 
   await connect(query)
+}
+
+const handleCopy = async (messageId: string) => {
+  const msg = chatStore.messages.find(m => m.id === messageId)
+  if (msg) {
+    const text = msg.answerContent || msg.content
+    try {
+      await navigator.clipboard.writeText(text)
+    } catch {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+    }
+  }
+}
+
+const handleRegenerate = (messageId: string) => {
+  // 找到该助手消息前一条用户消息
+  const idx = chatStore.messages.findIndex(m => m.id === messageId)
+  if (idx > 0) {
+    const userMsg = chatStore.messages[idx - 1]
+    if (userMsg.role === 'user') {
+      // 删除当前助手消息
+      chatStore.messages.splice(idx, 1)
+      // 重新发送
+      sendMessage(userMsg.content)
+    }
+  }
+}
+
+const handleFeedback = (messageId: string, score: 'up' | 'down') => {
+  console.log(`Feedback for ${messageId}: ${score}`)
+  // TODO: 接入 Langfuse 评分 API
 }
 
 defineExpose({
@@ -142,175 +202,154 @@ defineExpose({
   display: flex;
   flex-direction: column;
   height: 100%;
-  max-width: 800px;
-  margin: 0 auto;
-  background: rgba(0, 0, 0, 0.3);
-  border-radius: 16px;
-  overflow: hidden;
-}
-
-.header {
-  background: linear-gradient(90deg, #e94560 0%, #ff6b6b 100%);
-  padding: 16px 20px;
-  text-align: center;
-}
-
-.header h1 {
-  font-size: 20px;
-  font-weight: 600;
-  color: white;
-  margin: 0;
-}
-
-.header p {
-  color: rgba(255, 255, 255, 0.8);
-  font-size: 12px;
-  margin: 4px 0 0 0;
+  background: var(--bg-deepest);
 }
 
 .messages {
   flex: 1;
   overflow-y: auto;
-  padding: 16px;
+  padding: var(--gap-xl) var(--gap-2xl);
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--gap-xl);
 }
 
-.message {
-  max-width: 80%;
-  padding: 12px 16px;
-  border-radius: 16px;
-  line-height: 1.6;
-}
-
-.message.user {
+/* 用户消息 */
+.user-bubble {
   align-self: flex-end;
-  background: linear-gradient(135deg, #e94560 0%, #ff6b6b 100%);
+  max-width: 70%;
+  background: var(--dota-red);
   color: white;
-  border-bottom-right-radius: 4px;
+  padding: 10px 16px;
+  border-radius: var(--radius-bubble) var(--radius-bubble) var(--radius-bubble-tail) var(--radius-bubble);
+  animation: fadeIn 0.3s ease;
 }
 
-.message.assistant {
-  align-self: flex-start;
-  background: rgba(255, 255, 255, 0.1);
-  color: white;
-  border-bottom-left-radius: 4px;
-}
-
-.message.thinking {
-  opacity: 0.7;
-}
-
-.meta {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 6px;
-  font-size: 11px;
-  opacity: 0.7;
-}
-
-.role {
-  font-weight: 500;
-}
-
-.time {
-  margin-left: 8px;
-}
-
-.content {
+.bubble-content {
   font-size: 14px;
+  line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
+.bubble-time {
+  display: block;
+  text-align: right;
+  font-size: 11px;
+  opacity: 0.7;
+  margin-top: 4px;
+}
+
+/* 助手消息 */
+.assistant-bubble {
+  display: flex;
+  gap: var(--gap-md);
+  max-width: 85%;
+  align-self: flex-start;
+  animation: fadeIn 0.3s ease;
+}
+
+.assistant-avatar {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, var(--dota-red), var(--dota-red-dark));
+  border-radius: var(--radius-lg);
+  font-weight: 700;
+  font-size: 14px;
+  color: white;
+  flex-shrink: 0;
+}
+
+.assistant-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.answer-content {
+  background: var(--bg-bubble);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-bubble) var(--radius-bubble) var(--radius-bubble) var(--radius-bubble-tail);
+  padding: 12px 16px;
+}
+
+/* 思考中占位 */
+.thinking-placeholder {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  padding: 12px 16px;
+  background: var(--bg-bubble);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-lg);
+}
+
+.typing-dots {
+  display: flex;
+  gap: 3px;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dota-gold);
+  animation: typing 1.4s infinite;
+}
+
+.dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+.thinking-text {
+  font-size: 13px;
+  color: var(--text-tertiary);
+}
+
+/* 输入区域 */
 .input-area {
   display: flex;
-  gap: 12px;
-  padding: 16px;
-  background: rgba(0, 0, 0, 0.2);
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  gap: var(--gap-md);
+  padding: var(--gap-xl) var(--gap-2xl);
+  border-top: 1px solid var(--border-primary);
+  background: var(--bg-deepest);
 }
 
-.input-area input {
+.chat-input {
   flex: 1;
-  padding: 12px 16px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 24px;
-  background: rgba(255, 255, 255, 0.1);
-  color: white;
+  border-radius: var(--radius-xl);
+  padding: 12px 18px;
   font-size: 14px;
-  outline: none;
-  transition: border-color 0.2s;
 }
 
-.input-area input:focus {
-  border-color: #e94560;
-}
-
-.input-area input::placeholder {
-  color: rgba(255, 255, 255, 0.5);
-}
-
-.input-area button {
+.send-btn {
   padding: 12px 24px;
-  background: linear-gradient(135deg, #e94560 0%, #ff6b6b 100%);
-  color: white;
-  border: none;
-  border-radius: 24px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: opacity 0.2s;
+  border-radius: var(--radius-xl);
+  white-space: nowrap;
 }
 
-.input-area button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
+/* 移动端 */
+@media (max-width: 767px) {
+  .messages {
+    padding: var(--gap-md);
+  }
 
-.status-bar {
-  padding: 10px 16px;
-  background: rgba(0, 0, 0, 0.2);
-  font-size: 12px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
+  .user-bubble {
+    max-width: 85%;
+  }
 
-.status-bar .streaming {
-  color: #ffe66d;
-}
+  .assistant-bubble {
+    max-width: 95%;
+  }
 
-.status-bar .ready {
-  color: #4ade80;
-}
-
-.trace-id {
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.4);
-  font-family: 'Courier New', monospace;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
-  border-radius: 4px;
-  transition: background 0.2s, color 0.2s;
-}
-
-.trace-id:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.7);
-}
-
-.copy-hint {
-  opacity: 0;
-  transition: opacity 0.2s;
-}
-
-.trace-id:hover .copy-hint {
-  opacity: 1;
+  .input-area {
+    padding: var(--gap-md);
+  }
 }
 </style>

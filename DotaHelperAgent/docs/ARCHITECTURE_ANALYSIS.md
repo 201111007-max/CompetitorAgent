@@ -1,10 +1,10 @@
 # DotaHelperAgent 待改进事项
 
-> 最后更新：2026-06-12
+> 最后更新：2026-06-14
 
 ## 一、待改进优先级
 
-> 更新时间：2026-06-12
+> 更新时间：2026-06-14
 
 ### 1.1 总体架构升级路线图（第十六章）
 
@@ -12,7 +12,7 @@
 
 | 阶段 | 升级方向 | 优先级 | 预计工作量 | 核心内容 | 状态 |
 |------|---------|--------|----------|---------|------|
-| **第一阶段** | **知识管理能力升级** | **P0** | 1-2周 | 向量数据库 + 攻略文档检索 | ❌ 待实现 |
+| **第一阶段** | **知识管理能力升级** | **P0** | 1-2周 | 向量数据库 + 攻略文档检索 | ✅ 已完成 |
 | **第二阶段** | **GSI 实时数据处理** | **P1** | 2-3周 | GSI服务器 + 状态管理 + 事件处理 | ❌ 待实现 |
 | **第三阶段** | **推理和决策能力增强** | **P1** | 3-4周 | 数据驱动决策 + 混合推理 | ❌ 待实现 |
 | **第四阶段** | **个性化学习能力** | **P2** | 2-3周 | 用户画像 + 在线学习 | ❌ 待实现 |
@@ -26,7 +26,7 @@
 | **P0** | **Agent 执行层监控（Langfuse）** | 中 | 高 | - | ✅ 已完成 |
 | **P0** | **工具调用层监控（Langfuse）** | 中 | 高 | - | ✅ 已完成 |
 | **P0** | **Trace 定位与日志追踪体系** | 大 | 高 | - | ✅ 已完成 |
-| **P0** | **知识管理能力升级** | 中 | 高 | **第一阶段** | ❌ 待实现 |
+| **P0** | **知识管理能力升级** | 中 | 高 | **第一阶段** | ✅ 已完成 |
 | **P1** | **GSI 实时游戏状态监控** | 大 | 高 | **第二阶段** | ❌ 待实现 |
 | **P1** | **游戏事件提醒系统** | 中 | 中 | **第二阶段** | ❌ 待实现 |
 | **P1** | **Agent主动推荐机制** | 大 | 高 | **第三阶段** | ❌ 待实现 |
@@ -43,6 +43,7 @@
 | 优先级 | 改进项 | 完成时间 | 代码位置 |
 | --- | --- | --- | --- |
 | P0 | 工具选择智能化（LLM Function Calling） | 2026-05-17 | `core/llm_tool_selector.py` |
+| P0 | 知识管理能力升级 | 2026-06-14 | `knowledge/` + `tools/knowledge_tools.py` + `config/knowledge_config.yaml` |
 | P1 | 记忆系统深度集成 | 2026-05-17 | `memory/memory.py` |
 | P1 | 多轮对话上下文 | 2026-05-17 | `core/conversation_manager.py` + `core/context_augmenter.py` |
 | P1 | 工具执行并行化 | 2026-06-10 | `core/parallel_executor.py` + `core/parallel_execution_config.py` |
@@ -74,9 +75,14 @@
 #### 1.3.2 新增待办项
 
 **第一阶段：知识管理能力升级**（P0，新增）：
-- ❌ **向量数据库集成**（Chroma/FAISS）
-- ❌ **攻略文档向量化存储**
-- ❌ **知识查询工具**
+- ✅ **向量数据库集成**（Chroma） - `knowledge/vector_store.py`
+- ✅ **攻略文档向量化存储** - `data/guides/hero_guides/` + `scripts/import_knowledge.py`
+- ✅ **知识查询工具** - `tools/knowledge_tools.py`（KnowledgeQueryTool, KnowledgeUpdateTool）
+- ✅ **知识融合引擎** - `knowledge/fusion_engine.py`
+- ✅ **实体对齐** - `knowledge/entity_alignment.py`
+- ✅ **冲突检测** - `knowledge/conflict_detector.py`
+- ✅ **置信度评估** - `knowledge/confidence_evaluator.py`
+- ✅ **配置化管理** - `config/knowledge_config.yaml`
 
 #### 1.3.3 优先级调整建议
 
@@ -91,19 +97,19 @@
 | P2 | 用户反馈学习 | P2 | 保持不变，属于第四阶段 |
 | P2 | 语音提醒系统 | P2 | 保持不变，属于第五阶段 |
 | P2 | 前端样式优化 | P2 | 保持不变，属于第五阶段 |
-| - | **知识管理能力升级** | **P0** | **新增，最高优先级** |
+| - | **知识管理能力升级** | **P0** | **已完成，2026-06-14** |
 
 #### 1.3.4 实施建议
 
 **推荐实施顺序**：
-1. **第一阶段（P0）**：知识管理能力升级 - 建立知识库基础设施
-2. **第二阶段（P1）**：GSI 实时数据处理 - 实现实时监控能力
+1. ~~**第一阶段（P0）**：知识管理能力升级 - 建立知识库基础设施~~ ✅ 已完成
+2. **第二阶段（P1）**：GSI 实时数据处理 - 实现实时监控能力（当前优先）
 3. **第三阶段（P1）**：推理和决策能力增强 - 提升决策质量
 4. **第四阶段（P2）**：个性化学习能力 - 实现个性化推荐
 5. **第五阶段（P2）**：多模态交互能力 - 提升用户体验
 
 **关键依赖关系**：
-- 第二阶段依赖第一阶段（知识库支持决策推荐）
+- ~~第二阶段依赖第一阶段（知识库支持决策推荐）~~ ✅ 第一阶段已完成
 - 第三阶段依赖第二阶段（实时数据支持推理）
 - 第四阶段依赖第三阶段（决策能力支持个性化）
 - 第五阶段可并行开发（相对独立）
@@ -143,8 +149,8 @@ Langfuse 是一个开源的 LLM 应用可观测性平台，提供：
 | `utils/llm_client.py` | LLM 调用追踪、Token 统计 | ✅ 已完成 |
 | `utils/api_client.py` | API 调用追踪（OpenDota） | ✅ 已完成 |
 | `tests/integration/test_langfuse_integration.py` | 集成测试 | ✅ 已完成 |
-| `core/tool_registry.py` | 工具执行追踪、耗时统计 | ❌ 未集成 |
-| `core/agent_controller.py` | ReAct 循环追踪、会话关联 | ❌ 未集成 |
+| `core/tool_registry.py` | 工具执行追踪、耗时统计 | ✅ 已完成 |
+| `core/agent_controller.py` | ReAct 循环追踪、会话关联 | ✅ 已完成 |
 | Prompt 管理 | 版本化 Prompt 模板 | ❌ 未集成 |
 
 ### 2.3 特性亮点
@@ -159,7 +165,7 @@ Langfuse 是一个开源的 LLM 应用可观测性平台，提供：
 2. **性能优化**：识别慢查询和瓶颈 ✅（通过 API 调用追踪）
 3. **成本控制**：Token 使用量可视化 ✅（在 llm_client.py 中记录）
 4. **质量评估**：用户评分 + 自动评估 ✅
-5. **Prompt 优化**：版本管理和 A/B 测试 ❌（未集成）
+5. **Prompt 优化**：版本管理和 A/B 测试 ❌（未集成，属于第三阶段）
 
 ---
 
@@ -216,6 +222,7 @@ Langfuse 是一个开源的 LLM 应用可观测性平台，提供：
 
 **实现位置**:
 - `utils/trace_context.py` - Trace 上下文管理（TraceContext, TraceSpan, @traced 装饰器）
+- `utils/trace_persistence.py` - Trace 持久化模块（SQLite 存储，支持历史查询和长期存储）
 - `utils/log_config.py` - TraceJSONFormatter 日志格式化器
 - `web/app.py` - Flask 请求级 Trace 初始化与清理、Trace 查询 API
 - `core/agent_controller.py` - Agent 执行流程 Span 追踪
@@ -227,6 +234,7 @@ Langfuse 是一个开源的 LLM 应用可观测性平台，提供：
 - ✅ Trace 查询接口（`GET /api/trace/<trace_id>`, `GET /api/trace/<trace_id>/spans`）
 - ✅ 前端 TraceID 传递（X-Trace-ID Header）
 - ✅ @traced 装饰器（自动为函数添加 Trace 支持）
+- ✅ Trace 持久化（SQLite 存储，支持历史查询和长期存储）
 
 **核心特性**:
 - TraceContext 数据结构：包含 trace_id, span_id, parent_span_id, session_id, operation, start_time
@@ -241,7 +249,49 @@ Langfuse 是一个开源的 LLM 应用可观测性平台，提供：
 
 ---
 
-## 六、P1：Prompt 版本管理 ❌
+## 六、P0：知识管理能力升级 ✅
+
+**实现状态**: ✅ 已完成（2026-06-14）
+
+**目标**: 将 DotaHelperAgent 从纯 API 查询模式升级为知识驱动的智能助手，支持攻略文档向量化存储和语义检索
+
+**实现位置**:
+- `knowledge/vector_store.py` - 向量数据库客户端（基于 Chroma）
+- `knowledge/fusion_engine.py` - 知识融合引擎（整合多源知识）
+- `knowledge/entity_alignment.py` - 实体对齐（统一不同数据源的英雄/物品名称）
+- `knowledge/conflict_detector.py` - 冲突检测（识别知识库中的矛盾建议）
+- `knowledge/confidence_evaluator.py` - 置信度评估（根据数据源可信度评估知识质量）
+- `tools/knowledge_tools.py` - 知识查询工具（KnowledgeQueryTool, KnowledgeUpdateTool）
+- `config/knowledge_config.yaml` - 知识管理配置文件
+- `scripts/import_knowledge.py` - 数据导入脚本
+- `data/guides/hero_guides/` - 攻略文档目录（已有 PA.md）
+
+**已实现功能**:
+- ✅ 向量数据库集成（Chroma，支持持久化存储和内存模式）
+- ✅ 攻略文档向量化存储（支持 JSON/MD/TXT 格式导入）
+- ✅ 语义检索（基于 Embedding 的相似度搜索）
+- ✅ 知识融合引擎（实体对齐 + 冲突检测 + 置信度评估 + 知识融合）
+- ✅ 知识查询工具（支持非结构化/结构化/融合知识查询）
+- ✅ 知识更新工具（支持增量导入和覆盖导入）
+- ✅ 配置化管理（向量数据库、融合引擎、查询参数均可配置）
+- ✅ Agent 集成（agent_controller.py 中自动初始化知识系统并注册工具）
+
+**核心特性**:
+- 延迟导入设计：chromadb 未安装时静默降级
+- 多源知识融合：OpenDota API 数据 + 攻略文档 + 用户贡献
+- 实体对齐：统一中英文英雄/物品名称
+- 冲突检测：自动识别物品推荐和技能加点冲突
+- 置信度评估：基于数据源可信度 + 胜率 + 选取率综合评分
+
+**预期收益**:
+- ✅ 攻略文档语义检索（而非关键词匹配）
+- ✅ 多源知识融合（API 数据 + 文档知识）
+- ✅ 知识冲突自动检测
+- ✅ 知识质量评估
+
+---
+
+## 七、P1：Prompt 版本管理 ❌
 
 **目标**: 使用 Langfuse 管理 Prompt 模板，支持版本化和 A/B 测试
 
@@ -296,7 +346,7 @@ class PromptManager:
 
 ---
 
-## 七、P1：工具执行并行化 ✅
+## 八、P1：工具执行并行化 ✅
 
 **实现状态**: ✅ 已完成（2026-06-10）
 
@@ -330,7 +380,7 @@ class PromptManager:
 
 ---
 
-## 八、P1：GSI 实时游戏状态监控 ❌
+## 九、P1：GSI 实时游戏状态监控 ❌
 
 **目标**: 集成 Dota 2 游戏状态集成（Game State Integration, GSI）功能，实时监控游戏状态
 
@@ -407,7 +457,7 @@ class PromptManager:
 
 ---
 
-## 九、P1：游戏事件提醒系统 ❌
+## 十、P1：游戏事件提醒系统 ❌
 
 **目标**: 基于游戏状态监控，提供游戏事件提醒功能
 
@@ -491,7 +541,7 @@ gsi:
 
 ---
 
-## 九、P1：Agent主动推荐机制 ❌
+## 十一、P1：Agent主动推荐机制 ❌
 
 **目标**: 在游戏过程中，Agent自动推送建议，无需用户主动输入问题
 

@@ -1,17 +1,13 @@
 <template>
   <div class="hero-panel">
-    <div class="hero-header">
-      <h3>测试助手</h3>
-      <button @click="$emit('close')" class="close-btn">×</button>
-    </div>
-
     <div class="hero-content">
       <div class="query-section">
-        <button 
-          @click="handleGenerate" 
-          class="generate-btn"
+        <button
+          @click="handleGenerate"
+          class="dota-btn generate-btn"
           :disabled="heroStore.isLoading"
         >
+          <span class="btn-icon">⚡</span>
           {{ heroStore.isLoading ? '生成中...' : '随机生成查询' }}
         </button>
       </div>
@@ -20,7 +16,7 @@
         {{ heroStore.error }}
       </div>
 
-      <div v-if="heroStore.currentQuery" class="query-result">
+      <div v-if="heroStore.currentQuery" class="query-result dota-card">
         <div class="query-text">
           <p>{{ heroStore.currentQuery.query }}</p>
         </div>
@@ -29,10 +25,10 @@
           <div v-if="heroStore.currentQuery.our_heroes.length > 0" class="hero-group">
             <h4>我方英雄</h4>
             <div class="hero-tags">
-              <span 
-                v-for="hero in heroStore.currentQuery.our_heroes" 
-                :key="hero" 
-                class="hero-tag our"
+              <span
+                v-for="hero in heroStore.currentQuery.our_heroes"
+                :key="hero"
+                class="dota-tag dota-tag-ally"
               >
                 {{ hero }}
               </span>
@@ -42,10 +38,10 @@
           <div v-if="heroStore.currentQuery.enemy_heroes.length > 0" class="hero-group">
             <h4>敌方英雄</h4>
             <div class="hero-tags">
-              <span 
-                v-for="hero in heroStore.currentQuery.enemy_heroes" 
-                :key="hero" 
-                class="hero-tag enemy"
+              <span
+                v-for="hero in heroStore.currentQuery.enemy_heroes"
+                :key="hero"
+                class="dota-tag dota-tag-enemy"
               >
                 {{ hero }}
               </span>
@@ -54,14 +50,14 @@
         </div>
 
         <div class="action-section">
-          <button 
-            @click="handleSendQuery" 
-            class="send-btn"
+          <button
+            @click="handleSendQuery"
+            class="dota-btn"
             :disabled="isSending"
           >
             {{ isSending ? '发送中...' : '发送到聊天' }}
           </button>
-          <button @click="handleClear" class="clear-btn">清空</button>
+          <button @click="handleClear" class="dota-btn-ghost">清空</button>
         </div>
       </div>
 
@@ -72,40 +68,36 @@
       <div class="history-section">
         <div class="history-header">
           <h4>历史记录 ({{ historyList.length }}/20)</h4>
-          <button 
-            v-if="historyList.length > 0" 
-            @click="handleClearHistory" 
-            class="clear-history-btn"
+          <button
+            v-if="historyList.length > 0"
+            @click="handleClearHistory"
+            class="dota-btn-ghost clear-history-btn"
           >
             清空历史
           </button>
         </div>
 
         <div v-if="historyList.length > 0" class="history-list">
-          <div 
-            v-for="(item, index) in historyList" 
-            :key="index" 
-            class="history-item"
+          <div
+            v-for="(item, index) in historyList"
+            :key="index"
+            class="history-item dota-card"
           >
             <div class="history-content">
               <div class="history-query">{{ item.query }}</div>
               <div class="history-meta">
                 <span class="history-time">{{ formatHistoryTime(item.timestamp) }}</span>
-                <span v-if="item.our_heroes.length" class="history-heroes our">
+                <span v-if="item.our_heroes.length" class="dota-tag dota-tag-ally history-hero-tag">
                   我方: {{ item.our_heroes.join(', ') }}
                 </span>
-                <span v-if="item.enemy_heroes.length" class="history-heroes enemy">
+                <span v-if="item.enemy_heroes.length" class="dota-tag dota-tag-enemy history-hero-tag">
                   敌方: {{ item.enemy_heroes.join(', ') }}
                 </span>
               </div>
             </div>
             <div class="history-actions">
-              <button @click="handleCopy(item.query)" class="copy-btn" title="复制">
-                📋
-              </button>
-              <button @click="handleUseHistory(item)" class="use-btn" title="使用">
-                使用
-              </button>
+              <button @click="handleCopy(item.query)" class="dota-btn-ghost" title="复制">📋</button>
+              <button @click="handleUseHistory(item)" class="use-btn" title="使用">使用</button>
             </div>
           </div>
         </div>
@@ -119,7 +111,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { message } from '@/utils/message'
 import { useHeroStore } from '@/stores/hero'
 import { useHeroQuery } from '@/composables/useHeroQuery'
@@ -207,120 +199,72 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: rgba(0, 0, 0, 0.4);
-}
-
-.hero-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 12px 16px;
-  background: rgba(0, 0, 0, 0.3);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.hero-header h3 {
-  margin: 0;
-  font-size: 14px;
-  color: white;
-}
-
-.close-btn {
-  width: 24px;
-  height: 24px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(255, 255, 255, 0.1);
-  border: none;
-  border-radius: 4px;
-  color: white;
-  font-size: 16px;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-
-.close-btn:hover {
-  background: rgba(255, 255, 255, 0.2);
 }
 
 .hero-content {
   flex: 1;
   overflow-y: auto;
-  padding: 16px;
+  padding: var(--gap-xl);
 }
 
 .query-section {
-  margin-bottom: 16px;
+  margin-bottom: var(--gap-xl);
 }
 
 .generate-btn {
   width: 100%;
-  padding: 12px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border: none;
-  border-radius: 8px;
-  color: white;
+  padding: 14px;
   font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: transform 0.2s, box-shadow 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--gap-sm);
+  background: linear-gradient(135deg, var(--dota-red), var(--dota-red-dark));
+  box-shadow: var(--shadow-btn);
 }
 
 .generate-btn:hover:not(:disabled) {
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+  box-shadow: 0 4px 16px rgba(191, 46, 26, 0.4);
 }
 
-.generate-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
+.btn-icon {
+  font-size: 16px;
 }
 
 .error-message {
-  padding: 12px;
-  background: rgba(248, 113, 113, 0.1);
-  border: 1px solid rgba(248, 113, 113, 0.3);
-  border-radius: 8px;
-  color: #f87171;
+  padding: var(--gap-xl);
+  background: rgba(248, 113, 113, 0.08);
+  border: 1px solid rgba(248, 113, 113, 0.2);
+  border-radius: var(--radius-lg);
+  color: var(--status-error);
   font-size: 13px;
-  margin-bottom: 16px;
+  margin-bottom: var(--gap-xl);
 }
 
 .query-result {
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 8px;
-  padding: 16px;
-  margin-bottom: 16px;
-}
-
-.query-text {
-  margin-bottom: 16px;
+  margin-bottom: var(--gap-xl);
 }
 
 .query-text p {
   margin: 0;
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--text-primary);
   font-size: 14px;
   line-height: 1.6;
 }
 
 .heroes-section {
-  margin-bottom: 16px;
+  margin: var(--gap-xl) 0;
 }
 
 .hero-group {
-  margin-bottom: 12px;
-}
-
-.hero-group:last-child {
-  margin-bottom: 0;
+  margin-bottom: var(--gap-lg);
 }
 
 .hero-group h4 {
-  margin: 0 0 8px 0;
+  margin: 0 0 var(--gap-sm) 0;
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--text-tertiary);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
@@ -328,130 +272,65 @@ onMounted(() => {
 .hero-tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-}
-
-.hero-tag {
-  padding: 4px 10px;
-  border-radius: 12px;
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.hero-tag.our {
-  background: rgba(74, 222, 128, 0.2);
-  color: #4ade80;
-  border: 1px solid rgba(74, 222, 128, 0.3);
-}
-
-.hero-tag.enemy {
-  background: rgba(248, 113, 113, 0.2);
-  color: #f87171;
-  border: 1px solid rgba(248, 113, 113, 0.3);
+  gap: var(--gap-sm);
 }
 
 .action-section {
   display: flex;
-  gap: 8px;
+  gap: var(--gap-md);
 }
 
-.send-btn {
+.action-section .dota-btn {
   flex: 1;
-  padding: 10px;
-  background: linear-gradient(135deg, #e94560 0%, #ff6b6b 100%);
-  border: none;
-  border-radius: 6px;
-  color: white;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: transform 0.2s;
-}
-
-.send-btn:hover:not(:disabled) {
-  transform: translateY(-1px);
-}
-
-.send-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.clear-btn {
-  padding: 10px 16px;
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 6px;
-  color: white;
-  font-size: 13px;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-
-.clear-btn:hover {
-  background: rgba(255, 255, 255, 0.15);
 }
 
 .empty-state {
   text-align: center;
   padding: 40px 20px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-disabled);
   font-size: 13px;
-  margin-bottom: 16px;
+  margin-bottom: var(--gap-xl);
 }
 
 .history-section {
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
-  padding-top: 16px;
+  border-top: 1px solid var(--border-primary);
+  padding-top: var(--gap-xl);
 }
 
 .history-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 12px;
+  margin-bottom: var(--gap-lg);
 }
 
 .history-header h4 {
   margin: 0;
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--text-secondary);
 }
 
 .clear-history-btn {
-  padding: 4px 8px;
-  background: rgba(248, 113, 113, 0.2);
-  border: none;
-  border-radius: 4px;
-  color: #f87171;
   font-size: 11px;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-
-.clear-history-btn:hover {
-  background: rgba(248, 113, 113, 0.3);
+  color: var(--status-error);
 }
 
 .history-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--gap-md);
   max-height: 300px;
   overflow-y: auto;
 }
 
 .history-item {
   display: flex;
-  gap: 8px;
-  padding: 10px;
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 6px;
-  transition: background 0.2s;
+  gap: var(--gap-md);
+  padding: var(--gap-lg);
 }
 
 .history-item:hover {
-  background: rgba(255, 255, 255, 0.08);
+  box-shadow: var(--shadow-card-hover);
 }
 
 .history-content {
@@ -461,76 +340,57 @@ onMounted(() => {
 
 .history-query {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--text-primary);
   line-height: 1.4;
   overflow: hidden;
   text-overflow: ellipsis;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
-  margin-bottom: 4px;
+  margin-bottom: var(--gap-xs);
 }
 
 .history-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--gap-sm);
   font-size: 10px;
 }
 
 .history-time {
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-disabled);
 }
 
-.history-heroes {
-  color: rgba(255, 255, 255, 0.5);
-}
-
-.history-heroes.our {
-  color: #4ade80;
-}
-
-.history-heroes.enemy {
-  color: #f87171;
+.history-hero-tag {
+  font-size: 10px;
+  padding: 1px 6px;
 }
 
 .history-actions {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--gap-xs);
 }
 
-.copy-btn,
 .use-btn {
-  padding: 4px 8px;
-  border: none;
-  border-radius: 4px;
+  padding: 4px 10px;
+  background: rgba(198, 164, 78, 0.15);
+  border: 1px solid rgba(198, 164, 78, 0.3);
+  border-radius: var(--radius-md);
+  color: var(--dota-gold);
   font-size: 11px;
   cursor: pointer;
-  transition: background 0.2s;
-}
-
-.copy-btn {
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.copy-btn:hover {
-  background: rgba(255, 255, 255, 0.2);
-}
-
-.use-btn {
-  background: rgba(102, 126, 234, 0.3);
-  color: #a5b4fc;
+  transition: background var(--transition-fast);
 }
 
 .use-btn:hover {
-  background: rgba(102, 126, 234, 0.5);
+  background: rgba(198, 164, 78, 0.25);
 }
 
 .no-history {
   text-align: center;
   padding: 20px;
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--text-disabled);
   font-size: 12px;
 }
 </style>

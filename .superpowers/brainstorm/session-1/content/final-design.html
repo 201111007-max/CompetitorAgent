@@ -1,0 +1,256 @@
+<h2>完整设计方案</h2>
+<p class="subtitle">Dota 2 风格 + 现代融合 — 最终设计概览</p>
+
+<div class="section">
+  <h3>设计决策总结</h3>
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+    <div style="background: #141414; border: 1px solid #2a2a2a; border-radius: 8px; padding: 14px;">
+      <div style="color: #c6a44e; font-size: 11px; font-weight: 600; margin-bottom: 6px;">视觉风格</div>
+      <div style="color: #e0e0e0; font-size: 13px;">Dota 2 风格 + 现代融合</div>
+      <div style="color: #888; font-size: 11px; margin-top: 4px;">暗红 + 金色 + 深黑 + 适度圆角</div>
+    </div>
+    <div style="background: #141414; border: 1px solid #2a2a2a; border-radius: 8px; padding: 14px;">
+      <div style="color: #c6a44e; font-size: 11px; font-weight: 600; margin-bottom: 6px;">布局结构</div>
+      <div style="color: #e0e0e0; font-size: 13px;">左侧面板 + 聊天主区</div>
+      <div style="color: #888; font-size: 11px; margin-top: 4px;">可收起侧边栏 + 右侧抽屉</div>
+    </div>
+    <div style="background: #141414; border: 1px solid #2a2a2a; border-radius: 8px; padding: 14px;">
+      <div style="color: #c6a44e; font-size: 11px; font-weight: 600; margin-bottom: 6px;">消息展示</div>
+      <div style="color: #e0e0e0; font-size: 13px;">折叠式思考 + Markdown</div>
+      <div style="color: #888; font-size: 11px; margin-top: 4px;">工具调用可折叠 + 消息操作按钮</div>
+    </div>
+    <div style="background: #141414; border: 1px solid #2a2a2a; border-radius: 8px; padding: 14px;">
+      <div style="color: #c6a44e; font-size: 11px; font-weight: 600; margin-bottom: 6px;">辅助面板</div>
+      <div style="color: #e0e0e0; font-size: 13px;">右侧抽屉式</div>
+      <div style="color: #888; font-size: 11px; margin-top: 4px;">英雄面板 / 日志面板</div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>配色系统</h3>
+  <div class="mockup">
+    <div class="mockup-header">Dota 2 品牌色 + 现代暗色 UI</div>
+    <div class="mockup-body" style="padding: 20px;">
+      <div style="display: flex; gap: 16px; flex-wrap: wrap;">
+        <div>
+          <div style="font-size: 11px; color: #888; margin-bottom: 6px;">品牌主色</div>
+          <div style="display: flex; gap: 6px;">
+            <div style="text-align: center;">
+              <div style="width: 48px; height: 32px; background: #BF2E1A; border-radius: 4px;"></div>
+              <div style="font-size: 9px; color: #888; margin-top: 2px;">#BF2E1A</div>
+              <div style="font-size: 8px; color: #666;">强调/按钮</div>
+            </div>
+            <div style="text-align: center;">
+              <div style="width: 48px; height: 32px; background: #c6a44e; border-radius: 4px;"></div>
+              <div style="font-size: 9px; color: #888; margin-top: 2px;">#c6a44e</div>
+              <div style="font-size: 8px; color: #666;">装饰/标题</div>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div style="font-size: 11px; color: #888; margin-bottom: 6px;">背景层级</div>
+          <div style="display: flex; gap: 6px;">
+            <div style="text-align: center;">
+              <div style="width: 48px; height: 32px; background: #0d0d0d; border: 1px solid #333; border-radius: 4px;"></div>
+              <div style="font-size: 9px; color: #888; margin-top: 2px;">#0d0d0d</div>
+              <div style="font-size: 8px; color: #666;">最深层</div>
+            </div>
+            <div style="text-align: center;">
+              <div style="width: 48px; height: 32px; background: #141414; border: 1px solid #333; border-radius: 4px;"></div>
+              <div style="font-size: 9px; color: #888; margin-top: 2px;">#141414</div>
+              <div style="font-size: 8px; color: #666;">侧边栏</div>
+            </div>
+            <div style="text-align: center;">
+              <div style="width: 48px; height: 32px; background: #1a1a1a; border: 1px solid #333; border-radius: 4px;"></div>
+              <div style="font-size: 9px; color: #888; margin-top: 2px;">#1a1a1a</div>
+              <div style="font-size: 8px; color: #666;">卡片/输入</div>
+            </div>
+            <div style="text-align: center;">
+              <div style="width: 48px; height: 32px; background: #1e1e1e; border: 1px solid #333; border-radius: 4px;"></div>
+              <div style="font-size: 9px; color: #888; margin-top: 2px;">#1e1e1e</div>
+              <div style="font-size: 8px; color: #666;">消息气泡</div>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div style="font-size: 11px; color: #888; margin-bottom: 6px;">状态色</div>
+          <div style="display: flex; gap: 6px;">
+            <div style="text-align: center;">
+              <div style="width: 48px; height: 32px; background: #4ade80; border-radius: 4px;"></div>
+              <div style="font-size: 9px; color: #888; margin-top: 2px;">#4ade80</div>
+              <div style="font-size: 8px; color: #666;">成功/就绪</div>
+            </div>
+            <div style="text-align: center;">
+              <div style="width: 48px; height: 32px; background: #fbbf24; border-radius: 4px;"></div>
+              <div style="font-size: 9px; color: #888; margin-top: 2px;">#fbbf24</div>
+              <div style="font-size: 8px; color: #666;">警告/思考</div>
+            </div>
+            <div style="text-align: center;">
+              <div style="width: 48px; height: 32px; background: #f87171; border-radius: 4px;"></div>
+              <div style="font-size: 9px; color: #888; margin-top: 2px;">#f87171</div>
+              <div style="font-size: 8px; color: #666;">错误/敌方</div>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div style="font-size: 11px; color: #888; margin-bottom: 6px;">文字色</div>
+          <div style="display: flex; gap: 6px;">
+            <div style="text-align: center;">
+              <div style="width: 48px; height: 32px; background: #e0e0e0; border-radius: 4px;"></div>
+              <div style="font-size: 9px; color: #888; margin-top: 2px;">#e0e0e0</div>
+              <div style="font-size: 8px; color: #666;">主文字</div>
+            </div>
+            <div style="text-align: center;">
+              <div style="width: 48px; height: 32px; background: #888; border-radius: 4px;"></div>
+              <div style="font-size: 9px; color: #888; margin-top: 2px;">#888888</div>
+              <div style="font-size: 8px; color: #666;">次要文字</div>
+            </div>
+            <div style="text-align: center;">
+              <div style="width: 48px; height: 32px; background: #555; border-radius: 4px;"></div>
+              <div style="font-size: 9px; color: #888; margin-top: 2px;">#555555</div>
+              <div style="font-size: 8px; color: #666;">禁用/占位</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>完整界面 Mockup</h3>
+  <div class="mockup">
+    <div class="mockup-header">DotaHelperAgent — Dota 2 风格重新设计</div>
+    <div class="mockup-body" style="padding: 0; overflow: hidden;">
+      <div style="display: flex; height: 420px; background: #0d0d0d;">
+        <!-- 左侧面板 - 收起状态 -->
+        <div style="width: 52px; background: #0a0a0a; border-right: 1px solid #2a2a2a; display: flex; flex-direction: column; align-items: center; padding-top: 12px; gap: 8px;">
+          <!-- 汉堡按钮 -->
+          <div style="width: 32px; height: 32px; background: rgba(255,255,255,0.05); border-radius: 6px; display: flex; align-items: center; justify-content: center; cursor: pointer;">
+            <span style="color: #888; font-size: 14px;">☰</span>
+          </div>
+          <!-- 新建对话 -->
+          <div style="width: 32px; height: 32px; background: rgba(191,46,26,0.15); border: 1px solid rgba(191,46,26,0.3); border-radius: 6px; display: flex; align-items: center; justify-content: center; cursor: pointer;">
+            <span style="color: #BF2E1A; font-size: 16px;">+</span>
+          </div>
+          <div style="width: 24px; height: 1px; background: #2a2a2a; margin: 4px 0;"></div>
+          <!-- 对话图标 -->
+          <div style="width: 32px; height: 32px; background: rgba(191,46,26,0.2); border-left: 2px solid #BF2E1A; border-radius: 0 6px 6px 0; display: flex; align-items: center; justify-content: center;">
+            <span style="color: #e0e0e0; font-size: 12px;">💬</span>
+          </div>
+          <div style="width: 32px; height: 32px; background: rgba(255,255,255,0.03); border-radius: 6px; display: flex; align-items: center; justify-content: center;">
+            <span style="color: #555; font-size: 12px;">💬</span>
+          </div>
+          <div style="width: 32px; height: 32px; background: rgba(255,255,255,0.03); border-radius: 6px; display: flex; align-items: center; justify-content: center;">
+            <span style="color: #555; font-size: 12px;">💬</span>
+          </div>
+          <div style="flex: 1;"></div>
+          <!-- 底部快捷 -->
+          <div style="width: 32px; height: 32px; background: rgba(198,164,78,0.1); border-radius: 6px; display: flex; align-items: center; justify-content: center; cursor: pointer;" title="英雄面板">
+            <span style="color: #c6a44e; font-size: 12px;">⚔</span>
+          </div>
+          <div style="width: 32px; height: 32px; background: rgba(255,255,255,0.03); border-radius: 6px; display: flex; align-items: center; justify-content: center; cursor: pointer; margin-bottom: 12px;" title="日志">
+            <span style="color: #555; font-size: 12px;">📋</span>
+          </div>
+        </div>
+        <!-- 主聊天区 -->
+        <div style="flex: 1; display: flex; flex-direction: column;">
+          <!-- 顶部栏 -->
+          <div style="height: 44px; background: #111; border-bottom: 1px solid #2a2a2a; display: flex; align-items: center; padding: 0 16px; justify-content: space-between;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <div style="width: 20px; height: 20px; background: #BF2E1A; border-radius: 3px; display: flex; align-items: center; justify-content: center; color: white; font-size: 9px; font-weight: bold;">D</div>
+              <span style="color: #c6a44e; font-size: 12px; font-weight: 600; letter-spacing: 0.5px;">DOTA HELPER AGENT</span>
+              <span style="color: #555; font-size: 10px;">·</span>
+              <span style="color: #4ade80; font-size: 10px;">● 就绪</span>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <span style="color: #555; font-size: 10px; font-family: monospace; cursor: pointer;">Trace: abc123</span>
+            </div>
+          </div>
+          <!-- 消息区 -->
+          <div style="flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px;">
+            <!-- 用户消息 -->
+            <div style="display: flex; justify-content: flex-end;">
+              <div style="max-width: 70%;">
+                <div style="background: #BF2E1A; color: white; padding: 10px 16px; border-radius: 12px 12px 4px 12px; font-size: 13px; line-height: 1.5;">
+                  对面有帕吉和斧王，推荐什么英雄
+                </div>
+                <div style="text-align: right; margin-top: 4px; font-size: 10px; color: #555;">14:32 · 📋</div>
+              </div>
+            </div>
+            <!-- 助手消息 -->
+            <div style="display: flex; gap: 10px; align-items: flex-start;">
+              <div style="width: 32px; height: 32px; background: linear-gradient(135deg, #BF2E1A, #8b1a0e); border-radius: 8px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: white; font-size: 12px; font-weight: bold;">D</div>
+              <div style="flex: 1; display: flex; flex-direction: column; gap: 8px;">
+                <!-- 折叠思考过程 -->
+                <div style="background: #141414; border: 1px solid #2a2a2a; border-radius: 8px; overflow: hidden;">
+                  <div style="padding: 8px 12px; display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                    <span style="color: #888; font-size: 10px;">▼</span>
+                    <span style="color: #c6a44e; font-size: 11px; font-weight: 500;">💭 思考过程</span>
+                    <span style="color: #555; font-size: 10px; margin-left: auto;">3 步 · 2.1s</span>
+                  </div>
+                </div>
+                <!-- Markdown 回复 -->
+                <div style="background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; padding: 16px; font-size: 13px; color: #e0e0e0; line-height: 1.7;">
+                  <div style="color: #c6a44e; font-weight: 600; font-size: 14px; margin-bottom: 8px;">推荐英雄</div>
+                  <p style="margin: 0 0 8px 0;">针对帕吉和斧王，推荐以下英雄：</p>
+                  <div style="margin: 8px 0; padding-left: 14px; border-left: 2px solid #BF2E1A;">
+                    <div style="margin-bottom: 4px;"><strong style="color: #BF2E1A;">幻影刺客</strong> — 高爆发物理输出，克制肉盾</div>
+                    <div><strong style="color: #BF2E1A;">噬魂鬼</strong> — 魔免突进，无视帕吉钩子</div>
+                  </div>
+                  <div style="margin-top: 10px; padding: 10px; background: rgba(198,164,78,0.06); border: 1px solid rgba(198,164,78,0.12); border-radius: 6px; font-size: 12px; color: #c6a44e;">
+                    💡 建议优先选择幻影刺客，当前版本胜率 54.2%
+                  </div>
+                </div>
+                <!-- 操作按钮 -->
+                <div style="display: flex; gap: 6px;">
+                  <div style="padding: 4px 10px; background: rgba(255,255,255,0.05); border-radius: 4px; font-size: 10px; color: #888; cursor: pointer;">📋 复制</div>
+                  <div style="padding: 4px 10px; background: rgba(255,255,255,0.05); border-radius: 4px; font-size: 10px; color: #888; cursor: pointer;">🔄 重新生成</div>
+                  <div style="padding: 4px 10px; background: rgba(255,255,255,0.05); border-radius: 4px; font-size: 10px; color: #888; cursor: pointer;">👍</div>
+                  <div style="padding: 4px 10px; background: rgba(255,255,255,0.05); border-radius: 4px; font-size: 10px; color: #888; cursor: pointer;">👎</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- 输入区 -->
+          <div style="padding: 16px 20px; border-top: 1px solid #2a2a2a;">
+            <div style="display: flex; gap: 10px; align-items: flex-end;">
+              <div style="flex: 1; background: #1a1a1a; border: 1px solid #333; border-radius: 10px; padding: 10px 14px; color: #e0e0e0; font-size: 13px; min-height: 40px; max-height: 120px;">
+                <span style="color: #555;">输入消息，如：对面有帕吉和斧王，推荐什么英雄</span>
+              </div>
+              <div style="background: #BF2E1A; border-radius: 10px; padding: 10px 20px; color: white; font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap;">发送</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>组件改造清单</h3>
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+    <div style="background: #141414; border: 1px solid #2a2a2a; border-radius: 8px; padding: 12px;">
+      <div style="color: #BF2E1A; font-size: 11px; font-weight: 600; margin-bottom: 6px;">新增组件</div>
+      <ul style="font-size: 12px; color: #ccc; line-height: 1.8; margin: 0; padding-left: 16px;">
+        <li>SidePanel — 可收起左侧面板</li>
+        <li>SessionList — 会话列表</li>
+        <li>ThinkingSteps — 折叠思考过程</li>
+        <li>MarkdownRenderer — Markdown 渲染</li>
+        <li>MessageActions — 消息操作按钮</li>
+        <li>RightDrawer — 右侧抽屉面板</li>
+      </ul>
+    </div>
+    <div style="background: #141414; border: 1px solid #2a2a2a; border-radius: 8px; padding: 12px;">
+      <div style="color: #c6a44e; font-size: 11px; font-weight: 600; margin-bottom: 6px;">改造组件</div>
+      <ul style="font-size: 12px; color: #ccc; line-height: 1.8; margin: 0; padding-left: 16px;">
+        <li>ChatBox → 重构为 Dota 2 风格</li>
+        <li>HeroPanel → 迁移到右侧抽屉</li>
+        <li>LogPanel → 迁移到右侧抽屉</li>
+        <li>HomeView → 新布局结构</li>
+        <li>全局样式 → Dota 2 配色系统</li>
+      </ul>
+    </div>
+  </div>
+</div>

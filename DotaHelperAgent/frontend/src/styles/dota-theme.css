@@ -1,0 +1,300 @@
+/* ========================================
+   Dota 2 Theme — CSS Variables & Global Styles
+   DotaHelperAgent Frontend Redesign
+   ======================================== */
+
+:root {
+  /* 品牌色 */
+  --dota-red: #BF2E1A;
+  --dota-red-dark: #8b1a0e;
+  --dota-red-light: #d94432;
+  --dota-gold: #c6a44e;
+  --dota-gold-dark: #9a7d3a;
+  --dota-gold-light: #d4b56a;
+
+  /* 背景层级 */
+  --bg-deepest: #0d0d0d;
+  --bg-sidebar-collapsed: #0a0a0a;
+  --bg-panel: #111111;
+  --bg-card: #141414;
+  --bg-input: #1a1a1a;
+  --bg-bubble: #1e1e1e;
+
+  /* 状态色 */
+  --status-success: #4ade80;
+  --status-warning: #fbbf24;
+  --status-error: #f87171;
+  --status-info: #60a5fa;
+
+  /* 文字色 */
+  --text-primary: #e0e0e0;
+  --text-secondary: #cccccc;
+  --text-tertiary: #888888;
+  --text-disabled: #555555;
+
+  /* 边框色 */
+  --border-primary: #2a2a2a;
+  --border-secondary: #333333;
+
+  /* 圆角 */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+  --radius-pill: 12px;
+  --radius-bubble: 12px;
+  --radius-bubble-tail: 4px;
+
+  /* 阴影 */
+  --shadow-btn: 0 2px 8px rgba(191, 46, 26, 0.3);
+  --shadow-card-hover: 0 4px 12px rgba(0, 0, 0, 0.3);
+  --shadow-drawer: -4px 0 16px rgba(0, 0, 0, 0.3);
+  --shadow-bottom-drawer: 0 -4px 16px rgba(0, 0, 0, 0.4);
+
+  /* 间距 */
+  --gap-xs: 4px;
+  --gap-sm: 6px;
+  --gap-md: 8px;
+  --gap-lg: 12px;
+  --gap-xl: 16px;
+  --gap-2xl: 20px;
+
+  /* 侧边栏 */
+  --sidebar-collapsed-width: 52px;
+  --sidebar-expanded-width: 260px;
+
+  /* 抽屉面板 */
+  --drawer-hero-width: 360px;
+  --drawer-log-width: 400px;
+
+  /* 顶部状态栏 */
+  --topbar-height: 44px;
+
+  /* 字体 */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'Consolas', 'Monaco', 'Courier New', monospace;
+
+  /* 过渡 */
+  --transition-fast: 0.2s ease;
+  --transition-normal: 0.3s ease;
+}
+
+/* ========================================
+   响应式断点
+   ≥1280px: 桌面端 — 侧边栏可收起，面板水平并列
+   768-1279px: 平板端 — 侧边栏默认收起，面板垂直堆叠
+   <768px: 移动端 — 侧边栏隐藏，底部抽屉 + Tab
+   ======================================== */
+
+/* 桌面端默认样式已在各组件中定义 */
+
+/* 平板端 */
+@media (max-width: 1279px) {
+  :root {
+    --drawer-hero-width: min(360px, 40vw);
+    --drawer-log-width: min(400px, 40vw);
+  }
+}
+
+/* 移动端 */
+@media (max-width: 767px) {
+  :root {
+    --sidebar-collapsed-width: 0px;
+    --sidebar-expanded-width: 0px;
+    --drawer-hero-width: 100vw;
+    --drawer-log-width: 100vw;
+  }
+}
+
+/* ========================================
+   全局基础样式
+   ======================================== */
+
+body {
+  font-family: var(--font-sans);
+  background: var(--bg-deepest);
+  color: var(--text-primary);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ========================================
+   滚动条
+   ======================================== */
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+
+/* ========================================
+   动画关键帧
+   ======================================== */
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideInRight {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideInBottom {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes typing {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.5;
+  }
+  30% {
+    transform: translateY(-6px);
+    opacity: 1;
+  }
+}
+
+/* ========================================
+   通用工具类
+   ======================================== */
+
+.dota-btn {
+  padding: 10px 20px;
+  background: var(--dota-red);
+  color: white;
+  border: none;
+  border-radius: var(--radius-lg);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.dota-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-btn);
+}
+
+.dota-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.dota-btn-ghost {
+  padding: 6px 12px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-tertiary);
+  border: 1px solid var(--border-secondary);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.dota-btn-ghost:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+}
+
+.dota-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.dota-tag-ally {
+  background: rgba(74, 222, 128, 0.12);
+  border: 1px solid rgba(74, 222, 128, 0.25);
+  color: var(--status-success);
+}
+
+.dota-tag-enemy {
+  background: rgba(248, 113, 113, 0.12);
+  border: 1px solid rgba(248, 113, 113, 0.25);
+  color: var(--status-error);
+}
+
+.dota-tag-gold {
+  background: rgba(198, 164, 78, 0.12);
+  border: 1px solid rgba(198, 164, 78, 0.25);
+  color: var(--dota-gold);
+}
+
+.dota-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-lg);
+  padding: var(--gap-xl);
+}
+
+.dota-input {
+  width: 100%;
+  padding: 10px 14px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-secondary);
+  border-radius: var(--radius-xl);
+  color: var(--text-primary);
+  font-size: 13px;
+  outline: none;
+  transition: border-color var(--transition-fast);
+}
+
+.dota-input:focus {
+  border-color: var(--dota-red);
+}
+
+.dota-input::placeholder {
+  color: var(--text-disabled);
+}

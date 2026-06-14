@@ -1,0 +1,155 @@
+<h2>聊天消息展示方案</h2>
+<p class="subtitle">左侧面板 + 聊天主区 — 消息渲染和交互设计</p>
+
+<div class="section">
+  <h3>当前问题</h3>
+  <div class="pros-cons">
+    <div class="cons">
+      <h4>消息展示问题</h4>
+      <ul>
+        <li>纯文本渲染，无 Markdown 支持（代码块、列表、加粗等）</li>
+        <li>工具调用过程以纯文本 emoji 拼接，信息密度低</li>
+        <li>思考/计划/观察等中间步骤混在回复中，难以区分</li>
+        <li>流式输出时内容跳动，体验差</li>
+        <li>无代码高亮</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>消息组件方案</h3>
+  <div class="cards">
+    <div class="card" data-choice="msg-a" onclick="toggleSelect(this)">
+      <div class="card-image">
+        <div style="background: #0d0d0d; border: 1px solid #333; border-radius: 6px; padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+          <!-- 用户消息 -->
+          <div style="display: flex; justify-content: flex-end;">
+            <div style="background: #BF2E1A; color: white; padding: 10px 14px; border-radius: 12px 12px 4px 12px; max-width: 75%; font-size: 12px;">
+              对面有帕吉和斧王，推荐什么英雄
+            </div>
+          </div>
+          <!-- 助手消息 - 折叠式 -->
+          <div style="display: flex; gap: 8px; align-items: flex-start;">
+            <div style="width: 28px; height: 28px; background: linear-gradient(135deg, #BF2E1A, #8b1a0e); border-radius: 6px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: white; font-size: 11px; font-weight: bold;">D</div>
+            <div style="flex: 1; display: flex; flex-direction: column; gap: 8px;">
+              <!-- 思考步骤 - 可折叠 -->
+              <div style="background: #141414; border: 1px solid #2a2a2a; border-radius: 8px; overflow: hidden;">
+                <div style="padding: 8px 12px; display: flex; align-items: center; gap: 6px; cursor: pointer; border-bottom: 1px solid #2a2a2a;">
+                  <span style="color: #888; font-size: 10px;">▶</span>
+                  <span style="color: #c6a44e; font-size: 11px; font-weight: 500;">💭 思考过程</span>
+                  <span style="color: #555; font-size: 10px; margin-left: auto;">3 步</span>
+                </div>
+                <div style="padding: 8px 12px; font-size: 11px; color: #888; line-height: 1.6;">
+                  <div>📋 计划: hero_counter, item_recommend</div>
+                  <div>🔧 执行: hero_counter ✓</div>
+                  <div>🔧 执行: item_recommend ✓</div>
+                </div>
+              </div>
+              <!-- 最终回答 - Markdown 渲染 -->
+              <div style="background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; padding: 12px; font-size: 12px; color: #e0e0e0; line-height: 1.7;">
+                <div style="color: #c6a44e; font-weight: 600; margin-bottom: 6px;">推荐英雄</div>
+                <div>针对帕吉和斧王，推荐以下英雄：</div>
+                <div style="margin: 8px 0; padding-left: 12px; border-left: 2px solid #BF2E1A;">
+                  <div><strong style="color: #BF2E1A;">幻影刺客</strong> — 高爆发物理输出，克制肉盾</div>
+                  <div><strong style="color: #BF2E1A;">噬魂鬼</strong> — 魔免突进，无视帕吉钩子</div>
+                </div>
+                <div style="margin-top: 8px; padding: 8px; background: rgba(198,164,78,0.08); border: 1px solid rgba(198,164,78,0.15); border-radius: 4px; font-size: 11px; color: #c6a44e;">
+                  💡 建议优先选择幻影刺客，当前版本胜率 54.2%
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <h3>A. 折叠式思考过程 + Markdown 回复</h3>
+        <p>思考/工具调用步骤默认折叠，点击展开。最终回答用 Markdown 渲染，含代码高亮、列表、表格。信息层次清晰，不干扰阅读。</p>
+      </div>
+    </div>
+
+    <div class="card" data-choice="msg-b" onclick="toggleSelect(this)">
+      <div class="card-image">
+        <div style="background: #0d0d0d; border: 1px solid #333; border-radius: 6px; padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+          <!-- 用户消息 -->
+          <div style="display: flex; justify-content: flex-end;">
+            <div style="background: #BF2E1A; color: white; padding: 10px 14px; border-radius: 12px 12px 4px 12px; max-width: 75%; font-size: 12px;">
+              对面有帕吉和斧王，推荐什么英雄
+            </div>
+          </div>
+          <!-- 助手消息 - 时间线式 -->
+          <div style="display: flex; gap: 8px; align-items: flex-start;">
+            <div style="width: 28px; height: 28px; background: linear-gradient(135deg, #BF2E1A, #8b1a0e); border-radius: 6px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: white; font-size: 11px; font-weight: bold;">D</div>
+            <div style="flex: 1; display: flex; flex-direction: column; gap: 0;">
+              <!-- 时间线步骤 -->
+              <div style="display: flex; gap: 8px; padding: 6px 0;">
+                <div style="width: 2px; background: #c6a44e; border-radius: 1px; flex-shrink: 0;"></div>
+                <div style="font-size: 11px; color: #c6a44e;">📋 计划执行: hero_counter, item_recommend</div>
+              </div>
+              <div style="display: flex; gap: 8px; padding: 6px 0;">
+                <div style="width: 2px; background: #4ade80; border-radius: 1px; flex-shrink: 0;"></div>
+                <div style="font-size: 11px; color: #4ade80;">✓ hero_counter — 获取克制英雄数据</div>
+              </div>
+              <div style="display: flex; gap: 8px; padding: 6px 0;">
+                <div style="width: 2px; background: #4ade80; border-radius: 1px; flex-shrink: 0;"></div>
+                <div style="font-size: 11px; color: #4ade80;">✓ item_recommend — 获取出装推荐</div>
+              </div>
+              <!-- 分割线 -->
+              <div style="border-top: 1px solid #2a2a2a; margin: 6px 0;"></div>
+              <!-- 最终回答 -->
+              <div style="font-size: 12px; color: #e0e0e0; line-height: 1.7; padding: 4px 0;">
+                <div style="color: #c6a44e; font-weight: 600; margin-bottom: 6px;">推荐英雄</div>
+                <div>针对帕吉和斧王，推荐以下英雄：</div>
+                <div style="margin: 8px 0; padding-left: 12px; border-left: 2px solid #BF2E1A;">
+                  <div><strong style="color: #BF2E1A;">幻影刺客</strong> — 高爆发物理输出，克制肉盾</div>
+                  <div><strong style="color: #BF2E1A;">噬魂鬼</strong> — 魔免突进，无视帕吉钩子</div>
+                </div>
+                <div style="margin-top: 8px; padding: 8px; background: rgba(198,164,78,0.08); border: 1px solid rgba(198,164,78,0.15); border-radius: 4px; font-size: 11px; color: #c6a44e;">
+                  💡 建议优先选择幻影刺客，当前版本胜率 54.2%
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <h3>B. 时间线式步骤 + Markdown 回复</h3>
+        <p>工具调用步骤以时间线形式展示（竖线+状态色），始终可见。步骤和最终回答之间有分割线。过程透明，但可能信息过载。</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>其他消息展示细节</h3>
+  <div class="options" data-multiselect>
+    <div class="option" data-choice="detail-markdown" onclick="toggleSelect(this)">
+      <div class="letter">1</div>
+      <div class="content">
+        <h3>Markdown 渲染</h3>
+        <p>支持标题、列表、表格、代码块（语法高亮）、加粗/斜体、引用块等</p>
+      </div>
+    </div>
+    <div class="option" data-choice="detail-hero-card" onclick="toggleSelect(this)">
+      <div class="letter">2</div>
+      <div class="content">
+        <h3>英雄卡片组件</h3>
+        <p>英雄推荐时展示卡片式组件（头像+名称+胜率+标签），而非纯文本列表</p>
+      </div>
+    </div>
+    <div class="option" data-choice="detail-item-grid" onclick="toggleSelect(this)">
+      <div class="letter">3</div>
+      <div class="content">
+        <h3>物品网格组件</h3>
+        <p>出装推荐时展示物品图标网格（类似游戏内商店），而非文字列表</p>
+      </div>
+    </div>
+    <div class="option" data-choice="detail-copy" onclick="toggleSelect(this)">
+      <div class="letter">4</div>
+      <div class="content">
+        <h3>消息操作按钮</h3>
+        <p>每条消息支持复制、重新生成、反馈评分等操作</p>
+      </div>
+    </div>
+  </div>
+</div>
