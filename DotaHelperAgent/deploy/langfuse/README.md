@@ -5,7 +5,7 @@
 ### 1. 启动服务
 
 ```powershell
-cd d:\trae_projects\first-agent\langfuse
+cd d:\trae_projects\first-agent\DotaHelperAgent\deploy\langfuse
 docker-compose up -d
 ```
 

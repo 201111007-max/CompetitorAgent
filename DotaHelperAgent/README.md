@@ -23,11 +23,24 @@ llm:
   # API Key 从环境变量读取：export DEEPSEEK_API_KEY=your_key
 ```
 
+**环境变量配置（推荐）：**
+```bash
+# 复制环境变量模板
+cp .env.example .env
+
+# 编辑 .env 文件，填入你的 API Key
+# DEEPSEEK_API_KEY=your_key_here
+```
+
 ### 2️⃣ 启动服务
 
 ```bash
-# 安装后端依赖
+# 安装后端依赖（完整版）
 pip install -r requirements.txt
+
+# 安装可选依赖（推荐）
+pip install duckduckgo-search python-dotenv  # 搜索功能、环境变量管理
+pip install -r requirements-optional.txt     # Langfuse 监控
 
 # 启动后端（端口 5000）
 python web/app.py
@@ -149,6 +162,55 @@ npm run dev
 - **DuckDuckGo Search** - 免费搜索（可选）
 - **SQLite Cache** - 两级缓存系统（内存 + 持久化）
 
+## 依赖说明
+
+### 核心依赖（必需）
+
+| 依赖 | 版本 | 说明 |
+|------|------|------|
+| flask | ≥2.0.0 | Web 框架 |
+| flask-cors | ≥3.0.0 | 跨域支持 |
+| requests | ≥2.28.0 | HTTP 客户端 |
+| pyyaml | ≥6.0 | 配置文件解析 |
+| python-dateutil | ≥2.8.0 | 日期处理 |
+| chromadb | ≥0.5.0 | 向量数据库 |
+| openai | ≥1.12.0 | OpenAI API 客户端 |
+| sentence-transformers | ≥2.2.2 | 向量嵌入模型 |
+
+**安装命令：**
+```bash
+pip install -r requirements.txt
+```
+
+### 可选依赖（推荐）
+
+| 依赖 | 说明 | 安装命令 |
+|------|------|---------|
+| duckduckgo-search | DuckDuckGo 搜索功能 | `pip install duckduckgo-search` |
+| python-dotenv | 环境变量管理 | `pip install python-dotenv` |
+| langfuse | Agent 监控和追踪 | `pip install -r requirements-optional.txt` |
+
+**一键安装所有可选依赖：**
+```bash
+pip install duckduckgo-search python-dotenv
+pip install -r requirements-optional.txt
+```
+
+### 前端依赖
+
+前端依赖位于 `frontend/package.json`，使用 npm 自动安装：
+
+```bash
+cd frontend
+npm install
+```
+
+主要依赖包括：
+- vue@3.5.34
+- naive-ui@2.44.1
+- pinia@3.0.4
+- axios@1.16.1
+
 ## 项目结构
 
 ```
@@ -224,35 +286,67 @@ DotaHelperAgent/
 
 ### 1. 环境要求
 
-- Python 3.10+
-- Node.js 18+
-- LLM API Key (OpenAI 兼容接口)
+- **操作系统**：Windows / macOS / Linux
+- **Python**：3.10+ （推荐 3.11+）
+- **Node.js**：18+ （推荐 20+）
+- **内存**：至少 4GB RAM（向量数据库需要）
+- **磁盘**：至少 2GB 可用空间
+- **API Key**：LLM API Key (DeepSeek、OpenAI 或兼容接口)
 
 ### 2. 配置 LLM
 
 ```bash
+# 复制配置模板
 cp config/llm_config.yaml.example config/llm_config.yaml
+
 # 编辑 llm_config.yaml，填入你的 API Key 和 Base URL
 ```
 
-### 3. 启动后端
-
+**环境变量配置（推荐）：**
 ```bash
-pip install flask flask-cors schedule pyyaml requests
+# 复制环境变量模板
+cp .env.example .env
+
+# 编辑 .env 文件，配置 API Keys
+# - DEEPSEEK_API_KEY: DeepSeek API Key（推荐）
+# - OPENDOTA_API_KEY: OpenDota API Key（可选）
+# - LANGFUSE_PUBLIC_KEY/SECRET_KEY: 监控配置（可选）
+```
+
+### 3. 安装依赖
+
+**后端依赖：**
+```bash
+# 核心依赖（必需）
+pip install -r requirements.txt
+
+# 可选依赖（推荐安装）
+pip install duckduckgo-search python-dotenv  # 搜索功能、环境变量管理
+pip install -r requirements-optional.txt     # Langfuse 监控
+```
+
+**前端依赖：**
+```bash
+cd frontend
+npm install
+```
+
+### 4. 启动服务
+
+**启动后端：**
+```bash
 python web/app.py
 # API 服务运行在 http://localhost:5000
 ```
 
-### 4. 启动前端
-
+**启动前端：**
 ```bash
 cd frontend
-npm install
 npm run dev
 # 前端运行在 http://localhost:3000，自动代理 API 到 :5000
 ```
 
-### 5. 访问
+### 5. 访问应用
 
 打开浏览器访问 **http://localhost:3000**
 
@@ -310,3 +404,84 @@ npm run dev
 - [架构分析报告](docs/ARCHITECTURE_ANALYSIS.md)
 - [前端迁移总结](frontend/MIGRATION_SUMMARY.md)
 - [前端部署指南](frontend/DEPLOYMENT.md)
+
+## 常见问题
+
+### 1. 如何获取 API Key？
+
+**DeepSeek API Key（推荐）：**
+1. 访问 https://platform.deepseek.com/
+2. 注册账号并登录
+3. 在 API Keys 页面创建新的 API Key
+4. 将 API Key 添加到 `.env` 文件或 `llm_config.yaml`
+
+**OpenAI API Key：**
+1. 访问 https://platform.openai.com/
+2. 注册账号并登录
+3. 在 API Keys 页面创建新的 API Key
+4. 修改 `llm_config.yaml` 中的 `base_url` 和 `model`
+
+### 2. 安装依赖时遇到问题？
+
+**ChromaDB 安装失败：**
+```bash
+# Windows 用户可能需要安装 Visual C++ Build Tools
+# 下载地址：https://visualstudio.microsoft.com/visual-cpp-build-tools/
+
+# 或使用预编译版本
+pip install chromadb --prefer-binary
+```
+
+**Sentence Transformers 下载慢：**
+```bash
+# 设置国内镜像
+export HF_ENDPOINT=https://hf-mirror.com
+pip install sentence-transformers
+```
+
+### 3. 如何验证安装是否成功？
+
+**验证后端：**
+```bash
+# 启动后端
+python web/app.py
+
+# 访问健康检查接口
+curl http://localhost:5000/api/health
+# 应返回：{"status": "healthy", ...}
+```
+
+**验证前端：**
+```bash
+cd frontend
+npm run dev
+
+# 访问 http://localhost:3000
+# 应看到聊天界面
+```
+
+### 4. 搜索功能不可用？
+
+如果看到 "搜索功能不可用" 提示，需要安装 DuckDuckGo 搜索：
+
+```bash
+pip install duckduckgo-search
+```
+
+### 5. 向量数据库初始化慢？
+
+首次运行时，向量数据库需要下载模型文件（约 500MB），请耐心等待。模型会缓存到本地，后续启动会很快。
+
+### 6. 如何更新到最新版本？
+
+```bash
+# 拉取最新代码
+git pull
+
+# 更新后端依赖
+pip install -r requirements.txt --upgrade
+
+# 更新前端依赖
+cd frontend
+npm update
+```
