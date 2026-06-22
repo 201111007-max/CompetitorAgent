@@ -231,31 +231,40 @@ def create_all_tools(
     item_recommender=None,
     skill_builder=None,
     client=None,
-    localization=None
+    localization=None,
+    gsi_state_manager=None,
+    gsi_event_queue=None
 ) -> List[Tool]:
     """创建所有可用的 Agent Tools
-    
+
     Args:
         hero_analyzer: 英雄分析器实例（可选）
         item_recommender: 物品推荐器实例（可选）
         skill_builder: 技能加点器实例（可选）
         client: OpenDota API 客户端（可选）
         localization: 本地化工具（可选）
-        
+        gsi_state_manager: GSI 状态管理器实例（可选）
+        gsi_event_queue: GSI 事件队列实例（可选）
+
     Returns:
         所有可用的 Tool 列表
     """
     all_tools = []
-    
+
     if hero_analyzer and client:
         all_tools.extend(create_hero_tools(hero_analyzer, client, localization))
-    
+
     if item_recommender and client:
         all_tools.extend(create_item_tools(item_recommender, client, localization))
-    
+
     if skill_builder and client:
         all_tools.extend(create_skill_tools(skill_builder, client, localization))
-    
+
+    # GSI 工具（可选）
+    if gsi_state_manager or gsi_event_queue:
+        from tools.gsi_tools import create_gsi_tools
+        all_tools.extend(create_gsi_tools(gsi_state_manager, gsi_event_queue))
+
     return all_tools
 
 

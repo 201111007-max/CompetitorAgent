@@ -7,6 +7,10 @@
         <span class="status-dot"></span>
         {{ connected ? '已连接' : '未连接' }}
       </span>
+      <span class="gsi-status" :class="gsiConnected ? 'gsi-connected' : 'gsi-disconnected'" v-if="gsiChecked">
+        <span class="status-dot"></span>
+        GSI {{ gsiConnected ? '已连接' : '未连接' }}
+      </span>
     </div>
     <div class="bar-right">
       <span v-if="traceId" class="trace-id" @click="copyTraceId" title="点击复制 Trace ID">
@@ -17,10 +21,18 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useChatStore } from '@/stores/chat'
+import { useGsiStream } from '@/composables/useGsiStream'
 
 const chatStore = useChatStore()
+const { connected: gsiConnected, fetchState } = useGsiStream()
+const gsiChecked = ref(false)
+
+onMounted(async () => {
+  await fetchState()
+  gsiChecked.value = true
+})
 
 const connected = computed(() => !chatStore.isStreaming)
 const traceId = computed(() => chatStore.traceId)
@@ -108,6 +120,24 @@ const copyTraceId = async () => {
 .disconnected .status-dot {
   background: var(--status-error);
   animation: pulse 2s infinite;
+}
+
+.gsi-status {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-disabled);
+  margin-left: var(--gap-sm);
+}
+
+.gsi-connected .status-dot {
+  background: var(--status-success);
+  box-shadow: 0 0 6px rgba(74, 222, 128, 0.4);
+}
+
+.gsi-disconnected .status-dot {
+  background: var(--text-disabled);
 }
 
 .bar-right {

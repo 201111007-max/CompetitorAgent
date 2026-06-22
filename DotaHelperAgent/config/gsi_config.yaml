@@ -1,0 +1,52 @@
+# GSI (Game State Integration) 配置文件
+
+server:
+  host: "127.0.0.1"
+  port: 3000
+  token: "dota_helper_gsi_token"
+
+state:
+  max_history: 100
+  persistence_enabled: false
+
+events:
+  stack:
+    enabled: true
+    offset: 53
+    min_interval: 30
+  mid_rune:
+    enabled: true
+    interval: 120
+  bounty_rune:
+    enabled: true
+    interval: 180
+  wisdom_rune:
+    enabled: true
+    interval: 420
+  lotus:
+    enabled: true
+    interval: 180
+  neutral_item:
+    enabled: true
+    interval: 420
+  roshan:
+    enabled: true
+    interval: 480
+  daytime:
+    enabled: true
+  kill:
+    enabled: true
+  death:
+    enabled: true
+  level_up:
+    enabled: true
+  gold_spent:
+    enabled: true
+    threshold: 500
+
+sse:
+  heartbeat_interval: 30
+  max_queue_size: 50
+
+logging:
+  level: "INFO"

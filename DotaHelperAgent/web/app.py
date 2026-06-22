@@ -57,6 +57,17 @@ except ImportError:
     LangfuseClient = None
     LangfuseConfig = None
 
+# GSI 游戏状态集成（可选）
+try:
+    import yaml
+    from gsi.server import GSIServer
+    from gsi.state_manager import GSIStateManager
+    from gsi.event_handler import GSIEventHandler
+    from gsi.event_queue import GSIEventQueue
+    GSI_AVAILABLE = True
+except ImportError:
+    GSI_AVAILABLE = False
+
 # 初始化日志系统
 logger, memory_handler = setup_logging_with_memory(
     log_level="DEBUG",
@@ -81,6 +92,11 @@ cache_warming = False
 cache_ready = False
 localizer = DotaLocalizer()
 api_client = None  # 全局 API 客户端实例，用于缓存刷新
+
+# GSI 全局变量
+gsi_state_manager = None
+gsi_event_queue = None
+gsi_server = None
 
 # 日志目录（可配置，便于测试）
 LOG_DIR = Path(__file__).parent.parent / "logs"
@@ -421,6 +437,46 @@ def start_cache_scheduler() -> None:
     scheduler_thread.start()
 
 
+def initialize_gsi() -> None:
+    """初始化 GSI 游戏状态集成"""
+    global gsi_state_manager, gsi_event_queue, gsi_server
+
+    if not GSI_AVAILABLE:
+        app_logger.info("GSI 模块不可用，跳过初始化")
+        return
+
+    try:
+        gsi_config_path = project_root / "config" / "gsi_config.yaml"
+        if gsi_config_path.exists():
+            with open(gsi_config_path, 'r', encoding='utf-8') as f:
+                gsi_config = yaml.safe_load(f)
+        else:
+            app_logger.warning("GSI 配置文件不存在，使用默认配置")
+            gsi_config = {}
+
+        gsi_event_queue = GSIEventQueue(
+            max_history=gsi_config.get('state', {}).get('max_history', 100)
+        )
+        events_config = gsi_config.get('events', {})
+        gsi_event_handler = GSIEventHandler(gsi_event_queue, events_config)
+        gsi_state_manager = GSIStateManager(event_handler=gsi_event_handler)
+
+        server_config = gsi_config.get('server', {})
+        gsi_server = GSIServer(
+            host=server_config.get('host', '127.0.0.1'),
+            port=server_config.get('port', 3000),
+            token=server_config.get('token', ''),
+            state_manager=gsi_state_manager,
+            event_handler=gsi_event_handler,
+        )
+        gsi_server.start()
+        app_logger.info("GSI 初始化完成")
+    except Exception as e:
+        app_logger.warning(f"GSI 初始化失败: {e}")
+        gsi_state_manager = None
+        gsi_event_queue = None
+
+
 def initialize_agent_controller() -> None:
     """初始化 Agent 和 Agent Controller"""
     global agent, agent_controller, conversation_manager, matchup_manager
@@ -464,13 +520,18 @@ def initialize_agent_controller() -> None:
         
         # 创建 Tool Registry
         registry = ToolRegistry()
-        
+
+        # 初始化 GSI（可选）
+        initialize_gsi()
+
         # 创建所有 Agent Tools
         tools = create_all_tools(
             hero_analyzer=agent.hero_analyzer,
             item_recommender=agent.item_recommender,
             skill_builder=agent.skill_builder,
-            client=agent.client
+            client=agent.client,
+            gsi_state_manager=gsi_state_manager,
+            gsi_event_queue=gsi_event_queue,
         )
         
         # 注册所有 Tools
@@ -619,9 +680,49 @@ def index() -> Response:
             "logs": "/api/logs",
             "trace": "/api/trace/<trace_id>",
             "memory": "/api/memory/stats",
-            "feedback": "/api/feedback"
+            "feedback": "/api/feedback",
+            "gsi_events": "/api/gsi/events",
+            "gsi_state": "/api/gsi/state"
         }
     })
+
+
+@app.route('/api/gsi/events')
+def gsi_event_stream():
+    """SSE 推送 GSI 事件到前端"""
+    if gsi_event_queue is None:
+        return jsonify({"error": "GSI not available"}), 503
+
+    def generate():
+        subscriber = gsi_event_queue.subscribe()
+        try:
+            for event in gsi_event_queue.get_recent(5):
+                yield f"event: {event.event_type}\ndata: {json.dumps(event.to_dict())}\n\n"
+            while True:
+                try:
+                    event = subscriber.get(timeout=30)
+                    yield f"event: {event.event_type}\ndata: {json.dumps(event.to_dict())}\n\n"
+                except queue.Empty:
+                    yield "event: heartbeat\ndata: {}\n\n"
+        finally:
+            gsi_event_queue.unsubscribe(subscriber)
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype='text/event-stream',
+        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'}
+    )
+
+
+@app.route('/api/gsi/state')
+def gsi_state():
+    """获取当前 GSI 状态"""
+    if gsi_state_manager is None:
+        return jsonify({"available": False, "message": "GSI not available"})
+    state = gsi_state_manager.get_state()
+    if not state:
+        return jsonify({"available": False, "connected": gsi_state_manager.connected})
+    return jsonify({"available": True, "connected": gsi_state_manager.connected, "state": state.to_dict()})
 
 
 def get_agent() -> AgentController:

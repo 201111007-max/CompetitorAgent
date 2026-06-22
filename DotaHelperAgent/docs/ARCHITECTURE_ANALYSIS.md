@@ -1,10 +1,10 @@
 # DotaHelperAgent 待改进事项
 
-> 最后更新：2026-06-14
+> 最后更新：2026-06-22
 
 ## 一、待改进优先级
 
-> 更新时间：2026-06-14
+> 更新时间：2026-06-22
 
 ### 1.1 总体架构升级路线图（第十六章）
 
@@ -13,7 +13,7 @@
 | 阶段 | 升级方向 | 优先级 | 预计工作量 | 核心内容 | 状态 |
 |------|---------|--------|----------|---------|------|
 | **第一阶段** | **知识管理能力升级** | **P0** | 1-2周 | 向量数据库 + 攻略文档检索 | ✅ 已完成 |
-| **第二阶段** | **GSI 实时数据处理** | **P1** | 2-3周 | GSI服务器 + 状态管理 + 事件处理 | ❌ 待实现 |
+| **第二阶段** | **GSI 实时数据处理** | **P1** | 2-3周 | GSI服务器 + 状态管理 + 事件处理 | ✅ 已完成 |
 | **第三阶段** | **推理和决策能力增强** | **P1** | 3-4周 | 数据驱动决策 + 混合推理 | ❌ 待实现 |
 | **第四阶段** | **个性化学习能力** | **P2** | 2-3周 | 用户画像 + 在线学习 | ❌ 待实现 |
 | **第五阶段** | **多模态交互能力** | **P2** | 1-2周 | 语音播报 + 数据可视化 | ❌ 待实现 |
@@ -27,14 +27,14 @@
 | **P0** | **工具调用层监控（Langfuse）** | 中 | 高 | - | ✅ 已完成 |
 | **P0** | **Trace 定位与日志追踪体系** | 大 | 高 | - | ✅ 已完成 |
 | **P0** | **知识管理能力升级** | 中 | 高 | **第一阶段** | ✅ 已完成 |
-| **P1** | **GSI 实时游戏状态监控** | 大 | 高 | **第二阶段** | ❌ 待实现 |
-| **P1** | **游戏事件提醒系统** | 中 | 中 | **第二阶段** | ❌ 待实现 |
+| **P1** | **GSI 实时游戏状态监控** | 大 | 高 | **第二阶段** | ✅ 已完成 |
+| **P1** | **游戏事件提醒系统** | 中 | 中 | **第二阶段** | ✅ 已完成 |
 | **P1** | **Agent主动推荐机制** | 大 | 高 | **第三阶段** | ❌ 待实现 |
-| **P1** | **GSI数据与Agent结合方案** | 中 | 高 | **第二阶段** | ❌ 待实现 |
-| **P1** | **GSI主动推荐功能PRD** | 大 | 高 | **第二阶段** | ❌ 待实现 |
+| **P1** | **GSI数据与Agent结合方案** | 中 | 高 | **第二阶段** | ✅ 已完成 |
+| **P1** | **GSI主动推荐功能PRD** | 大 | 高 | **第二阶段** | ✅ 已完成 |
 | P1 | Prompt 版本管理（Langfuse） | 中 | 中 | **第三阶段** | ❌ 待实现 |
 | **P1** | **工具执行并行化** | 中 | 中 | - | ✅ 已完成 |
-| P2 | 前端样式优化 | 中 | 中 | **第五阶段** | ❌ 待实现 |
+| P2 | 前端样式优化 | 中 | 中 | **第五阶段** | ✅ 已完成 |
 | P2 | 用户反馈学习 | 大 | 中 | **第四阶段** | ❌ 待实现 |
 | P2 | 语音提醒系统 | 中 | 低 | **第五阶段** | ❌ 待实现 |
 
@@ -47,7 +47,11 @@
 | P1 | 记忆系统深度集成 | 2026-05-17 | `memory/memory.py` |
 | P1 | 多轮对话上下文 | 2026-05-17 | `core/conversation_manager.py` + `core/context_augmenter.py` |
 | P1 | 工具执行并行化 | 2026-06-10 | `core/parallel_executor.py` + `core/parallel_execution_config.py` |
+| P1 | GSI 实时游戏状态监控 | 2026-06-22 | `gsi/` + `tools/gsi_tools.py` + `config/gsi_config.yaml` |
+| P1 | 游戏事件提醒系统 | 2026-06-22 | `gsi/event_handler.py` + `gsi/event_queue.py` |
+| P1 | GSI 数据与 Agent 结合 | 2026-06-22 | `tools/gsi_tools.py` |
 | P2 | 反思结果驱动策略调整 | 2026-05-17 | `core/agent_controller.py#_adjust_strategy` |
+| P2 | 前端样式优化 | 2026-06-14 | `frontend/src/components/` + `frontend/src/styles/dota-theme.css` |
 
 ---
 
@@ -55,7 +59,7 @@
 
 #### 1.3.1 合并关系说明
 
-**第二阶段：GSI 实时数据处理** 整合了以下待办项：
+**第二阶段：GSI 实时数据处理** 整合了以下待办项（✅ 已完成，2026-06-22）：
 - ✅ **GSI 实时游戏状态监控**（第八章）→ 第二阶段核心功能
 - ✅ **游戏事件提醒系统**（第九章）→ 第二阶段事件处理器
 - ✅ **GSI数据与Agent结合方案**（第十一章）→ 第二阶段工具层集成
@@ -96,21 +100,21 @@
 | P1 | Prompt 版本管理 | P1 | 保持不变，属于第三阶段 |
 | P2 | 用户反馈学习 | P2 | 保持不变，属于第四阶段 |
 | P2 | 语音提醒系统 | P2 | 保持不变，属于第五阶段 |
-| P2 | 前端样式优化 | P2 | 保持不变，属于第五阶段 |
+| P2 | 前端样式优化 | P2 | **已完成，2026-06-14** |
 | - | **知识管理能力升级** | **P0** | **已完成，2026-06-14** |
 
 #### 1.3.4 实施建议
 
 **推荐实施顺序**：
 1. ~~**第一阶段（P0）**：知识管理能力升级 - 建立知识库基础设施~~ ✅ 已完成
-2. **第二阶段（P1）**：GSI 实时数据处理 - 实现实时监控能力（当前优先）
-3. **第三阶段（P1）**：推理和决策能力增强 - 提升决策质量
+2. ~~**第二阶段（P1）**：GSI 实时数据处理 - 实现实时监控能力~~ ✅ 已完成（2026-06-22）
+3. **第三阶段（P1）**：推理和决策能力增强 - 提升决策质量（当前优先）
 4. **第四阶段（P2）**：个性化学习能力 - 实现个性化推荐
 5. **第五阶段（P2）**：多模态交互能力 - 提升用户体验
 
 **关键依赖关系**：
 - ~~第二阶段依赖第一阶段（知识库支持决策推荐）~~ ✅ 第一阶段已完成
-- 第三阶段依赖第二阶段（实时数据支持推理）
+- ~~第三阶段依赖第二阶段（实时数据支持推理）~~ ✅ 第二阶段已完成
 - 第四阶段依赖第三阶段（决策能力支持个性化）
 - 第五阶段可并行开发（相对独立）
 
@@ -380,163 +384,80 @@ class PromptManager:
 
 ---
 
-## 九、P1：GSI 实时游戏状态监控 ❌
+## 九、P1：GSI 实时游戏状态监控 ✅
+
+**实现状态**: ✅ 已完成（2026-06-22）
 
 **目标**: 集成 Dota 2 游戏状态集成（Game State Integration, GSI）功能，实时监控游戏状态
 
-**参考项目**:
-- `dota2gsipy` - GSI HTTP 服务器实现（轻量级、无外部依赖）
-- `dota2-game-helper` - 游戏状态处理器实现
-
 **实现位置**: 
-- `utils/gsi_client.py` - GSI 客户端（新建）
-- `core/gsi_handler.py` - 游戏状态处理器（新建）
-- `model/gsi/` - GSI 数据模型（新建）
+- `gsi/server.py` - GSI HTTP 服务器
+- `gsi/state_manager.py` - 游戏状态管理器
+- `gsi/event_handler.py` - 事件处理器
+- `gsi/event_queue.py` - 事件队列
+- `gsi/models.py` - GSI 数据模型
+- `tools/gsi_tools.py` - Agent 工具层集成
+- `config/gsi_config.yaml` - 配置文件
+- `frontend/src/components/GsiStatusPanel.vue` - 前端 UI 面板
 
-**核心功能**:
-- GSI HTTP 服务器实现（接收 Dota 2 客户端发送的实时游戏数据）
-- 游戏状态数据解析（地图、玩家、英雄、技能、物品）
-- Token 认证机制（确保数据来源安全）
-- 实时数据更新（每次收到请求时更新 game_state 对象）
-- Null 值处理（使用 `defaultdict(lambda: None)` 处理缺失数据）
+**已实现功能**:
+- ✅ GSI HTTP 服务器实现（接收 Dota 2 客户端发送的实时游戏数据）
+- ✅ 游戏状态数据解析（地图、玩家、英雄、技能、物品）
+- ✅ Token 认证机制（确保数据来源安全）
+- ✅ 实时数据更新（每次收到请求时更新 game_state 对象）
+- ✅ 状态管理器（缓存、变化检测）
+- ✅ 事件队列（SSE 推送 + Agent 查询）
+- ✅ Agent 工具层集成（GSIDataTool）
+- ✅ 前端 UI 面板（GsiStatusPanel）
+- ✅ 配置化管理
 
-**数据模型**:
-
-| 模块 | 数据字段 | 说明 |
-|------|---------|------|
-| **Map** | `name`, `match_id`, `game_time`, `clock_time`, `daytime`, `radiant_score`, `dire_score`, `game_state`, `paused`, `win_team`, `ward_purchase_cooldown` | 地图/比赛信息 |
-| **Player** | `steam_id`, `name`, `kills`, `deaths`, `assists`, `last_hits`, `denies`, `gold`, `gold_reliable`, `gold_unreliable`, `gold_from_*`, `gpm`, `xpm` | 玩家数据 |
-| **Hero** | `pos`, `id`, `name`, `level`, `alive`, `respawn_seconds`, `buyback_cost`, `health`, `mana`, `silenced`, `stunned`, `disarmed`, `aghanims_scepter`, `aghanims_shard`, `talents`, `abilities`, `inventory` | 英雄数据 |
-| **Ability** | `name`, `level`, `can_cast`, `passive`, `cooldown`, `ultimate`, `charges` | 技能数据 |
-| **Item** | `name`, `purchaser`, `can_cast`, `cooldown`, `passive`, `charges` | 物品数据 |
-
-**集成方案**:
-
-1. **Agent 工具层新增 GSI 数据访问工具**
-   ```python
-   # tools/gsi_tools.py
-   class GSIDataTool:
-       """GSI 数据访问工具"""
-       
-       def get_current_game_state(self) -> Dict[str, Any]:
-           """获取当前游戏状态"""
-           return self.gsi_client.game_state.to_dict()
-       
-       def get_hero_position(self) -> Tuple[int, int]:
-           """获取英雄当前位置"""
-           return self.gsi_client.game_state.hero.pos
-       
-       def get_hero_health(self) -> Dict[str, int]:
-           """获取英雄生命值"""
-           return {
-               "health": self.gsi_client.game_state.hero.health,
-               "max_health": self.gsi_client.game_state.hero.max_health,
-               "health_percent": self.gsi_client.game_state.hero.health_percent
-           }
-   ```
-
-2. **实时游戏状态监控**
-   ```python
-   # core/gsi_handler.py
-   class GSIHandler:
-       """游戏状态处理器"""
-       
-       def on_game_state_update(self, game_state: GameState):
-           """游戏状态更新回调"""
-           # 检查游戏状态变化
-           if game_state.map.game_state == GameStateEnum.DOTA_GAMERULES_STATE_GAME_IN_PROGRESS:
-               # 游戏进行中，触发事件提醒
-               self.check_game_events(game_state)
-   ```
+**核心特性**:
+- 延迟导入设计：Flask 未安装时静默降级
+- 状态变化检测：自动检测游戏状态变化并触发事件
+- SSE 实时推送：前端实时显示游戏状态
+- Agent 集成：Agent 可查询实时游戏数据
 
 **预期收益**:
-- 实时游戏状态监控（了解当前游戏情况）
-- 基于实时数据的智能推荐（根据当前英雄状态推荐出装、技能加点）
-- 游戏事件提醒（堆野、符文、中立物品等）
-- 增强用户体验（实时交互）
+- ✅ 实时游戏状态监控（了解当前游戏情况）
+- ✅ 基于实时数据的智能推荐（根据当前英雄状态推荐出装、技能加点）
+- ✅ 游戏事件提醒（堆野、符文、中立物品等）
+- ✅ 增强用户体验（实时交互）
 
 ---
 
-## 十、P1：游戏事件提醒系统 ❌
+## 十、P1：游戏事件提醒系统 ✅
+
+**实现状态**: ✅ 已完成（2026-06-22）
 
 **目标**: 基于游戏状态监控，提供游戏事件提醒功能
 
-**参考项目**: `dota2-game-helper` - 游戏事件处理器实现
+**实现位置**: 
+- `gsi/event_handler.py` - 事件处理器
+- `gsi/event_queue.py` - 事件队列
+- `config/gsi_config.yaml` - 配置文件
 
-**实现位置**: `core/gsi_handler.py` - 游戏状态处理器（扩展）
+**已实现功能**:
+- ✅ 堆野提醒（每分钟堆野时间点提醒）
+- ✅ 符文提醒（中符、赏金符、智慧符、莲花）
+- ✅ 中立物品提醒（中立物品刷新时间点提醒）
+- ✅ 白天/夜晚切换提醒（昼夜切换提醒）
+- ✅ 肉山复活提醒（肉山死亡后复活时间提醒）
+- ✅ Tormentor 提醒（第一波 Tormentor 时间点提醒）
+- ✅ Shard 提醒（Shard 可用时间点提醒）
+- ✅ Ward purchase 提醒（眼购买冷却结束提醒）
+- ✅ 事件队列管理（SSE 推送 + Agent 查询）
+- ✅ 配置化管理（支持动态启用/禁用各类事件）
 
-**核心功能**:
-- 堆野提醒（每分钟堆野时间点提醒）
-- 符文提醒（中符、赏金符、智慧符、莲花）
-- 中立物品提醒（中立物品刷新时间点提醒）
-- 白天/夜晚切换提醒（昼夜切换提醒）
-- 肉山复活提醒（肉山死亡后复活时间提醒）
-- Tormentor 提醒（第一波 Tormentor 时间点提醒）
-- Shard 提醒（Shard 可用时间点提醒）
-- Ward purchase 提醒（眼购买冷却结束提醒）
-
-**事件处理逻辑**:
-
-```python
-# core/gsi_handler.py
-class GameStateHandler:
-    """游戏状态处理器"""
-    
-    def __init__(self):
-        self.game_start_alarmed = False
-        self.daytime_alarmed = False
-        self.nighttime_alarmed = False
-        self.last_roshan_dead_time = None
-        self.past_event_keys = set()
-    
-    def handle_stack(self, game_time: int):
-        """堆野提醒"""
-        stack_time = 60  # 每分钟堆野
-        stack_alarm_time = stack_time - self.config.stack_delay
-        if (game_time - stack_alarm_time) % stack_time == 0:
-            self.trigger_event("stack")
-    
-    def handle_mid_runes(self, game_time: int):
-        """中符提醒"""
-        mid_runes_time = 120  # 每2分钟中符
-        mid_runes_alarm_time = mid_runes_time - self.config.mid_runes_delay
-        if (game_time - mid_runes_alarm_time) % mid_runes_time == 0:
-            self.trigger_event("mid_runes")
-    
-    def handle_roshan(self, game_time: int):
-        """肉山复活提醒"""
-        if self.last_roshan_dead_time is not None:
-            roshan_respawn_time = self.last_roshan_dead_time + random.randint(480, 720)  # 8-12分钟
-            if game_time >= roshan_respawn_time:
-                self.trigger_event("roshan_respawn")
-                self.last_roshan_dead_time = None
-```
-
-**配置化管理**:
-
-```python
-# config/gsi_config.yaml
-gsi:
-  enabled: true
-  events:
-    stack_active: true
-    stack_delay: 10  # 提前10秒提醒
-    mid_runes_active: true
-    mid_runes_delay: 15
-    bounty_runes_active: true
-    wisdom_runes_active: true
-    lotus_active: true
-    neutral_items_active: [true, true, true]  # 三波中立物品
-    daytime_active: true
-    roshan_active: true
-    first_tormentor_active: true
-    shard_active: true
-    ward_purchase_active: true
-```
+**核心特性**:
+- 事件检测：基于游戏时间自动检测各类事件触发点
+- 去重机制：避免重复提醒（past_event_keys）
+- 灵活配置：每个事件类型可独立配置启用状态和提醒延迟
+- 事件队列：支持 SSE 实时推送到前端
+- Agent 集成：Agent 可查询待处理事件
 
 **预期收益**:
-- 游戏节奏提醒（帮助玩家掌握游戏节奏）
-- 资源获取提醒（符文、中立物品、肉山等）
+- ✅ 游戏节奏提醒（帮助玩家掌握游戏节奏）
+- ✅ 资源获取提醒（符文、中立物品、肉山等）
 - 时间管理优化（堆野、昼夜切换等）
 
 ---
@@ -733,7 +654,9 @@ STACK_PROMPT = """你是一个Dota 2游戏教练，正在指导玩家堆野。
 
 ---
 
-## 十三、P2：前端样式优化 ❌
+## 十三、P2：前端样式优化 ✅
+
+**实现状态**: ✅ 已完成（2026-06-14）
 
 **目标**: 优化前端界面样式，提升用户体验
 
