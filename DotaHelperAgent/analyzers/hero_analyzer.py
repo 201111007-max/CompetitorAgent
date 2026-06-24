@@ -266,8 +266,9 @@ class HeroAnalyzer:
         matchup_details: List[Dict[str, Any]] = []
         
         # 1. 分析对敌方英雄的克制（加分）
+        # 优先使用本地数据，如果没有则尝试 API
         for enemy_id in enemy_hero_ids:
-            score, reasons = self._analyze_single_matchup(hero_id, enemy_id, allow_api=False)
+            score, reasons = self._analyze_single_matchup(hero_id, enemy_id, allow_api=True)
             if score > 0:
                 enemy_name = self._get_hero_name_cn(enemy_id)
                 total_score += score

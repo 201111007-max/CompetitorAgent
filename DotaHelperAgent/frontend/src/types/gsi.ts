@@ -66,3 +66,29 @@ export interface GSIStateResponse {
   state?: GSIGameState
   message?: string
 }
+
+export interface Recommendation {
+  event_type: string
+  event_message: string
+  recommendation: {
+    recommendation: string
+    confidence: number
+    sources: string[]
+    conflict_detected: boolean
+  }
+  timestamp: number
+}
+
+export interface RecommendationStatus {
+  available: boolean
+  status?: {
+    enabled: boolean
+    running: boolean
+    event_queue_set: boolean
+    decision_fusion_set: boolean
+    state_manager_set: boolean
+    push_callback_set: boolean
+    cooldowns: Record<string, number>
+  }
+  message?: string
+}

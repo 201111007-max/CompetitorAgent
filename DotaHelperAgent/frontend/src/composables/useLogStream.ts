@@ -2,7 +2,7 @@ import { ref, onUnmounted } from 'vue'
 import { useLogStore } from '@/stores/log'
 import type { LogEntry } from '@/types/log'
 
-const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
+const baseURL = import.meta.env.VITE_API_BASE_URL || ''
 
 export function useLogStream() {
   const logStore = useLogStore()

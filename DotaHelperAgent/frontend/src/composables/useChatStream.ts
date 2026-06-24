@@ -2,7 +2,7 @@ import { ref } from 'vue'
 import { useChatStore } from '@/stores/chat'
 import type { ChatRequest } from '@/types/chat'
 
-const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
+const baseURL = import.meta.env.VITE_API_BASE_URL || ''
 
 export function useChatStream() {
   const chatStore = useChatStore()

@@ -78,6 +78,26 @@
           </div>
         </div>
       </div>
+
+      <div class="gsi-section" v-if="recommendations.length > 0">
+        <h4>主动推荐</h4>
+        <div class="recommendations">
+          <div
+            v-for="(rec, idx) in recentRecommendations"
+            :key="idx"
+            class="recommendation"
+          >
+            <div class="rec-header">
+              <span class="rec-type">{{ rec.event_type }}</span>
+              <span class="rec-confidence">{{ (rec.confidence * 100).toFixed(0) }}%</span>
+            </div>
+            <div class="rec-content">{{ rec.recommendation }}</div>
+            <div class="rec-sources" v-if="rec.sources.length > 0">
+              来源: {{ rec.sources.join(', ') }}
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -85,8 +105,10 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted } from 'vue'
 import { useGsiStream } from '@/composables/useGsiStream'
+import { useRecommendationStream } from '@/composables/useRecommendationStream'
 
 const { connected, currentState, events, connect, disconnect, fetchState } = useGsiStream()
+const { recommendations, connect: connectRec, disconnect: disconnectRec } = useRecommendationStream()
 
 const heroName = computed(() => {
   if (!currentState.value) return ''
@@ -105,15 +127,21 @@ const mpPercent = computed(() => {
 
 const recentEvents = computed(() => events.value.slice(-10).reverse())
 
+const recentRecommendations = computed(() => 
+  recommendations.value.slice(-5).reverse()
+)
+
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
 onMounted(() => {
   connect()
+  connectRec()
   pollTimer = setInterval(fetchState, 5000)
 })
 
 onUnmounted(() => {
   disconnect()
+  disconnectRec()
   if (pollTimer) clearInterval(pollTimer)
 })
 </script>
@@ -252,5 +280,50 @@ onUnmounted(() => {
 
 .gsi-event .event-msg {
   color: var(--text-secondary);
+}
+
+.recommendations {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.recommendation {
+  padding: 8px;
+  border-radius: 4px;
+  background: rgba(59, 130, 246, 0.05);
+  border-left: 2px solid var(--dota-blue, #3b82f6);
+}
+
+.rec-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.rec-type {
+  font-size: 10px;
+  color: var(--dota-blue, #3b82f6);
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.rec-confidence {
+  font-size: 10px;
+  color: var(--text-disabled);
+}
+
+.rec-content {
+  font-size: 12px;
+  color: var(--text-primary);
+  line-height: 1.4;
+  margin-bottom: 4px;
+}
+
+.rec-sources {
+  font-size: 10px;
+  color: var(--text-disabled);
+  font-style: italic;
 }
 </style>

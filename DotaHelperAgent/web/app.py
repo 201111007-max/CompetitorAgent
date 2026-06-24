@@ -68,6 +68,18 @@ try:
 except ImportError:
     GSI_AVAILABLE = False
 
+# 主动推荐系统（可选）
+try:
+    from core.decision.rule_engine import RuleEngine
+    from core.decision.data_engine import DataEngine
+    from core.decision.llm_engine import LLMEngine
+    from core.decision.decision_fusion import DecisionFusion
+    from core.event_trigger import EventTrigger
+    from tools.recommendation_tools import create_recommendation_tools
+    RECOMMENDATION_AVAILABLE = True
+except ImportError:
+    RECOMMENDATION_AVAILABLE = False
+
 # 初始化日志系统
 logger, memory_handler = setup_logging_with_memory(
     log_level="DEBUG",
@@ -97,6 +109,11 @@ api_client = None  # 全局 API 客户端实例，用于缓存刷新
 gsi_state_manager = None
 gsi_event_queue = None
 gsi_server = None
+
+# 主动推荐系统全局变量
+decision_fusion = None
+event_trigger = None
+recommendation_subscribers = {}  # SSE subscribers for recommendations
 
 # 日志目录（可配置，便于测试）
 LOG_DIR = Path(__file__).parent.parent / "logs"
@@ -477,6 +494,48 @@ def initialize_gsi() -> None:
         gsi_event_queue = None
 
 
+def initialize_recommendation_system() -> None:
+    """初始化主动推荐系统"""
+    global decision_fusion, event_trigger
+    
+    if not RECOMMENDATION_AVAILABLE:
+        app_logger.info("主动推荐系统模块不可用，跳过初始化")
+        return
+    
+    if not GSI_AVAILABLE:
+        app_logger.info("GSI 模块不可用，主动推荐系统需要 GSI 支持，跳过初始化")
+        return
+    
+    try:
+        # 加载推荐系统配置
+        rec_config_path = project_root / "config" / "recommendation_config.yaml"
+        if rec_config_path.exists():
+            with open(rec_config_path, 'r', encoding='utf-8') as f:
+                rec_config = yaml.safe_load(f)
+        else:
+            app_logger.warning("推荐系统配置文件不存在，使用默认配置")
+            rec_config = {}
+        
+        # 初始化决策融合引擎
+        decision_fusion = DecisionFusion(rec_config)
+        app_logger.info("决策融合引擎初始化完成")
+        
+        # 初始化事件触发器
+        if gsi_event_queue:
+            event_trigger = EventTrigger(config=rec_config.get('event_trigger', {}))
+            event_trigger.set_event_queue(gsi_event_queue)
+            event_trigger.set_decision_fusion(decision_fusion)
+            event_trigger.start()
+            app_logger.info("事件触发器初始化并启动完成")
+        else:
+            app_logger.warning("GSI 事件队列不可用，事件触发器无法初始化")
+    
+    except Exception as e:
+        app_logger.warning(f"主动推荐系统初始化失败: {e}")
+        decision_fusion = None
+        event_trigger = None
+
+
 def initialize_agent_controller() -> None:
     """初始化 Agent 和 Agent Controller"""
     global agent, agent_controller, conversation_manager, matchup_manager
@@ -523,6 +582,9 @@ def initialize_agent_controller() -> None:
 
         # 初始化 GSI（可选）
         initialize_gsi()
+        
+        # 初始化主动推荐系统（可选，依赖 GSI）
+        initialize_recommendation_system()
 
         # 创建所有 Agent Tools
         tools = create_all_tools(
@@ -544,6 +606,20 @@ def initialize_agent_controller() -> None:
             app_logger.info(f"已注册 {len(search_tools)} 个搜索工具")
         except Exception as e:
             app_logger.warning(f"搜索工具注册失败: {e}")
+        
+        # 注册主动推荐工具
+        if RECOMMENDATION_AVAILABLE and decision_fusion:
+            try:
+                recommendation_tools = create_recommendation_tools(
+                    decision_fusion=decision_fusion,
+                    state_manager=gsi_state_manager,
+                    event_trigger=event_trigger,
+                    event_queue=gsi_event_queue
+                )
+                registry.register_batch(recommendation_tools)
+                app_logger.info(f"已注册 {len(recommendation_tools)} 个主动推荐工具")
+            except Exception as e:
+                app_logger.warning(f"主动推荐工具注册失败: {e}")
         
         app_logger.info(f"已注册 {len(registry)} 个 Agent Tools")
         
@@ -723,6 +799,123 @@ def gsi_state():
     if not state:
         return jsonify({"available": False, "connected": gsi_state_manager.connected})
     return jsonify({"available": True, "connected": gsi_state_manager.connected, "state": state.to_dict()})
+
+
+@app.route('/api/gsi/recommendations')
+def gsi_recommendation_stream():
+    """SSE 推送主动推荐到前端"""
+    if event_trigger is None or decision_fusion is None:
+        return jsonify({"error": "Recommendation system not available"}), 503
+
+    def generate():
+        # 创建推荐订阅队列
+        rec_queue = queue.Queue(maxsize=100)
+        
+        # 注册订阅回调
+        def push_callback(recommendation_data):
+            try:
+                rec_queue.put_nowait(recommendation_data)
+            except queue.Full:
+                app_logger.warning("Recommendation queue full, dropping recommendation")
+        
+        # 设置推送回调
+        event_trigger.set_push_callback(push_callback)
+        
+        try:
+            while True:
+                try:
+                    rec_data = rec_queue.get(timeout=30)
+                    yield f"event: recommendation\ndata: {json.dumps(rec_data)}\n\n"
+                except queue.Empty:
+                    yield "event: heartbeat\ndata: {}\n\n"
+        finally:
+            # 清理回调
+            event_trigger.set_push_callback(None)
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype='text/event-stream',
+        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'}
+    )
+
+
+@app.route('/api/gsi/recommendation/status')
+def gsi_recommendation_status():
+    """获取主动推荐系统状态"""
+    if event_trigger is None:
+        return jsonify({"available": False, "message": "Recommendation system not available"})
+    
+    status = event_trigger.get_status()
+    return jsonify({"available": True, "status": status})
+
+
+@app.route('/api/gsi/recommendation/query')
+def gsi_recommendation_query():
+    """主动查询推荐（基于最近事件）"""
+    if decision_fusion is None or gsi_state_manager is None:
+        return jsonify({"available": False, "message": "Recommendation system not available"})
+    
+    try:
+        # 获取当前游戏状态
+        game_state = gsi_state_manager.get_state()
+        if not game_state:
+            return jsonify({"available": False, "message": "当前不在游戏中"})
+        
+        # 获取最近事件
+        recent_events = []
+        if gsi_event_queue:
+            recent_events = gsi_event_queue.get_recent(5)
+        
+        if not recent_events:
+            return jsonify({"available": False, "message": "暂无游戏事件"})
+        
+        # 使用最近一个事件生成推荐
+        event = recent_events[-1]
+        
+        # 调用决策融合器生成推荐
+        recommendation = decision_fusion.generate_recommendation(
+            event=event,
+            game_state=game_state
+        )
+        
+        if not recommendation:
+            return jsonify({"available": False, "message": "暂无推荐建议"})
+        
+        return jsonify({
+            "available": True,
+            "recommendation": recommendation.recommendation,
+            "confidence": recommendation.confidence,
+            "sources": recommendation.sources
+        })
+    
+    except Exception as e:
+        app_logger.error(f"推荐查询失败: {e}", exc_info=True)
+        return jsonify({"available": False, "message": f"推荐查询时发生错误: {str(e)}"})
+
+
+@app.route('/api/gsi/data', methods=['POST'])
+def gsi_receive_data():
+    """接收 GSI 数据推送（用于测试和模拟）"""
+    if gsi_state_manager is None:
+        return jsonify({"available": False, "message": "GSI not available"})
+    
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+        
+        # 更新游戏状态（这会触发事件检测）
+        state = gsi_state_manager.update_state(data)
+        
+        return jsonify({
+            "available": True,
+            "message": "GSI data received and processed",
+            "state": state.to_dict()
+        })
+    
+    except Exception as e:
+        app_logger.error(f"接收 GSI 数据失败: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
 
 
 def get_agent() -> AgentController:
@@ -1719,6 +1912,7 @@ def parse_preview() -> Response:
 @app.route('/api/chat/stream', methods=['POST'])
 def chat_stream() -> Response:
     """流式输出接口（使用 Agent Controller，带 Trace 支持）"""
+    app_logger.info(f"[DEBUG] /api/chat/stream 路由被调用，agent_controller={agent_controller is not None}")
     data = request.get_json()
     query = data.get('query', '')
     session_id = data.get('session_id', str(uuid.uuid4()))
@@ -1748,6 +1942,7 @@ def chat_stream() -> Response:
             app_logger.warning(f"更新 Langfuse input 失败: {e}")
 
     def generate():
+        app_logger.info(f"[DEBUG] 生成器启动: query={query[:30]}")
         trace_dict = trace_ctx.to_dict() if trace_ctx else None
         
         if trace_ctx:
@@ -3365,4 +3560,4 @@ if __name__ == '__main__':
     # 启动每日缓存刷新任务
     start_cache_scheduler()
     
-    app.run(host='0.0.0.0', port=5000, debug=True, threaded=True)
+    app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)

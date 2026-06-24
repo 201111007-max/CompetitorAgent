@@ -1,7 +1,7 @@
 import { ref, onUnmounted } from 'vue'
 import type { GSIEvent, GSIGameState, GSIStateResponse } from '@/types/gsi'
 
-const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
+const baseURL = import.meta.env.VITE_API_BASE_URL || ''
 
 export function useGsiStream() {
   const connected = ref(false)

@@ -255,38 +255,91 @@ class CacheManager:
             self._stats["misses"] += 1
             return None
     
+    def set_batch(self, items: List[tuple]) -> None:
+        """批量设置缓存（单事务，高性能）
+
+        Args:
+            items: [(cache_key, data), ...] 列表
+
+        性能优化：
+        - 单个 SQLite 事务完成所有写入
+        - 仅在所有数据写入后执行一次淘汰检查
+        - 内存缓存逐条写入（无额外开销）
+        """
+        if not items:
+            return
+
+        timestamp = time.time()
+        now_iso = datetime.now().isoformat()
+
+        with self._lock:
+            # 1. 批量写入内存缓存
+            if self.enable_memory_cache:
+                for cache_key, data in items:
+                    self._memory_cache[cache_key] = data
+                    self._memory_timestamp[cache_key] = timestamp
+                    self._update_access_time(cache_key)
+
+            # 2. 批量写入 SQLite（单事务）
+            conn = self._get_connection()
+            try:
+                cursor = conn.cursor()
+                cursor.execute("BEGIN TRANSACTION")
+
+                for cache_key, data in items:
+                    # 序列化数据
+                    try:
+                        value_str = json.dumps(data, ensure_ascii=False)
+                    except (TypeError, ValueError):
+                        value_str = repr(pickle.dumps(data, protocol=pickle.HIGHEST_PROTOCOL))
+
+                    size_bytes = len(value_str.encode('utf-8'))
+
+                    cursor.execute('''
+                        INSERT OR REPLACE INTO cache_items
+                        (key, value, timestamp, created_at, access_count, last_access, size_bytes)
+                        VALUES (?, ?, ?, ?, 0, ?, ?)
+                    ''', (cache_key, value_str, timestamp, now_iso, time.time(), size_bytes))
+
+                conn.commit()
+            finally:
+                conn.close()
+
+            # 3. 仅执行一次淘汰检查
+            self._evict_if_needed()
+
     def set(self, cache_key: str, data: Any) -> None:
         """设置缓存
-        
+
         线程安全，自动淘汰
         """
         with self._lock:
             timestamp = time.time()
-            
+
             # 1. 保存到内存缓存
             if self.enable_memory_cache:
                 self._memory_cache[cache_key] = data
                 self._memory_timestamp[cache_key] = timestamp
                 self._update_access_time(cache_key)
-            
+
             # 2. 保存到 SQLite 缓存
             conn = self._get_connection()
             try:
                 cursor = conn.cursor()
-                
+
                 # 序列化数据
                 try:
                     value_str = json.dumps(data, ensure_ascii=False)
                 except (TypeError, ValueError):
                     # 如果不能 JSON 序列化，使用 pickle
                     value_str = repr(pickle.dumps(data, protocol=pickle.HIGHEST_PROTOCOL))
-                
+
                 # 计算大小
                 size_bytes = len(value_str.encode('utf-8'))
-                
+
                 # 使用 INSERT OR REPLACE
                 cursor.execute('''
-                    INSERT OR REPLACE INTO cache_items 
+                    INSERT OR REPLACE INTO cache_items
                     (key, value, timestamp, created_at, access_count, last_access, size_bytes)
                     VALUES (?, ?, ?, ?, 0, ?, ?)
                 ''', (
@@ -297,11 +350,11 @@ class CacheManager:
                     time.time(),
                     size_bytes
                 ))
-                
+
                 conn.commit()
             finally:
                 conn.close()
-            
+
             # 3. 检查是否需要淘汰
             self._evict_if_needed()
     

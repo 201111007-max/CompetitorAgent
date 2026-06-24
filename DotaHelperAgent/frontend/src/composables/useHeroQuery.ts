@@ -1,12 +1,14 @@
 import { useHeroStore } from '@/stores/hero'
 import type { HeroInfo, HeroQuery } from '@/types/hero'
 
-const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
+// 使用相对路径，通过 Vite 代理转发到后端
+const baseURL = import.meta.env.VITE_API_BASE_URL || ''
 
 export function useHeroQuery() {
   const heroStore = useHeroStore()
 
-  const generateQuery = async (): Promise<HeroQuery | null> => {
+  const generateQuery = async (retryCount = 0): Promise<HeroQuery | null> => {
+    const maxRetries = 2
     heroStore.setLoading(true)
     heroStore.setError(null)
 
@@ -15,6 +17,29 @@ export function useHeroQuery() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
       })
+
+      // 检查 HTTP 状态码
+      if (!response.ok) {
+        const contentType = response.headers.get('content-type') || ''
+        // 如果返回的是 HTML（proxy 错误页面），尝试重试
+        if (contentType.includes('text/html') && retryCount < maxRetries) {
+          console.warn(`请求失败 (HTTP ${response.status})，重试中... (${retryCount + 1}/${maxRetries})`)
+          await new Promise(resolve => setTimeout(resolve, 500 * (retryCount + 1)))
+          return generateQuery(retryCount + 1)
+        }
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+      }
+
+      // 检查响应类型
+      const contentType = response.headers.get('content-type') || ''
+      if (!contentType.includes('application/json')) {
+        if (retryCount < maxRetries) {
+          console.warn(`响应类型错误 (${contentType})，重试中... (${retryCount + 1}/${maxRetries})`)
+          await new Promise(resolve => setTimeout(resolve, 500 * (retryCount + 1)))
+          return generateQuery(retryCount + 1)
+        }
+        throw new Error('服务器返回了非 JSON 响应')
+      }
 
       const data = await response.json()
 
@@ -31,6 +56,12 @@ export function useHeroQuery() {
         return null
       }
     } catch (e) {
+      // 网络错误，尝试重试
+      if (retryCount < maxRetries) {
+        console.warn(`网络错误，重试中... (${retryCount + 1}/${maxRetries})`, e)
+        await new Promise(resolve => setTimeout(resolve, 500 * (retryCount + 1)))
+        return generateQuery(retryCount + 1)
+      }
       const error = e instanceof Error ? e.message : '网络错误'
       heroStore.setError(error)
       return null
