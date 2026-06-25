@@ -19,16 +19,18 @@ class HybridSkillBuilder(HybridAnalyzer):
     2. LLM 失败时回退到基于规则的加点建议
     """
     
-    def __init__(self, client: OpenDotaClient, llm_enabled: bool = False):
+    def __init__(self, client: OpenDotaClient, llm_enabled: bool = False, prompt_manager=None):
         """初始化混合建议器
         
         Args:
             client: OpenDota API 客户端
             llm_enabled: 是否启用 LLM
+            prompt_manager: Prompt 管理器（可选）
         """
         super().__init__(llm_enabled)
         self.set_data_client(client)
         self.client = client
+        self.prompt_manager = prompt_manager
     
     def recommend_skill_build(
         self,
@@ -72,7 +74,19 @@ class HybridSkillBuilder(HybridAnalyzer):
         role = input_data["role"]
         enemy_heroes = input_data.get("enemy_heroes", [])
         
-        prompt = f"""作为 Dota 2 技能加点专家，为 {hero_name}（定位：{role}）推荐技能加点顺序。
+        # 使用 PromptManager 获取 Prompt
+        if self.prompt_manager:
+            prompt = self.prompt_manager.get_prompt(
+                "skill_build",
+                variables={
+                    "hero_name": hero_name,
+                    "role": role,
+                    "enemy_heroes": ', '.join(enemy_heroes) if enemy_heroes else '未知'
+                }
+            )
+        else:
+            # 降级方案：使用硬编码 Prompt
+            prompt = f"""作为 Dota 2 技能加点专家，为 {hero_name}（定位：{role}）推荐技能加点顺序。
 
 敌方阵容：{', '.join(enemy_heroes) if enemy_heroes else '未知'}
 

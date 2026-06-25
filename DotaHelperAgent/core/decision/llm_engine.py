@@ -45,16 +45,18 @@ class LLMRecommendation:
 class LLMEngine:
     """LLM 增强引擎"""
     
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: Optional[Dict[str, Any]] = None, prompt_manager=None):
         """
         初始化 LLM 引擎
         
         Args:
             config: 配置字典
+            prompt_manager: Prompt 管理器（可选）
         """
         self.config = config or {}
         self.llm_client = None
         self.knowledge_system = None
+        self.prompt_manager = prompt_manager
         logger.info("LLM 增强引擎初始化完成")
     
     def set_llm_client(self, llm_client):
@@ -209,8 +211,30 @@ class LLMEngine:
         # 格式化知识内容
         knowledge_text = self._format_knowledge(knowledge)
         
-        # 构建 Prompt
-        prompt = f"""你是一位专业的 Dota 2 游戏助手。请根据当前游戏状态和触发事件，给出专业的游戏建议。
+        # 使用 PromptManager 获取 Prompt
+        if self.prompt_manager:
+            prompt = self.prompt_manager.get_prompt(
+                "game_advice",
+                variables={
+                    "hero_name": hero_name,
+                    "health": str(health),
+                    "max_health": str(max_health),
+                    "health_percent": f"{health/max_health*100:.1f}" if max_health > 0 else "0",
+                    "mana": str(mana),
+                    "max_mana": str(max_mana),
+                    "mana_percent": f"{mana/max_mana*100:.1f}" if max_mana > 0 else "0",
+                    "gold": str(gold),
+                    "game_time_formatted": f"{game_time // 60}分{game_time % 60}秒",
+                    "kills": str(kills),
+                    "deaths": str(deaths),
+                    "assists": str(assists),
+                    "event_type": event_type,
+                    "knowledge_text": knowledge_text
+                }
+            )
+        else:
+            # 降级方案：使用硬编码 Prompt
+            prompt = f"""你是一位专业的 Dota 2 游戏助手。请根据当前游戏状态和触发事件，给出专业的游戏建议。
 
 ## 当前游戏状态
 

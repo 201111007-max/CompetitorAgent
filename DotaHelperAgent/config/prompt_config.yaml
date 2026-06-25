@@ -1,0 +1,32 @@
+# Prompt 管理配置
+
+prompt_manager:
+  # 默认策略：langfuse | local
+  default_strategy: "langfuse"
+
+  # Langfuse 配置（复用 langfuse_config.yaml 中的连接信息）
+  langfuse:
+    enabled: true
+
+  # 本地配置
+  local:
+    prompts_dir: "config/prompts"
+
+  # 缓存配置
+  cache:
+    enabled: true
+    ttl: 300  # 秒
+
+  # Prompt 注册表（名称 → 文件映射）
+  registry:
+    assistant_system: "system_prompts.yaml"
+    assistant_general_chat: "system_prompts.yaml"
+    assistant_fallback: "system_prompts.yaml"
+    assistant_fallback_with_search: "system_prompts.yaml"
+    hero_recommendation: "recommendation.yaml"
+    hero_recommendation_json: "recommendation.yaml"
+    item_recommendation: "recommendation.yaml"
+    hero_explanation: "hero_analysis.yaml"
+    team_analysis: "hero_analysis.yaml"
+    game_advice: "decision.yaml"
+    skill_build: "skill_build.yaml"

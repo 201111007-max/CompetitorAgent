@@ -1,0 +1,43 @@
+# 技能加点 Prompt 配置
+
+prompts:
+  skill_build:
+    description: "技能加点推荐 Prompt"
+    version: 1
+    content: |
+      作为 Dota 2 技能加点专家，为 {{hero_name}}（定位：{{role}}）推荐技能加点顺序。
+
+      敌方阵容：{{enemy_heroes}}
+
+      请分析：
+      1. 对线期应该优先加什么技能来压制/发育
+      2. 中期团战应该主升什么技能
+      3. 后期技能加点优先级
+      4. 天赋选择建议
+
+      请严格按照以下 JSON 格式返回：
+      {
+          "early_game": {
+              "priority": ["技能 1", "技能 2"],
+              "notes": "前期加点理由"
+          },
+          "mid_game": {
+              "priority": ["主升技能"],
+              "notes": "中期加点理由"
+          },
+          "late_game": {
+              "priority": ["后期技能"],
+              "notes": "后期加点理由"
+          },
+          "talents": {
+              "level_10": "10 级天赋选择",
+              "level_15": "15 级天赋选择",
+              "level_20": "20 级天赋选择",
+              "level_25": "25 级天赋选择"
+          },
+          "strategy_notes": "整体加点策略说明"
+      }
+    variables: ["hero_name", "role", "enemy_heroes"]
+    metadata:
+      author: "system"
+      tags: ["skill", "build", "recommendation"]

@@ -246,13 +246,15 @@ class DotaLLMAnalyzer:
     使用大模型增强分析能力，提供自然语言解释和策略建议
     """
     
-    def __init__(self, llm_client: LLMClient):
+    def __init__(self, llm_client: LLMClient, prompt_manager=None):
         """初始化
         
         Args:
             llm_client: LLM 客户端实例
+            prompt_manager: Prompt 管理器（可选）
         """
         self.llm = llm_client
+        self.prompt_manager = prompt_manager
     
     def explain_recommendation(
         self,
@@ -272,7 +274,20 @@ class DotaLLMAnalyzer:
         Returns:
             自然语言解释
         """
-        prompt = f"""作为 Dota 2 专家，请解释为什么 {hero_name} 是应对敌方阵容的好选择。
+        # 使用 PromptManager 获取 Prompt
+        if self.prompt_manager:
+            prompt = self.prompt_manager.get_prompt(
+                "hero_explanation",
+                variables={
+                    "hero_name": hero_name,
+                    "enemy_heroes": ', '.join(enemy_heroes),
+                    "win_rate": f"{win_rate:.1%}",
+                    "reasons": ', '.join(reasons)
+                }
+            )
+        else:
+            # 降级方案：使用硬编码 Prompt
+            prompt = f"""作为 Dota 2 专家，请解释为什么 {hero_name} 是应对敌方阵容的好选择。
 
 敌方阵容: {', '.join(enemy_heroes)}
 统计数据: 胜率 {win_rate:.1%}
@@ -299,7 +314,18 @@ class DotaLLMAnalyzer:
         Returns:
             阵容分析
         """
-        prompt = f"""分析以下 Dota 2 阵容的优劣势：
+        # 使用 PromptManager 获取 Prompt
+        if self.prompt_manager:
+            prompt = self.prompt_manager.get_prompt(
+                "team_analysis",
+                variables={
+                    "our_heroes": ', '.join(our_heroes) if our_heroes else '暂无',
+                    "enemy_heroes": ', '.join(enemy_heroes)
+                }
+            )
+        else:
+            # 降级方案：使用硬编码 Prompt
+            prompt = f"""分析以下 Dota 2 阵容的优劣势：
 
 己方阵容: {', '.join(our_heroes) if our_heroes else '暂无'}
 敌方阵容: {', '.join(enemy_heroes)}
@@ -328,7 +354,19 @@ class DotaLLMAnalyzer:
         Returns:
             出装建议
         """
-        prompt = f"""作为 Dota 2 装备专家，为 {hero_name} 在 {game_stage} 阶段提供出装建议。
+        # 使用 PromptManager 获取 Prompt
+        if self.prompt_manager:
+            prompt = self.prompt_manager.get_prompt(
+                "item_recommendation",
+                variables={
+                    "hero_name": hero_name,
+                    "enemy_heroes": ', '.join(enemy_heroes),
+                    "game_stage": game_stage
+                }
+            )
+        else:
+            # 降级方案：使用硬编码 Prompt
+            prompt = f"""作为 Dota 2 装备专家，为 {hero_name} 在 {game_stage} 阶段提供出装建议。
 
 敌方阵容：{', '.join(enemy_heroes)}
 
@@ -358,7 +396,19 @@ class DotaLLMAnalyzer:
         our_team_str = ', '.join(our_heroes) if our_heroes else '暂无'
         enemy_team_str = ', '.join(enemy_heroes)
         
-        prompt = f"""作为 Dota 2 专家，请根据以下阵容推荐 {top_n} 个最佳英雄选择。
+        # 使用 PromptManager 获取 Prompt
+        if self.prompt_manager:
+            prompt = self.prompt_manager.get_prompt(
+                "hero_recommendation_json",
+                variables={
+                    "top_n": str(top_n),
+                    "our_team": our_team_str,
+                    "enemy_team": enemy_team_str
+                }
+            )
+        else:
+            # 降级方案：使用硬编码 Prompt
+            prompt = f"""作为 Dota 2 专家，请根据以下阵容推荐 {top_n} 个最佳英雄选择。
 
 己方阵容：{our_team_str}
 敌方阵容：{enemy_team_str}

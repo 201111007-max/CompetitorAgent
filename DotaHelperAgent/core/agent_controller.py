@@ -165,7 +165,8 @@ class AgentController:
         max_turns: int = 5,
         enable_reflection: bool = True,
         enable_memory: bool = True,
-        metacognition_config: Optional[Dict[str, Any]] = None
+        metacognition_config: Optional[Dict[str, Any]] = None,
+        prompt_manager=None
     ):
         """初始化 Agent Controller
 
@@ -179,6 +180,7 @@ class AgentController:
             enable_memory: 是否启用记忆系统
             metacognition_config: 元认知配置（可选）
                                 示例：{"type": "rule_based", "clarification_threshold": "low"}
+            prompt_manager: Prompt 管理器（可选）
         """
         self.tool_registry = tool_registry
         self.llm_client = llm_client
@@ -188,6 +190,7 @@ class AgentController:
         self.enable_reflection = enable_reflection
         self.enable_memory = enable_memory and memory is not None
         self.current_thought: Optional[AgentThought] = None
+        self.prompt_manager = prompt_manager
         
         # 初始化 LLM 工具选择器
         self.tool_selector = LLMToolSelector(llm_client, tool_registry)
@@ -1051,15 +1054,28 @@ class AgentController:
         query = thought.query or thought.context.get('query', '')
         session_id = thought.context.get('session_id')
         
-        # 根据查询类型使用不同的 prompt
-        if query_type == "general_chat":
-            fallback_prompt = f"""你是一个 Dota 2 游戏助手，同时也是一个通用的 AI 助手。请直接回答用户的问题。
+        # 使用 PromptManager 获取降级 Prompt
+        if self.prompt_manager:
+            if query_type == "general_chat":
+                fallback_prompt = self.prompt_manager.get_prompt(
+                    "assistant_general_chat",
+                    variables={"query": query}
+                )
+            else:
+                fallback_prompt = self.prompt_manager.get_prompt(
+                    "assistant_fallback",
+                    variables={"query": query}
+                )
+        else:
+            # 降级方案：使用硬编码 Prompt
+            if query_type == "general_chat":
+                fallback_prompt = f"""你是一个 Dota 2 游戏助手，同时也是一个通用的 AI 助手。请直接回答用户的问题。
 
 用户问题：{query}
 
 请提供友好、专业、详细的回答。如果问题涉及 Dota 2，请结合你的游戏知识给出建议；如果是通用问题，请给出通用的回答。"""
-        else:
-            fallback_prompt = f"""你是一个 Dota 2 游戏专家助手。由于数据 API 暂时不可用，请直接根据你的游戏知识回答用户问题。
+            else:
+                fallback_prompt = f"""你是一个 Dota 2 游戏专家助手。由于数据 API 暂时不可用，请直接根据你的游戏知识回答用户问题。
 
 用户问题：{query}
 
@@ -1124,7 +1140,18 @@ class AgentController:
         except Exception as e:
             logger.warning_ctx(f"搜索失败: {e}, 使用纯 LLM 知识回答", session_id=session_id)
         
-        fallback_prompt = f"""你是一个 Dota 2 游戏专家助手。由于数据 API 暂时不可用，请根据你的游戏知识回答用户问题。
+        # 使用 PromptManager 获取带搜索上下文的降级 Prompt
+        if self.prompt_manager:
+            fallback_prompt = self.prompt_manager.get_prompt(
+                "assistant_fallback_with_search",
+                variables={
+                    "search_context": search_context,
+                    "query": query
+                }
+            )
+        else:
+            # 降级方案：使用硬编码 Prompt
+            fallback_prompt = f"""你是一个 Dota 2 游戏专家助手。由于数据 API 暂时不可用，请根据你的游戏知识回答用户问题。
 {search_context}
 用户问题：{query}
 
@@ -1342,7 +1369,12 @@ class AgentController:
         Returns:
             str: LLM 生成的答案
         """
-        system_prompt = """你是一个 Dota 2 游戏助手。请根据用户的问题直接回答，不需要调用工具。
+        # 使用 PromptManager 获取系统 Prompt
+        if self.prompt_manager:
+            system_prompt = self.prompt_manager.get_prompt("assistant_system")
+        else:
+            # 降级方案：使用硬编码 Prompt
+            system_prompt = """你是一个 Dota 2 游戏助手。请根据用户的问题直接回答，不需要调用工具。
 回答要求：
 1. 简洁明了，直接回答问题
 2. 如果涉及游戏知识，给出合理的解释
@@ -1410,8 +1442,20 @@ class AgentController:
         our_heroes = context.get('our_heroes', [])
         enemy_heroes = context.get('enemy_heroes', [])
         
-        # 构造推荐提示
-        system_prompt = """你是一个 Dota 2 游戏专家助手。根据阵容分析结果，为用户推荐合适的英雄。
+        # 构造推荐提示 - 使用 PromptManager
+        if self.prompt_manager:
+            system_prompt = self.prompt_manager.get_prompt(
+                "hero_recommendation",
+                variables={
+                    "query": query,
+                    "our_heroes": ', '.join(our_heroes) if our_heroes else '未提供',
+                    "enemy_heroes": ', '.join(enemy_heroes) if enemy_heroes else '未提供',
+                    "composition_analysis": str(composition_analysis)
+                }
+            )
+        else:
+            # 降级方案：使用硬编码 Prompt
+            system_prompt = """你是一个 Dota 2 游戏专家助手。根据阵容分析结果，为用户推荐合适的英雄。
 
 推荐要求：
 1. 基于阵容分析结果（优势、劣势、整体评估）

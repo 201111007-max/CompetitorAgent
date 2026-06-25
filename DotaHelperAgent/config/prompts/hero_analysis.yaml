@@ -1,0 +1,40 @@
+# 英雄分析相关 Prompt 配置
+
+prompts:
+  hero_explanation:
+    description: "英雄推荐理由解释"
+    version: 1
+    content: |
+      作为 Dota 2 专家，请解释为什么 {{hero_name}} 是应对敌方阵容的好选择。
+
+      敌方阵容: {{enemy_heroes}}
+      统计数据: 胜率 {{win_rate}}
+      数据支撑: {{reasons}}
+
+      请用中文简要解释（100字以内）：
+      1. 这个英雄的核心优势
+      2. 针对敌方哪个英雄最有效
+      3. 使用时的关键技巧
+    variables: ["hero_name", "enemy_heroes", "win_rate", "reasons"]
+    metadata:
+      author: "system"
+      tags: ["analysis", "hero", "explanation"]
+
+  team_analysis:
+    description: "阵容分析 Prompt"
+    version: 1
+    content: |
+      分析以下 Dota 2 阵容的优劣势：
+
+      己方阵容: {{our_heroes}}
+      敌方阵容: {{enemy_heroes}}
+
+      请用中文分析：
+      1. 己方阵容的优势和劣势
+      2. 敌方阵容的威胁点
+      3. 游戏各阶段的策略建议（前期/中期/后期）
+      4. 团战关键要点
+    variables: ["our_heroes", "enemy_heroes"]
+    metadata:
+      author: "system"
+      tags: ["analysis", "team", "composition"]
