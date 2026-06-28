@@ -72,27 +72,36 @@ class RuleResult:
 class RuleEngine:
     """规则推理引擎"""
     
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: Optional[Dict[str, Any]] = None, strategy_params=None):
         """
         初始化规则引擎
         
         Args:
             config: 配置字典
+            strategy_params: 策略参数管理实例（可选，用于动态规则参数）
         """
         self.config = config or {}
+        self.strategy_params = strategy_params
         self.rules: List[Rule] = []
         self._load_default_rules()
         logger.info(f"规则引擎初始化完成，加载 {len(self.rules)} 条规则")
     
     def _load_default_rules(self):
         """加载默认规则"""
+        # 从策略参数读取动态阈值（如有）
+        low_health_threshold = 0.3
+        if self.strategy_params:
+            low_health_threshold = self.strategy_params.get_rule_param(
+                "low_health_threshold", default=0.3
+            )
+
         # 血量预警规则
         self.rules.append(Rule(
             id="health_warning",
             name="血量预警",
             description="当英雄血量低于阈值时发出预警",
             priority=RulePriority.HIGH,
-            condition="health_percent < 0.3",
+            condition=f"health_percent < {low_health_threshold}",
             recommendation="血量较低，建议回城补给或购买治疗道具",
             confidence=0.9
         ))

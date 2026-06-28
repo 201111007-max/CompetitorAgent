@@ -48,6 +48,11 @@ from utils.trace_context import (
 )
 from managers.matchup_data_manager import MatchupDataManager
 from cache.cache_manager import get_cache
+from feedback.store import FeedbackStore, FeedbackRecord
+from feedback.collector import FeedbackCollector
+from feedback.evaluator import EffectEvaluator
+from feedback.strategy_params import StrategyParams
+from feedback.learning_engine import LearningEngine
 
 # Langfuse 监控（可选）
 try:
@@ -117,6 +122,13 @@ gsi_server = None
 decision_fusion = None
 event_trigger = None
 recommendation_subscribers = {}  # SSE subscribers for recommendations
+
+# 反馈学习系统全局变量
+feedback_store = None
+feedback_collector = None
+feedback_evaluator = None
+strategy_params = None
+learning_engine = None
 
 # 日志目录（可配置，便于测试）
 LOG_DIR = Path(__file__).parent.parent / "logs"
@@ -572,8 +584,11 @@ def initialize_recommendation_system() -> None:
             app_logger.warning("推荐系统配置文件不存在，使用默认配置")
             rec_config = {}
         
-        # 初始化决策融合引擎
-        decision_fusion = DecisionFusion(rec_config)
+        # 初始化反馈学习系统（可选）
+        initialize_feedback_system()
+        
+        # 初始化决策融合引擎（传入策略参数）
+        decision_fusion = DecisionFusion(rec_config, strategy_params=strategy_params)
         app_logger.info("决策融合引擎初始化完成")
         
         # 初始化事件触发器
@@ -581,6 +596,9 @@ def initialize_recommendation_system() -> None:
             event_trigger = EventTrigger(config=rec_config.get('event_trigger', {}))
             event_trigger.set_event_queue(gsi_event_queue)
             event_trigger.set_decision_fusion(decision_fusion)
+            # 注入反馈采集器（供推荐上下文注册）
+            if feedback_collector:
+                event_trigger.set_feedback_collector(feedback_collector)
             event_trigger.start()
             app_logger.info("事件触发器初始化并启动完成")
         else:
@@ -590,6 +608,62 @@ def initialize_recommendation_system() -> None:
         app_logger.warning(f"主动推荐系统初始化失败: {e}")
         decision_fusion = None
         event_trigger = None
+
+
+def initialize_feedback_system() -> None:
+    """初始化反馈学习系统"""
+    global feedback_store, feedback_collector, feedback_evaluator, strategy_params, learning_engine
+    
+    try:
+        # 加载反馈系统配置
+        feedback_config_path = project_root / "config" / "feedback_config.yaml"
+        if feedback_config_path.exists():
+            with open(feedback_config_path, 'r', encoding='utf-8') as f:
+                feedback_config = yaml.safe_load(f)
+        else:
+            app_logger.warning("反馈系统配置文件不存在，使用默认配置")
+            feedback_config = {}
+        
+        # 初始化策略参数管理
+        strategy_config = feedback_config.get("learning", {}).get("strategy", {})
+        strategy_params = StrategyParams(
+            config_path=strategy_config.get("config_path", "config/learned_strategy.yaml")
+        )
+        app_logger.info("策略参数管理初始化完成")
+        
+        # 初始化反馈存储
+        store_config = feedback_config.get("feedback", {}).get("store", {})
+        feedback_store = FeedbackStore(
+            db_path=store_config.get("db_path", "feedback/feedback.db")
+        )
+        app_logger.info("反馈存储初始化完成")
+        
+        # 初始化反馈采集器
+        feedback_collector = FeedbackCollector(
+            store=feedback_store,
+            config=feedback_config.get("feedback", {})
+        )
+        app_logger.info("反馈采集器初始化完成")
+        
+        # 初始化效果评估器
+        feedback_evaluator = EffectEvaluator(store=feedback_store)
+        app_logger.info("效果评估器初始化完成")
+        
+        # 初始化学习引擎
+        learning_engine = LearningEngine(
+            evaluator=feedback_evaluator,
+            strategy_params=strategy_params,
+            config=feedback_config.get("learning", {})
+        )
+        app_logger.info("学习引擎初始化完成")
+        
+    except Exception as e:
+        app_logger.warning(f"反馈学习系统初始化失败: {e}")
+        feedback_store = None
+        feedback_collector = None
+        feedback_evaluator = None
+        strategy_params = None
+        learning_engine = None
 
 
 def initialize_agent_controller() -> None:
@@ -3605,6 +3679,299 @@ def generate_hero_query() -> Response:
         }), 500
 
 
+# ============================================================================
+# 反馈学习系统 API
+# ============================================================================
+
+@app.route('/api/feedback/explicit', methods=['POST'])
+def submit_explicit_feedback():
+    """提交显式反馈
+    
+    Request Body:
+        recommendation_id: 推荐 ID
+        score: 评分 (1-5)
+        comment: 可选备注
+    
+    Returns:
+        反馈记录
+    """
+    if feedback_collector is None:
+        return jsonify({
+            'success': False,
+            'error': '反馈系统未初始化'
+        }), 503
+    
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({
+                'success': False,
+                'error': '请求数据为空'
+            }), 400
+        
+        recommendation_id = data.get('recommendation_id')
+        score = data.get('score')
+        comment = data.get('comment')
+        
+        if not recommendation_id or score is None:
+            return jsonify({
+                'success': False,
+                'error': '缺少必要参数: recommendation_id, score'
+            }), 400
+        
+        if not isinstance(score, (int, float)) or score < 1 or score > 5:
+            return jsonify({
+                'success': False,
+                'error': 'score 必须是 1-5 之间的数字'
+            }), 400
+        
+        # 采集反馈
+        record = feedback_collector.collect_explicit_feedback(
+            recommendation_id=recommendation_id,
+            score=score,
+            comment=comment
+        )
+        
+        if record is None:
+            return jsonify({
+                'success': False,
+                'error': '推荐 ID 不存在'
+            }), 404
+        
+        # 实时学习更新
+        if learning_engine:
+            learning_engine.realtime_update(record)
+        
+        return jsonify({
+            'success': True,
+            'feedback_id': record.feedback_id,
+            'message': '反馈提交成功'
+        })
+    
+    except Exception as e:
+        app_logger.error(f"提交显式反馈失败: {e}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/feedback/implicit', methods=['POST'])
+def submit_implicit_feedback():
+    """提交隐式反馈
+    
+    Request Body:
+        recommendation_id: 推荐 ID
+        behavior_type: 行为类型 ("adopt" | "partial_adopt" | "ignore" | "reverse")
+    
+    Returns:
+        反馈记录
+    """
+    if feedback_collector is None:
+        return jsonify({
+            'success': False,
+            'error': '反馈系统未初始化'
+        }), 503
+    
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({
+                'success': False,
+                'error': '请求数据为空'
+            }), 400
+        
+        recommendation_id = data.get('recommendation_id')
+        behavior_type = data.get('behavior_type')
+        
+        if not recommendation_id or not behavior_type:
+            return jsonify({
+                'success': False,
+                'error': '缺少必要参数: recommendation_id, behavior_type'
+            }), 400
+        
+        valid_behaviors = ['adopt', 'partial_adopt', 'ignore', 'reverse']
+        if behavior_type not in valid_behaviors:
+            return jsonify({
+                'success': False,
+                'error': f'behavior_type 必须是 {valid_behaviors} 之一'
+            }), 400
+        
+        # 采集反馈
+        record = feedback_collector.collect_implicit_feedback(
+            recommendation_id=recommendation_id,
+            behavior_type=behavior_type
+        )
+        
+        if record is None:
+            return jsonify({
+                'success': False,
+                'error': '推荐 ID 不存在'
+            }), 404
+        
+        # 实时学习更新
+        if learning_engine:
+            learning_engine.realtime_update(record)
+        
+        return jsonify({
+            'success': True,
+            'feedback_id': record.feedback_id,
+            'message': '反馈提交成功'
+        })
+    
+    except Exception as e:
+        app_logger.error(f"提交隐式反馈失败: {e}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/feedback/stats', methods=['GET'])
+def get_feedback_stats():
+    """查询反馈统计
+    
+    Query Parameters:
+        hours: 统计时间范围（小时），默认 24
+    
+    Returns:
+        统计数据
+    """
+    if feedback_evaluator is None:
+        return jsonify({
+            'success': False,
+            'error': '反馈系统未初始化'
+        }), 503
+    
+    try:
+        hours = int(request.args.get('hours', 24))
+        since = time.time() - (hours * 3600)
+        
+        # 获取整体统计
+        overall = feedback_evaluator.get_overall_stats(since=since)
+        
+        # 获取引擎维度统计
+        engine_stats = feedback_evaluator.evaluate_engines(since=since)
+        
+        # 获取规则维度统计
+        rule_stats = feedback_evaluator.evaluate_rules(since=since)
+        
+        # 获取场景维度统计
+        scenario_stats = feedback_evaluator.evaluate_scenarios(since=since)
+        
+        return jsonify({
+            'success': True,
+            'hours': hours,
+            'overall': overall,
+            'by_engine': {k: v.to_dict() for k, v in engine_stats.items()},
+            'by_rule': {k: v.to_dict() for k, v in rule_stats.items()},
+            'by_scenario': {k: v.to_dict() for k, v in scenario_stats.items()}
+        })
+    
+    except Exception as e:
+        app_logger.error(f"查询反馈统计失败: {e}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/feedback/strategy', methods=['GET'])
+def get_strategy_params():
+    """查询当前策略参数
+    
+    Returns:
+        策略参数
+    """
+    if strategy_params is None:
+        return jsonify({
+            'success': False,
+            'error': '反馈系统未初始化'
+        }), 503
+    
+    try:
+        engine_weights = strategy_params.get_engine_weights()
+        rule_params = {}
+        
+        # 获取所有规则参数
+        for param_name in ['low_health_threshold', 'recommendation_cooldown']:
+            rule_params[param_name] = strategy_params.get_rule_param(param_name)
+        
+        stats = strategy_params.get_stats()
+        
+        return jsonify({
+            'success': True,
+            'engine_weights': engine_weights,
+            'rule_params': rule_params,
+            'stats': stats
+        })
+    
+    except Exception as e:
+        app_logger.error(f"查询策略参数失败: {e}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/feedback/strategy/reset', methods=['POST'])
+def reset_strategy_params():
+    """重置策略参数为默认值
+    
+    Returns:
+        重置结果
+    """
+    if strategy_params is None:
+        return jsonify({
+            'success': False,
+            'error': '反馈系统未初始化'
+        }), 503
+    
+    try:
+        strategy_params.reset()
+        
+        return jsonify({
+            'success': True,
+            'message': '策略参数已重置为默认值'
+        })
+    
+    except Exception as e:
+        app_logger.error(f"重置策略参数失败: {e}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/feedback/calibrate', methods=['POST'])
+def trigger_calibration():
+    """手动触发批量校准
+    
+    Returns:
+        校准结果
+    """
+    if learning_engine is None:
+        return jsonify({
+            'success': False,
+            'error': '反馈系统未初始化'
+        }), 503
+    
+    try:
+        learning_engine.batch_calibration()
+        
+        return jsonify({
+            'success': True,
+            'message': '批量校准完成'
+        })
+    
+    except Exception as e:
+        app_logger.error(f"批量校准失败: {e}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
 if __name__ == '__main__':
     app_logger.info("=" * 50)
     app_logger.info("DotaHelperAgent API Server - ReAct Agent 架构")
@@ -3618,5 +3985,28 @@ if __name__ == '__main__':
     
     # 启动每日缓存刷新任务
     start_cache_scheduler()
+    
+    # 启动每日批量校准任务
+    def daily_calibration():
+        """每日批量校准"""
+        if learning_engine:
+            try:
+                app_logger.info("开始每日批量校准...")
+                learning_engine.batch_calibration()
+                app_logger.info("每日批量校准完成")
+            except Exception as e:
+                app_logger.error(f"每日批量校准失败: {e}", exc_info=True)
+    
+    schedule.every().day.at("03:00").do(daily_calibration)
+    
+    def run_scheduler():
+        """运行定时任务调度器"""
+        while True:
+            schedule.run_pending()
+            time.sleep(60)
+    
+    scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
+    scheduler_thread.start()
+    app_logger.info("定时任务调度器已启动：每日 03:00 执行批量校准")
     
     app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)

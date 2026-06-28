@@ -53,6 +53,9 @@ class EventTrigger:
         # 推送回调
         self._push_callback = None
         
+        # 反馈采集器（可选，用于注册推荐上下文）
+        self.feedback_collector = None
+        
         # 运行状态
         self._running = False
         self._thread: Optional[threading.Thread] = None
@@ -98,6 +101,16 @@ class EventTrigger:
         """
         self._push_callback = callback
         logger.info("事件触发器设置推送回调")
+    
+    def set_feedback_collector(self, feedback_collector):
+        """
+        设置反馈采集器
+        
+        Args:
+            feedback_collector: 反馈采集器实例
+        """
+        self.feedback_collector = feedback_collector
+        logger.info("事件触发器设置反馈采集器")
     
     def start(self):
         """启动事件监听"""
@@ -250,6 +263,8 @@ class EventTrigger:
         Args:
             event: GSI 事件对象
         """
+        import uuid
+        
         event_type = event.event_type
         
         # 更新冷却时间
@@ -259,6 +274,9 @@ class EventTrigger:
         game_state = None
         if self.state_manager:
             game_state = self.state_manager.get_state()
+        
+        # 生成推荐 ID（用于反馈追踪）
+        recommendation_id = str(uuid.uuid4())
         
         # 调用决策融合器生成推荐（传入完整事件对象）
         try:
@@ -270,21 +288,66 @@ class EventTrigger:
             if recommendation:
                 logger.info(f"生成推荐: {recommendation.recommendation[:50]}...")
                 
+                # 记录推荐上下文（供反馈系统使用）
+                self._record_recommendation_context(recommendation_id, recommendation, event)
+                
                 # 推送推荐结果
-                self._push_recommendation(recommendation, event)
+                self._push_recommendation(recommendation, event, recommendation_id)
             else:
                 logger.debug(f"事件 {event_type} 未生成推荐")
         
         except Exception as e:
             logger.error(f"生成推荐失败: {e}")
     
-    def _push_recommendation(self, recommendation, event):
+    def _record_recommendation_context(self, recommendation_id: str, recommendation, event):
+        """
+        记录推荐上下文（供反馈系统使用）
+        
+        Args:
+            recommendation_id: 推荐 ID
+            recommendation: 推荐结果
+            event: 触发事件
+        """
+        # 提取引擎信息
+        engine = "unknown"
+        rule_name = None
+        if hasattr(recommendation, 'sources') and recommendation.sources:
+            engine = recommendation.sources[0]
+            if engine == "rule" and hasattr(recommendation, 'all_recommendations'):
+                for rec in recommendation.all_recommendations:
+                    if rec.get('engine') == 'rule':
+                        rule_name = rec.get('rule_name')
+                        break
+        
+        # 构建上下文
+        context = {
+            "recommendation": recommendation.recommendation if hasattr(recommendation, 'recommendation') else str(recommendation),
+            "confidence": recommendation.confidence if hasattr(recommendation, 'confidence') else 0.0,
+        }
+        
+        # 注册到反馈采集器（供后续反馈关联）
+        if self.feedback_collector:
+            try:
+                self.feedback_collector.record_recommendation(
+                    recommendation_id=recommendation_id,
+                    engine=engine,
+                    event_type=event.event_type,
+                    rule_name=rule_name,
+                    context=context
+                )
+            except Exception as e:
+                logger.error(f"注册推荐上下文到反馈采集器失败: {e}")
+        
+        logger.debug(f"记录推荐上下文: {recommendation_id}, engine={engine}")
+    
+    def _push_recommendation(self, recommendation, event, recommendation_id: str = None):
         """
         推送推荐结果
         
         Args:
             recommendation: 推荐结果
             event: 触发事件
+            recommendation_id: 推荐 ID（用于反馈追踪）
         """
         if not self._push_callback:
             logger.debug("未设置推送回调，跳过推送")
@@ -297,6 +360,7 @@ class EventTrigger:
                 "event_type": event.event_type,
                 "event_message": event.message,
                 "recommendation": recommendation.to_dict(),
+                "recommendation_id": recommendation_id,
                 "timestamp": time.time()
             }
             

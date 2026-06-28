@@ -53,17 +53,19 @@ class FusedRecommendation:
 class DecisionFusion:
     """决策融合器"""
     
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: Optional[Dict[str, Any]] = None, strategy_params=None):
         """
         初始化决策融合器
         
         Args:
             config: 配置字典
+            strategy_params: 策略参数管理实例（可选，用于动态引擎权重）
         """
         self.config = config or {}
+        self.strategy_params = strategy_params
         
         # 初始化三个决策引擎
-        self.rule_engine = RuleEngine(config.get("rule_engine", {}))
+        self.rule_engine = RuleEngine(config.get("rule_engine", {}), strategy_params=strategy_params)
         self.data_engine = DataEngine(config.get("data_engine", {}))
         self.llm_engine = LLMEngine(config.get("llm_engine", {}))
         
@@ -360,12 +362,15 @@ class DecisionFusion:
         Returns:
             融合后的推荐
         """
-        # 定义引擎权重
-        engine_weights = {
-            "rule": 0.3,
-            "data": 0.4,
-            "llm": 0.3
-        }
+        # 从策略参数获取动态引擎权重，或使用默认值
+        if self.strategy_params:
+            engine_weights = self.strategy_params.get_engine_weights()
+        else:
+            engine_weights = {
+                "rule": 0.3,
+                "data": 0.4,
+                "llm": 0.3
+            }
         
         # 计算加权置信度
         total_weight = 0
