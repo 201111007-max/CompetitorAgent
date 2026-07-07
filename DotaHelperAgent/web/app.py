@@ -71,6 +71,7 @@ try:
     from gsi.state_manager import GSIStateManager
     from gsi.event_handler import GSIEventHandler
     from gsi.event_queue import GSIEventQueue
+    from utils.voice_player import VoicePlayer
     GSI_AVAILABLE = True
 except ImportError:
     GSI_AVAILABLE = False
@@ -117,6 +118,7 @@ prompt_manager = None  # 全局 Prompt 管理器实例
 gsi_state_manager = None
 gsi_event_queue = None
 gsi_server = None
+voice_player = None
 
 # 主动推荐系统全局变量
 decision_fusion = None
@@ -543,7 +545,12 @@ def initialize_gsi() -> None:
             max_history=gsi_config.get('state', {}).get('max_history', 100)
         )
         events_config = gsi_config.get('events', {})
-        gsi_event_handler = GSIEventHandler(gsi_event_queue, events_config)
+        
+        # 初始化语音播放器
+        voice_config = gsi_config.get('voice', {})
+        voice_player = VoicePlayer(voice_config)
+        
+        gsi_event_handler = GSIEventHandler(gsi_event_queue, events_config, voice_player=voice_player)
         gsi_state_manager = GSIStateManager(event_handler=gsi_event_handler)
 
         server_config = gsi_config.get('server', {})
@@ -1048,6 +1055,88 @@ def gsi_receive_data():
     
     except Exception as e:
         app_logger.error(f"接收 GSI 数据失败: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+# ==================== Voice API Endpoints ====================
+
+@app.route('/api/voice/status', methods=['GET'])
+def get_voice_status():
+    """Get voice player status"""
+    if voice_player is None:
+        return jsonify({"available": False, "message": "Voice player not available"})
+    
+    try:
+        status = voice_player.get_status()
+        return jsonify({"available": True, "status": status})
+    except Exception as e:
+        app_logger.error(f"获取语音状态失败: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/voice/toggle', methods=['POST'])
+def toggle_voice():
+    """Toggle voice on/off"""
+    if voice_player is None:
+        return jsonify({"available": False, "message": "Voice player not available"})
+    
+    try:
+        data = request.get_json()
+        if not data or 'enabled' not in data:
+            return jsonify({"error": "Missing 'enabled' field"}), 400
+        
+        enabled = bool(data['enabled'])
+        voice_player.set_enabled(enabled)
+        
+        return jsonify({"success": True, "enabled": enabled})
+    except Exception as e:
+        app_logger.error(f"切换语音状态失败: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/voice/volume', methods=['POST'])
+def set_voice_volume():
+    """Set voice volume (0.0-1.0)"""
+    if voice_player is None:
+        return jsonify({"available": False, "message": "Voice player not available"})
+    
+    try:
+        data = request.get_json()
+        if not data or 'volume' not in data:
+            return jsonify({"error": "Missing 'volume' field"}), 400
+        
+        volume = float(data['volume'])
+        if not 0.0 <= volume <= 1.0:
+            return jsonify({"error": "Volume must be between 0.0 and 1.0"}), 400
+        
+        voice_player.set_volume(volume)
+        
+        return jsonify({"success": True, "volume": volume})
+    except ValueError:
+        return jsonify({"error": "Invalid volume value"}), 400
+    except Exception as e:
+        app_logger.error(f"设置语音音量失败: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/voice/event', methods=['POST'])
+def set_voice_event_enabled():
+    """Set event type voice enabled/disabled"""
+    if voice_player is None:
+        return jsonify({"available": False, "message": "Voice player not available"})
+    
+    try:
+        data = request.get_json()
+        if not data or 'event_type' not in data or 'enabled' not in data:
+            return jsonify({"error": "Missing 'event_type' or 'enabled' field"}), 400
+        
+        event_type = str(data['event_type'])
+        enabled = bool(data['enabled'])
+        voice_player.set_event_enabled(event_type, enabled)
+        
+        return jsonify({"success": True, "event_type": event_type, "enabled": enabled})
+    except Exception as e:
+        app_logger.error(f"设置事件语音状态失败: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 

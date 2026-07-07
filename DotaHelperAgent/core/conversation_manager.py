@@ -7,6 +7,7 @@ import sqlite3
 import json
 import time
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, field, asdict
@@ -62,6 +63,7 @@ class ConversationSession:
 
     context_state: Dict[str, Any] = field(default_factory=dict)
     entity_history: Dict[str, List[Dict]] = field(default_factory=dict)
+    last_compressed_turn: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -71,7 +73,8 @@ class ConversationSession:
             "last_active": self.last_active,
             "turn_count": self.turn_count,
             "context_state": self.context_state,
-            "entity_history": self.entity_history
+            "entity_history": self.entity_history,
+            "last_compressed_turn": self.last_compressed_turn
         }
 
     @classmethod
@@ -82,7 +85,8 @@ class ConversationSession:
             last_active=data.get("last_active", time.time()),
             turn_count=data.get("turn_count", 0),
             context_state=data.get("context_state", {}),
-            entity_history=data.get("entity_history", {})
+            entity_history=data.get("entity_history", {}),
+            last_compressed_turn=data.get("last_compressed_turn", 0)
         )
         session.messages = [Message.from_dict(msg) for msg in data.get("messages", [])]
         return session
@@ -142,7 +146,9 @@ class ConversationManager:
         storage_dir: str = "memory",
         session_ttl: int = 1800,
         max_turns: int = 20,
-        max_context_turns: int = 5
+        max_context_turns: int = 5,
+        llm_client: Optional[Any] = None,
+        async_compress: bool = False
     ):
         """初始化会话管理器
 
@@ -151,15 +157,24 @@ class ConversationManager:
             session_ttl: 会话过期时间（秒）
             max_turns: 最大对话轮数
             max_context_turns: 保留完整上下文的轮数
+            llm_client: LLM 客户端（可选，用于生成高质量摘要）
+            async_compress: 是否异步执行压缩（避免阻塞主流程）
         """
         self.storage_dir = Path(storage_dir)
         self.storage_dir.mkdir(exist_ok=True)
         self.session_ttl = session_ttl
         self.max_turns = max_turns
         self.max_context_turns = max_context_turns
+        self.llm_client = llm_client
+        self.async_compress = async_compress
 
         self._lock = threading.RLock()
         self._active_sessions: Dict[str, ConversationSession] = {}
+
+        # 异步压缩线程池（仅在有 LLM 客户端且开启异步时创建）
+        self._compress_executor: Optional[ThreadPoolExecutor] = None
+        if async_compress and llm_client:
+            self._compress_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="compress")
 
         self._db_path = self.storage_dir / "conversations.db"
         self._init_database()
@@ -249,7 +264,9 @@ class ConversationManager:
             if session is None:
                 return False
 
-            if session.turn_count >= self.max_turns:
+            # 检查是否需要压缩：距离上次压缩后又超过 max_turns 轮
+            turns_since_compress = session.turn_count - session.last_compressed_turn
+            if turns_since_compress >= self.max_turns:
                 self._compress_session(session)
 
             session.add_message(message)
@@ -320,7 +337,12 @@ class ConversationManager:
             return True
 
     def compress_context(self, session_id: str) -> Optional[str]:
-        """压缩会话上下文
+        """压缩会话上下文（分层压缩策略）
+
+        分层策略：
+        - 最近 5 轮：完整保留（不压缩）
+        - 5-20 轮：轻量摘要（关键实体+结论）
+        - 20+ 轮：深度摘要（仅保留核心决策）
 
         Args:
             session_id: 会话 ID
@@ -332,22 +354,45 @@ class ConversationManager:
         if session is None:
             return None
 
+        # 分层压缩逻辑
         if session.turn_count <= self.max_context_turns:
+            # 最近 5 轮：完整保留
             return self._format_full_history(session.messages)
-
-        old_messages = session.messages[:-self.max_context_turns * 2]
-        recent_messages = session.messages[-self.max_context_turns * 2:]
-
-        summary = self._generate_summary(old_messages)
-
+        
+        # 计算距离上次压缩的轮次
+        turns_since_compress = session.turn_count - session.last_compressed_turn
+        
+        if turns_since_compress < 20:
+            # 5-20 轮：轻量压缩（保留最近 10 条消息）
+            keep_count = self.max_context_turns * 2  # 10 条
+            compression_level = "light"
+        else:
+            # 20+ 轮：深度压缩（保留最近 6 条消息）
+            keep_count = 6
+            compression_level = "deep"
+        
+        if len(session.messages) <= keep_count:
+            return None
+        
+        old_messages = session.messages[:-keep_count]
+        recent_messages = session.messages[-keep_count:]
+        
+        # 根据压缩级别生成不同详细程度的摘要
+        summary = self._generate_summary(old_messages, level=compression_level)
+        
+        # 构建压缩后的消息列表
+        level_label = "轻量摘要" if compression_level == "light" else "深度摘要"
         session.messages = [
             Message(
                 role=MessageRole.SYSTEM.value,
-                content=f"[对话摘要] {summary}",
+                content=f"[{level_label}] {summary}",
                 timestamp=session.created_at
             )
         ] + recent_messages
-
+        
+        # 记录压缩时的轮次，避免重复压缩
+        session.last_compressed_turn = session.turn_count
+        
         self._save_session_to_db(session)
         return summary
 
@@ -430,8 +475,33 @@ class ConversationManager:
         return (time.time() - session.last_active) > self.session_ttl
 
     def _compress_session(self, session: ConversationSession) -> None:
-        """压缩会话"""
-        self.compress_context(session.session_id)
+        """压缩会话
+        
+        如果启用了异步压缩且线程池可用，则在后台线程执行压缩；
+        否则同步执行压缩。
+        """
+        if self._compress_executor:
+            # 异步压缩：提交到线程池
+            self._compress_executor.submit(self._do_compress, session.session_id)
+            logger.debug_ctx(
+                "异步压缩已提交",
+                session_id=session.session_id,
+                extra_data={"turn_count": session.turn_count}
+            )
+        else:
+            # 同步压缩
+            self._do_compress(session.session_id)
+    
+    def _do_compress(self, session_id: str) -> None:
+        """执行实际的压缩操作"""
+        try:
+            self.compress_context(session_id)
+        except Exception as e:
+            logger.error_ctx(
+                "压缩会话失败",
+                session_id=session_id,
+                extra_data={"error": str(e)}
+            )
 
     def _format_full_history(self, messages: List[Message]) -> str:
         """格式化完整历史"""
@@ -441,11 +511,92 @@ class ConversationManager:
             history_parts.append(f"{role_label}: {msg.content}")
         return "\n".join(history_parts)
 
-    def _generate_summary(self, messages: List[Message]) -> str:
-        """生成对话摘要"""
+    def _generate_summary(self, messages: List[Message], level: str = "light") -> str:
+        """生成对话摘要
+        
+        优先使用 LLM 生成高质量摘要，如果 LLM 不可用则降级到规则驱动
+        
+        Args:
+            messages: 消息列表
+            level: 压缩级别（"light" 或 "deep"）
+        
+        Returns:
+            str: 摘要文本
+        """
         if not messages:
             return ""
 
+        # 尝试使用 LLM 生成摘要
+        if self.llm_client:
+            try:
+                return self._generate_llm_summary(messages, level)
+            except Exception as e:
+                logger.warning_ctx(
+                    "LLM摘要生成失败，降级到规则驱动",
+                    extra_data={"error": str(e)}
+                )
+
+        # 降级到规则驱动摘要
+        return self._generate_rule_based_summary(messages, level)
+
+    def _generate_llm_summary(self, messages: List[Message], level: str = "light") -> str:
+        """使用 LLM 生成对话摘要
+        
+        Args:
+            messages: 消息列表
+            level: 压缩级别（"light" 或 "deep"）
+        
+        Returns:
+            str: 摘要文本
+        """
+        # 格式化对话历史
+        history_parts = []
+        for msg in messages:
+            role_label = "用户" if msg.role == MessageRole.USER.value else "助手"
+            history_parts.append(f"{role_label}: {msg.content}")
+        
+        conversation_text = "\n".join(history_parts)
+        
+        # 根据压缩级别构建不同的 prompt
+        if level == "deep":
+            prompt = f"""请为以下 Dota 2 助手对话生成极简摘要，仅保留核心决策和关键结论：
+
+{conversation_text}
+
+请用一句话总结（不超过30字）："""
+            max_tokens = 60
+        else:  # light
+            prompt = f"""请为以下 Dota 2 助手对话生成简洁的摘要，提取关键信息（讨论的英雄、话题、结论等）：
+
+{conversation_text}
+
+请用一句话总结（不超过50字）："""
+            max_tokens = 100
+
+        # 调用 LLM
+        response = self.llm_client.chat(
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+            max_tokens=max_tokens
+        )
+        
+        summary = response.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+        
+        if summary:
+            return summary
+        
+        raise ValueError("LLM返回空摘要")
+
+    def _generate_rule_based_summary(self, messages: List[Message], level: str = "light") -> str:
+        """规则驱动的对话摘要（降级方案）
+        
+        Args:
+            messages: 消息列表
+            level: 压缩级别（"light" 或 "deep"）
+        
+        Returns:
+            str: 摘要文本
+        """
         entities_mentioned = []
         topics_discussed = []
 
@@ -470,6 +621,14 @@ class ConversationManager:
         if topics_discussed:
             summary_parts.append(f"话题: {', '.join(topics_discussed)}")
 
+        # 深度压缩时只保留核心信息
+        if level == "deep":
+            if hero_names:
+                return f"讨论英雄: {', '.join(hero_names[:3])}"  # 最多3个英雄
+            elif topics_discussed:
+                return f"话题: {topics_discussed[0]}"  # 只保留第一个话题
+            return "多轮对话"
+        
         return "；".join(summary_parts) if summary_parts else "进行了多轮对话"
 
     def _save_session_to_db(self, session: ConversationSession) -> None:

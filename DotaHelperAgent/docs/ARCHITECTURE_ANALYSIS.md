@@ -16,7 +16,7 @@
 | **第二阶段** | **GSI 实时数据处理** | **P1** | 2-3周 | GSI服务器 + 状态管理 + 事件处理 | ✅ 已完成 |
 | **第三阶段** | **推理和决策能力增强** | **P1** | 3-4周 | 数据驱动决策 + 混合推理 | ✅ 已完成 |
 | **第四阶段** | **个性化学习能力** | **P2** | 2-3周 | 用户画像 + 在线学习 | ✅ 已完成 |
-| **第五阶段** | **多模态交互能力** | **P2** | 1-2周 | 语音播报 + 数据可视化 | ❌ 待实现 |
+| **第五阶段** | **多模态交互能力** | **P2** | 1-2周 | 语音播报 + 数据可视化 | 🔄 部分完成（前端样式 ✅ 2026-06-14；语音提醒 ❌ 待实现） |
 
 
 ### 1.2 详细待办事项清单
@@ -38,6 +38,10 @@
 | P2 | 前端样式优化 | 中 | 中 | **第五阶段** | ✅ 已完成 |
 | P2 | 用户反馈学习 | 大 | 中 | **第四阶段** | ✅ 已完成 |
 | P2 | 语音提醒系统 | 中 | 低 | **第五阶段** | ❌ 待实现 |
+| P1 | 上下文压缩：修复重复压缩 bug | 小 | 中 | - | ✅ 已完成 |
+| P1 | 上下文压缩：摘要生成升级为 LLM 驱动 | 中 | 高 | - | ✅ 已完成 |
+| P2 | 上下文压缩：分层压缩策略（完整/轻量/深度） | 中 | 中 | - | ✅ 已完成 |
+| P2 | 上下文压缩：异步压缩避免阻塞主流程 | 小 | 低 | - | ✅ 已完成 |
 
 ### 已完成的改进项
 
@@ -78,8 +82,8 @@
 - ✅ **用户反馈学习**（P2）→ 第四阶段在线学习引擎
 
 **第五阶段：多模态交互能力** 整合了以下待办项：
-- ✅ **语音提醒系统**（P2）→ 第五阶段语音播报功能
-- ✅ **前端样式优化**（P2）→ 第五阶段数据可视化
+- ❌ **语音提醒系统**（P2）→ 第五阶段语音播报功能（**待实现**，参考 [第十五章](#十五p2语音提醒系统)）
+- ✅ **前端样式优化**（P2）→ 第五阶段数据可视化（已完成，2026-06-14）
 
 #### 1.3.2 新增待办项
 
@@ -111,17 +115,17 @@
 #### 1.3.4 实施建议
 
 **推荐实施顺序**：
-1. ~~**第一阶段（P0）**：知识管理能力升级 - 建立知识库基础设施~~ ✅ 已完成
+1. ~~**第一阶段（P0）**：知识管理能力升级 - 建立知识库基础设施~~ ✅ 已完成（2026-06-14）
 2. ~~**第二阶段（P1）**：GSI 实时数据处理 - 实现实时监控能力~~ ✅ 已完成（2026-06-22）
 3. ~~**第三阶段（P1）**：推理和决策能力增强 - 提升决策质量~~ ✅ 已完成（2026-06-24）
-4. **第四阶段（P2）**：个性化学习能力 - 实现个性化推荐
-5. **第五阶段（P2）**：多模态交互能力 - 提升用户体验
+4. ~~**第四阶段（P2）**：个性化学习能力 - 实现个性化推荐~~ ✅ 已完成（2026-06-25）
+5. **第五阶段（P2）**：多模态交互能力 - 提升用户体验（前端样式 ✅ 已完成；语音提醒 ❌ 待实现）
 
 **关键依赖关系**：
 - ~~第二阶段依赖第一阶段（知识库支持决策推荐）~~ ✅ 第一阶段已完成
 - ~~第三阶段依赖第二阶段（实时数据支持推理）~~ ✅ 第二阶段已完成
-- 第四阶段依赖第三阶段（决策能力支持个性化）
-- 第五阶段可并行开发（相对独立）
+- ~~第四阶段依赖第三阶段（决策能力支持个性化）~~ ✅ 第四阶段已完成
+- 第五阶段可并行开发（相对独立），当前仅剩语音提醒子项未实现
 
 ---
 
@@ -140,9 +144,9 @@
 
 Langfuse 是一个开源的 LLM 应用可观测性平台，提供：
 - **Trace 追踪**：完整记录请求生命周期 ✅
-- **Prompt 管理**：版本化 Prompt 模板（待集成）
+- **Prompt 管理**：版本化 Prompt 模板 ✅（2026-06-24 通过 [第七章](#七p1prompt-版本管理-) 完成）
 - **评分系统**：用户反馈和自动评估 ✅
-- **成本分析**：Token 使用量和成本统计（待集成）
+- **成本分析**：Token 使用量和成本统计 ✅（通过 `utils/llm_client.py` 中的 Token 统计实现）
 - **会话分析**：多轮对话上下文追踪 ✅
 
 **官方文档**：https://langfuse.com/docs
@@ -662,15 +666,15 @@ STACK_PROMPT = """你是一个Dota 2游戏教练，正在指导玩家堆野。
 
 ### Out of Scope
 
+> **状态说明**：以下为本 PRD 起草时（2026-06-22 之前）规划排除的功能。截至 2026-07-06，部分排除项已根据实际需求实现，已实现的项以 `✅` 标注并附实现位置。
+
 - **WebSocket Push**: Not implementing WebSocket push (using desktop notifications and voice instead)
-- **SSE Push**: Not implementing SSE push (using desktop notifications and voice instead)
-- **State Change Reminders**: Not implementing state change reminders (health, gold, skill cooldown, level up) - focusing on game events, game phases, and team states only
+- **SSE Push**: ~~Not implementing SSE push (using desktop notifications and voice instead)~~ ✅ **已实现**（2026-06-22）- `web/app.py` `/api/gsi/recommendations` 端点 + `frontend/src/composables/useRecommendationStream.ts`
+- **State Change Reminders**: ~~Not implementing state change reminders (health, gold, skill cooldown, level up)~~ ✅ **已实现**（2026-06-24）- 第十一章"基于状态变化"推荐模式（血量<30%、金钱>=装备价格、技能冷却结束）
 - **STRATZ API Integration**: Not integrating STRATZ API for game data (using Dota 2 client GSI only)
 - **Mobile Notifications**: Not implementing mobile notifications (Windows desktop only)
 - **Multi-user Support**: Not implementing multi-user support (single-user mode only)
 - **Cloud Storage**: Not implementing cloud storage for behavior history (SQLite local storage only)
-
----
 
 ---
 
@@ -931,7 +935,7 @@ class VoicePlayer:
 2. ~~训练胜率预测模型~~ ✅ 已完成（数据引擎集成）
 3. ~~实现决策融合器~~ ✅ 已完成（规则引擎 + 数据引擎 + LLM引擎）
 4. ~~新增数据驱动推荐工具~~ ✅ 已完成（recommendation_tools.py）
-5. Prompt 版本管理 ❌ 待实现
+5. ~~Prompt 版本管理~~ ✅ 已完成（2026-06-24）
 
 **预期收益**:
 - ✅ 基于历史数据的胜率预测
@@ -1005,5 +1009,476 @@ class VoicePlayer:
 
 ---
 
-> **文档版本**: v1.1  
-> **最后更新**: 2026-06-24
+## 十七、Skill/SubAgent 可替代功能分析
+
+> 更新时间：2026-07-06
+
+**分析目标**: 从产品功能角度，识别 DotaHelperAgent 中哪些用户可感知的功能可以用 Skill（轻量单次调用）或 SubAgent（重多步推理）模式替代实现。
+
+**核心判断标准**: 当前这些功能通过内部硬编码 LLM 调用实现（prompt + API 调用）。如果用 Skill/SubAgent 模式替代，意味着将它们变成可独立调用的能力单元，由主 Agent 按需调度，而不是在代码中写死调用逻辑。
+
+### 17.1 适合用 Skill 替代的功能（轻量、单次 LLM 调用）
+
+| 产品功能 | 功能描述 | 为什么适合 Skill |
+|---------|---------|----------------|
+| **多轮对话上下文理解** | 理解用户指代（如"它"指哪个英雄）、推断用户意图、注入上下文信息 | 单次 LLM 调用即可完成语义理解，输入输出边界清晰，不需要多步推理 |
+| **阵容分析** | 分析敌我双方阵容的优劣势，给出阵容评估 | 单次 LLM 推理，输入阵容列表，输出分析文本，不需要调用外部工具 |
+| **版本强势查询** | 查询当前版本的热门英雄、强势英雄 | 数据查询 + 单次 LLM 总结，输入输出明确，流程简单 |
+| **知识查询** | 检索攻略文档并生成回答（如"PA 怎么出装？"） | 向量检索 + 单次 LLM 总结，输入输出边界清晰 |
+| **智能搜索** | 搜索最新的 Dota 2 资讯、攻略、更新内容 | 搜索引擎调用 + 单次 LLM 摘要，流程简单，天然适合 Skill |
+
+### 17.2 适合用 SubAgent 替代的功能（重、多步推理）
+
+| 产品功能 | 功能描述 | 为什么适合 SubAgent |
+|---------|---------|-------------------|
+| **英雄克制推荐** | 根据敌方阵容推荐克制英雄（如"对面有 PA、火枪，我该选什么？"） | 多步推理：调用外部 API 获取对局数据 → 数据分析 → LLM 评估克制关系 → 排序推荐，SubAgent 可自主编排整个流程 |
+| **出装推荐** | 根据英雄和局势推荐核心装备、针对出装、局势出装 | 多步推理：查询英雄数据 → 分析敌方阵容 → 查询物品库 → LLM 生成推荐方案，需要自主调用多个数据源 |
+| **技能加点推荐** | 推荐技能升级顺序、天赋树选择 | 多步推理：查询英雄技能信息 → 分析对局情况 → LLM 生成加点方案，可独立执行完整流程 |
+| **游戏事件提醒** | 堆野、符文刷新、肉山复活等游戏事件提醒 | 事件检测 → 构建游戏上下文 → LLM 生成个性化建议，SubAgent 可自主完成从事件感知到建议生成的全流程 |
+| **主动推荐** | 根据游戏状态自动推送建议（如血量低时提醒回城） | 感知游戏状态 → 判断触发条件 → 生成个性化建议，多步推理适合 SubAgent |
+| **用户反馈学习** | 根据用户反馈（评分、采纳行为）调整推荐策略 | 收集反馈 → 评估推荐效果 → 调整策略参数，自主闭环适合 SubAgent |
+
+### 17.3 不适合替代的功能（纯工程实现）
+
+| 产品功能 | 为什么不适合替代 |
+|---------|----------------|
+| **GSI 实时游戏状态监控** | 需要持续监听 HTTP 请求，低延迟要求，不适合 Skill/SubAgent 的调用-返回模式 |
+| **缓存系统** | 纯工程实现（LRU + SQLite），无 LLM 推理，不需要智能调度 |
+| **记忆系统** | SQLite 持久化存储，纯 I/O 操作，不涉及推理 |
+| **SSE 流式输出** | 网络通信层，纯工程实现，与 LLM 推理无关 |
+| **前端界面** | Vue 3 组件，用户交互层，与 Skill/SubAgent 模式无关 |
+
+### 17.4 功能替代方式总结
+
+| 产品功能 | 推荐替代方式 | 替代后的调用流程 |
+|---------|------------|----------------|
+| 英雄克制推荐 | **SubAgent** | 主 Agent → 克制推荐 SubAgent → 自主调用 API + 分析 + 生成推荐 |
+| 出装推荐 | **SubAgent** | 主 Agent → 出装推荐 SubAgent → 自主查询数据 + 分析 + 生成方案 |
+| 技能加点推荐 | **SubAgent** | 主 Agent → 技能加点 SubAgent → 自主查询技能 + 分析 + 生成加点 |
+| 游戏事件提醒 | **SubAgent** | 主 Agent → 事件提醒 SubAgent → 自主感知事件 + 生成建议 |
+| 主动推荐 | **SubAgent** | 主 Agent → 主动推荐 SubAgent → 自主感知状态 + 判断 + 推送 |
+| 用户反馈学习 | **SubAgent** | 主 Agent → 反馈学习 SubAgent → 自主收集 + 评估 + 调整 |
+| 阵容分析 | **Skill** | 主 Agent → 调用阵容分析 Skill → 返回分析结果 |
+| 多轮对话 | **Skill** | 主 Agent → 调用对话理解 Skill → 返回增强后的上下文 |
+| 版本强势查询 | **Skill** | 主 Agent → 调用版本强势 Skill → 返回查询结果 |
+| 知识查询 | **Skill** | 主 Agent → 调用知识查询 Skill → 返回检索结果 |
+| 智能搜索 | **Skill** | 主 Agent → 调用智能搜索 Skill → 返回搜索结果 |
+
+### 17.5 替代收益分析
+
+| 维度 | 当前方式 | Skill/SubAgent 方式 | 收益 |
+|------|---------|-------------------|------|
+| **可测试性** | 需要 mock LLM 客户端，测试复杂 | Skill/SubAgent 独立测试，接口清晰 | 测试复杂度降低 |
+| **可替换性** | 修改代码替换 LLM 调用逻辑 | 替换 Skill/SubAgent 实现即可 | 切换成本降低 |
+| **可复用性** | 功能与模块耦合，难以复用 | 独立能力单元，可跨场景复用 | 复用性提升 |
+| **主 Agent 复杂度** | 硬编码调用逻辑，代码复杂 | 只需编排调度，逻辑简洁 | 主 Agent 更清晰 |
+| **降级策略** | 每个功能各自实现降级 | 统一降级框架，一致性更好 | 维护成本降低 |
+
+### 17.6 实施建议
+
+**推荐实施顺序**：
+1. 先抽取轻量功能为 Skill：阵容分析 → 知识查询 → 版本强势 → 智能搜索 → 多轮对话
+2. 再抽取重功能为 SubAgent：英雄克制推荐 → 出装推荐 → 技能加点 → 游戏事件提醒 → 主动推荐 → 用户反馈学习
+3. 最后统一降级框架和编排调度逻辑
+
+**注意事项**：
+- 每个 Skill/SubAgent 需定义清晰的输入/输出接口
+- 保留当前的规则驱动降级方案作为兜底
+- 需考虑 Skill/SubAgent 调用的延迟开销
+- GSI 实时监控、缓存、记忆系统等纯工程模块保持现有实现
+
+---
+
+## 十八、Skill/SubAgent 评估体系
+
+> 更新时间：2026-07-06
+
+### 18.1 评估目标与挑战
+
+**目标**: 评估基于 Skill/SubAgent 模式替代实现后的功能效果和可靠性，建立可量化、可对比、可回归的评测体系。
+
+**核心挑战**:
+- Dota 2 领域缺乏标准化公开评测集（不同于 GAIA、WebArena）
+- 同一查询可能存在多个有效答案，难以精确匹配
+- 业务场景涉及游戏专业知识，需要领域知识支撑
+- 用户主观体验（流畅度、个性化）难以量化
+
+### 18.2 业界主流评测体系调研
+
+调研 2026 年主流 Agent/Skill 评测体系，提炼适用于 DotaHelperAgent 的方法论。
+
+#### 18.2.1 主流评测基准对比
+
+| 评测基准 | 评估目标 | 核心指标 | 适用性 |
+|---------|---------|---------|--------|
+| **GAIA** ([amd-gaia.ai](https://amd-gaia.ai/docs/eval)) | 多步推理+工具调用 | 7 维评分量表、Pass/Fail | 借鉴评分量表设计 |
+| **AgentBench** | 8 个环境综合能力 | 任务成功率 | 借鉴环境隔离设计 |
+| **WebArena** ([arXiv:2307.13854](https://arxiv.org/html/2307.13854v4)) | 真实 Web 任务 | 任务成功率 14.4%→78% | 借鉴任务定义方法 |
+| **SWE-bench Verified** | 真实代码修复 | 多级评分 | 不适用 |
+| **TAU-bench** | 策略感知客服 | 通过率 | 借鉴领域策略测试 |
+| **MCPAgentBench** | MCP 工具使用 | 任务完成率+效率 | 借鉴工具调用评估 |
+| **TRAJECT-Bench** ([arXiv:TRAJECT](https://openreview.net/pdf?id=TZWnWvsQ0X)) | 工具使用轨迹 | 轨迹级诊断（工具选择、参数、依赖） | **核心参考** |
+| **AgentProp-Bench** ([arXiv:2604.16706](https://arxiv.org/html/2604.16706v1)) | 错误传播+缓解 | Stage-level 传播率 | 借鉴错误传播分析 |
+| **BabelJudge** ([arXiv:2606.22329](https://arxiv.org/pdf/2606.22329)) | LLM-as-a-Judge 可靠性 | 位置/长度/跨语言偏见 | 借鉴 Judge 校准方法 |
+
+#### 18.2.2 主流评测框架
+
+| 框架 | 特点 | 适用场景 |
+|------|------|---------|
+| **MLflow** ([mlflow.org](https://mlflow.org/top-5-agent-evaluation-frameworks/)) | 最广泛使用（30M+ 月下载），多维评分、人机协同 | 离线评测 + 在线监控 |
+| **DeepEval** ([deepeval.com](https://deepeval.com/guides/guides-llm-as-a-judge)) | pytest 风格 CI/CD 集成、G-Eval/DAG/QAG | CI 集成回归测试 |
+| **Ragas** | RAG 评测起家，扩展到 Agent | 知识查询 Skill 评测 |
+| **Arize Phoenix** | ML 可观测性扩展 | Trace 分析 |
+
+#### 18.2.3 核心评估方法论提炼
+
+**方法 1：LLM-as-a-Judge（LLM 评判）**
+- **核心思想**：用 LLM 评估 LLM 输出
+- **三大可靠性支柱**（Microsoft Foundry 2026.01）：
+  1. Human Alignment（与人类判断一致）
+  2. Self-Consistency（自身一致性）
+  3. Inter-Model Agreement（模型间一致性）
+- **风险**：位置偏见、长度偏见、自我偏好、跨语言退化
+- **缓解**：盲评、多模型交叉评审、temperature=0、多次采样取平均
+
+**方法 2：Trajectory Evaluation（轨迹评估）**
+- **核心思想**：评估 Agent 完整执行轨迹，而非仅最终输出
+- **关键指标**（TRAJECT-Bench）：
+  - Tool Selection Accuracy（工具选择准确率）
+  - Argument Correctness（参数正确性）
+  - Dependency/Order Satisfaction（依赖/顺序满足度）
+  - Premature Invocation Rate（过早调用率）
+  - Clue Adherence Rate（线索遵循率）
+- **优势**：暴露中间失败，可定位根因
+
+**方法 3：Rejection-Recovery Decomposition（拒绝-恢复分解）**
+- **核心思想**：错误检测和错误恢复是相互独立的能力
+- **指标**：拒绝率、恢复率、独立评估两者
+
+**方法 4：Multi-dimensional Rubric（多维评分量表）**
+- **核心思想**：7 维评分（正确性、完整性、相关性、安全性、效率、鲁棒性、个性化）
+- **应用**：GAIA Agent Eval Benchmark
+- **格式**：每维 1-5 分，加权聚合
+
+### 18.3 DotaHelperAgent 评估框架设计
+
+基于业界方法论，结合 DotaHelperAgent 实际场景，设计三层评估体系。
+
+#### 18.3.1 评估三层架构
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                   L1: 离线评测（开发阶段）                    │
+│   - 标准测试集（自建 DotaBench）                              │
+│   - 单元测试 + 集成测试                                       │
+│   - LLM-as-a-Judge + 规则评分                                 │
+└──────────────────────────┬──────────────────────────────────┘
+                           ↓
+┌─────────────────────────────────────────────────────────────┐
+│                   L2: 在线评测（生产阶段）                    │
+│   - Trace 记录                                              │
+│   - 用户反馈（显式评分 + 隐式行为）                            │
+│   - 实时监控仪表板                                            │
+└──────────────────────────┬──────────────────────────────────┘
+                           ↓
+┌─────────────────────────────────────────────────────────────┐
+│                   L3: 回归测试（发布阶段）                    │
+│   - 基线对比                                                 │
+│   - A/B 测试                                                 │
+│   - 版本对比报告                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+#### 18.3.2 评估维度定义
+
+为 DotaHelperAgent 定义 7 维评分量表（参考 GAIA + TRAJECT-Bench）：
+
+| 维度 | 权重 | 评估目标 | 评分标准（1-5） |
+|------|------|---------|---------------|
+| **正确性** | 25% | 答案是否准确 | 1=完全错误 2=部分正确 3=基本正确 4=正确 5=完全准确 |
+| **完整性** | 15% | 是否覆盖所有要点 | 1=缺失严重 3=部分覆盖 5=完整覆盖 |
+| **相关性** | 15% | 是否切题 | 1=答非所问 3=部分切题 5=精准切题 |
+| **工具选择** | 15% | 工具是否合适 | 1=选错工具 3=勉强可用 5=最优选择 |
+| **效率** | 10% | 步骤是否精简 | 1=严重冗余 3=有冗余 5=最优路径 |
+| **鲁棒性** | 10% | 异常处理 | 1=崩溃 3=部分降级 5=优雅降级 |
+| **个性化** | 10% | 是否贴合用户风格 | 1=通用模板 3=部分个性化 5=高度定制 |
+
+#### 18.3.3 Skill 评估指标（轻量级）
+
+针对 Skill（单次 LLM 调用）的评估指标：
+
+| 指标 | 计算方式 | 目标值 |
+|------|---------|--------|
+| **任务成功率** | 成功调用数 / 总调用数 | ≥ 95% |
+| **响应时间 P50** | 中位数耗时 | < 2s |
+| **响应时间 P99** | 99 分位耗时 | < 5s |
+| **降级触发率** | 降级调用数 / 总调用数 | < 10% |
+| **LLM Judge 评分** | 7 维加权平均 | ≥ 4.0/5.0 |
+| **用户满意度** | 显式评分平均 | ≥ 4.0/5.0 |
+| **置信度校准** | 预测置信度与实际准确率相关性 | ≥ 0.7 |
+
+#### 18.3.4 SubAgent 评估指标（多步推理）
+
+针对 SubAgent（多步推理循环）的评估指标（参考 TRAJECT-Bench + AgentProp-Bench）：
+
+| 指标 | 计算方式 | 目标值 | 来源 |
+|------|---------|--------|------|
+| **任务成功率** | 成功完成任务 / 总任务 | ≥ 90% | AgentBench |
+| **工具选择准确率** | 正确工具选择 / 总工具调用 | ≥ 85% | TRAJECT-Bench |
+| **参数正确率** | 正确参数 / 总参数 | ≥ 80% | TRAJECT-Bench |
+| **依赖满足度** | 正确顺序执行 / 总任务 | ≥ 90% | TRAJECT-Bench |
+| **过早调用率** | 过早调用次数 / 总调用 | < 10% | AgentEscapeBench |
+| **线索遵循率** | 遵循关键线索 / 总线索 | ≥ 80% | AgentEscapeBench |
+| **平均步数** | 总步数 / 任务数 | ≤ 5 步 | 业务基准 |
+| **最大步数** | 单任务最大步数 | ≤ max_steps | 配置限制 |
+| **错误传播率** | 错误步骤数 / 总步骤 | < 15% | AgentProp-Bench |
+| **拒绝率** | 主动拒绝错误 / 应拒绝总数 | ≥ 70% | AgentProp-Bench |
+| **恢复率** | 错误后恢复 / 错误总数 | ≥ 60% | AgentProp-Bench |
+| **执行时间 P99** | 99 分位耗时 | < 15s | 业务基准 |
+| **降级触发率** | 降级调用数 / 总调用 | < 15% | 业务基准 |
+| **LLM Judge 轨迹分** | 7 维加权平均 | ≥ 3.8/5.0 | 自定义 |
+
+#### 18.3.5 评估方法选择
+
+| 评估场景 | 推荐方法 | 原因 |
+|---------|---------|------|
+| **单元测试** | 规则匹配 + 字符串匹配 | 精确、可重复 |
+| **功能测试** | LLM-as-a-Judge (G-Eval) | 处理开放性答案 |
+| **轨迹测试** | LLM-as-a-Judge + 规则混合 | 同时评估过程和结果 |
+| **回归测试** | 基线对比 + 多模型投票 | 稳定性、可对比 |
+| **用户反馈** | 显式评分 + 隐式行为 | 真实场景信号 |
+| **A/B 测试** | 统计显著性检验 | 决策依据 |
+
+### 18.4 自建评测集 DotaBench
+
+由于 Dota 2 领域无公开评测集，需要构建自有的评测集。
+
+#### 18.4.1 评测集结构
+
+```
+DotaBench/
+├── skill_bench/
+│   ├── lineup_analyzer/
+│   │   ├── cases.jsonl          # 测试用例
+│   │   ├── expected.jsonl        # 期望输出
+│   │   └── judge_prompts.yaml   # Judge prompt
+│   ├── dialogue_understander/
+│   ├── meta_analyzer/
+│   ├── knowledge_query/
+│   └── web_search/
+├── subagent_bench/
+│   ├── counter_pick/
+│   ├── item_recommender/
+│   ├── skill_builder/
+│   ├── event_advisor/
+│   ├── proactive_recommender/
+│   └── feedback_learner/
+├── e2e_bench/
+│   ├── user_scenarios.jsonl     # 端到端场景
+│   └── eval_scenarios.yaml      # 场景定义
+└── human_eval/
+    ├── sample_pool.jsonl        # 人工评估样本池
+    └── rubrics.yaml             # 评分量表
+```
+
+#### 18.4.2 测试用例设计原则
+
+1. **覆盖度**：覆盖各 Skill/SubAgent 的典型场景
+2. **难度分层**：简单（30%）、中等（50%）、困难（20%）
+3. **多样性**：包含正常输入、边界输入、异常输入
+4. **可对比**：每条用例都有期望输出（参考答案）
+5. **可扩展**：支持增量添加新用例
+
+#### 18.4.3 测试用例示例
+
+**Skill 用例：阵容分析**
+
+```json
+{
+  "case_id": "lineup_001",
+  "input": {
+    "radiant_heroes": ["幻影刺客", "水晶室女", "潮汐猎人", "剧毒术士", "发条技师"],
+    "dire_heroes": ["敌法师", "莉娜", "莱恩", "沙王", "巫医"]
+  },
+  "expected": {
+    "key_points": [
+      "己方有 PA + 水晶室女的高爆发组合",
+      "己方控制能力强（潮汐、剧毒、发条）",
+      "敌方有敌法师克制 PA",
+      "敌方控制偏弱（莱恩、沙王单体控制）"
+    ],
+    "verdict": "己方阵容控制强、爆发高，敌方单体控制多"
+  },
+  "difficulty": "medium",
+  "tags": ["control", "burst", "anti-carry"]
+}
+```
+
+**SubAgent 用例：英雄克制**
+
+```json
+{
+  "case_id": "counter_pick_001",
+  "input": {
+    "enemy_heroes": ["幻影刺客", "火枪手"]
+  },
+  "expected": {
+    "top_recommendations": [
+      {"hero": "敌法师", "reason": "法术免疫克制 PA 标记"},
+      {"hero": "潮汐猎人", "reason": "技能增强降低 PA 暴击伤害"},
+      {"hero": "末日使者", "reason": "大招无视 BKB"}
+    ],
+    "must_include_heroes": ["敌法师", "潮汐猎人"]
+  },
+  "difficulty": "easy",
+  "tags": ["counter", "pa", "sniper"]
+}
+```
+
+### 18.5 LLM-as-a-Judge 设计
+
+参考 [Microsoft Foundry 2026.01 报告](https://techcommunity.microsoft.com/blog/azure-ai-foundry-blog/evaluating-ai-agents-can-llm%E2%80%91as%E2%80%91a%E2%80%91judge-evaluators-be-trusted/4480110) 的三大可靠性支柱，设计可靠的 Judge。
+
+#### 18.5.1 Judge 评分 Prompt 模板
+
+```yaml
+lineup_analyzer_judge:
+  system: |
+    你是一名 Dota 2 阵容分析质量评估专家。
+    请基于以下 7 个维度评估输出质量（1-5 分）：
+    1. 正确性（25%）
+    2. 完整性（15%）
+    3. 相关性（15%）
+    4. 工具选择（15%）
+    5. 效率（10%）
+    6. 鲁棒性（10%）
+    7. 个性化（10%）
+  
+  template: |
+    ## 输入
+    己方阵容：{radiant_heroes}
+    敌方阵容：{dire_heroes}
+    
+    ## 期望关键点
+    {expected_points}
+    
+    ## 实际输出
+    {actual_output}
+    
+    ## 评估
+    请按 7 维度评分，并给出总分（加权平均）和简要理由。
+    
+    输出 JSON 格式：
+    {{
+      "correctness": 1-5,
+      "completeness": 1-5,
+      "relevance": 1-5,
+      "tool_selection": 1-5,
+      "efficiency": 1-5,
+      "robustness": 1-5,
+      "personalization": 1-5,
+      "total_score": 加权平均,
+      "reasoning": "评分理由"
+    }}
+```
+
+#### 18.5.2 Judge 可靠性保障
+
+| 风险 | 缓解措施 |
+|------|---------|
+| 位置偏见 | 盲评（打乱 A/B 顺序） |
+| 长度偏见 | 限制输入长度，明确相关性 > 长度 |
+| 自我偏好 | 使用不同家族的 LLM 作为 Judge |
+| 采样噪声 | temperature=0，多次采样取平均（≥3 次） |
+| 模型间分歧 | 多模型投票（GPT-4o + Claude + Gemini） |
+| 跨语言退化 | 始终使用中文，避免混入英文术语 |
+
+#### 18.5.3 Judge 校准方法
+
+借鉴 [BabelJudge](https://arxiv.org/pdf/2606.22329) 的"Gold-labelling by degradation"思想：
+
+1. **准备参考答案**：人工标注的高质量答案
+2. **构造扰动样本**：对参考答案进行可控扰动（删除、错误、冗余）
+3. **测试 Judge 一致性**：扰动样本应被 Judge 识别为低分
+4. **持续校准**：每月重新校准一次
+
+### 18.6 评估工具选型
+
+#### 18.6.1 推荐方案
+
+| 评估场景 | 推荐工具 | 理由 |
+|---------|---------|------|
+| 单元测试 | **pytest** + 自定义评估器 | 项目已有基础 |
+| LLM-as-a-Judge | **DeepEval** | pytest 风格，CI 集成好，**G-Eval/DAG/QAG** 三种方法 |
+| 轨迹评估 | **MLflow Tracing** + 自定义评分 | 业内最广泛使用 |
+| 知识查询 RAG 指标 | **Ragas** | RAG 评测起家，faithfulness/context_precision 等指标完善 |
+| 可视化 | **MLflow UI** / **Arize Phoenix** | Trace 时间线可视化 |
+| 在线监控 | **Langfuse**（已有） | 项目已集成 |
+| 自建场景 | **自研 DotaBench** | 领域特定 |
+
+#### 18.6.2 与现有系统集成
+
+DotaHelperAgent 已有 Langfuse Trace 系统，可直接复用：
+
+- Trace 记录每步执行（已有）
+- 评估结果记录到 Trace（新增）
+- 用户反馈关联 Trace（已有）
+- 评分上报 Langfuse Score（已有）
+
+### 18.7 评估实施计划
+
+#### 18.7.1 分阶段实施
+
+| 阶段 | 时间 | 任务 | 验收标准 |
+|------|------|------|---------|
+| **阶段 1** | 第 1-2 周 | 构建 DotaBench 评测集（各 Skill/SubAgent 至少 30 条用例） | 评测集覆盖度 > 80% |
+| **阶段 2** | 第 2-3 周 | 实现 LLM-as-a-Judge（7 维评分）+ DeepEval 集成 | Judge 评分与人工评分一致性 > 80% |
+| **阶段 3** | 第 3-4 周 | 实现 Trajectory 评估（针对 SubAgent） | 轨迹评分与专家分析一致 |
+| **阶段 4** | 第 4-5 周 | 实现回归测试 + A/B 测试框架 | 自动化回归报告 |
+| **阶段 5** | 第 5-6 周 | 在线监控仪表板 + 告警 | 实时监控上线 |
+| **阶段 6** | 第 6 周+ | 持续优化 + Judge 校准 | 持续改进 |
+
+#### 18.7.2 验收标准
+
+1. **评测集覆盖度**：DotaBench 至少 200 条用例，覆盖所有 Skill/SubAgent
+2. **Judge 可靠性**：Judge 评分与人工评分一致性 ≥ 80%
+3. **自动化程度**：CI 集成回归测试，每次 PR 触发
+4. **可视化**：评估仪表板支持多维筛选、趋势分析
+5. **响应时间**：单次评估 < 30s（LLM Judge）
+6. **成本控制**：月度评估成本 < $100
+
+### 18.8 风险与缓解
+
+| 风险 | 缓解措施 |
+|------|---------|
+| LLM Judge 偏见 | 多模型投票、盲评、temperature=0 |
+| 评测集偏差 | 持续扩充用例，覆盖边缘情况 |
+| 评估成本高 | 关键场景用 GPT-4o，大规模用开源 LLaMA 3 70B |
+| 评估延迟 | 异步执行，CI 缓存结果 |
+| 主观维度难量化 | 多评估员平均，明确评分标准 |
+| 游戏版本变化 | 评测集随版本更新，建立版本映射 |
+
+### 18.9 持续改进机制
+
+1. **每周**：CI 回归测试，输出评分趋势
+2. **每月**：Judge 校准，更新评测集
+3. **每版本**：A/B 测试新方案，统计显著性检验
+4. **每季度**：评估体系复盘，引入新方法（如新 LLM Judge 技术）
+
+### 18.10 参考资料
+
+- [TRAJECT-Bench (ICLR 2026)](https://openreview.net/pdf?id=TZWnWvsQ0X) - 轨迹感知评测
+- [AgentProp-Bench](https://arxiv.org/html/2604.16706v1) - 错误传播分析
+- [BabelJudge](https://arxiv.org/pdf/2606.22329) - LLM Judge 可靠性
+- [Microsoft Foundry: LLM-as-a-Judge Reliability](https://techcommunity.microsoft.com/blog/azure-ai-foundry-blog/evaluating-ai-agents-can-llm%E2%80%91as%E2%80%91a%E2%80%91judge-evaluators-be-trusted/4480110) - 三大可靠性支柱
+- [WebArena](https://arxiv.org/html/2307.13854v4) - 任务成功率评估
+- [MLflow Top 5 Agent Evaluation Tools](https://mlflow.org/top-5-agent-evaluation-frameworks/) - 工具对比
+- [DeepEval LLM-as-a-Judge Guide](https://deepeval.com/guides/guides-llm-as-a-judge) - G-Eval/DAG/QAG
+- [GAIA Agent Eval Benchmark](https://amd-gaia.ai/docs/eval) - 7 维评分量表
+- [Agent 评测不能只看答案：从 Output Eval 到 Trajectory Eval](https://blog.csdn.net/Huang_ZX_259/article/details/162561227) - Output vs Trajectory
+- [Evaluating AI Agents: Metrics and Best Practices (Maxim AI)](https://www.getmaxim.ai/articles/evaluating-ai-agents-metrics-and-best-practices/) - 评估最佳实践
+
+---
+
+> **文档版本**: v1.3  
+> **最后更新**: 2026-07-06

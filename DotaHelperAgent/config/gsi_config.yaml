@@ -48,5 +48,27 @@ sse:
   heartbeat_interval: 30
   max_queue_size: 50
 
+voice:
+  enabled: true
+  volume: 0.7
+  resources_dir: "resources/voice"
+  events:
+    game_start: true
+    stack: true
+    rune_mid: true
+    rune_bounty: true
+    rune_wisdom: true
+    rune_lotus: true
+    neutral: true
+    daytime: true
+    nighttime: true
+    roshan: true
+    tormentor: true
+    shard: true
+    ward_purchase: true
+    kill: false
+    death: true
+    level_up: true
+
 logging:
   level: "INFO"

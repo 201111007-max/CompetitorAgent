@@ -2,3 +2,7 @@
 # 安装命令: pip install -r requirements-optional.txt
 
 langfuse>=2.0.0
+
+# 可选依赖 - 语音提醒系统
+# 安装命令: pip install pygame
+pygame>=2.0.0
