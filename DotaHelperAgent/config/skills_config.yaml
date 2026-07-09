@@ -1,0 +1,29 @@
+# Skill 全局配置
+skills:
+  enabled: true
+  timeout: 30.0
+  fallback_enabled: true
+
+  # 各 Skill 单独配置
+  lineup_analyzer:
+    enabled: true
+    timeout: 15.0
+
+  dialogue_understander:
+    enabled: true
+    timeout: 10.0
+
+  meta_analyzer:
+    enabled: true
+    timeout: 20.0
+    cache_ttl: 3600
+
+  knowledge_query:
+    enabled: true
+    timeout: 15.0
+    top_k: 5
+
+  web_search:
+    enabled: true
+    timeout: 20.0
+    max_results: 5

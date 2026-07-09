@@ -2937,6 +2937,55 @@ def get_tools() -> Response:
         return jsonify(tools)
 
 
+@app.route('/api/skills', methods=['GET'])
+def list_skills() -> Response:
+    """列出所有已注册的 Skill"""
+    if agent_controller and hasattr(agent_controller, 'skill_registry'):
+        registry = agent_controller.skill_registry
+        skills_info = []
+        for name in registry.list_all():
+            info = registry.get_info(name)
+            if info:
+                skills_info.append(info)
+        return jsonify({"skills": skills_info})
+    return jsonify({"skills": []})
+
+
+@app.route('/api/skills/<name>/invoke', methods=['POST'])
+def invoke_skill(name: str) -> Response:
+    """调用指定 Skill"""
+    if not agent_controller or not hasattr(agent_controller, 'skill_registry'):
+        return jsonify({"success": False, "error": "Skill system not initialized"}), 503
+
+    try:
+        from skills import SkillContext
+        import asyncio
+
+        data = request.json or {}
+        input_data = data.get("input")
+        context_data = data.get("context", {})
+
+        context = SkillContext(
+            session_id=context_data.get("session_id"),
+            user_id=context_data.get("user_id"),
+            trace_id=context_data.get("trace_id"),
+        )
+
+        registry = agent_controller.skill_registry
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result = loop.run_until_complete(
+                registry.invoke(name, input_data, context)
+            )
+            return jsonify(result.to_dict())
+        finally:
+            loop.close()
+    except Exception as e:
+        app_logger.error(f"调用 Skill '{name}' 失败: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/memory/stats', methods=['GET'])
 def get_memory_stats() -> Response:
     """获取 Memory 系统统计信息"""

@@ -1,0 +1,122 @@
+prompts:
+  lineup_analysis:
+    description: "阵容分析 Prompt"
+    version: 1
+    content: |
+      你是一名专业的 Dota 2 阵容分析专家。
+
+      ## 己方阵容
+      {{radiant_heroes}}
+
+      ## 敌方阵容
+      {{dire_heroes}}
+
+      ## 数据参考
+      {{structured_analysis}}
+
+      请分析双方阵容优劣势，包括：
+      1. 己方阵容优势（控制、爆发、推进、分推等）
+      2. 己方阵容劣势（被克制、缺少某些能力）
+      3. 敌方阵容优势
+      4. 敌方阵容劣势
+      5. 关键对决点
+      6. 整体胜率评估
+
+      请用简洁清晰的语言输出，控制在 300 字以内。
+    variables:
+      - radiant_heroes
+      - dire_heroes
+      - structured_analysis
+    metadata:
+      author: "system"
+      tags: ["skill", "lineup_analysis"]
+
+  dialogue_understand:
+    description: "多轮对话理解 Prompt"
+    version: 1
+    content: |
+      你是一名 Dota 2 助手，需要理解用户的对话上下文。
+
+      ## 对话历史
+      {{history}}
+
+      ## 当前用户输入
+      {{current_input}}
+
+      请以 JSON 格式输出，不要包含其他内容：
+      {
+        "enhanced_query": "消解后的完整查询",
+        "intent": "recommend_heroes | recommend_items | recommend_skills | analyze_matchups | general",
+        "entities": {
+          "heroes": ["英雄列表"],
+          "items": ["物品列表"],
+          "skills": ["技能列表"]
+        },
+        "context_used": true
+      }
+    variables:
+      - history
+      - current_input
+    metadata:
+      author: "system"
+      tags: ["skill", "dialogue_understand"]
+
+  meta_query:
+    description: "版本强势查询 Prompt"
+    version: 1
+    content: |
+      你是一名 Dota 2 版本分析师。
+
+      ## 当前版本数据
+      {{meta_data}}
+
+      ## 用户问题
+      {{user_query}}
+
+      请根据版本数据回答用户问题，控制在 200 字以内。
+    variables:
+      - meta_data
+      - user_query
+    metadata:
+      author: "system"
+      tags: ["skill", "meta_query"]
+
+  knowledge_query_skill:
+    description: "知识查询 Skill Prompt"
+    version: 1
+    content: |
+      基于以下攻略资料回答用户问题：
+
+      ## 攻略资料
+      {{context}}
+
+      ## 用户问题
+      {{query}}
+
+      请给出准确、简洁的回答。如果资料不足，请明确说明。
+    variables:
+      - context
+      - query
+    metadata:
+      author: "system"
+      tags: ["skill", "knowledge_query"]
+
+  web_search_skill:
+    description: "智能搜索 Skill Prompt"
+    version: 1
+    content: |
+      基于以下搜索结果回答用户问题：
+
+      ## 搜索结果
+      {{results}}
+
+      ## 用户问题
+      {{query}}
+
+      请给出简洁准确的回答，并标注信息来源。如果搜索结果为空或不足，请明确说明。
+    variables:
+      - results
+      - query
+    metadata:
+      author: "system"
+      tags: ["skill", "web_search"]

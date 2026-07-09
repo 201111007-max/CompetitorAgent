@@ -259,6 +259,110 @@ class AgentController:
         # 初始化知识管理系统
         self._init_knowledge_system()
 
+        # 初始化 Skill 系统
+        self._init_skill_system()
+
+    def _load_skills_config(self) -> Dict[str, Any]:
+        """加载 Skill 配置"""
+        try:
+            import yaml
+            config_path = Path(__file__).parent.parent / "config" / "skills_config.yaml"
+            if config_path.exists():
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    return yaml.safe_load(f).get("skills", {})
+        except Exception as e:
+            logger.warning(f"加载 Skill 配置失败: {e}")
+        return {"enabled": True}
+
+    def _init_skill_system(self) -> None:
+        """初始化并注册所有 Skill"""
+        try:
+            from skills import get_registry, SkillContext
+            from skills.lineup_analyzer import LineupAnalyzerSkill
+            from skills.dialogue_understander import DialogueUnderstanderSkill
+            from skills.meta_analyzer import MetaAnalyzerSkill
+            from skills.knowledge_query import KnowledgeQuerySkill
+            from skills.web_search import WebSearchSkill
+            from analyzers.hero_analyzer import HeroAnalyzer
+            from utils.api_client import OpenDotaClient
+            from tools.search_tools import DuckDuckGoSearchTool
+
+            registry = get_registry()
+            skills_config = self._load_skills_config()
+
+            if not skills_config.get("enabled", True):
+                logger.info("Skill 系统未启用")
+                self.skill_registry = registry
+                return
+
+            # 阵容分析 Skill
+            hero_analyzer = HeroAnalyzer(client=OpenDotaClient())
+            lineup_config = skills_config.get("lineup_analyzer", {})
+            if lineup_config.get("enabled", True):
+                registry.register(LineupAnalyzerSkill(
+                    llm_client=self.llm_client,
+                    hero_analyzer=hero_analyzer,
+                    prompt_manager=self.prompt_manager,
+                    timeout=lineup_config.get("timeout", 15.0),
+                ))
+
+            # 多轮对话理解 Skill
+            dialogue_config = skills_config.get("dialogue_understander", {})
+            if dialogue_config.get("enabled", True):
+                registry.register(DialogueUnderstanderSkill(
+                    llm_client=self.llm_client,
+                    context_augmenter=self.context_augmenter,
+                    prompt_manager=self.prompt_manager,
+                    timeout=dialogue_config.get("timeout", 10.0),
+                ))
+
+            # 版本强势查询 Skill
+            async def fetch_meta() -> Dict[str, Any]:
+                from tools.hero_tools import GetMetaHeroesTool
+                tool = GetMetaHeroesTool(client=OpenDotaClient())
+                return tool._get_meta(limit=20)
+
+            meta_config = skills_config.get("meta_analyzer", {})
+            if meta_config.get("enabled", True):
+                registry.register(MetaAnalyzerSkill(
+                    llm_client=self.llm_client,
+                    data_fetcher=fetch_meta,
+                    prompt_manager=self.prompt_manager,
+                    cache_ttl=meta_config.get("cache_ttl", 3600),
+                    timeout=meta_config.get("timeout", 20.0),
+                ))
+
+            # 知识查询 Skill
+            knowledge_config = skills_config.get("knowledge_query", {})
+            if knowledge_config.get("enabled", True) and self.knowledge_enabled and self.vector_store:
+                registry.register(KnowledgeQuerySkill(
+                    llm_client=self.llm_client,
+                    vector_store=self.vector_store,
+                    fusion_engine=self.fusion_engine,
+                    prompt_manager=self.prompt_manager,
+                    top_k=knowledge_config.get("top_k", 5),
+                    timeout=knowledge_config.get("timeout", 15.0),
+                ))
+
+            # 智能搜索 Skill
+            web_config = skills_config.get("web_search", {})
+            if web_config.get("enabled", True):
+                registry.register(WebSearchSkill(
+                    llm_client=self.llm_client,
+                    search_engine=DuckDuckGoSearchTool(),
+                    prompt_manager=self.prompt_manager,
+                    max_results=web_config.get("max_results", 5),
+                    timeout=web_config.get("timeout", 20.0),
+                ))
+
+            self.skill_registry = registry
+            logger.info(f"Skill 系统初始化完成，已注册 {len(registry.list_all())} 个 Skill")
+
+        except Exception as e:
+            logger.warning(f"Skill 系统初始化失败: {e}")
+            from skills import get_registry
+            self.skill_registry = get_registry()
+
     def _init_knowledge_system(self) -> None:
         """初始化知识管理系统"""
         try:

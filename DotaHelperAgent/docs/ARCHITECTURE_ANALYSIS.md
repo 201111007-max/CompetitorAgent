@@ -1,6 +1,6 @@
 # DotaHelperAgent 待改进事项
 
-> 最后更新：2026-06-24
+> 最后更新：2026-07-09
 
 ## 一、待改进优先级
 
@@ -16,7 +16,7 @@
 | **第二阶段** | **GSI 实时数据处理** | **P1** | 2-3周 | GSI服务器 + 状态管理 + 事件处理 | ✅ 已完成 |
 | **第三阶段** | **推理和决策能力增强** | **P1** | 3-4周 | 数据驱动决策 + 混合推理 | ✅ 已完成 |
 | **第四阶段** | **个性化学习能力** | **P2** | 2-3周 | 用户画像 + 在线学习 | ✅ 已完成 |
-| **第五阶段** | **多模态交互能力** | **P2** | 1-2周 | 语音播报 + 数据可视化 | 🔄 部分完成（前端样式 ✅ 2026-06-14；语音提醒 ❌ 待实现） |
+| **第五阶段** | **多模态交互能力** | **P2** | 1-2周 | 语音播报 + 数据可视化 | ✅ 已完成（前端样式 2026-06-14；语音提醒 2026-06-29） |
 
 
 ### 1.2 详细待办事项清单
@@ -37,7 +37,7 @@
 | **P1** | **工具执行并行化** | 中 | 中 | - | ✅ 已完成 |
 | P2 | 前端样式优化 | 中 | 中 | **第五阶段** | ✅ 已完成 |
 | P2 | 用户反馈学习 | 大 | 中 | **第四阶段** | ✅ 已完成 |
-| P2 | 语音提醒系统 | 中 | 低 | **第五阶段** | ❌ 待实现 |
+| P2 | 语音提醒系统 | 中 | 低 | **第五阶段** | ✅ 已完成（2026-06-29） |
 | P1 | 上下文压缩：修复重复压缩 bug | 小 | 中 | - | ✅ 已完成 |
 | P1 | 上下文压缩：摘要生成升级为 LLM 驱动 | 中 | 高 | - | ✅ 已完成 |
 | P2 | 上下文压缩：分层压缩策略（完整/轻量/深度） | 中 | 中 | - | ✅ 已完成 |
@@ -61,6 +61,7 @@
 | P2 | 反思结果驱动策略调整 | 2026-05-17 | `core/agent_controller.py#_adjust_strategy` |
 | P2 | 前端样式优化 | 2026-06-14 | `frontend/src/components/` + `frontend/src/styles/dota-theme.css` |
 | P2 | 用户反馈学习 | 2026-06-25 | `feedback/` + `config/feedback_config.yaml` + `web/app.py` |
+| P2 | 语音提醒系统 | 2026-06-29 | `utils/voice_player.py` + `gsi/event_handler.py` + `config/gsi_config.yaml` + `web/app.py` |
 
 ---
 
@@ -82,7 +83,7 @@
 - ✅ **用户反馈学习**（P2）→ 第四阶段在线学习引擎
 
 **第五阶段：多模态交互能力** 整合了以下待办项：
-- ❌ **语音提醒系统**（P2）→ 第五阶段语音播报功能（**待实现**，参考 [第十五章](#十五p2语音提醒系统)）
+- ✅ **语音提醒系统**（P2）→ 第五阶段语音播报功能（已完成，2026-06-29）
 - ✅ **前端样式优化**（P2）→ 第五阶段数据可视化（已完成，2026-06-14）
 
 #### 1.3.2 新增待办项
@@ -119,7 +120,7 @@
 2. ~~**第二阶段（P1）**：GSI 实时数据处理 - 实现实时监控能力~~ ✅ 已完成（2026-06-22）
 3. ~~**第三阶段（P1）**：推理和决策能力增强 - 提升决策质量~~ ✅ 已完成（2026-06-24）
 4. ~~**第四阶段（P2）**：个性化学习能力 - 实现个性化推荐~~ ✅ 已完成（2026-06-25）
-5. **第五阶段（P2）**：多模态交互能力 - 提升用户体验（前端样式 ✅ 已完成；语音提醒 ❌ 待实现）
+5. ~~**第五阶段（P2）**：多模态交互能力 - 提升用户体验~~ ✅ 已完成（前端样式 2026-06-14；语音提醒 2026-06-29）
 
 **关键依赖关系**：
 - ~~第二阶段依赖第一阶段（知识库支持决策推荐）~~ ✅ 第一阶段已完成
@@ -737,13 +738,22 @@ STACK_PROMPT = """你是一个Dota 2游戏教练，正在指导玩家堆野。
 
 ---
 
-## 十五、P2：语音提醒系统 ❌
+## 十五、P2：语音提醒系统 ✅
+
+**实现状态**: ✅ 已完成（2026-06-29）
 
 **目标**: 提供语音提醒功能，增强游戏事件提醒的感知度
 
 **参考项目**: `dota2-game-helper` - 语音播放实现
 
-**实现位置**: `utils/voice_player.py` - 语音播放器（新建）
+**实现位置**:
+- `utils/voice_player.py` - 语音播放器（独立模块，支持 pygame 静默降级）
+- `resources/voice/` - 13 个预录制语音文件
+- `gsi/event_handler.py` - 事件触发语音播放
+- `config/gsi_config.yaml` - 语音配置（开关、音量、事件启用状态）
+- `web/app.py` - 4 个 `/api/voice/*` 控制端点
+- `tests/utils/test_voice_player.py` - 单元测试
+- `tests/integration/test_voice_integration.py` - 集成测试
 
 **核心功能**:
 - 语音播放功能（播放预录制的语音文件）
@@ -770,26 +780,42 @@ STACK_PROMPT = """你是一个Dota 2游戏教练，正在指导玩家堆野。
 
 **实现方案**:
 
-```python
-# utils/voice_player.py
-import pygame
-import os
+实际实现采用配置注入 + 事件类型映射 + 静默降级设计：
 
+```python
+# utils/voice_player.py（核心逻辑）
 class VoicePlayer:
-    """语音播放器"""
-    
-    def __init__(self, resources_dir: str = "resources/"):
-        self.resources_dir = resources_dir
-        pygame.mixer.init()
-    
-    def play(self, voice_type: str):
-        """播放语音"""
-        voice_file = os.path.join(self.resources_dir, f"{voice_type}.wav")
-        if os.path.exists(voice_file):
-            pygame.mixer.Sound(voice_file).play()
-        else:
-            logging.warning(f"Voice file not found: {voice_file}")
+    EVENT_VOICE_MAP = {
+        "game_start": "prologue.wav",
+        "stack": "alarm_stack.wav",
+        "rune_mid": "alarm_mid_runes.wav",
+        # ... 共 13 种事件映射
+    }
+
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        self._config = config or {}
+        self._enabled = self._config.get("enabled", True)
+        self._volume = self._config.get("volume", 0.7)
+        self._resources_dir = self._config.get("resources_dir", "resources/voice")
+        self._event_settings = self._config.get("events", {})
+        # pygame 未安装或初始化失败时静默降级
+
+    def play(self, event_type: str) -> None:
+        if not self._enabled or not self._event_settings.get(event_type, True):
+            return
+        voice_file = self.EVENT_VOICE_MAP.get(event_type)
+        if voice_file:
+            full_path = os.path.join(self._resources_dir, voice_file)
+            if os.path.exists(full_path):
+                sound = pygame.mixer.Sound(full_path)
+                sound.set_volume(self._volume)
+                sound.play()
 ```
+
+**集成点**:
+- [`gsi/event_handler.py`](../../gsi/event_handler.py) 在 `_emit()` 中调用 `voice_player.play(event_type)`
+- [`config/gsi_config.yaml`](../../config/gsi_config.yaml) 中 `voice` 段控制默认开关、音量和各事件启用状态
+- [`web/app.py`](../../web/app.py) 提供 `/api/voice/status`、`/api/voice/toggle`、`/api/voice/volume`、`/api/voice/event` 四个运行时控制端点
 
 **预期收益**:
 - 提醒感知度增强（语音比文字更直观）
@@ -1480,5 +1506,5 @@ DotaHelperAgent 已有 Langfuse Trace 系统，可直接复用：
 
 ---
 
-> **文档版本**: v1.3  
-> **最后更新**: 2026-07-06
+> **文档版本**: v1.4  
+> **最后更新**: 2026-07-09
