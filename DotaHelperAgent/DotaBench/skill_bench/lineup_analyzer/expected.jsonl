@@ -1,0 +1,5 @@
+{"case_id": "lineup_001", "key_points": ["己方有 PA + 水晶室女的高爆发组合", "己方控制能力强（潮汐、剧毒、发条）", "敌方有敌法师克制 PA", "敌方控制偏弱（莱恩、沙王单体控制）"], "must_include_heroes": ["幻影刺客", "敌法师"], "verdict": "己方阵容控制强、爆发高，敌方单体控制多"}
+{"case_id": "lineup_002", "key_points": ["己方全球流（幽鬼、先知）", "己方大招流（沉默、天怒大招）", "敌方偏中后期团战（斯温、术士）"], "must_include_heroes": ["幽鬼", "斯温"], "verdict": "己方全球流克敌方团战阵容"}
+{"case_id": "lineup_003", "key_points": ["己方分推能力强", "己方有米波+齐天大圣的分推核心", "敌方团战能力强（剃刀、死亡先知、半人马）"], "must_include_heroes": ["米波", "剃刀"], "verdict": "己方分推 vs 敌方团战"}
+{"case_id": "lineup_004", "key_points": ["应能处理空输入"], "must_include_heroes": [], "verdict": "应提示输入无效"}
+{"case_id": "lineup_005", "key_points": ["镜像对局", "单英雄分析"], "must_include_heroes": ["虚无之灵"], "verdict": "镜像对局无明显克制"}

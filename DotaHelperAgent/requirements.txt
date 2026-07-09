@@ -27,3 +27,14 @@ sentence-transformers>=2.2.2
 # 安装命令: pip install pygame
 # 或: pip install -r requirements-optional.txt
 # pygame>=2.0.0
+
+# 评测系统依赖（推荐安装）
+# 安装命令: pip install pytest pytest-asyncio scipy
+# pytest>=7.0.0
+# pytest-asyncio>=0.21.0
+# scipy>=1.10.0
+
+# 可选依赖 - 高级评估工具
+# 安装命令: pip install deepeval mlflow
+# deepeval>=0.20.0
+# mlflow>=2.10.0

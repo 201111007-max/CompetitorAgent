@@ -1,0 +1,5 @@
+{"case_id": "lineup_001", "input": {"radiant_heroes": ["幻影刺客", "水晶室女", "潮汐猎人", "剧毒术士", "发条技师"], "dire_heroes": ["敌法师", "莉娜", "莱恩", "沙王", "巫医"]}, "difficulty": "medium", "tags": ["control", "burst", "anti-carry"]}
+{"case_id": "lineup_002", "input": {"radiant_heroes": ["幽鬼", "沉默术士", "天怒法师", "巫医", "光之守卫"], "dire_heroes": ["斯温", "亚巴顿", "马格纳斯", "撼地者", "术士"]}, "difficulty": "medium", "tags": ["teamfight", "global"]}
+{"case_id": "lineup_003", "input": {"radiant_heroes": ["米波", "先知", "兽王", "炼金术士", "齐天大圣"], "dire_heroes": ["剃刀", "死亡先知", "瘟疫法师", "半人马战行者", "发条技师"]}, "difficulty": "hard", "tags": ["split-push", "macro"]}
+{"case_id": "lineup_004", "input": {"radiant_heroes": [], "dire_heroes": []}, "difficulty": "easy", "tags": ["empty-input", "edge-case"]}
+{"case_id": "lineup_005", "input": {"radiant_heroes": ["虚无之灵"], "dire_heroes": ["虚无之灵"]}, "difficulty": "hard", "tags": ["mirror-match", "single-hero"]}
