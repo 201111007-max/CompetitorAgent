@@ -314,7 +314,7 @@ Langfuse 是一个开源的 LLM 应用可观测性平台，提供：
 **实现位置**:
 - `utils/prompt_manager.py` - Prompt 管理器（接口 + 工厂 + 缓存）
 - `utils/prompt_strategy.py` - 策略接口 + Langfuse 策略 + 本地 YAML 策略
-- `config/prompts/` - Prompt 配置目录（5个 YAML 文件）
+- `config/prompts/` - Prompt 配置目录（6个 YAML 文件）
 - `config/prompt_config.yaml` - Prompt 管理配置
 - `tests/utils/test_prompt_manager.py` - Prompt 管理器单元测试（12个用例）
 - `tests/utils/test_prompt_strategy.py` - 策略单元测试（13个用例）
@@ -826,8 +826,8 @@ class VoicePlayer:
 
 ## 十六、Agent 架构升级总体思路 🔄
 
-> **状态**: 🔄 部分完成（第一、二阶段已完成，第三阶段部分完成）
-> **更新时间**: 2026-06-24
+> **状态**: ✅ 已完成（第一至五阶段全部完成，Skill 抽取已完成）
+> **更新时间**: 2026-07-10
 > **说明**: 本章节内容已整合到第一章"待改进优先级"中，作为总体架构升级路线图。详细实施方案请参考各阶段对应的详细文档。
 
 **目标**: 将 DotaHelperAgent 从"被动查询助手"升级为"智能决策推荐系统"
@@ -952,7 +952,7 @@ class VoicePlayer:
 
 ---
 
-#### **第三阶段：推理和决策能力增强**（P1，3-4 周）🔄 部分完成
+#### **第三阶段：推理和决策能力增强**（P1，3-4 周）✅ 已完成
 
 **目标**: 实现数据驱动的决策推荐
 
@@ -1506,5 +1506,636 @@ DotaHelperAgent 已有 Langfuse Trace 系统，可直接复用：
 
 ---
 
-> **文档版本**: v1.4  
-> **最后更新**: 2026-07-09
+## 十九、前沿 Agent 理念融合计划
+
+> 更新时间：2026-07-10
+
+**分析目标**: 基于 2025-2026 年 Agent 领域的前沿技术，识别可融入 DotaHelperAgent 的核心理念，提升项目的技术深度和面试竞争力。
+
+### 19.1 Hermes Agent 核心理念
+
+**来源**: Nous Research（2026.02）
+
+**核心定位**: 自我进化的持久记忆 Agent 框架
+
+#### 19.1.1 六大技术支柱
+
+| 支柱 | 核心理念 | 技术实现 |
+|------|---------|---------|
+| **GEPA 自我进化引擎** | 类反向传播优化 prompt | 100-500 次评估完成策略迭代（传统 RL 需上万次） |
+| **持久记忆架构** | 跨会话记忆不丢失 | MEMORY.md（环境事实）+ USER.md（用户偏好）+ SQLite FTS5 |
+| **技能自动学习** | 任务完成后自动沉淀技能 | 生成 SKILL.md，遵循 agentskills.io 标准，渐进式披露（Level 0/1/2） |
+| **四层记忆系统** | 多粒度记忆管理 | Prompt Memory → Session Archive → Persistent Notes → Dynamic Skills |
+| **子代理并行** | 复杂任务并发处理 | 隔离子代理，RPC 风格工具调用，失败隔离 |
+| **MCP 深度融合** | 工具能力无限扩展 | 支持 stdio + HTTP 双传输，OAuth 2.1 认证 |
+
+#### 19.1.2 与 DotaHelperAgent 对比
+
+| 维度 | Hermes Agent | DotaHelperAgent 当前 | 差距 |
+|------|-------------|---------------------|------|
+| 记忆持久化 | ✅ 跨会话持久化 | ⚠️ 三级记忆但缺少语义检索 | 中等 |
+| 技能沉淀 | ✅ 自动生成 SKILL.md | ⚠️ 已有 Skill 架构但无自动学习 | 较大 |
+| 自我进化 | ✅ GEPA 优化策略 | ❌ 无自我进化机制 | 大 |
+| 子代理并行 | ✅ 隔离子代理 | ❌ 单 Agent | 大 |
+
+### 19.2 Loop Agent 核心理念
+
+**来源**: Anthropic Long-running Harness + Google ADK LoopAgent + Ralph Wiggum Loop
+
+**核心定位**: 迭代式自主执行的 Agent 架构
+
+#### 19.2.1 三大来源与核心理念
+
+| 来源 | 核心理念 | 关键技术 |
+|------|---------|---------|
+| **Anthropic Long-running Harness** | 模型不是产品，Harness 才是 | Stop Hooks + 终止条件 + 进度持久化 |
+| **Google ADK LoopAgent** | 确定性循环执行 | 子代理序列执行 + 最大迭代 + 终止信号 |
+| **Ralph Wiggum Loop** | 自主编码，无需人工干预 | 文件系统持久化 + Git 历史 + 无限重试 |
+
+#### 19.2.2 Anthropic 的 Long-running Agent Harness
+
+**核心洞察**: Agent 失败的原因通常不是模型不够强，而是 Harness（执行框架）设计不当。
+
+**两大失败模式**:
+
+| 失败模式 | 表现 | 原因 |
+|---------|------|------|
+| **上下文焦虑** | 加速执行、跳过步骤、提前结束 | 模型感知到接近上下文窗口限制 |
+| **过早宣布完成** | 声称"完成"但实际只完成 60% | 缺乏明确的终止条件验证 |
+
+**解决方案: Stop Hooks**
+
+```python
+# 核心机制：每次模型回合后调用 hook
+def stop_hook(result):
+    if not tests_pass(result):
+        return "continue"  # 继续执行
+    return "stop"  # 允许停止
+```
+
+**关键设计原则**:
+- **进度持久化**: 将状态存储在文件系统和 Git，而非对话历史
+- **明确终止条件**: 用脚本验证"完成"的定义
+- **上下文管理**: 60% 以下正常执行，60-80% 准备切换，80% 以上强制新上下文
+
+#### 19.2.3 Google ADK LoopAgent
+
+**核心定位**: 确定性工作流代理，按顺序迭代执行子代理。
+
+**架构设计**:
+
+```python
+LoopAgent(
+    sub_agents=[WriterAgent, CriticAgent],
+    max_iterations=5
+)
+```
+
+**执行流程**:
+1. **子代理执行**: 按顺序调用每个子代理
+2. **终止检查**:
+   - 最大迭代次数达到
+   - 子代理发出终止信号（如 "STOP"）
+   - 收敛检测（改进幅度 < 阈值）
+
+**三种终止模式**:
+
+| 模式 | 适用场景 | 示例 |
+|------|---------|------|
+| **固定迭代** | 已知需要多少轮 | "运行 3 轮质量改进" |
+| **条件终止** | 有明确目标 | "优化直到响应时间 < 100ms" |
+| **收敛检测** | 目标未知 | "重构直到 3 轮改进 < 5%" |
+
+#### 19.2.4 Ralph Wiggum Loop（自主编码）
+
+**起源**: 澳大利亚开发者 Geoffrey Huntley 用 5 行 bash 脚本实现自主编码。
+
+**核心脚本**:
+```bash
+while :; do cat PROMPT.md | claude-code ; done
+```
+
+**关键创新**:
+- **文件系统持久化**: 进度存储在文件和 Git，而非对话历史
+- **无限重试**: Agent 自主修复错误，无需人工干预
+- **成本极低**: 5 万美元项目用 297 美元 API 费用完成
+
+**上下文管理策略**:
+- Token 使用 < 60%: 正常执行
+- 60-80%: 完成当前任务后准备切换
+- \> 80%: 强制新上下文，新 Agent 从文件继续
+
+### 19.3 可融入 DotaHelperAgent 的补充方案
+
+#### 19.3.1 P0: Stop Hooks 终止验证（来自 Anthropic）
+
+**现状**: DotaHelperAgent 的 ReAct 循环没有明确的终止验证。
+
+**补充方案**:
+
+```python
+class StopHook:
+    def check(self, result: AgentResult) -> bool:
+        """验证是否满足终止条件"""
+        # 1. 检查用户查询是否完整回答
+        # 2. 检查工具调用是否成功
+        # 3. 检查置信度是否达标
+        return all([
+            self._is_query_answered(result),
+            self._tools_succeeded(result),
+            self._confidence_adequate(result)
+        ])
+```
+
+**实现要点**:
+- 在 `AgentController.solve()` 中集成 StopHook
+- 定义清晰的终止条件（查询回答、工具成功、置信度）
+- 支持自定义终止规则
+
+**预计工作量**: 3-5 天  
+**面试价值**: ⭐⭐⭐⭐⭐ 展现对长时间运行 Agent 的理解
+
+#### 19.3.2 P0: 技能自动沉淀机制（来自 Hermes）
+
+**现状**: DotaHelperAgent 已有 Skill 架构，但技能是静态的，需要人工编写。
+
+**补充方案**:
+
+```
+任务完成 → 反思评估 → 提取成功模式 → 生成 SKILL.md → 注册到 SkillRegistry
+```
+
+**实现要点**:
+- 在 `ReflectionEvaluator` 中增加"技能提取"步骤
+- 定义技能模板（输入/输出/步骤/注意事项）
+- 实现技能版本管理（新技能覆盖旧技能需验证）
+
+**预计工作量**: 1 周  
+**面试价值**: ⭐⭐⭐⭐⭐ 展现对"自我进化 Agent"的理解
+
+#### 19.3.3 P0: 迭代式技能优化（来自 Hermes + Loop）
+
+**现状**: DotaHelperAgent 的 Skill 是静态的，无自动优化。
+
+**补充方案**:
+
+```
+执行任务 → 评估结果 → 提取成功模式 → 更新 SKILL.md → 下次使用改进版
+```
+
+**实现要点**:
+- 使用 LoopAgent 模式迭代优化技能
+- 收敛检测：连续 3 次改进 < 5% 时停止
+- 技能版本控制：保留历史版本，支持回滚
+
+**预计工作量**: 1 周  
+**面试价值**: ⭐⭐⭐⭐⭐ 展现对自我进化 Agent 的理解
+
+#### 19.3.4 P1: 进度持久化机制（来自 Ralph Wiggum）
+
+**现状**: DotaHelperAgent 的上下文压缩会丢失历史细节。
+
+**补充方案**:
+
+```python
+class ProgressTracker:
+    def save_state(self, state: AgentState):
+        """将进度持久化到文件"""
+        # 1. 写入 progress.md
+        # 2. 提交 Git（可选）
+        # 3. 新 Agent 从文件恢复状态
+```
+
+**实现要点**:
+- 新增 `ProgressTracker` 类
+- 支持从文件恢复状态
+- 集成 Git 版本控制（可选）
+
+**预计工作量**: 3-5 天  
+**面试价值**: ⭐⭐⭐⭐ 展现对长任务执行的理解
+
+#### 19.3.5 P1: 四层记忆架构（来自 Hermes）
+
+**现状**: DotaHelperAgent 有三级记忆（短期/长期/情景），但缺少技能记忆层。
+
+**补充方案**:
+
+```
+Level 0: Prompt Memory（当前会话上下文）
+Level 1: Session Archive（SQLite 存储历史会话）
+Level 2: Persistent Notes（MEMORY.md 存储长期事实）
+Level 3: Dynamic Skills（SKILL.md 存储可复用技能）
+```
+
+**实现要点**:
+- 新增 `SkillMemory` 类，管理技能记忆
+- 实现记忆层级间的自动晋升机制（频繁使用的短期记忆 → 长期记忆）
+- 支持语义检索（向量数据库）
+
+**预计工作量**: 1 周  
+**面试价值**: ⭐⭐⭐⭐ 展现对记忆系统深度理解
+
+#### 19.3.6 P1: 双循环架构（来自 Cve2PoC）
+
+**现状**: DotaHelperAgent 只有单层 ReAct 循环。
+
+**补充方案**:
+
+```
+战略循环（Strategic Loop）：规划、评估、调整策略
+    ↓
+战术循环（Tactical Loop）：执行、验证、修复细节
+```
+
+**应用场景**:
+- 英雄克制推荐：战略循环分析阵容，战术循环查询数据
+- 出装推荐：战略循环确定方向，战术循环查询物品库
+
+**实现要点**:
+- 新增 `StrategicLoop` 和 `TacticalLoop` 类
+- 实现循环间的协调机制
+- 支持循环嵌套和递归
+
+**预计工作量**: 1 周  
+**面试价值**: ⭐⭐⭐⭐ 展现对复杂任务分解的理解
+
+#### 19.3.7 P1: 子代理并行执行（来自 Hermes）
+
+**现状**: DotaHelperAgent 有工具并行执行，但无子代理并行。
+
+**补充方案**:
+
+```
+主 Agent → 分解任务 → 生成子代理 → 并行执行 → 聚合结果
+```
+
+**实现要点**:
+- 新增 `SubAgent` 基类，定义接口
+- 实现 `SubAgentExecutor`，管理子代理生命周期
+- 支持失败隔离和结果聚合
+
+**预计工作量**: 1-2 周  
+**面试价值**: ⭐⭐⭐⭐⭐ 展现对多 Agent 协作的理解
+
+#### 19.3.8 P2: 自适应上下文选择（来自 Loong）
+
+**现状**: DotaHelperAgent 的上下文压缩是规则驱动的，缺少智能选择。
+
+**补充方案**:
+
+```
+Observe → 评估上下文相关性 → Act → 选择最优上下文子集 → 执行任务
+```
+
+**实现要点**:
+- 在 `ContextAugmenter` 中增加"观察-行动"推理步骤
+- 使用 LLM 评估每段上下文的相关性（0-1 分）
+- 只保留相关性 > 阈值的上下文
+
+**预计工作量**: 3-5 天  
+**面试价值**: ⭐⭐⭐⭐ 展现对长上下文优化的理解
+
+### 19.4 实施路线图
+
+| 阶段 | 时间 | 任务 | 验收标准 |
+|------|------|------|---------|
+| **阶段 1** | 第 1-2 周 | Stop Hooks + 进度持久化 | Agent 可自主验证终止条件，支持长任务执行 |
+| **阶段 2** | 第 2-3 周 | 技能自动沉淀 + 迭代优化 | 任务完成后自动生成技能，技能可迭代改进 |
+| **阶段 3** | 第 3-4 周 | 四层记忆 + 子代理并行 | 记忆系统支持技能层，复杂任务可并行处理 |
+| **阶段 4** | 第 4-5 周 | 双循环架构 + 自适应上下文 | 支持战略/战术双层循环，上下文智能选择 |
+
+### 19.5 预期收益
+
+| 维度 | 当前能力 | 融合后能力 | 收益 |
+|------|---------|-----------|------|
+| **自主执行** | 被动响应 | 自主终止验证 | Agent 可长时间运行，无需人工干预 |
+| **自我进化** | 静态技能 | 技能自动沉淀 | 运行越久，能力越强 |
+| **长任务处理** | 上下文限制 | 进度持久化 | 支持跨会话长任务 |
+| **复杂任务** | 单层循环 | 双循环架构 | 可处理战略级复杂任务 |
+| **多 Agent 协作** | 单 Agent | 子代理并行 | 复杂任务并发处理 |
+
+### 19.6 参考资料
+
+- [Hermes Agent 官方文档](https://hermesagentai.cn/) - 自我进化 Agent 框架
+- [Anthropic: Effective harnesses for long-running agents](https://www.anthropic.com/engineering/harness-design-long-running-apps) - 长时间运行 Agent 设计
+- [Google ADK LoopAgent 文档](https://google.github.io/adk-docs/agents/workflow-agents/loop-agents/) - 循环代理模式
+- [Ralph Wiggum Loop 介绍](https://blog.kwt.co.kr/랄프-위검-루프-자는-동안-ai가-코딩하는-시대가-왔다/) - 自主编码技术
+- [Cve2PoC: Dual-Loop Agent Framework](https://arxiv.org/pdf/2602.05721) - 双循环 Agent 架构
+- [Loong: Long Document Translation Agent](https://arxiv.org/pdf/2605.30274) - 自适应上下文选择
+
+---
+
+## 二十、产品定位转型分析：从查询工具到真正的 Agent 产品
+
+> 更新时间：2026-07-10
+
+### 20.1 核心问题：当前为什么不像 Agent 产品
+
+```
+当前模式：用户提问 → Agent 查表/调 API → 返回答案
+本质是：带 LLM 包装的查询工具
+```
+
+**真正的 Agent 产品特征**：
+
+| 特征 | 查询工具 | 真正的 Agent |
+|------|---------|-------------|
+| **目标** | 回答单个问题 | 完成复杂目标 |
+| **执行** | 单轮响应 | 多步自主执行 |
+| **决策** | 固定流程 | 自主决策下一步 |
+| **学习** | 无记忆 | 从经验中学习 |
+| **协作** | 单点 | 多角色协作 |
+
+### 20.2 转型方向：4 个真正的 Agent 场景
+
+#### 20.2.1 场景 1：赛后复盘 Agent（Loop Agent）
+
+**为什么需要 Agent**：
+- 需要多步分析（对线期 → 团战 → 资源 → 决策点）
+- 每局游戏情况不同，需要自主判断分析重点
+- 需要对比多个时间节点的数据
+
+**Agent 流程**：
+```
+输入：比赛 Match ID
+    ↓
+Loop 1: 数据收集（对线数据、团战数据、经济曲线）
+    ↓
+Loop 2: 问题识别（哪个阶段出了问题？）
+    ↓
+Loop 3: 根因分析（为什么会出现这个问题？）
+    ↓
+Loop 4: 改进建议（下次怎么避免？）
+    ↓
+输出：结构化复盘报告
+```
+
+**关键差异**：不是一次性回答，而是**自主执行多步分析**。
+
+#### 20.2.2 场景 2：多 Agent 战术讨论（Multi-Agent）
+
+**为什么需要 Agent**：
+- 需要不同视角（进攻、防守、经济、节奏）
+- 需要 Agent 之间辩论和达成共识
+- 模拟真实战队的战术讨论
+
+**Agent 架构**：
+```
+CoachAgent（教练）：主持讨论，综合意见
+    ↕
+CarryAgent（ Carry 视角）：关注发育和输出环境
+    ↕
+SupportAgent（辅助视角）：关注视野和团队保护
+    ↕
+MidAgent（中单视角）：关注节奏和控符
+```
+
+**示例对话**：
+```
+Coach: "对面有 PA，我们怎么打？"
+Carry: "出刃甲，她跳脸就开刃甲反打"
+Support: "我建议先手控，PA 怕先手，我可以出吹风"
+Mid: "我选宙斯，全球流抓她farm"
+Coach: "综合意见：1. Carry 出刃甲 2. 辅助先手控 3. 中单全球流"
+```
+
+**关键差异**：不是单 Agent 回答，而是**多 Agent 协作讨论**。
+
+#### 20.2.3 场景 3：自我进化教练 Agent（Hermes 风格）
+
+**为什么需要 Agent**：
+- 需要记住用户的历史对局和习惯
+- 需要从历史中总结用户的弱点
+- 需要制定个性化训练计划
+
+**Agent 能力**：
+```
+记忆层：
+  - 用户最近 20 局的对局数据
+  - 用户的英雄池和胜率
+  - 用户的常见失误模式
+
+自我进化：
+  - 每次对局后自动提取经验
+  - 生成 SKILL.md（如"对线 PA 的注意事项"）
+  - 下次遇到类似情况时主动提醒
+
+训练计划：
+  - 分析用户弱点（如"补刀不稳定"）
+  - 制定训练任务（如"每天练习 10 分钟补刀"）
+  - 跟踪训练效果
+```
+
+**关键差异**：不是被动回答，而是**主动学习和个性化指导**。
+
+### 20.3 技术架构改造
+
+#### 20.3.1 从单轮 ReAct 到 Loop Agent
+
+```python
+# 当前：单轮 ReAct
+def solve(query):
+    for turn in range(max_turns):
+        thought = llm.think(...)
+        action = llm.act(...)
+        observation = tool.execute(action)
+        if should_stop():
+            break
+    return answer
+
+# 改造：Loop Agent
+class ReplayAnalysisAgent:
+    async def analyze(self, match_id: str):
+        # Phase 1: 数据收集
+        data = await self.collect_data(match_id)
+        
+        # Phase 2: 多轮分析循环
+        insights = []
+        for phase in ["laning", "mid_game", "late_game"]:
+            insight = await self.analyze_phase(data, phase)
+            insights.append(insight)
+            
+            # Stop Hook: 是否发现关键问题？
+            if self.stop_hook.check(insight):
+                break
+        
+        # Phase 3: 综合报告
+        report = await self.generate_report(insights)
+        return report
+```
+
+#### 20.3.2 从单 Agent 到 Multi-Agent
+
+```python
+# 新增：多 Agent 协作框架
+class TacticalDiscussion:
+    def __init__(self):
+        self.coach = CoachAgent()
+        self.carry = CarryAgent()
+        self.support = SupportAgent()
+        self.mid = MidAgent()
+    
+    async def discuss(self, question: str):
+        # 多轮讨论
+        for round in range(max_rounds):
+            carry_opinion = await self.carry.speak(question)
+            support_opinion = await self.support.speak(question)
+            mid_opinion = await self.mid.speak(question)
+            
+            # Coach 综合意见
+            consensus = await self.coach.synthesize([
+                carry_opinion, support_opinion, mid_opinion
+            ])
+            
+            # 达成共识则停止
+            if consensus.confidence > 0.8:
+                break
+        
+        return consensus
+```
+
+#### 20.3.3 新增：技能自动沉淀
+
+```python
+# 新增：从对局中自动学习技能
+class SkillExtractor:
+    async def extract(self, match_data, result):
+        """从对局结果中提取经验"""
+        # 分析胜负原因
+        reasons = await self.analyze_reasons(match_data, result)
+        
+        # 生成技能文档
+        for reason in reasons:
+            skill = SkillDocument(
+                name=f"对线{reason.hero}的注意事项",
+                situation=reason.situation,
+                actions=reason.recommended_actions,
+                confidence=reason.confidence,
+            )
+            await self.skill_registry.register(skill)
+```
+
+### 20.4 产品定位重新设计
+
+| 维度 | 当前定位 | 新定位 |
+|------|---------|--------|
+| **产品名** | DotaHelperAgent | **DotaCoach AI** |
+| **一句话描述** | Dota 2 智能助手 | **AI Dota 教练，自主分析你的对局并制定训练计划** |
+| **核心功能** | 查询英雄克制/出装 | 赛后复盘 + 多 Agent 战术讨论 + 个性化训练 |
+| **交互方式** | 单轮问答 | 多轮对话 + 主动提醒 + 长任务执行 |
+| **技术亮点** | ReAct + Langfuse | Loop Agent + Multi-Agent + 自我进化 |
+
+### 20.5 核心功能优先级
+
+| 优先级 | 功能 | Agent 类型 | 面试价值 |
+|--------|------|-----------|---------|
+| **P0** | 赛后复盘 Agent | Loop Agent | ⭐⭐⭐⭐⭐ |
+| **P0** | 多 Agent 战术讨论 | Multi-Agent | ⭐⭐⭐⭐⭐ |
+| **P1** | 自我进化教练 | Hermes 风格 | ⭐⭐⭐⭐⭐ |
+| **P2** | 原查询功能 | 保留（降级为工具） | ⭐⭐⭐ |
+
+### 20.6 实施路线图
+
+```
+第 1-2 周：赛后复盘 Agent（Loop Agent 模式）
+    - 实现多阶段分析循环
+    - 集成 Stop Hooks
+    - 输出结构化复盘报告
+
+第 3-4 周：多 Agent 战术讨论
+    - 实现 4 个角色 Agent
+    - 实现讨论协议（发言 → 综合 → 共识）
+    - 输出讨论记录
+
+第 5-6 周：自我进化教练
+    - 实现技能自动沉淀
+    - 实现用户画像记忆
+    - 实现个性化训练计划
+```
+
+### 20.7 转型核心总结
+
+**转型核心**：从"查询工具"变为"自主执行的 Agent"
+
+| 改变 | 说明 |
+|------|------|
+| **从单轮到多轮** | 不是一次回答，而是多步自主分析 |
+| **从单 Agent 到多 Agent** | 不是单一视角，而是多角色协作 |
+| **从被动到主动** | 不是等用户提问，而是主动分析和建议 |
+| **从无记忆到有记忆** | 不是每次从零开始，而是从历史中学习 |
+| **从即时到长任务** | 不是秒级响应，而是分钟级深度分析 |
+
+这样改造后，DotaHelperAgent 就是一个**真正的 Agent 产品**，而不是"带 LLM 的查询工具"。
+
+---
+
+## 二十一、OpenDota API 参考
+
+> 更新时间：2026-07-10
+
+**官方文档**: https://docs.opendota.com/
+
+### 21.1 获取比赛 ID 的 API
+
+**注意**: `account_id` 是 Steam 32位 ID（Steam32 ID），不是 Steam 64位 ID。
+
+| API 端点 | 用途 | 返回内容 |
+|---------|------|---------|
+| `/players/{account_id}/matches` | 获取指定玩家的比赛历史 | 返回该玩家的所有比赛，每个比赛包含 `match_id` |
+| `/proMatches` | 获取职业比赛列表 | 返回最近的职业比赛，包含 `match_id` |
+| `/publicMatches` | 获取公开比赛列表 | 返回最近的公开比赛，包含 `match_id` |
+
+**Steam ID 转换**:
+- Steam 64位 ID: `76561198047544285`
+- Steam 32位 ID: `87278757`（OpenDota API 使用此格式）
+- 转换公式: `Steam32 = Steam64 - 76561197960265728`
+
+### 21.2 获取比赛详情的 API
+
+| API 端点 | 用途 | 返回内容 |
+|---------|------|---------|
+| `/matches/{match_id}` | 获取指定比赛的详细信息 | 返回完整比赛数据（需要已知 match_id） |
+
+### 21.3 赛后复盘推荐调用流程
+
+```
+1. 获取玩家比赛列表（得到 match_id）
+   GET /players/{account_id}/matches
+
+2. 获取具体比赛的详细数据
+   GET /matches/{match_id}
+```
+
+**示例请求**：
+```
+https://api.opendota.com/api/players/87278757/matches
+```
+
+返回的比赛对象包含：
+- `match_id`: 比赛 ID
+- `player_slot`: 玩家位置
+- `radiant_win`: 是否胜利
+- `duration`: 比赛时长
+- `hero_id`: 使用的英雄
+- `kills` / `deaths` / `assists`: KDA 数据
+- `last_hits` / `denies`: 补刀/反补数据
+- `gold_per_min` / `xp_per_min`: 每分钟金钱/经验
+- `item_0` ~ `item_5`: 物品栏
+- `picks_bans`: Ban/Pick 信息
+- `teamfights`: 团战数据
+- `radiant_gold_adv`: 经济优势曲线
+- `radiant_xp_adv`: 经验优势曲线
+
+### 21.4 项目已有 API 集成
+
+当前项目 `utils/api_client.py` 已集成的 OpenDota API：
+- `/heroes/{hero_id}/matchups` - 英雄克制查询（带缓存）
+
+待新增：
+- `/players/{account_id}/matches` - 玩家比赛历史
+- `/matches/{match_id}` - 比赛详情
+
+---
+
+> **文档版本**: v1.7  
+> **最后更新**: 2026-07-10
