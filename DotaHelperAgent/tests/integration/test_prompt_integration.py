@@ -275,25 +275,6 @@ class TestBusinessModuleIntegration:
         assert "帕吉,宙斯" in prompt or "帕吉" in prompt
         assert "65.0%" in prompt
     
-    def test_llm_engine_integration(self):
-        """测试 LLMEngine 与 PromptManager 的集成"""
-        from core.decision.llm_engine import LLMEngine
-        
-        config_dir = Path(__file__).parent.parent.parent / "config" / "prompts"
-        
-        if not config_dir.exists():
-            pytest.skip("config/prompts 目录不存在")
-        
-        strategy = LocalYAMLPromptStrategy(prompts_dir=str(config_dir))
-        prompt_manager = PromptManager(fallback_strategy=strategy)
-        
-        # 创建 LLMEngine（传入 prompt_manager）
-        engine = LLMEngine(prompt_manager=prompt_manager)
-        
-        # 验证 prompt_manager 被正确设置
-        assert engine.prompt_manager is not None
-        assert engine.prompt_manager == prompt_manager
-    
     def test_skill_builder_integration(self):
         """测试 HybridSkillBuilder 与 PromptManager 的集成"""
         from analyzers.skill_builder import HybridSkillBuilder

@@ -1825,317 +1825,64 @@ Observe → 评估上下文相关性 → Act → 选择最优上下文子集 →
 
 ---
 
-## 二十、产品定位转型分析：从查询工具到真正的 Agent 产品
+## 二十、产品定位转型与赛后复盘 Agent 设计
 
-> 更新时间：2026-07-10
+> 详细设计见 `docs/superpowers/plans/` 目录下对应文档
 
-### 20.1 核心问题：当前为什么不像 Agent 产品
+### 20.1 产品定位转型（第二十章）
 
-```
-当前模式：用户提问 → Agent 查表/调 API → 返回答案
-本质是：带 LLM 包装的查询工具
-```
+**核心转型**: 从"查询工具"升级为"自主执行的 Agent 产品"
 
-**真正的 Agent 产品特征**：
+| 维度 | 当前 | 目标 |
+|------|------|------|
+| 执行模式 | 单轮问答 | 多步自主分析 |
+| 协作方式 | 单 Agent | 多 Agent 协作 |
+| 学习能力 | 无记忆 | 从历史中对局学习 |
 
-| 特征 | 查询工具 | 真正的 Agent |
-|------|---------|-------------|
-| **目标** | 回答单个问题 | 完成复杂目标 |
-| **执行** | 单轮响应 | 多步自主执行 |
-| **决策** | 固定流程 | 自主决策下一步 |
-| **学习** | 无记忆 | 从经验中学习 |
-| **协作** | 单点 | 多角色协作 |
+**三大 Agent 场景**: 赛后复盘（Loop Agent）、多 Agent 战术讨论（Multi-Agent）、自我进化教练（Hermes 风格）
 
-### 20.2 转型方向：4 个真正的 Agent 场景
+> 详细设计: [`2026-07-10-product-transformation.md`](superpowers/plans/2026-07-10-product-transformation.md)
 
-#### 20.2.1 场景 1：赛后复盘 Agent（Loop Agent）
+### 20.2 OpenDota API 参考（第二十一章）
 
-**为什么需要 Agent**：
-- 需要多步分析（对线期 → 团战 → 资源 → 决策点）
-- 每局游戏情况不同，需要自主判断分析重点
-- 需要对比多个时间节点的数据
+赛后复盘核心 API 调用流程:
+1. `GET /players/{account_id}/matches` — 获取玩家比赛历史（得到 match_id）
+2. `GET /matches/{match_id}` — 获取比赛详情（完整数据）
 
-**Agent 流程**：
-```
-输入：比赛 Match ID
-    ↓
-Loop 1: 数据收集（对线数据、团战数据、经济曲线）
-    ↓
-Loop 2: 问题识别（哪个阶段出了问题？）
-    ↓
-Loop 3: 根因分析（为什么会出现这个问题？）
-    ↓
-Loop 4: 改进建议（下次怎么避免？）
-    ↓
-输出：结构化复盘报告
-```
+> 详细 API 文档: https://docs.opendota.com/
 
-**关键差异**：不是一次性回答，而是**自主执行多步分析**。
+### 20.3 Claude Code 设计模式分析（第二十二章）
 
-#### 20.2.2 场景 2：多 Agent 战术讨论（Multi-Agent）
+从 Claude Code 项目中提取 7 个可复用设计模式用于赛后复盘 Agent:
 
-**为什么需要 Agent**：
-- 需要不同视角（进攻、防守、经济、节奏）
-- 需要 Agent 之间辩论和达成共识
-- 模拟真实战队的战术讨论
+| 设计模式 | 来源 | 复盘应用 | 优先级 |
+|---------|------|---------|--------|
+| Stop Hooks 终止验证 | `stopHooks.ts` | 定义复盘终止条件 | P0 |
+| Token 预算控制 | `tokenBudget.ts` | 防止过度分析 + 边际递减检测 | P0 |
+| Dream/Recap 记忆整合 | `dream.ts` | 构建复盘提示词 | P0 |
+| Batch 并行子代理 | `batch.ts` | 并行分析对线/团战/经济/决策 | P1 |
+| QueryEngine 生命周期 | `QueryEngine.ts` | 中断恢复 + 部分结果提取 | P1 |
+| 条件激活技能 | `loadSkillsDir.ts` | 复盘 Skill 配置 | P1 |
+| 统一任务队列 | 子代理通知机制 | 聚合并行分析结果 | P2 |
 
-**Agent 架构**：
-```
-CoachAgent（教练）：主持讨论，综合意见
-    ↕
-CarryAgent（ Carry 视角）：关注发育和输出环境
-    ↕
-SupportAgent（辅助视角）：关注视野和团队保护
-    ↕
-MidAgent（中单视角）：关注节奏和控符
-```
+> 详细设计: [`2026-07-13-claude-code-patterns.md`](superpowers/plans/2026-07-13-claude-code-patterns.md)
 
-**示例对话**：
-```
-Coach: "对面有 PA，我们怎么打？"
-Carry: "出刃甲，她跳脸就开刃甲反打"
-Support: "我建议先手控，PA 怕先手，我可以出吹风"
-Mid: "我选宙斯，全球流抓她farm"
-Coach: "综合意见：1. Carry 出刃甲 2. 辅助先手控 3. 中单全球流"
-```
+### 20.4 赛后复盘 Agent 综合设计（第二十三章）
 
-**关键差异**：不是单 Agent 回答，而是**多 Agent 协作讨论**。
+**核心流程**: 数据获取 → 多阶段 Loop 分析（对线/团战/经济/决策）→ 验证停止检查 → 报告生成 → 后台自我审查
 
-#### 20.2.3 场景 3：自我进化教练 Agent（Hermes 风格）
+**关键组件**:
+- `ReviewIterationBudget` — 迭代预算控制（Hermes 令牌桶 + Claude Code 边际递减）
+- `ReviewStopVerifier` — 验证停止机制（类型化终态 + 验证钩子）
+- `ReviewContextCompressor` — 有损上下文压缩（修剪工具结果 + 保护头尾 + LLM 摘要）
+- `BackgroundReviewSpawner` — 后台自我审查（异步，不阻塞主流程）
+- `ReviewPromptBuilder` — 三层提示词构建（stable/context/volatile）
 
-**为什么需要 Agent**：
-- 需要记住用户的历史对局和习惯
-- 需要从历史中总结用户的弱点
-- 需要制定个性化训练计划
+**新增模块**: `core/review/`（agent/budget/verifier/compressor/prompt_builder/background_review/report/types）
 
-**Agent 能力**：
-```
-记忆层：
-  - 用户最近 20 局的对局数据
-  - 用户的英雄池和胜率
-  - 用户的常见失误模式
-
-自我进化：
-  - 每次对局后自动提取经验
-  - 生成 SKILL.md（如"对线 PA 的注意事项"）
-  - 下次遇到类似情况时主动提醒
-
-训练计划：
-  - 分析用户弱点（如"补刀不稳定"）
-  - 制定训练任务（如"每天练习 10 分钟补刀"）
-  - 跟踪训练效果
-```
-
-**关键差异**：不是被动回答，而是**主动学习和个性化指导**。
-
-### 20.3 技术架构改造
-
-#### 20.3.1 从单轮 ReAct 到 Loop Agent
-
-```python
-# 当前：单轮 ReAct
-def solve(query):
-    for turn in range(max_turns):
-        thought = llm.think(...)
-        action = llm.act(...)
-        observation = tool.execute(action)
-        if should_stop():
-            break
-    return answer
-
-# 改造：Loop Agent
-class ReplayAnalysisAgent:
-    async def analyze(self, match_id: str):
-        # Phase 1: 数据收集
-        data = await self.collect_data(match_id)
-        
-        # Phase 2: 多轮分析循环
-        insights = []
-        for phase in ["laning", "mid_game", "late_game"]:
-            insight = await self.analyze_phase(data, phase)
-            insights.append(insight)
-            
-            # Stop Hook: 是否发现关键问题？
-            if self.stop_hook.check(insight):
-                break
-        
-        # Phase 3: 综合报告
-        report = await self.generate_report(insights)
-        return report
-```
-
-#### 20.3.2 从单 Agent 到 Multi-Agent
-
-```python
-# 新增：多 Agent 协作框架
-class TacticalDiscussion:
-    def __init__(self):
-        self.coach = CoachAgent()
-        self.carry = CarryAgent()
-        self.support = SupportAgent()
-        self.mid = MidAgent()
-    
-    async def discuss(self, question: str):
-        # 多轮讨论
-        for round in range(max_rounds):
-            carry_opinion = await self.carry.speak(question)
-            support_opinion = await self.support.speak(question)
-            mid_opinion = await self.mid.speak(question)
-            
-            # Coach 综合意见
-            consensus = await self.coach.synthesize([
-                carry_opinion, support_opinion, mid_opinion
-            ])
-            
-            # 达成共识则停止
-            if consensus.confidence > 0.8:
-                break
-        
-        return consensus
-```
-
-#### 20.3.3 新增：技能自动沉淀
-
-```python
-# 新增：从对局中自动学习技能
-class SkillExtractor:
-    async def extract(self, match_data, result):
-        """从对局结果中提取经验"""
-        # 分析胜负原因
-        reasons = await self.analyze_reasons(match_data, result)
-        
-        # 生成技能文档
-        for reason in reasons:
-            skill = SkillDocument(
-                name=f"对线{reason.hero}的注意事项",
-                situation=reason.situation,
-                actions=reason.recommended_actions,
-                confidence=reason.confidence,
-            )
-            await self.skill_registry.register(skill)
-```
-
-### 20.4 产品定位重新设计
-
-| 维度 | 当前定位 | 新定位 |
-|------|---------|--------|
-| **产品名** | DotaHelperAgent | **DotaCoach AI** |
-| **一句话描述** | Dota 2 智能助手 | **AI Dota 教练，自主分析你的对局并制定训练计划** |
-| **核心功能** | 查询英雄克制/出装 | 赛后复盘 + 多 Agent 战术讨论 + 个性化训练 |
-| **交互方式** | 单轮问答 | 多轮对话 + 主动提醒 + 长任务执行 |
-| **技术亮点** | ReAct + Langfuse | Loop Agent + Multi-Agent + 自我进化 |
-
-### 20.5 核心功能优先级
-
-| 优先级 | 功能 | Agent 类型 | 面试价值 |
-|--------|------|-----------|---------|
-| **P0** | 赛后复盘 Agent | Loop Agent | ⭐⭐⭐⭐⭐ |
-| **P0** | 多 Agent 战术讨论 | Multi-Agent | ⭐⭐⭐⭐⭐ |
-| **P1** | 自我进化教练 | Hermes 风格 | ⭐⭐⭐⭐⭐ |
-| **P2** | 原查询功能 | 保留（降级为工具） | ⭐⭐⭐ |
-
-### 20.6 实施路线图
-
-```
-第 1-2 周：赛后复盘 Agent（Loop Agent 模式）
-    - 实现多阶段分析循环
-    - 集成 Stop Hooks
-    - 输出结构化复盘报告
-
-第 3-4 周：多 Agent 战术讨论
-    - 实现 4 个角色 Agent
-    - 实现讨论协议（发言 → 综合 → 共识）
-    - 输出讨论记录
-
-第 5-6 周：自我进化教练
-    - 实现技能自动沉淀
-    - 实现用户画像记忆
-    - 实现个性化训练计划
-```
-
-### 20.7 转型核心总结
-
-**转型核心**：从"查询工具"变为"自主执行的 Agent"
-
-| 改变 | 说明 |
-|------|------|
-| **从单轮到多轮** | 不是一次回答，而是多步自主分析 |
-| **从单 Agent 到多 Agent** | 不是单一视角，而是多角色协作 |
-| **从被动到主动** | 不是等用户提问，而是主动分析和建议 |
-| **从无记忆到有记忆** | 不是每次从零开始，而是从历史中学习 |
-| **从即时到长任务** | 不是秒级响应，而是分钟级深度分析 |
-
-这样改造后，DotaHelperAgent 就是一个**真正的 Agent 产品**，而不是"带 LLM 的查询工具"。
+> 详细设计: [`2026-07-13-post-match-review-agent.md`](superpowers/plans/2026-07-13-post-match-review-agent.md)
 
 ---
 
-## 二十一、OpenDota API 参考
-
-> 更新时间：2026-07-10
-
-**官方文档**: https://docs.opendota.com/
-
-### 21.1 获取比赛 ID 的 API
-
-**注意**: `account_id` 是 Steam 32位 ID（Steam32 ID），不是 Steam 64位 ID。
-
-| API 端点 | 用途 | 返回内容 |
-|---------|------|---------|
-| `/players/{account_id}/matches` | 获取指定玩家的比赛历史 | 返回该玩家的所有比赛，每个比赛包含 `match_id` |
-| `/proMatches` | 获取职业比赛列表 | 返回最近的职业比赛，包含 `match_id` |
-| `/publicMatches` | 获取公开比赛列表 | 返回最近的公开比赛，包含 `match_id` |
-
-**Steam ID 转换**:
-- Steam 64位 ID: `76561198047544285`
-- Steam 32位 ID: `87278757`（OpenDota API 使用此格式）
-- 转换公式: `Steam32 = Steam64 - 76561197960265728`
-
-### 21.2 获取比赛详情的 API
-
-| API 端点 | 用途 | 返回内容 |
-|---------|------|---------|
-| `/matches/{match_id}` | 获取指定比赛的详细信息 | 返回完整比赛数据（需要已知 match_id） |
-
-### 21.3 赛后复盘推荐调用流程
-
-```
-1. 获取玩家比赛列表（得到 match_id）
-   GET /players/{account_id}/matches
-
-2. 获取具体比赛的详细数据
-   GET /matches/{match_id}
-```
-
-**示例请求**：
-```
-https://api.opendota.com/api/players/87278757/matches
-```
-
-返回的比赛对象包含：
-- `match_id`: 比赛 ID
-- `player_slot`: 玩家位置
-- `radiant_win`: 是否胜利
-- `duration`: 比赛时长
-- `hero_id`: 使用的英雄
-- `kills` / `deaths` / `assists`: KDA 数据
-- `last_hits` / `denies`: 补刀/反补数据
-- `gold_per_min` / `xp_per_min`: 每分钟金钱/经验
-- `item_0` ~ `item_5`: 物品栏
-- `picks_bans`: Ban/Pick 信息
-- `teamfights`: 团战数据
-- `radiant_gold_adv`: 经济优势曲线
-- `radiant_xp_adv`: 经验优势曲线
-
-### 21.4 项目已有 API 集成
-
-当前项目 `utils/api_client.py` 已集成的 OpenDota API：
-- `/heroes/{hero_id}/matchups` - 英雄克制查询（带缓存）
-
-待新增：
-- `/players/{account_id}/matches` - 玩家比赛历史
-- `/matches/{match_id}` - 比赛详情
-
----
-
-> **文档版本**: v1.7  
-> **最后更新**: 2026-07-10
+> **文档版本**: v2.0
+> **最后更新**: 2026-07-13
