@@ -6,19 +6,46 @@ from utils.log_config import get_logger
 
 logger = get_logger("hero_analyzer", component="analyzers")
 
+from abc import ABC, abstractmethod
+
 # 支持两种导入方式：包导入和直接运行
 try:
     from ..utils.api_client import OpenDotaClient
     from ..core.config import MatchupConfig
-    from ..strategies.score_strategies import IScoreStrategy, WinRateStrategy
     from ..utils.localization import DotaLocalizer
     from ..managers.matchup_data_manager import MatchupDataManager
 except ImportError:
     from utils.api_client import OpenDotaClient
     from core.config import MatchupConfig
-    from strategies.score_strategies import IScoreStrategy, WinRateStrategy
     from utils.localization import DotaLocalizer
     from managers.matchup_data_manager import MatchupDataManager
+
+
+class IScoreStrategy(ABC):
+    """评分策略接口"""
+
+    @abstractmethod
+    def calculate(self, matchup: Dict, config: Any) -> Tuple[float, List[str]]:
+        """计算评分
+
+        Args:
+            matchup: 对局数据
+            config: 配置
+
+        Returns:
+            (score, reasons): 评分和理由列表
+        """
+        ...
+
+
+class WinRateStrategy(IScoreStrategy):
+    """胜率评分策略"""
+
+    def calculate(self, matchup: Dict, config: Any) -> Tuple[float, List[str]]:
+        win_rate = matchup.get("wins", 0) / max(matchup.get("matches_played", 1), 1)
+        score = win_rate * 10
+        reasons = [f"胜率: {win_rate:.1%}"]
+        return score, reasons
 
 
 class HeroAnalyzer:

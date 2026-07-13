@@ -278,12 +278,8 @@ class AgentController:
         """初始化并注册所有 Skill"""
         try:
             from skills import get_registry, SkillContext
-            from skills.lineup_analyzer import LineupAnalyzerSkill
             from skills.dialogue_understander import DialogueUnderstanderSkill
-            from skills.meta_analyzer import MetaAnalyzerSkill
-            from skills.knowledge_query import KnowledgeQuerySkill
             from skills.web_search import WebSearchSkill
-            from analyzers.hero_analyzer import HeroAnalyzer
             from utils.api_client import OpenDotaClient
             from tools.search_tools import DuckDuckGoSearchTool
 
@@ -295,17 +291,6 @@ class AgentController:
                 self.skill_registry = registry
                 return
 
-            # 阵容分析 Skill
-            hero_analyzer = HeroAnalyzer(client=OpenDotaClient())
-            lineup_config = skills_config.get("lineup_analyzer", {})
-            if lineup_config.get("enabled", True):
-                registry.register(LineupAnalyzerSkill(
-                    llm_client=self.llm_client,
-                    hero_analyzer=hero_analyzer,
-                    prompt_manager=self.prompt_manager,
-                    timeout=lineup_config.get("timeout", 15.0),
-                ))
-
             # 多轮对话理解 Skill
             dialogue_config = skills_config.get("dialogue_understander", {})
             if dialogue_config.get("enabled", True):
@@ -314,34 +299,6 @@ class AgentController:
                     context_augmenter=self.context_augmenter,
                     prompt_manager=self.prompt_manager,
                     timeout=dialogue_config.get("timeout", 10.0),
-                ))
-
-            # 版本强势查询 Skill
-            async def fetch_meta() -> Dict[str, Any]:
-                from tools.hero_tools import GetMetaHeroesTool
-                tool = GetMetaHeroesTool(client=OpenDotaClient())
-                return tool._get_meta(limit=20)
-
-            meta_config = skills_config.get("meta_analyzer", {})
-            if meta_config.get("enabled", True):
-                registry.register(MetaAnalyzerSkill(
-                    llm_client=self.llm_client,
-                    data_fetcher=fetch_meta,
-                    prompt_manager=self.prompt_manager,
-                    cache_ttl=meta_config.get("cache_ttl", 3600),
-                    timeout=meta_config.get("timeout", 20.0),
-                ))
-
-            # 知识查询 Skill
-            knowledge_config = skills_config.get("knowledge_query", {})
-            if knowledge_config.get("enabled", True) and self.knowledge_enabled and self.vector_store:
-                registry.register(KnowledgeQuerySkill(
-                    llm_client=self.llm_client,
-                    vector_store=self.vector_store,
-                    fusion_engine=self.fusion_engine,
-                    prompt_manager=self.prompt_manager,
-                    top_k=knowledge_config.get("top_k", 5),
-                    timeout=knowledge_config.get("timeout", 15.0),
                 ))
 
             # 智能搜索 Skill
@@ -364,50 +321,11 @@ class AgentController:
             self.skill_registry = get_registry()
 
     def _init_knowledge_system(self) -> None:
-        """初始化知识管理系统"""
-        try:
-            from knowledge.vector_store import VectorStore
-            from knowledge.fusion_engine import KnowledgeFusionEngine
-            from tools.knowledge_tools import KnowledgeQueryTool, KnowledgeUpdateTool, create_knowledge_tools
-            import yaml
-
-            # 加载知识管理配置
-            config_path = Path(__file__).parent.parent / "config" / "knowledge_config.yaml"
-            knowledge_config = {}
-
-            if config_path.exists():
-                with open(config_path, 'r', encoding='utf-8') as f:
-                    full_config = yaml.safe_load(f)
-                    knowledge_config = full_config.get('knowledge', {})
-
-            # 检查是否启用知识管理
-            if knowledge_config.get('enabled', True):
-                # 初始化向量数据库
-                vector_store_config = knowledge_config.get('vector_store', {})
-                self.vector_store = VectorStore(vector_store_config)
-
-                # 初始化知识融合引擎
-                fusion_config = knowledge_config.get('fusion', {})
-                self.fusion_engine = KnowledgeFusionEngine(fusion_config)
-
-                # 注册知识工具
-                knowledge_tools = create_knowledge_tools(self.vector_store, self.fusion_engine)
-                for tool in knowledge_tools:
-                    self.tool_registry.register(tool)
-
-                self.knowledge_enabled = True
-                logger.info("知识管理系统初始化完成")
-            else:
-                self.knowledge_enabled = False
-                self.vector_store = None
-                self.fusion_engine = None
-                logger.info("知识管理系统未启用")
-
-        except Exception as e:
-            logger.warning(f"知识管理系统初始化失败: {e}")
-            self.knowledge_enabled = False
-            self.vector_store = None
-            self.fusion_engine = None
+        """初始化知识管理系统（已简化，知识模块已移除）"""
+        self.knowledge_enabled = False
+        self.vector_store = None
+        self.fusion_engine = None
+        logger.info("知识管理系统已简化（模块已移除）")
 
     def _analyze_query_for_knowledge(self, query: str) -> Dict[str, Any]:
         """分析查询是否需要知识库

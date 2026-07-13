@@ -22,11 +22,9 @@ from datetime import datetime, timedelta
 try:
     from ..cache.cache_manager import CacheManager
     from ..utils.log_config import get_logger
-    from ..utils.background_loader import BackgroundLoader
 except ImportError:
     from cache.cache_manager import CacheManager
     from utils.log_config import get_logger
-    from utils.background_loader import BackgroundLoader
 
 logger = get_logger("matchup_data_manager", component="managers")
 
@@ -76,7 +74,6 @@ class MatchupDataManager:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         
         self._lock = threading.RLock()
-        self._background_loader: Optional[BackgroundLoader] = None
         self._data_status = {
             "total_heroes": self.TOTAL_HEROES,
             "loaded_heroes": 0,
@@ -241,23 +238,8 @@ class MatchupDataManager:
             logger.warning(f"[MATCHUP_INVALID] 数据不完整已删除: hero_id={hero_id}")
     
     def _start_background_load(self) -> None:
-        """启动后台异步加载"""
-        if self._background_loader is None:
-            self._background_loader = BackgroundLoader(
-                matchup_manager=self,
-                api_client=self.api_client,
-                rate_limit=1.0  # 1 次/秒，避免 429
-            )
-        
-        missing_ids = self._data_status["missing_heroes"]
-        if missing_ids:
-            self._data_status["is_loading"] = True
-            self._background_loader.start()
-            
-            for hero_id in missing_ids:
-                self._background_loader.add_task(hero_id)
-            
-            logger.info(f"后台加载已启动，待加载: {len(missing_ids)} 个英雄")
+        """启动后台异步加载（已简化，移除 BackgroundLoader 依赖）"""
+        logger.info("后台加载功能已简化，缺失数据将在需要时按需加载")
     
     def get_matchup(self, hero_id: int) -> Optional[Dict[str, Any]]:
         """获取英雄 matchup 数据（按优先级）
@@ -319,10 +301,7 @@ class MatchupDataManager:
                     logger.warning(f"[MATCHUP_FILE_ERROR] 读取本地文件失败: hero_id={hero_id}, error={str(e)}, time={elapsed:.3f}s")
             
             elapsed = time.time() - start_time
-            logger.info(f"[MATCHUP_MISS] 数据不存在: hero_id={hero_id}, time={elapsed:.3f}s, 触发后台加载")
-            
-            if self._background_loader:
-                self._background_loader.add_task(hero_id, priority=1)
+            logger.info(f"[MATCHUP_MISS] 数据不存在: hero_id={hero_id}, time={elapsed:.3f}s")
             
             return None
     
@@ -465,20 +444,12 @@ class MatchupDataManager:
         return self._data_status["loaded_heroes"] >= self.TOTAL_HEROES * 0.8
     
     def force_load_all(self) -> None:
-        """强制全量加载所有数据"""
-        all_hero_ids = list(range(1, self.TOTAL_HEROES + 1))
-        missing_ids = [id for id in all_hero_ids if id in self._data_status["missing_heroes"]]
-        
-        if missing_ids:
-            self._start_background_load()
-            for hero_id in missing_ids:
-                self._background_loader.add_task(hero_id, priority=0)
+        """强制全量加载所有数据（已简化）"""
+        logger.info("全量加载功能已简化，数据将在需要时按需加载")
     
     def stop_background_load(self) -> None:
-        """停止后台加载"""
-        if self._background_loader:
-            self._background_loader.stop()
-            self._data_status["is_loading"] = False
+        """停止后台加载（已简化）"""
+        self._data_status["is_loading"] = False
     
     def clear_all_data(self) -> None:
         """清空所有数据"""

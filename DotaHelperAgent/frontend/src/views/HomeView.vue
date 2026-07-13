@@ -20,19 +20,14 @@
     <RightDrawer
       :show-hero="showHeroPanel"
       :show-log="showLogPanel"
-      :show-gsi="showGsiPanel"
       @close-hero="showHeroPanel = false"
       @close-log="showLogPanel = false"
-      @close-gsi="showGsiPanel = false"
     >
       <template #hero>
         <HeroPanel @sendQuery="handleSendQuery" />
       </template>
       <template #log>
         <LogPanel />
-      </template>
-      <template #gsi>
-        <GsiStatusPanel />
       </template>
     </RightDrawer>
 
@@ -52,13 +47,6 @@
       >
         📋
       </button>
-      <button
-        class="fab-btn"
-        :class="{ active: showGsiPanel }"
-        @click="showGsiPanel = !showGsiPanel"
-      >
-        🎮
-      </button>
     </div>
   </div>
 </template>
@@ -72,13 +60,11 @@ import ChatBox from '@/components/ChatBox.vue'
 import RightDrawer from '@/components/RightDrawer.vue'
 import HeroPanel from '@/components/HeroPanel.vue'
 import LogPanel from '@/components/LogPanel.vue'
-import GsiStatusPanel from '@/components/GsiStatusPanel.vue'
 
 const chatStore = useChatStore()
 const sidePanelCollapsed = ref(true)
 const showHeroPanel = ref(false)
 const showLogPanel = ref(false)
-const showGsiPanel = ref(false)
 const chatBoxRef = ref<InstanceType<typeof ChatBox> | null>(null)
 
 const handleSendQuery = (query: string) => {

@@ -7,7 +7,6 @@ from .utils.llm_client import LLMClient, LLMConfig, DotaLLMAnalyzer
 from .analyzers.hero_analyzer import HeroAnalyzer
 from .analyzers.item_recommender import ItemRecommender
 from .analyzers.skill_builder import SkillBuilder
-from .strategies.score_strategies import IScoreStrategy, WinRateStrategy, PopularityStrategy
 from .cache.cache_manager import CacheManager, get_cache
 from .core.config import (
     AgentConfig,
@@ -41,11 +40,6 @@ __all__ = [
     # 缓存
     "CacheManager",
     "get_cache",
-
-    # 策略
-    "IScoreStrategy",
-    "WinRateStrategy",
-    "PopularityStrategy",
 
     # 配置
     "AgentConfig",

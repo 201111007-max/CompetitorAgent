@@ -260,11 +260,6 @@ def create_all_tools(
     if skill_builder and client:
         all_tools.extend(create_skill_tools(skill_builder, client, localization))
 
-    # GSI 工具（可选）
-    if gsi_state_manager or gsi_event_queue:
-        from tools.gsi_tools import create_gsi_tools
-        all_tools.extend(create_gsi_tools(gsi_state_manager, gsi_event_queue))
-
     return all_tools
 
 

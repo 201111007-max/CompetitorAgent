@@ -1,5 +1,5 @@
 <template>
-  <div class="right-drawer" :class="{ 'has-panels': showHero || showLog || showGsi }">
+  <div class="right-drawer" :class="{ 'has-panels': showHero || showLog }">
     <!-- 英雄面板 -->
     <transition name="slide-right">
       <div v-if="showHero" class="drawer-panel hero-panel">
@@ -28,23 +28,9 @@
       </div>
     </transition>
 
-    <!-- GSI 状态面板 -->
-    <transition name="slide-right">
-      <div v-if="showGsi" class="drawer-panel gsi-panel">
-        <div class="panel-header">
-          <span class="panel-icon">🎮</span>
-          <span class="panel-title">游戏状态</span>
-          <button class="close-btn" @click="$emit('closeGsi')">×</button>
-        </div>
-        <div class="panel-body">
-          <slot name="gsi"></slot>
-        </div>
-      </div>
-    </transition>
-
     <!-- 移动端底部抽屉 -->
     <transition name="slide-bottom">
-      <div v-if="isMobile && (showHero || showLog || showGsi)" class="mobile-drawer">
+      <div v-if="isMobile && (showHero || showLog)" class="mobile-drawer">
         <div class="mobile-tabs">
           <button
             class="mobile-tab"
@@ -60,19 +46,11 @@
           >
             📋 日志
           </button>
-          <button
-            class="mobile-tab"
-            :class="{ active: mobileTab === 'gsi' }"
-            @click="mobileTab = 'gsi'"
-          >
-            🎮 GSI
-          </button>
           <button class="mobile-close" @click="closeMobile">×</button>
         </div>
         <div class="mobile-content">
           <slot v-if="mobileTab === 'hero'" name="hero"></slot>
-          <slot v-else-if="mobileTab === 'log'" name="log"></slot>
-          <slot v-else name="gsi"></slot>
+          <slot v-else name="log"></slot>
         </div>
       </div>
     </transition>
@@ -85,16 +63,14 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 const props = defineProps<{
   showHero: boolean
   showLog: boolean
-  showGsi: boolean
 }>()
 
 const emit = defineEmits<{
   closeHero: []
   closeLog: []
-  closeGsi: []
 }>()
 
-const mobileTab = ref<'hero' | 'log' | 'gsi'>('hero')
+const mobileTab = ref<'hero' | 'log'>('hero')
 const windowWidth = ref(window.innerWidth)
 
 const isMobile = computed(() => windowWidth.value < 768)
@@ -109,7 +85,6 @@ onUnmounted(() => window.removeEventListener('resize', onResize))
 const closeMobile = () => {
   emit('closeHero')
   emit('closeLog')
-  emit('closeGsi')
 }
 </script>
 
@@ -139,11 +114,6 @@ const closeMobile = () => {
 }
 
 .log-panel {
-  width: var(--drawer-log-width);
-  border-left: 1px solid var(--border-primary);
-}
-
-.gsi-panel {
   width: var(--drawer-log-width);
   border-left: 1px solid var(--border-primary);
 }
