@@ -1849,7 +1849,9 @@ Observe → 评估上下文相关性 → Act → 选择最优上下文子集 →
 1. `GET /players/{account_id}/matches` — 获取玩家比赛历史（得到 match_id）
 2. `GET /matches/{match_id}` — 获取比赛详情（完整数据）
 
-> 详细 API 文档: https://docs.opendota.com/
+**Steam ID 转换**: `Steam32 = Steam64 - 76561197960265728`
+
+> 详细设计: [`2026-07-10-opendota-api-reference.md`](superpowers/plans/2026-07-10-opendota-api-reference.md) | 官方文档: https://docs.opendota.com/
 
 ### 20.3 Claude Code 设计模式分析（第二十二章）
 
