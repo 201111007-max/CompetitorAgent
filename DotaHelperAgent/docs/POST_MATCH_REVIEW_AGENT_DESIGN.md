@@ -1,7 +1,8 @@
 # 赛后复盘 Agent 架构设计文档
 
-> **版本**: v1.0
+> **版本**: v1.1
 > **创建时间**: 2026-07-15
+> **最新修订**: 2026-07-15
 > **定位**: 赛后复盘 Agent 的顶层架构设计蓝图
 > **状态**: 设计中
 
@@ -12,6 +13,11 @@
 - 本文档聚焦：架构理念、系统分层、核心机制、组件职责、数据流、接口契约
 - 详细实现方案见 `docs/superpowers/plans/` 下的对应文档
 - 历史架构演进记录见 `docs/architecture_upgrade/ARCHITECTURE_ANALYSIS.md`
+
+> **v1.1 重要变更**: 复盘 Agent 重构为 `DotaHelperAgent/post_match_review/` 独立顶级包，
+> 所有组件（LLM 客户端、记忆、技能、缓存、可观测性、Prompt）均在包内自包含实现，
+> 不再依赖 `core/`、`analyzers/`、`skills/`、`memory/`、`utils/` 等已有目录的代码。
+> 详见 §3.3 与 §9。
 
 ### 设计理念来源
 
@@ -183,44 +189,174 @@ match_id
 [输出] ─── Markdown 报告 + 前端展示 + 记忆持久化
 ```
 
-### 3.3 模块目录结构
+### 3.3 模块目录结构（自包含独立包 v1.1）
+
+> **设计原则**: 复盘 Agent 作为 `DotaHelperAgent/` 下的**独立顶级包** `post_match_review/`,
+> 所有 LLM 客户端、记忆、技能、缓存、可观测性、Prompt 模板均在包内自包含实现,
+> 不依赖 `core/`、`analyzers/`、`skills/`、`memory/`、`utils/` 等已有目录的代码。
+> 外部仅通过 `post_match_review.facade` 暴露的公共 API 与之交互。
 
 ```
 DotaHelperAgent/
-├── core/
-│   └── review/                           # 赛后复盘 Agent 模块
-│       ├── __init__.py
-│       ├── orchestrator.py               # ReviewOrchestrator 编排器
-│       ├── strategic_loop.py             # 战略循环
-│       ├── tactical_loop.py              # 战术循环
-│       ├── budget.py                     # 迭代预算控制
-│       ├── stop_verifier.py              # 停止验证器
-│       ├── compressor.py                 # 上下文压缩器
-│       ├── prompt_builder.py             # 提示词构建器
-│       ├── background_review.py          # 后台自我审查
-│       ├── report.py                     # 复盘报告生成
-│       ├── types.py                      # 枚举和数据类型
-│       └── state.py                      # Agent 状态管理
-├── analyzers/
-│   └── review/                           # 复盘分析器
-│       ├── __init__.py
-│       ├── base.py                       # BaseReviewAnalyzer 抽象基类
-│       ├── laning.py                     # 对线期分析器
-│       ├── teamfight.py                  # 团战分析器
-│       ├── economy.py                    # 经济分析器
-│       ├── decision.py                   # 决策分析器
-│       └── vision.py                     # 视野分析器
-├── tools/
-│   └── review_tools.py                   # 复盘相关工具
-├── skills/
-│   └── post_match_review/                # 复盘 Skill
-│       ├── __init__.py
-│       └── skill.py
-├── config/
-│   └── review_config.yaml                # 复盘配置
-└── data/
-    └── reviews/                          # 复盘报告存储
+└── post_match_review/                       # 独立顶级包,与既有代码零耦合
+    ├── __init__.py                         # 公共 API 导出
+    ├── README.md                           # 模块说明
+    ├── pyproject.toml                      # 独立依赖声明(可选,见附录 D)
+    │
+    ├── interfaces/                         # ── 接口契约层(Protocol/ABC)
+    │   ├── __init__.py
+    │   ├── orchestrator.py                 # IReviewOrchestrator
+    │   ├── analyzer.py                     # IReviewAnalyzer
+    │   ├── budget.py                       # IIterationBudget
+    │   ├── verifier.py                     # IStopVerifier
+    │   ├── compressor.py                   # IContextCompressor
+    │   ├── memory.py                       # IFourLayerMemory / ILevelN
+    │   ├── llm.py                          # ILLMClient
+    │   ├── data_source.py                  # IMatchDataSource
+    │   ├── skill.py                        # IReviewSkill
+    │   └── tracer.py                       # ITracer
+    │
+    ├── types/                              # ── 数据模型/枚举/状态
+    │   ├── __init__.py
+    │   ├── enums.py                        # BudgetDecision / TerminalState / ContinueState / MatchType
+    │   ├── match_data.py                   # MatchData / PlayerData / PickBan / LaneData / TeamfightData
+    │   ├── analysis.py                     # AnalysisResult / Conclusion / AnalysisContext
+    │   ├── report.py                       # ReviewReport / MatchSummary
+    │   ├── state.py                        # ReviewAgentState
+    │   ├── strategy.py                     # AnalysisStrategy
+    │   └── events.py                       # ProgressEvent / VerificationResult
+    │
+    ├── orchestrator/                       # ── 编排层
+    │   ├── __init__.py
+    │   ├── review_orchestrator.py          # ReviewOrchestrator(主入口)
+    │   ├── strategic_loop.py               # StrategicLoop
+    │   ├── tactical_loop.py                # TacticalLoop
+    │   ├── background_reviewer.py          # BackgroundReviewer
+    │   └── runtime.py                      # Runtime(依赖注入容器,组装所有组件)
+    │
+    ├── engines/                            # ── 核心引擎层
+    │   ├── __init__.py
+    │   ├── budget.py                       # IterationBudget(令牌桶 + 边际递减)
+    │   ├── stop_verifier.py                # StopVerifier(三段验证)
+    │   ├── compressor.py                   # ContextCompressor(修剪+保护+LLM 摘要)
+    │   └── prompt_builder.py               # PromptBuilder(Stable/Context/Volatile 三层)
+    │
+    ├── analyzers/                          # ── 分析能力层
+    │   ├── __init__.py
+    │   ├── base.py                         # BaseLLMReviewAnalyzer / BaseRuleReviewAnalyzer
+    │   ├── laning_analyzer.py              # 对线期分析
+    │   ├── teamfight_analyzer.py           # 团战分析
+    │   ├── economy_analyzer.py             # 经济分析
+    │   ├── decision_analyzer.py            # 关键决策点分析
+    │   ├── vision_analyzer.py              # 视野分析
+    │   └── fallback_analyzer.py            # 规则驱动降级(LLM 不可用时)
+    │
+    ├── data_source/                        # ── 数据源层(独立 OpenDota 客户端)
+    │   ├── __init__.py
+    │   ├── opendota_client.py              # OpenDotaClient(独立 HTTP 客户端)
+    │   ├── match_fetcher.py                # MatchFetcher(数据获取+结构化)
+    │   ├── data_validator.py               # 数据完整性校验
+    │   └── cache.py                        # 比赛数据本地缓存
+    │
+    ├── llm/                                # ── LLM 抽象层(独立实现)
+    │   ├── __init__.py
+    │   ├── client.py                       # LLMClient(可替换实现)
+    │   ├── prompt_manager.py               # PromptManager(版本管理)
+    │   └── token_counter.py                # TokenCounter
+    │
+    ├── memory/                             # ── 记忆系统(独立四层实现)
+    │   ├── __init__.py
+    │   ├── four_layer_memory.py            # FourLayerMemory(统一入口)
+    │   ├── session_archive.py              # Level 1: SessionArchive(SQLite)
+    │   ├── persistent_notes.py             # Level 2: PersistentNotes(JSON + 倒排索引)
+    │   ├── skill_store.py                  # Level 3: SkillStore(SKILL.md 文件)
+    │   └── dream_recap.py                  # DreamRecap(Claude Code 整合模式)
+    │
+    ├── parallel/                           # ── 并行编排
+    │   ├── __init__.py
+    │   ├── subagent.py                     # SubAgent(独立上下文)
+    │   ├── task_queue.py                   # TaskQueue(结果收集)
+    │   └── parallel_runner.py              # ParallelRunner(批量并发)
+    │
+    ├── report/                             # ── 报告生成
+    │   ├── __init__.py
+    │   ├── report_builder.py               # ReportBuilder(聚合+交叉验证)
+    │   ├── markdown_renderer.py            # MarkdownRenderer
+    │   └── progress_emitter.py             # ProgressEmitter(SSE 事件)
+    │
+    ├── observability/                      # ── 可观测性(模块内独立)
+    │   ├── __init__.py
+    │   ├── logger.py                       # 模块独立 logger(命名: pmr.*)
+    │   ├── tracer.py                       # Tracer(本地 trace 实现)
+    │   ├── langfuse_adapter.py             # LangfuseAdapter(可选,SDK 缺失时静默降级)
+    │   └── metrics.py                      # MetricsCollector
+    │
+    ├── facade/                             # ── 公共 API 门面(外部唯一入口)
+    │   ├── __init__.py
+    │   ├── api.py                          # PostMatchReviewAPI
+    │   └── entrypoint.py                   # create_default_api() 工厂函数
+    │
+    ├── prompts/                            # ── 提示词模板(YAML)
+    │   ├── strategic_loop.yaml
+    │   ├── tactical_laning.yaml
+    │   ├── tactical_teamfight.yaml
+    │   ├── tactical_economy.yaml
+    │   ├── tactical_decision.yaml
+    │   ├── tactical_vision.yaml
+    │   ├── report_generation.yaml
+    │   ├── background_review.yaml
+    │   ├── dream_recap.yaml
+    │   └── stop_verification.yaml
+    │
+    ├── config/                             # ── 配置文件
+    │   └── review_config.yaml
+    │
+    ├── data/                               # ── 运行时数据(本地存储,git 忽略)
+    │   ├── reviews/                        # 复盘报告(Markdown + JSON)
+    │   ├── progress/                       # 中断恢复进度文件 {match_id}.json
+    │   ├── memory/                         # 记忆持久化(SQLite + JSON)
+    │   ├── skills/                         # 提取/进化的技能(SKILL.md)
+    │   └── cache/                          # 比赛数据缓存
+    │
+    ├── tests/                              # ── 测试(独立 pytest 配置)
+    │   ├── __init__.py
+    │   ├── conftest.py
+    │   ├── unit/
+    │   │   ├── __init__.py
+    │   │   ├── test_budget.py
+    │   │   ├── test_stop_verifier.py
+    │   │   ├── test_compressor.py
+    │   │   ├── test_prompt_builder.py
+    │   │   └── test_runtime.py
+    │   ├── analyzers/
+    │   │   ├── __init__.py
+    │   │   ├── test_laning_analyzer.py
+    │   │   ├── test_teamfight_analyzer.py
+    │   │   ├── test_economy_analyzer.py
+    │   │   ├── test_decision_analyzer.py
+    │   │   └── test_vision_analyzer.py
+    │   ├── integration/
+    │   │   ├── __init__.py
+    │   │   └── test_orchestrator_e2e.py
+    │   └── fixtures/
+    │       └── match_8893253595.json
+    │
+    └── docs/                               # ── 模块独立文档
+        ├── README.md
+        ├── ARCHITECTURE.md                 # 详细架构说明
+        ├── INTERFACES.md                   # 接口契约参考
+        └── USAGE.md                        # 使用指南
 ```
+
+**目录结构关键约束**:
+
+| 约束 | 说明 |
+|------|------|
+| **禁止反向依赖** | `post_match_review/` 内的任何文件**不得** `import` `DotaHelperAgent.core.*` / `DotaHelperAgent.analyzers.*` / `DotaHelperAgent.skills.*` / `DotaHelperAgent.memory.*` / `DotaHelperAgent.utils.*` 等既有路径 |
+| **外部唯一入口** | 外部代码仅可通过 `from post_match_review import PostMatchReviewAPI` 接入 |
+| **包内依赖单向** | 包内依赖顺序: `interfaces`/`types` → `data_source`/`llm`/`memory`/`observability` → `engines`/`parallel` → `analyzers` → `orchestrator` → `facade` |
+| **运行时数据隔离** | 所有读写文件均位于包内 `data/`,不污染 `DotaHelperAgent/data/` |
+| **可选依赖** | `langfuse` SDK 缺失时,`observability/langfuse_adapter.py` 静默降级为空实现 |
 
 ---
 
@@ -854,15 +990,29 @@ Phase 5: 后台自我审查（异步，不阻塞主流程）
 | **DecisionAnalyzer** | 决策分析（Roshan、推塔、团战决策） | 继承 BaseReviewAnalyzer |
 | **VisionAnalyzer** | 视野分析（守卫、盲区、反野） | 继承 BaseReviewAnalyzer |
 
-### 6.4 基础设施层组件
+### 6.4 基础设施层组件（包内自包含 v1.1）
 
-| 组件 | 职责 | 复用现有 |
+> **重要**: v1.1 起,所有基础设施组件均位于 `post_match_review/` 包内,**不复用**
+> `DotaHelperAgent/utils/`、`DotaHelperAgent/memory/`、`DotaHelperAgent/skills/`
+> 等既有目录的代码。这保证复盘 Agent 可独立演进、独立测试、独立部署。
+
+| 组件 | 职责 | 包内位置 |
 |------|------|---------|
-| **LLMClient** | LLM 调用 | 复用 `utils/llm_client.py` |
-| **OpenDotaClient** | OpenDota API 调用 | 复用 `utils/api_client.py`（新增 `get_player_matches()` 和 `get_match_details()`） | 小 |
-| **AgentMemory** | 记忆系统 | 复用 `memory/memory.py`（扩展四层） | 中 |
-| **SkillRegistry** | 技能注册与管理 | 复用 `skills/registry.py` |
-| **TraceContext** | 可观测性 | 复用 `utils/trace_context.py` |
+| **LLMClient** | LLM 调用抽象 | `post_match_review/llm/client.py` |
+| **OpenDotaClient** | OpenDota API HTTP 客户端 | `post_match_review/data_source/opendota_client.py` |
+| **MatchFetcher** | 比赛数据获取与结构化 | `post_match_review/data_source/match_fetcher.py` |
+| **FourLayerMemory** | 四层记忆(Prompt/Session/Persistent/Skills) | `post_match_review/memory/four_layer_memory.py` |
+| **SessionArchive** | Level 1: 复盘报告归档(SQLite) | `post_match_review/memory/session_archive.py` |
+| **PersistentNotes** | Level 2: 用户画像(结构化 JSON) | `post_match_review/memory/persistent_notes.py` |
+| **SkillStore** | Level 3: 技能沉淀(SKILL.md 文件) | `post_match_review/memory/skill_store.py` |
+| **DreamRecap** | 复盘后整合与持久化 | `post_match_review/memory/dream_recap.py` |
+| **Tracer** | 链路追踪(本地 + Langfuse) | `post_match_review/observability/tracer.py` |
+| **LangfuseAdapter** | Langfuse 可选适配器(SDK 缺失时降级) | `post_match_review/observability/langfuse_adapter.py` |
+| **Logger** | 模块独立 logger(`pmr.*` 命名空间) | `post_match_review/observability/logger.py` |
+| **PromptManager** | Prompt 版本管理(YAML) | `post_match_review/llm/prompt_manager.py` |
+| **TokenCounter** | Token 计数(支撑预算控制) | `post_match_review/llm/token_counter.py` |
+| **DataCache** | 比赛数据本地缓存 | `post_match_review/data_source/cache.py` |
+| **DataValidator** | 数据完整性校验 | `post_match_review/data_source/data_validator.py` |
 
 ---
 
@@ -905,8 +1055,12 @@ class IReviewOrchestrator(Protocol):
         """中断当前复盘分析"""
         ...
 
-    def get_partial_result(self) -> Optional[PartialReviewReport]:
-        """获取中断后的部分结果"""
+    def get_partial_result(self) -> Optional[ReviewReport]:
+        """获取中断后的部分结果
+
+        返回当前已生成的 ReviewReport,其中 completed_phases 可能不完整,
+        terminal_state 反映中断原因(INTERRUPTED)。
+        """
         ...
 ```
 
@@ -1146,60 +1300,209 @@ class MatchType(Enum):
 
 ---
 
-## 九、与现有系统的集成
+## 九、与现有系统的集成（最小化接入 v1.1）
 
-### 9.1 集成点清单
+> **核心原则**: 复盘 Agent 是**自包含**的独立包,与 `DotaHelperAgent` 既有模块**零代码依赖**。
+> 外部仅通过 `post_match_review.facade` 暴露的 `PostMatchReviewAPI` 接入。
+> 既有组件**不感知**复盘 Agent 存在,反之亦然。
 
-| 集成点 | 现有组件 | 集成方式 | 改动量 |
-|-------|---------|---------|--------|
-| **LLM 调用** | `utils/llm_client.py` | 直接复用 | 无 |
-| **API 客户端** | `utils/api_client.py` | 新增 `get_player_matches()` 和 `get_match_details()` | 小 |
-| **记忆系统** | `memory/memory.py` | 扩展四层记忆（新增 Level 2/3） | 中 |
-| **工具注册** | `core/tool_registry.py` | 注册复盘相关工具 | 小 |
-| **Skill 注册** | `skills/registry.py` | 注册 `PostMatchReviewSkill` | 小 |
-| **会话管理** | `core/conversation_manager.py` | 复盘对话作为独立会话 | 小 |
-| **前端展示** | `web/app.py` + `frontend/` | 新增 `/api/review` 端点 + 复盘展示组件 | 中 |
-| **Langfuse** | `utils/trace_context.py` | 复盘分析过程接入 trace | 小 |
-| **并行执行** | `core/parallel_executor.py` | 复用并行执行框架 | 小 |
-| **Prompt 管理** | `utils/prompt_manager.py` | 复用 Prompt 版本管理 | 小 |
+### 9.1 集成策略:Adapter 模式（单向解耦）
 
-### 9.2 新增 API 端点
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                       既有 DotaHelperAgent                            │
+│  ┌──────────────┐  ┌──────────────┐  ┌───────────────────────────┐  │
+│  │ web/app.py   │  │  frontend/   │  │  其余 core/analyzers/     │  │
+│  │ (FastAPI)    │  │  Vue 3 + TS  │  │  skills/memory/utils/     │  │
+│  └──────┬───────┘  └──────┬───────┘  └─────────────┬─────────────┘  │
+│         │                 │                         │                │
+│         │    通过 HTTP/SSE / WS 接入（仅契约层）      │                │
+│         │                 │                         │                │
+└─────────┼─────────────────┼─────────────────────────┼────────────────┘
+          │                 │                         │
+          ▼                 ▼                         ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│         post_match_review/  (独立顶级包,零 import 既有模块)            │
+│                                                                       │
+│   facade/PostMatchReviewAPI  ←  外部唯一入口                          │
+│        │                                                              │
+│        ▼                                                              │
+│   orchestrator/ReviewOrchestrator                                    │
+│        │                                                              │
+│   engines/ + analyzers/ + memory/ + llm/ + data_source/              │
+│   parallel/ + report/ + observability/  (全部包内自包含)              │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+**集成约束**:
+
+| 约束 | 说明 |
+|------|------|
+| **零 import 既有代码** | `post_match_review/` 任何文件**不得** `import DotaHelperAgent.core.*` / `analyzers.*` / `skills.*` / `memory.*` / `utils.*` |
+| **单向接入** | 仅允许既有代码 → `post_match_review.facade` 单向调用,反向调用被禁止 |
+| **配置文件独立** | `post_match_review/config/review_config.yaml` 与 `DotaHelperAgent/config/*.yaml` 解耦,可独立维护 |
+| **数据目录独立** | 复盘报告/记忆/缓存/技能存于 `post_match_review/data/`,不污染 `DotaHelperAgent/data/` |
+| **日志命名空间独立** | 所有日志以 `pmr.*` 为前缀(如 `pmr.orchestrator` / `pmr.analyzer.laning`),便于过滤 |
+| **LLM 配置可独立** | `post_match_review/llm/client.py` 通过环境变量读取 `OPENAI_API_KEY` 等,与 `utils/llm_client.py` 共享底层 env,但实现隔离 |
+
+### 9.2 唯一外部接入点:PostMatchReviewAPI
+
+```python
+# 既有代码中的接入示例(web/app.py)
+from post_match_review import PostMatchReviewAPI
+
+review_api = PostMatchReviewAPI()  # 默认从 post_match_review/config/review_config.yaml 加载
+
+# FastAPI 端点
+@app.post("/api/review")
+async def start_review(match_id: str) -> StreamingResponse:
+    return StreamingResponse(
+        review_api.review_stream(match_id),
+        media_type="text/event-stream",
+    )
+
+@app.get("/api/review/{match_id}/report")
+async def get_report(match_id: str) -> dict:
+    return await review_api.get_report(match_id)
+```
+
+### 9.3 新增 API 端点
 
 ```
 POST /api/review
   Body: { "match_id": "8893253595" }
   Response: SSE 流式返回分析进度 + 最终报告
+  接入: review_api.review_stream(match_id)
 
 GET /api/review/{match_id}/status
   Response: { "status": "analyzing", "progress": 0.6, "current_phase": "teamfight" }
+  接入: review_api.get_status(match_id)
 
 GET /api/review/{match_id}/report
   Response: 完整复盘报告 (Markdown)
+  接入: review_api.get_report(match_id)
 
 POST /api/review/{match_id}/interrupt
   Response: { "status": "interrupted", "partial_report": {...} }
+  接入: review_api.interrupt(match_id)
 
 GET /api/review/history
   Response: 复盘历史记录列表
+  接入: review_api.list_history()
+
+GET /api/review/{match_id}/stream/ws        # 可选 WebSocket 端点
+  接入: review_api.review_ws(match_id)
 ```
 
-### 9.3 前端集成
+### 9.4 前端集成（既有 frontend/ 目录内新增）
+
+> 前端组件仍位于 `frontend/src/`,但仅通过 HTTP/SSE 与后端交互,
+> 不直接 `import` 任何 `post_match_review.*` 模块。
 
 ```
-新增前端组件:
+新增前端组件(均位于既有 frontend/src/ 内):
 
   frontend/src/
   ├── components/
-  │   └── ReviewPanel.vue            # 复盘面板（主组件）
-  │       ├── ReviewProgress.vue     # 分析进度展示
-  │       ├── ReviewReport.vue       # 复盘报告展示
-  │       └── ReviewTimeline.vue     # 分析时间线
+  │   └── review/
+  │       ├── ReviewPanel.vue            # 复盘面板(主组件)
+  │       ├── ReviewProgress.vue         # 分析进度展示
+  │       ├── ReviewReport.vue           # 复盘报告展示
+  │       ├── ReviewTimeline.vue         # 分析时间线
+  │       └── ReviewHistory.vue          # 复盘历史列表
   ├── composables/
-  │   └── useReview.ts              # 复盘 SSE 流式处理
+  │   └── useReview.ts                   # 复盘 SSE 流式处理
   ├── stores/
-  │   └── review.ts                 # 复盘状态管理
-  └── types/
-      └── review.ts                 # 复盘类型定义
+  │   └── review.ts                      # 复盘状态管理(Pinia)
+  ├── types/
+  │   └── review.ts                      # 复盘类型定义(镜像后端 types)
+  └── api/
+      └── review.ts                      # 复盘 API 客户端(fetch 封装)
+```
+
+### 9.5 LLM 配置共享（最小耦合）
+
+复盘 Agent 不复用 `utils/llm_client.py`,但通过**环境变量**共享 LLM 凭证,
+避免配置重复。
+
+```python
+# post_match_review/llm/client.py 内部示例
+import os
+from openai import AsyncOpenAI
+
+class LLMClient:
+    """独立 LLM 客户端,仅通过环境变量读取凭证"""
+
+    def __init__(self) -> None:
+        self._client = AsyncOpenAI(
+            api_key=os.environ.get("OPENAI_API_KEY"),
+            base_url=os.environ.get("OPENAI_BASE_URL"),
+        )
+
+    async def chat(self, messages: list[dict], **kwargs) -> str:
+        # 独立实现,与 utils/llm_client.py 行为可不同
+        ...
+```
+
+**LLM 凭证传递方式**:
+
+| 凭证 | 来源 | 说明 |
+|------|------|------|
+| `OPENAI_API_KEY` | 环境变量 | 与既有模块共享 |
+| `OPENAI_BASE_URL` | 环境变量 | 与既有模块共享 |
+| `OPENAI_MODEL` | `post_match_review/config/review_config.yaml` | 模块独立配置 |
+| `*_PROMPT_VERSION` | `post_match_review/config/review_config.yaml` | 模块独立配置 |
+
+### 9.6 Langfuse 可选集成（包内独立）
+
+> 与既有 `utils/trace_context.py` 隔离,复盘 Agent 在包内独立实现 Langfuse 适配器。
+
+```python
+# post_match_review/observability/langfuse_adapter.py
+from typing import Protocol, Any
+
+class ITracer(Protocol):
+    """链路追踪接口"""
+    def span(self, name: str, **kwargs: Any) -> "Span": ...
+    def event(self, name: str, **kwargs: Any) -> None: ...
+
+class LangfuseTracer:
+    """Langfuse 实现 - SDK 缺失时降级为 NoOpTracer"""
+    def __init__(self, config: dict) -> None:
+        try:
+            from langfuse import Langfuse  # type: ignore
+            self._client = Langfuse(**config)
+        except ImportError:
+            self._client = None  # 静默降级
+
+    def span(self, name: str, **kwargs: Any) -> "Span":
+        if self._client is None:
+            return NoOpSpan()
+        return self._client.span(name=name, **kwargs)
+```
+
+### 9.7 集成测试隔离
+
+为保证自包含属性,集成测试**仅在 `post_match_review/tests/` 内进行**,
+不调用既有 `DotaHelperAgent/tests/` 下的任何 fixture 或测试函数。
+
+```python
+# post_match_review/tests/conftest.py
+import pytest
+from pathlib import Path
+
+@pytest.fixture
+def package_root() -> Path:
+    """指向 post_match_review/ 自身,绝不引用 DotaHelperAgent 上层目录"""
+    return Path(__file__).parent.parent
+
+@pytest.fixture
+def match_fixture() -> dict:
+    """独立测试 fixture(match_8893253595.json)"""
+    import json
+    fixture_path = Path(__file__).parent / "fixtures" / "match_8893253595.json"
+    with open(fixture_path, "r", encoding="utf-8") as f:
+        return json.load(f)
 ```
 
 ---
@@ -1208,9 +1511,11 @@ GET /api/review/history
 
 ### 10.1 review_config.yaml
 
+> 配置文件位于 `post_match_review/config/review_config.yaml`(v1.1 起移入独立包内)。
+
 ```yaml
-# config/review_config.yaml
-# 赛后复盘 Agent 配置
+# post_match_review/config/review_config.yaml
+# 赛后复盘 Agent 配置（独立于 DotaHelperAgent 顶层 config）
 
 review:
   # 全局配置
@@ -1409,11 +1714,11 @@ logger.info_ctx("后台审查完成", extra_data={"quality": 0.85, "skills_extra
 
 | 设计主题 | 详细文档 |
 |---------|---------|
-| 赛后复盘 Agent 综合设计 | `docs/superpowers/plans/2026-07-13-post-match-review-agent.md` |
-| Claude Code 设计模式分析 | `docs/superpowers/plans/2026-07-13-claude-code-patterns.md` |
-| 前沿 Agent 理念融合 | `docs/superpowers/plans/2026-07-10-frontier-agent-concepts.md` |
-| 产品定位转型 | `docs/superpowers/plans/2026-07-10-product-transformation.md` |
-| OpenDota API 参考 | `docs/superpowers/plans/2026-07-10-opendota-api-reference.md` |
+| 赛后复盘 Agent 综合设计 | `docs/superpowers/plans/post-match-review-agent/2026-07-13-post-match-review-agent.md` |
+| Claude Code 设计模式分析 | `docs/superpowers/plans/post-match-review-agent/2026-07-13-claude-code-patterns.md` |
+| 前沿 Agent 理念融合 | `docs/superpowers/plans/post-match-review-agent/2026-07-10-frontier-agent-concepts.md` |
+| 产品定位转型 | `docs/superpowers/plans/post-match-review-agent/2026-07-10-product-transformation.md` |
+| OpenDota API 参考 | `docs/superpowers/plans/post-match-review-agent/2026-07-10-opendota-api-reference.md` |
 
 ---
 
@@ -1450,4 +1755,57 @@ logger.info_ctx("后台审查完成", extra_data={"quality": 0.85, "skills_extra
 
 | 版本 | 日期 | 变更内容 |
 |------|------|---------|
-| v1.0 | 2026-07-15 | 初始版本，完整独立架构设计 |
+| v1.0 | 2026-07-15 | 初始版本,完整独立架构设计 |
+| v1.1 | 2026-07-15 | **目录结构重构**: 复盘 Agent 改为 `DotaHelperAgent/post_match_review/` 独立顶级包,与既有 `core/`/`analyzers/`/`skills/`/`memory/`/`utils/` 零代码依赖。所有 LLM 客户端、记忆、技能、可观测性、Prompt 模板、配置、运行时数据均在包内自包含。详见 §3.3 / §6.4 / §9 |
+
+### D. 自包含设计原则（v1.1 重要约定）
+
+#### D.1 为什么选择自包含独立包?
+
+| 理由 | 说明 |
+|------|------|
+| **避免架构污染** | 复盘 Agent 是新一代旗舰功能,设计理念(双循环/四层记忆/Stop Hooks)与既有模块(单轮查询式 Agent)差异巨大,混入既有目录会引入风格冲突 |
+| **独立演进能力** | 既有 `DotaHelperAgent` 已趋稳定,新功能应能独立升级/独立回滚,不受历史模块制约 |
+| **独立测试与部署** | 包内自带测试、配置、数据目录,可单独打包/单独 CI,减少回归影响面 |
+| **清晰的所有权边界** | 未来该包可能由专门团队负责,自包含结构便于代码所有权交接 |
+| **可复用潜力** | 独立包结构未来可被抽取为 `git submodule` 或独立 PyPI 包,跨项目复用 |
+
+#### D.2 自包含性验证清单
+
+代码 Review 与 CI 检查时,可通过以下清单验证自包含性:
+
+- [ ] `grep -r "from DotaHelperAgent\." post_match_review/` 返回**空**(无反向依赖)
+- [ ] `grep -r "from DotaHelperAgent\." post_match_review/tests/` 返回**空**
+- [ ] `grep -r "import DotaHelperAgent" post_match_review/` 返回**空**
+- [ ] 所有日志以 `pmr.` 前缀开头(`pmr.orchestrator` / `pmr.analyzer.laning` 等)
+- [ ] 所有文件读写路径均位于 `post_match_review/data/` 或 `post_match_review/config/`
+- [ ] LLM 凭证仅通过环境变量读取,不直接 `import utils.llm_client`
+- [ ] 集成测试仅在 `post_match_review/tests/` 内,不复用既有 `DotaHelperAgent/tests/` 的 fixture
+- [ ] `pyproject.toml` 中 `name = "post_match_review"`,独立于 `DotaHelperAgent` 顶层包
+
+#### D.3 与既有模块共享约定的保留项
+
+虽然代码隔离,但以下**约定**保持一致,保证工程风格统一:
+
+| 约定 | 来源 |
+|------|------|
+| Type Hints 必须标注 | `DotaHelperAgent` 既有约定 |
+| 接口 + 策略模式 | `DotaHelperAgent` 既有约定 |
+| LLM 驱动优先 + 规则驱动降级 | `DotaHelperAgent` 既有约定(元认知模块) |
+| Langfuse 可选,SDK 缺失时静默降级 | `DotaHelperAgent` 既有约定 |
+| 所有评估步骤接入 logger + trace | `DotaHelperAgent` 既有约定 |
+| 后端解析结果包含 `confidence` 字段 | `DotaHelperAgent` 既有约定 |
+| 前端不得包含解析逻辑 | `DotaHelperAgent` 既有约定 |
+
+#### D.4 何时可以放宽自包含约束?
+
+以下情况下,可以考虑打破自包含约束(需在 PR 描述中明确说明):
+
+1. **复盘 Agent 进入稳定期后**,需要共享某些工具(如时间格式化、英雄名称本地化)
+2. **DotaHelperAgent 整体架构升级**,所有模块统一重构
+3. **性能瓶颈**:独立实现某些组件导致性能下降超过 20%
+
+任何打破约束的改动需:
+- 在 `post_match_review/docs/ARCHITECTURE.md` 中记录依赖方向
+- 在 PR 描述中说明打破自包含的理由
+- 通过两阶段审查(Spec Compliance + Code Quality)

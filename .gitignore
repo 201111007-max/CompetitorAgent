@@ -97,3 +97,9 @@ out_project/
 
 # Trae IDE
 .trae/
+
+# ==================== Local Docs (not for GitHub) ====================
+# 个人/过程性文档 - 仅本地保留，不上传到 GitHub
+DotaHelperAgent/docs/bugs/
+DotaHelperAgent/docs/process_md/
+DotaHelperAgent/docs/superpowers/
