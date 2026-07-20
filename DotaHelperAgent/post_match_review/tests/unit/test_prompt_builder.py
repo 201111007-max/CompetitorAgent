@@ -108,8 +108,10 @@ class TestPromptBuilder:
 
     def test_build_context_layer_includes_completed_results(self) -> None:
         """测试 Context 层包含已完成结果"""
+        from post_match_review.types.analysis import AnalysisResult, Conclusion
+
         builder = PromptBuilder()
-        
+
         match_data = MatchData(
             match_id="8893253595",
             duration=1800,
@@ -120,16 +122,21 @@ class TestPromptBuilder:
             players=[],
             picks_bans=[],
         )
-        
+
         completed_results = [
-            {"phase": "laning", "finding": "对线优势", "confidence": 0.8}
+            AnalysisResult(
+                phase="laning",
+                conclusions=[Conclusion(title="对线优势", content="表现优秀", evidence=["补刀领先"], has_evidence=True)],
+                confidence=0.8,
+                iterations_used=2,
+            )
         ]
-        
+
         messages = builder.build(match_data, phase="teamfight", completed_results=completed_results)
         context_content = messages[1]["content"]
-        
-        assert "对线优势" in context_content
-        assert "0.80" in context_content or "0.8" in context_content
+
+        assert "laning" in context_content
+        assert "0.80" in context_content
 
     def test_build_volatile_layer_contains_phase_instruction(self) -> None:
         """测试 Volatile 层包含阶段指令"""

@@ -3,6 +3,7 @@ import yaml
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from post_match_review.types.match_data import MatchData
+from post_match_review.types.analysis import AnalysisResult
 from post_match_review.observability.logger import get_logger
 
 logger = get_logger("engines.prompt_builder")
@@ -29,7 +30,7 @@ class PromptBuilder:
         self,
         match_data: MatchData,
         phase: str,
-        completed_results: Optional[List[Dict[str, Any]]] = None,
+        completed_results: Optional[List[AnalysisResult]] = None,
         iteration_feedback: Optional[str] = None,
     ) -> List[Dict[str, str]]:
         """构建完整提示词消息列表
@@ -37,7 +38,7 @@ class PromptBuilder:
         Args:
             match_data: 结构化比赛数据
             phase: 当前分析阶段
-            completed_results: 已完成的阶段结果摘要
+            completed_results: 已完成的阶段结果
             iteration_feedback: 上一轮迭代反馈
 
         Returns:
@@ -80,13 +81,13 @@ class PromptBuilder:
     def _build_context_layer(
         self,
         match_data: MatchData,
-        completed_results: Optional[List[Dict[str, Any]]],
+        completed_results: Optional[List[AnalysisResult]],
     ) -> str:
         """构建 Context 层（比赛数据 + 已有结论）
 
         Args:
             match_data: 结构化比赛数据
-            completed_results: 已完成的阶段结果摘要
+            completed_results: 已完成的阶段结果
 
         Returns:
             str: Context 层内容
@@ -119,12 +120,13 @@ class PromptBuilder:
         if completed_results:
             context_parts.append("## 已完成的分析阶段")
             for result in completed_results:
-                phase_name = result.get("phase", "unknown")
-                finding = result.get("finding", "")
-                confidence = result.get("confidence", 0.0)
-                context_parts.append(f"### {phase_name}")
-                context_parts.append(f"- 发现: {finding}")
-                context_parts.append(f"- 置信度: {confidence:.2f}")
+                context_parts.append(f"### {result.phase}")
+                context_parts.append(f"- 置信度: {result.confidence:.2f}")
+                context_parts.append(f"- 迭代次数: {result.iterations_used}")
+                if result.conclusions:
+                    context_parts.append("- 主要发现:")
+                    for conclusion in result.conclusions[:3]:  # 最多展示 3 条结论
+                        context_parts.append(f"  - {conclusion.title}")
                 context_parts.append("")
 
         return "\n".join(context_parts)

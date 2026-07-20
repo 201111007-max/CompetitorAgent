@@ -19,9 +19,9 @@ class TestStopVerifier:
             match_id="8893253595",
             completed_phases=["laning", "teamfight", "economy"],
             conclusions=[
-                Conclusion(phase="laning", finding="对线优势", confidence=0.8, has_evidence=True),
-                Conclusion(phase="teamfight", finding="团战获胜", confidence=0.7, has_evidence=True),
-                Conclusion(phase="economy", finding="经济领先", confidence=0.9, has_evidence=True),
+                Conclusion(title="对线优势", content="对线表现优秀", evidence=["补刀领先"], has_evidence=True, impact="high"),
+                Conclusion(title="团战获胜", content="团战表现出色", evidence=["击杀数领先"], has_evidence=True, impact="high"),
+                Conclusion(title="经济领先", content="经济优势明显", evidence=["净经济领先"], has_evidence=True, impact="high"),
             ],
             confidence=0.8,
         )
@@ -42,8 +42,8 @@ class TestStopVerifier:
             match_id="8893253595",
             completed_phases=["laning", "teamfight"],  # 缺少 economy
             conclusions=[
-                Conclusion(phase="laning", finding="对线优势", confidence=0.8, has_evidence=True),
-                Conclusion(phase="teamfight", finding="团战获胜", confidence=0.7, has_evidence=True),
+                Conclusion(title="对线优势", content="对线表现优秀", evidence=["补刀领先"], has_evidence=True, impact="high"),
+                Conclusion(title="团战获胜", content="团战表现出色", evidence=["击杀数领先"], has_evidence=True, impact="high"),
             ],
             confidence=0.75,
         )
@@ -65,8 +65,8 @@ class TestStopVerifier:
             match_id="8893253595",
             completed_phases=["laning", "teamfight"],
             conclusions=[
-                Conclusion(phase="laning", finding="对线优势", confidence=0.8, has_evidence=True),
-                Conclusion(phase="teamfight", finding="团战获胜", confidence=0.7, has_evidence=False),  # 缺少证据
+                Conclusion(title="对线优势", content="对线表现优秀", evidence=["补刀领先"], has_evidence=True, impact="high"),
+                Conclusion(title="团战获胜", content="团战表现出色", evidence=[], has_evidence=False, impact="medium"),  # 缺少证据
             ],
             confidence=0.75,
         )
@@ -87,7 +87,7 @@ class TestStopVerifier:
             match_id="8893253595",
             completed_phases=["laning"],
             conclusions=[
-                Conclusion(phase="laning", finding="对线优势", confidence=0.5, has_evidence=True),
+                Conclusion(title="对线分析", content="对线表现一般", evidence=["数据"], has_evidence=True, impact="medium"),
             ],
             confidence=0.5,  # 低于 0.6
         )
@@ -108,7 +108,7 @@ class TestStopVerifier:
             match_id="8893253595",
             completed_phases=["laning"],  # 缺少 teamfight 和 economy
             conclusions=[
-                Conclusion(phase="laning", finding="对线优势", confidence=0.5, has_evidence=False),
+                Conclusion(title="对线分析", content="对线表现一般", evidence=[], has_evidence=False, impact="low"),
             ],
             confidence=0.5,  # 置信度不足
         )
@@ -147,7 +147,7 @@ class TestStopVerifier:
             match_id="8893253595",
             completed_phases=["laning"],
             conclusions=[
-                Conclusion(phase="laning", finding="对线优势", confidence=0.7, has_evidence=True),
+                Conclusion(title="对线优势", content="对线表现优秀", evidence=["补刀领先"], has_evidence=True, impact="high"),
             ],
             confidence=0.7,  # 低于 0.8
         )
