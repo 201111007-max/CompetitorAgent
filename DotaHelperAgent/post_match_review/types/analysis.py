@@ -35,6 +35,7 @@ class AnalysisContext:
     completed_results: List[AnalysisResult] = field(default_factory=list)
     iteration_feedback: Optional[str] = None
     config: Dict[str, Any] = field(default_factory=dict)
+    messages: List[Dict[str, str]] = field(default_factory=list)
 
 
 

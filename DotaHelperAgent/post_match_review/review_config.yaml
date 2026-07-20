@@ -1,0 +1,62 @@
+# 复盘 Agent 配置文件
+# 参考 POST_MATCH_REVIEW_AGENT_DESIGN.md §10.1
+
+# 基础配置
+match_id: null  # 运行时指定
+api_base_url: "https://api.openai.com/v1"
+model: "gpt-4o-mini"
+temperature: 0.3
+max_tokens: 4000
+
+# 战略循环配置
+strategic_loop:
+  max_iterations: 3
+  min_confidence: 0.6
+  required_phases:
+    - "laning"
+    - "teamfight"
+    - "economy"
+    - "decisions"
+
+# 战术循环配置
+tactical_loop:
+  max_iterations_per_phase: 3
+  default_budgets:
+    laning: 3
+    teamfight: 3
+    economy: 2
+    decisions: 2
+    vision: 1
+
+# 并行优化配置（Phase 5）
+enable_parallel_phases: false
+max_concurrency: 4
+
+# 上下文压缩配置（Phase 5）
+compression:
+  enabled: false
+  target_max_tokens: 15250
+  head_protect_count: 2
+  tail_token_budget: 20000
+  summary_token_budget: 750
+
+# 停止验证配置
+stop_verifier:
+  required_phases:
+    - "laning"
+    - "teamfight"
+    - "economy"
+    - "decisions"
+  min_confidence: 0.6
+  min_evidence_ratio: 0.7
+
+# 报告配置
+report:
+  include_evidence: true
+  include_improvements: true
+  max_conclusions_per_phase: 5
+
+# 日志配置
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
