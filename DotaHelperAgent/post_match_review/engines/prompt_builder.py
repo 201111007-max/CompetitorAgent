@@ -1,9 +1,9 @@
-"""三层提示词构建器"""
+﻿"""三层提示词构建器"""
 import yaml
 from pathlib import Path
 from typing import List, Dict, Any, Optional
-from post_match_review.types.match_data import MatchData
-from post_match_review.types.analysis import AnalysisResult
+from post_match_review.domain_types.match_data import MatchData
+from post_match_review.domain_types.analysis import AnalysisResult
 from post_match_review.observability.logger import get_logger
 
 logger = get_logger("engines.prompt_builder")

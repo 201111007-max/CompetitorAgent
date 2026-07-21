@@ -1,4 +1,4 @@
-"""Runtime 依赖注入容器"""
+﻿"""Runtime 依赖注入容器"""
 from typing import Optional, Dict, Any
 import yaml
 from pathlib import Path
@@ -11,7 +11,7 @@ from post_match_review.orchestrator.tactical_loop import TacticalLoop
 from post_match_review.orchestrator.review_orchestrator import ReviewOrchestrator
 from post_match_review.report.report_builder import ReportBuilder
 from post_match_review.report.markdown_renderer import MarkdownRenderer
-from post_match_review.types.state import ReviewAgentState
+from post_match_review.domain_types.state import ReviewAgentState
 from post_match_review.engines.stop_verifier import StopVerifier
 from post_match_review.engines.prompt_builder import PromptBuilder
 from post_match_review.analyzers.laning_analyzer import LaningAnalyzer

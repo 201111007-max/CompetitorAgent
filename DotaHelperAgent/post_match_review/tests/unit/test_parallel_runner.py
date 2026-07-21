@@ -1,4 +1,4 @@
-"""并行运行器单元测试"""
+﻿"""并行运行器单元测试"""
 import asyncio
 from typing import List
 
@@ -7,8 +7,8 @@ import pytest
 from post_match_review.parallel.parallel_runner import ParallelRunner
 from post_match_review.parallel.subagent import SubAgent
 from post_match_review.parallel.task_queue import TaskQueue
-from post_match_review.types.analysis import AnalysisContext, AnalysisResult, Conclusion
-from post_match_review.types.match_data import MatchData
+from post_match_review.domain_types.analysis import AnalysisContext, AnalysisResult, Conclusion
+from post_match_review.domain_types.match_data import MatchData
 
 
 class MockAnalyzer:

@@ -1,8 +1,8 @@
-"""并行子代理：独立上下文和执行环境"""
+﻿"""并行子代理：独立上下文和执行环境"""
 from typing import Any, Dict, List
 from post_match_review.interfaces.analyzer import IReviewAnalyzer
-from post_match_review.types.analysis import AnalysisContext, AnalysisResult
-from post_match_review.types.match_data import MatchData
+from post_match_review.domain_types.analysis import AnalysisContext, AnalysisResult
+from post_match_review.domain_types.match_data import MatchData
 from post_match_review.engines.budget import IterationBudget
 from post_match_review.observability.logger import get_logger
 

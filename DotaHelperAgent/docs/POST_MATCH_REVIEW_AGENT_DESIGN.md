@@ -2,9 +2,9 @@
 
 > **版本**: v1.4
 > **创建时间**: 2026-07-15
-> **最新修订**: 2026-07-20
+> **最新修订**: 2026-07-21
 > **定位**: 赛后复盘 Agent 的顶层架构设计蓝图
-> **状态**: 实施中（阶段 1-5 已完成，阶段 6-7 待启动）
+> **状态**: 实施中（阶段 1-6 已完成，阶段 7 待启动）
 
 ## 文档说明
 
@@ -216,7 +216,7 @@ DotaHelperAgent/
     │   ├── skill.py                        # IReviewSkill
     │   └── tracer.py                       # ITracer
     │
-    ├── types/                              # ── 数据模型/枚举/状态
+    ├── domain_types/                       # ── 数据模型/枚举/状态（v1.4: 重命名避免与标准库冲突）
     │   ├── __init__.py
     │   ├── enums.py                        # BudgetDecision / TerminalState / ContinueState / MatchType
     │   ├── match_data.py                   # MatchData / PlayerData / PickBan / LaneData / TeamfightData
@@ -1660,7 +1660,7 @@ logger.info_ctx("后台审查完成", extra_data={"quality": 0.85, "skills_extra
 | **阶段 3: 单阶段分析** | 战术循环 + 单个分析器（对线期） | 端到端完成一次对线期分析 | 阶段 2 | ✅ 已完成 (2026-07-16) |
 | **阶段 4: 全流程** | 战略循环 + 全部分析器 + 报告生成 | 端到端完成一次完整复盘 | 阶段 3 | ✅ 已完成 (2026-07-20) |
 | **阶段 5: 并行优化** | 并行子代理 + 上下文压缩 | 并行分析性能提升 > 30% | 阶段 4 | ✅ 已完成 (2026-07-20) |
-| **阶段 6: 自我进化** | 后台审查 + 技能沉淀 + 记忆扩展 | 复盘后自动生成技能、记忆持久化 | 阶段 4 | ⏳ 待启动 |
+| **阶段 6: 自我进化** | 后台审查 + 技能沉淀 + 记忆扩展 | 复盘后自动生成技能、记忆持久化 | 阶段 4 | ✅ 已完成 (2026-07-21) |
 | **阶段 7: 前端集成** | API 端点 + SSE 流式 + 复盘展示组件 | 前端可实时展示分析进度和报告 | 阶段 4 | ⏳ 待启动 |
 
 #### 13.1.1 已完成阶段详情
@@ -1726,6 +1726,31 @@ logger.info_ctx("后台审查完成", extra_data={"quality": 0.85, "skills_extra
 - ✅ 性能测试: 5 个阶段 mock LLM 延迟 500ms，串行 2500ms vs 并行 1020ms，**加速比 59.9%**（远超 30% 要求）
 - ✅ 端到端测试: 比赛 ID 8904322271 完整复盘流程验证通过
 - ✅ 总计测试通过（Phase 1-5）
+
+**阶段 6: 自我进化** (2026-07-21)
+- ✅ IFourLayerMemory / ISkillStore: 四层记忆系统接口定义
+- ✅ SessionArchive: Level 1 会话归档（SQLite 存储，支持按 match_id/时间/英雄查询，自动清理旧条目）
+- ✅ PersistentNotes: Level 2 持久笔记（JSON 存储，关键词检索，容量限制）
+- ✅ SkillStore: Level 3 技能沉淀（SKILL.md + frontmatter，版本号自增，Jaccard 冲突检测）
+- ✅ DreamRecap: 复盘后整合（LLM 驱动洞察提取 + 模式识别 + 持久化）
+- ✅ FourLayerMemory: 四层记忆统一入口
+- ✅ BackgroundReviewer: 异步后台审查（质量评估 + 模式提取 + 记忆沉淀，失败静默）
+- ✅ PromptLoader: 提示词加载器（YAML 模板加载，文件修改时间缓存失效）
+- ✅ 提示词模板: background_review.yaml, dream_recap.yaml
+- ✅ 集成到 ReviewOrchestrator: 报告生成后自动 spawn() 后台审查，不阻塞主流程
+- ✅ 单元测试: 33 个测试全部通过（17 个记忆系统 + 10 个后台审查 + 6 个集成测试）
+- ✅ 代码审查: 9 个问题全部修复（2 个 major + 7 个 minor）
+  - PersistentNotes ID 生成改为单调递增计数器，避免删除后重复
+  - BackgroundReviewer.spawn 使用 asyncio.get_running_loop() 替代已弃用的 get_event_loop()
+  - DreamRecap JSON 解析代码去重，提取通用方法
+  - FourLayerMemory.load_skills 接口文档补充
+  - SkillStore._parse_skill_file 正则表达式放宽，支持灵活格式
+  - SessionArchive.__del__ 空实现移除
+  - PromptLoader 缓存添加文件修改时间失效机制
+  - BackgroundReviewer._serialize_report 效率优化
+  - SessionArchive._cleanup_old_entries SQL 性能优化（使用主键索引）
+- ✅ 模块重命名: types/ → domain_types/（避免与 Python 标准库 types 模块冲突）
+- ✅ 总计测试通过（Phase 1-6）
 
 ### 13.2 执行方式
 
@@ -1823,6 +1848,7 @@ logger.info_ctx("后台审查完成", extra_data={"quality": 0.85, "skills_extra
 | v1.1 | 2026-07-15 | **目录结构重构**: 复盘 Agent 改为 `DotaHelperAgent/post_match_review/` 独立顶级包,与既有 `core/`/`analyzers/`/`skills/`/`memory/`/`utils/` 零代码依赖。所有 LLM 客户端、记忆、技能、可观测性、Prompt 模板、配置、运行时数据均在包内自包含。详见 §3.3 / §6.4 / §9 |
 | v1.2 | 2026-07-16 | **实施进展更新**: 阶段 1-3 已完成（63 个测试全部通过）。阶段 1 实现数据层（OpenDotaClient/MatchFetcher/DataValidator/Cache/MatchData）；阶段 2 实现核心骨架（IterationBudget/StopVerifier/PromptBuilder）；阶段 3 实现单阶段分析（LLMClient/TacticalLoop/LaningAnalyzer/分析器基类）。下一步：阶段 4 全流程（战略循环 + 全部分析器 + 报告生成）。详见 §13.1.1 |
 | v1.3 | 2026-07-20 | **阶段 4 全流程完成**: 实现战略循环（StrategicLoop）、5 个分析器（Teamfight/Economy/Decision/Vision/Fallback）、报告生成（ReportBuilder/MarkdownRenderer）、主编排器（ReviewOrchestrator）。端到端测试通过（比赛 ID 8905359313），整体置信度 0.68，5 个分析阶段全部完成。修复 4 个关键问题：JSON 解析支持 markdown 代码块、模板名不匹配、置信度计算优化、默认模型改为 deepseek-v4-pro。详见 §13.1.1 |
+| v1.4 | 2026-07-21 | **阶段 6 自我进化完成**: 实现四层记忆系统（SessionArchive/PersistentNotes/SkillStore/DreamRecap）、后台审查器（BackgroundReviewer）、提示词加载器（PromptLoader）。33 个单元测试全部通过。代码审查修复 9 个问题（2 个 major + 7 个 minor）。模块重命名 types/ → domain_types/（避免与标准库冲突）。详见 §13.1.1 |
 
 ### D. 自包含设计原则（v1.1 重要约定）
 

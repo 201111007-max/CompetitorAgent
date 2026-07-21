@@ -1,11 +1,11 @@
-"""战术循环：单阶段深度分析"""
+﻿"""战术循环：单阶段深度分析"""
 from typing import Optional
 from post_match_review.interfaces.analyzer import IReviewAnalyzer
 from post_match_review.interfaces.budget import IIterationBudget
 from post_match_review.interfaces.compressor import IContextCompressor
-from post_match_review.types.analysis import AnalysisContext, AnalysisResult
-from post_match_review.types.match_data import MatchData
-from post_match_review.types.enums import BudgetDecision
+from post_match_review.domain_types.analysis import AnalysisContext, AnalysisResult
+from post_match_review.domain_types.match_data import MatchData
+from post_match_review.domain_types.enums import BudgetDecision
 from post_match_review.observability.logger import get_logger
 
 logger = get_logger("orchestrator.tactical")

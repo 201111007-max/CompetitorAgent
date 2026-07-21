@@ -1,11 +1,11 @@
-"""并行运行器：批量并发执行子代理任务"""
+﻿"""并行运行器：批量并发执行子代理任务"""
 import asyncio
 from typing import List, Any
 
 from post_match_review.parallel.subagent import SubAgent
 from post_match_review.parallel.task_queue import TaskQueue
-from post_match_review.types.match_data import MatchData
-from post_match_review.types.analysis import AnalysisResult
+from post_match_review.domain_types.match_data import MatchData
+from post_match_review.domain_types.analysis import AnalysisResult
 from post_match_review.observability.logger import get_logger
 
 logger = get_logger("pmr.parallel.parallel_runner")

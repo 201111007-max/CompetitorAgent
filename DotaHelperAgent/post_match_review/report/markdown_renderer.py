@@ -1,7 +1,7 @@
-"""Markdown 报告渲染器"""
+﻿"""Markdown 报告渲染器"""
 from typing import List
-from post_match_review.types.report import ReviewReport
-from post_match_review.types.analysis import AnalysisResult
+from post_match_review.domain_types.report import ReviewReport
+from post_match_review.domain_types.analysis import AnalysisResult
 from post_match_review.observability.logger import get_logger
 
 logger = get_logger("pmr.report.renderer")

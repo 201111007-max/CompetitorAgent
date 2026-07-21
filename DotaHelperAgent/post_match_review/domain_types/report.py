@@ -1,7 +1,7 @@
-"""复盘报告类型定义"""
+﻿"""复盘报告类型定义"""
 from dataclasses import dataclass, field
 from typing import List
-from post_match_review.types.analysis import AnalysisResult
+from post_match_review.domain_types.analysis import AnalysisResult
 
 
 @dataclass

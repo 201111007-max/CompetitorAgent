@@ -1,7 +1,7 @@
-"""停止验证接口"""
+﻿"""停止验证接口"""
 from typing import Protocol
-from post_match_review.types.events import VerificationResult
-from post_match_review.types.state import ReviewAgentState
+from post_match_review.domain_types.events import VerificationResult
+from post_match_review.domain_types.state import ReviewAgentState
 
 
 class IStopVerifier(Protocol):

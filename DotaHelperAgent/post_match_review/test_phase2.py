@@ -1,4 +1,4 @@
-"""直接测试第二阶段代码（绕过 pytest 的包导入问题）"""
+﻿"""直接测试第二阶段代码（绕过 pytest 的包导入问题）"""
 import sys
 from pathlib import Path
 
@@ -7,14 +7,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # 测试导入
 print("测试导入...")
-from post_match_review.types.enums import BudgetDecision
-from post_match_review.types.events import VerificationResult
-from post_match_review.types.state import ReviewAgentState
-from post_match_review.types.analysis import Conclusion
+from post_match_review.domain_types.enums import BudgetDecision
+from post_match_review.domain_types.events import VerificationResult
+from post_match_review.domain_types.state import ReviewAgentState
+from post_match_review.domain_types.analysis import Conclusion
 from post_match_review.engines.budget import IterationBudget
 from post_match_review.engines.stop_verifier import StopVerifier
 from post_match_review.engines.prompt_builder import PromptBuilder
-from post_match_review.types.match_data import MatchData, PlayerData
+from post_match_review.domain_types.match_data import MatchData, PlayerData
 
 print("✓ 所有模块导入成功")
 

@@ -1,6 +1,6 @@
-"""数据源接口定义"""
+﻿"""数据源接口定义"""
 from typing import Protocol
-from post_match_review.types.match_data import MatchData
+from post_match_review.domain_types.match_data import MatchData
 
 
 class IMatchDataSource(Protocol):

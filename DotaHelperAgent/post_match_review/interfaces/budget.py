@@ -1,6 +1,6 @@
-"""迭代预算接口"""
+﻿"""迭代预算接口"""
 from typing import Protocol
-from post_match_review.types.enums import BudgetDecision
+from post_match_review.domain_types.enums import BudgetDecision
 
 
 class IIterationBudget(Protocol):

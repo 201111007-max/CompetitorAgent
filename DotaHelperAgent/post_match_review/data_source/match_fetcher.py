@@ -1,10 +1,10 @@
-"""比赛数据获取与结构化转换"""
+﻿"""比赛数据获取与结构化转换"""
 from typing import Any, Dict, List, Optional
 
 from post_match_review.data_source.exceptions import DataSourceError
 from post_match_review.data_source.opendota_client import OpenDotaClient
 from post_match_review.observability.logger import get_logger
-from post_match_review.types.match_data import (
+from post_match_review.domain_types.match_data import (
     EconomyData,
     LaneData,
     MatchData,

@@ -1,4 +1,4 @@
-"""性能基准测试：并行 vs 串行执行速度对比"""
+﻿"""性能基准测试：并行 vs 串行执行速度对比"""
 import asyncio
 import time
 from typing import List
@@ -9,8 +9,8 @@ import pytest
 from post_match_review.interfaces.analyzer import IReviewAnalyzer
 from post_match_review.parallel.parallel_runner import ParallelRunner
 from post_match_review.parallel.subagent import SubAgent
-from post_match_review.types.analysis import AnalysisContext, AnalysisResult, Conclusion
-from post_match_review.types.match_data import MatchData
+from post_match_review.domain_types.analysis import AnalysisContext, AnalysisResult, Conclusion
+from post_match_review.domain_types.match_data import MatchData
 
 
 class MockAnalyzer:

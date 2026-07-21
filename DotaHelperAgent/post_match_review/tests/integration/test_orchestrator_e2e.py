@@ -1,10 +1,10 @@
-"""集成测试：端到端复盘流程"""
+﻿"""集成测试：端到端复盘流程"""
 import pytest
 from typing import List, Dict, Any
 from post_match_review.interfaces.data_source import IMatchDataSource
 from post_match_review.interfaces.llm import ILLMClient
 from post_match_review.orchestrator.runtime import Runtime
-from post_match_review.types.match_data import (
+from post_match_review.domain_types.match_data import (
     MatchData,
     PlayerData,
     PickBan,
@@ -12,7 +12,7 @@ from post_match_review.types.match_data import (
     TeamfightData,
     EconomyData,
 )
-from post_match_review.types.report import ReviewReport
+from post_match_review.domain_types.report import ReviewReport
 
 
 class MockLLMClient(ILLMClient):
@@ -336,7 +336,7 @@ async def test_strategic_loop_classification(runtime: Runtime) -> None:
 @pytest.mark.asyncio
 async def test_report_builder_cross_validation() -> None:
     """测试报告构建器的交叉验证"""
-    from post_match_review.types.analysis import AnalysisResult, Conclusion
+    from post_match_review.domain_types.analysis import AnalysisResult, Conclusion
     from post_match_review.report.report_builder import ReportBuilder
 
     # 创建模拟的阶段结果

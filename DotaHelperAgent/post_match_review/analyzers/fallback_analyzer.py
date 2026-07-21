@@ -1,9 +1,9 @@
-"""降级分析器：LLM 不可用时基于规则生成数据摘要"""
+﻿"""降级分析器：LLM 不可用时基于规则生成数据摘要"""
 from typing import List, Dict, Any
 
 from post_match_review.analyzers.base import BaseRuleReviewAnalyzer
-from post_match_review.types.analysis import AnalysisContext, Conclusion
-from post_match_review.types.match_data import MatchData
+from post_match_review.domain_types.analysis import AnalysisContext, Conclusion
+from post_match_review.domain_types.match_data import MatchData
 from post_match_review.observability.logger import get_logger
 
 logger = get_logger("pmr.analyzers.fallback")

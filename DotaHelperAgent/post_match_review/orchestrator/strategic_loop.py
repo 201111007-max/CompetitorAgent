@@ -1,8 +1,8 @@
-"""战略循环：全局评估与策略制定"""
+﻿"""战略循环：全局评估与策略制定"""
 from typing import Dict, Any, List
-from post_match_review.types.match_data import MatchData
-from post_match_review.types.strategy import AnalysisStrategy
-from post_match_review.types.enums import MatchType
+from post_match_review.domain_types.match_data import MatchData
+from post_match_review.domain_types.strategy import AnalysisStrategy
+from post_match_review.domain_types.enums import MatchType
 from post_match_review.observability.logger import get_logger
 
 logger = get_logger("pmr.orchestrator.strategic")

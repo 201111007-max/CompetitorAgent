@@ -1,6 +1,6 @@
-"""任务队列：收集并行子代理的执行结果"""
+﻿"""任务队列：收集并行子代理的执行结果"""
 from typing import List, Optional, Any
-from post_match_review.types.analysis import AnalysisResult
+from post_match_review.domain_types.analysis import AnalysisResult
 from post_match_review.observability.logger import get_logger
 
 logger = get_logger("pmr.parallel.task_queue")

@@ -1,4 +1,4 @@
-"""数据源层单元测试"""
+﻿"""数据源层单元测试"""
 import asyncio
 import time
 from pathlib import Path
@@ -18,7 +18,7 @@ from post_match_review.data_source.exceptions import (
 )
 from post_match_review.data_source.match_fetcher import MatchFetcher
 from post_match_review.data_source.opendota_client import OpenDotaClient
-from post_match_review.types.match_data import (
+from post_match_review.domain_types.match_data import (
     EconomyData,
     LaneData,
     MatchData,

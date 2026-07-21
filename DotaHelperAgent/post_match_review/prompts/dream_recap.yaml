@@ -1,0 +1,91 @@
+# DreamRecap 提示词模板
+# 用于复盘后的记忆整合与知识沉淀
+
+insights_extraction:
+  system: |
+    你是一位 Dota 2 复盘分析专家，负责从复盘报告中提取关键洞察。
+    识别那些对玩家改进最有价值的发现，并将其结构化为可记忆的知识。
+
+  user: |
+    请分析以下复盘报告，提取 3-5 个关键洞察：
+
+    ## 比赛信息
+    - 比赛 ID: {match_id}
+    - 比赛时长: {duration} 秒
+    - 胜方: {winner}
+    - 用户英雄: {user_hero}
+
+    ## 复盘报告摘要
+    {report_summary}
+
+    请提取关键洞察，每个洞察包含：
+    - **insight**: 洞察内容（一句话总结）
+    - **category**: 分类（laning/mid_game/late_game/teamfight/economy/vision/decision）
+    - **confidence**: 置信度（0-1，基于证据强度和重要性）
+    - **evidence**: 支撑证据列表
+
+    请以 JSON 格式输出：
+    ```json
+    [
+      {{
+        "insight": "洞察内容",
+        "category": "laning",
+        "confidence": 0.8,
+        "evidence": ["证据1", "证据2"]
+      }}
+    ]
+    ```
+
+    优先提取：
+    1. 对线期的关键失误或成功策略
+    2. 团战的决策质量评估
+    3. 经济效率的关键节点
+    4. 视野控制的改进空间
+    5. 关键决策点的分析
+
+pattern_identification:
+  system: |
+    你是一位 Dota 2 战术分析专家，负责从洞察中识别可复用的模式。
+    将零散的洞察组织成结构化的知识，便于未来的复盘参考。
+
+  user: |
+    基于以下洞察，识别 2-3 个可复用的分析模式或技能：
+
+    ## 洞察列表
+    {insights_text}
+
+    请识别可复用的模式，每个模式包含：
+    - **name**: 模式名称（英文，snake_case）
+    - **type**: 类型（skill 或 note）
+    - **description**: 简要描述
+    - **content**: 详细内容（Markdown 格式）
+    - **category**: 分类
+    - **confidence**: 置信度（0-1）
+    - **evidence**: 支撑证据
+    - **tags**: 标签列表
+
+    请以 JSON 格式输出：
+    ```json
+    [
+      {{
+        "name": "pattern_name",
+        "type": "skill|note",
+        "description": "模式描述",
+        "content": "## 要点\n- ...\n\n## 应用场景\n- ...",
+        "category": "general",
+        "confidence": 0.75,
+        "evidence": ["证据1"],
+        "tags": ["tag1", "tag2"]
+      }}
+    ]
+    ```
+
+    判断标准：
+    - **skill**: 置信度 >= 0.7，具有明确的战术指导意义，可多次应用
+    - **note**: 置信度 < 0.7，或仅为观察性发现，需要更多验证
+
+    优先沉淀：
+    1. 英雄克制策略（如对抗特定英雄的通用方法）
+    2. 时间节点策略（如关键装备时间、强势期）
+    3. 常见失误模式（如视野盲区、站位问题）
+    4. 经济决策模式（如出装顺序、farm 路线）

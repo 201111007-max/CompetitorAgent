@@ -1,4 +1,4 @@
-"""复盘主编排器"""
+﻿"""复盘主编排器"""
 from typing import Optional, Callable, List, Dict, Any
 from post_match_review.interfaces.data_source import IMatchDataSource
 from post_match_review.interfaces.verifier import IStopVerifier
@@ -7,11 +7,11 @@ from post_match_review.orchestrator.strategic_loop import StrategicLoop
 from post_match_review.orchestrator.tactical_loop import TacticalLoop
 from post_match_review.report.report_builder import ReportBuilder
 from post_match_review.report.markdown_renderer import MarkdownRenderer
-from post_match_review.types.report import ReviewReport
-from post_match_review.types.match_data import MatchData
-from post_match_review.types.state import ReviewAgentState
-from post_match_review.types.analysis import AnalysisContext, AnalysisResult
-from post_match_review.types.enums import ReviewTerminalState
+from post_match_review.domain_types.report import ReviewReport
+from post_match_review.domain_types.match_data import MatchData
+from post_match_review.domain_types.state import ReviewAgentState
+from post_match_review.domain_types.analysis import AnalysisContext, AnalysisResult
+from post_match_review.domain_types.enums import ReviewTerminalState
 from post_match_review.engines.budget import IterationBudget
 from post_match_review.parallel.parallel_runner import ParallelRunner
 from post_match_review.parallel.subagent import SubAgent
@@ -36,6 +36,7 @@ class ReviewOrchestrator:
         enable_parallel_phases: bool = False,
         analyzer_factory: Optional[Callable[[str], IReviewAnalyzer]] = None,
         max_concurrency: int = 4,
+        background_reviewer: Optional[Any] = None,
     ) -> None:
         """初始化主编排器
 
@@ -63,11 +64,13 @@ class ReviewOrchestrator:
         self._enable_parallel_phases = enable_parallel_phases
         self._analyzer_factory = analyzer_factory
         self._parallel_runner = ParallelRunner(max_concurrency=max_concurrency) if enable_parallel_phases else None
+        self._background_reviewer = background_reviewer
 
         logger.info(
-            "复盘主编排器初始化完成: parallel=%s, max_concurrency=%d",
+            "复盘主编排器初始化完成: parallel=%s, max_concurrency=%d, background_review=%s",
             enable_parallel_phases,
             max_concurrency,
+            background_reviewer is not None,
         )
 
     async def review(self, match_id: str) -> ReviewReport:
@@ -148,6 +151,14 @@ class ReviewOrchestrator:
         logger.info("[步骤 6/6] 开始渲染 Markdown 报告")
         report.markdown_report = self._markdown_renderer.render(report)
         logger.info("Markdown 渲染完成: 报告长度=%d 字符", len(report.markdown_report))
+
+        # 7. 启动后台审查（如果启用）
+        if self._background_reviewer:
+            logger.info("[步骤 7] 启动后台审查任务")
+            try:
+                self._background_reviewer.spawn(match_data, report)
+            except Exception as e:
+                logger.error(f"启动后台审查失败: {e}", exc_info=True)
 
         logger.info(
             "复盘完成: match_id=%s, terminal_state=%s, confidence=%.2f",
@@ -438,7 +449,7 @@ class ReviewOrchestrator:
         Returns:
             ReviewReport: 错误报告
         """
-        from post_match_review.types.report import MatchSummary
+        from post_match_review.domain_types.report import MatchSummary
 
         return ReviewReport(
             match_id=match_id,

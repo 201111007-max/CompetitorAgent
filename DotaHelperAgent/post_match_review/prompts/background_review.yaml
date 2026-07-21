@@ -1,0 +1,89 @@
+# 后台审查提示词模板
+# 用于 BackgroundReviewer 评估复盘报告质量
+
+quality_assessment:
+  system: |
+    你是一位专业的 Dota 2 复盘分析师，负责评估复盘报告的质量。
+    请从以下四个维度对报告进行评分（0-1 分）：
+
+  user: |
+    请评估以下复盘报告的质量：
+
+    ## 比赛信息
+    - 比赛 ID: {match_id}
+    - 比赛时长: {duration} 秒
+    - 胜方: {winner}
+
+    ## 复盘报告摘要
+    {report_summary}
+
+    请从以下四个维度评分：
+
+    1. **数据支撑度 (data_support)**: 结论是否有具体数据支撑（如击杀数、经济差、视野得分等）
+    2. **分析深度 (analysis_depth)**: 是否深入到根因分析，而非仅描述现象
+    3. **可操作性 (actionability)**: 改进建议是否具体、可执行、有针对性
+    4. **完整性 (completeness)**: 是否覆盖对线期、中期、团战、视野、决策等关键方面
+
+    请以 JSON 格式输出：
+    ```json
+    {{
+      "data_support": 0.0-1.0,
+      "analysis_depth": 0.0-1.0,
+      "actionability": 0.0-1.0,
+      "completeness": 0.0-1.0,
+      "overall_score": 0.0-1.0,
+      "comments": "简要评价说明"
+    }}
+    ```
+
+pattern_extraction:
+  system: |
+    你是一位 Dota 2 战术分析专家，负责从复盘中提取可复用的分析模式和技能。
+    识别那些在类似场景下反复出现的洞察，并将其结构化为可沉淀的知识。
+
+  user: |
+    基于以下复盘报告，提取 2-3 个可复用的分析模式或经验教训：
+
+    ## 比赛信息
+    - 比赛 ID: {match_id}
+    - 比赛时长: {duration} 秒
+    - 胜方: {winner}
+    - 用户英雄: {user_hero}
+
+    ## 关键发现
+    {key_findings}
+
+    ## 改进建议
+    {improvement_areas}
+
+    请提取可复用的模式，每个模式包含：
+    - **name**: 模式名称（英文，snake_case，如 against_pa, mid_lane_pressure）
+    - **type**: 类型（skill 或 note）
+    - **description**: 简要描述
+    - **content**: 详细内容（Markdown 格式）
+    - **category**: 分类（laning/mid_game/late_game/teamfight/economy/vision/decision/hero_counter）
+    - **confidence**: 置信度（0-1，基于模式的通用性和证据强度）
+    - **evidence**: 支撑证据列表
+    - **tags**: 标签列表
+
+    请以 JSON 格式输出：
+    ```json
+    [
+      {{
+        "name": "pattern_name",
+        "type": "skill|note",
+        "description": "...",
+        "content": "## 要点\n- ...\n\n## 应用场景\n- ...",
+        "category": "...",
+        "confidence": 0.75,
+        "evidence": ["证据1", "证据2"],
+        "tags": ["tag1", "tag2"]
+      }}
+    ]
+    ```
+
+    优先提取：
+    1. 英雄克制模式（如对抗 PA、幻影刺客等）
+    2. 时间节点策略（如 6 级强势期、关键装备时间节点）
+    3. 常见失误模式（如视野盲区、团战站位问题）
+    4. 经济决策模式（如出装选择、farm 路线优化）

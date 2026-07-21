@@ -1,8 +1,8 @@
-"""停止验证器"""
+﻿"""停止验证器"""
 from typing import List
 from post_match_review.interfaces.verifier import IStopVerifier
-from post_match_review.types.events import VerificationResult
-from post_match_review.types.state import ReviewAgentState
+from post_match_review.domain_types.events import VerificationResult
+from post_match_review.domain_types.state import ReviewAgentState
 from post_match_review.observability.logger import get_logger
 
 logger = get_logger("engines.stop_verifier")

@@ -1,7 +1,7 @@
-"""迭代预算控制器单元测试"""
+﻿"""迭代预算控制器单元测试"""
 import pytest
 from post_match_review.engines.budget import IterationBudget
-from post_match_review.types.enums import BudgetDecision
+from post_match_review.domain_types.enums import BudgetDecision
 
 
 class TestIterationBudget:

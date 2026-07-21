@@ -1,4 +1,4 @@
-"""端到端测试：比赛ID 8904322271"""
+﻿"""端到端测试：比赛ID 8904322271"""
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
@@ -13,8 +13,8 @@ from post_match_review.report.report_builder import ReportBuilder
 from post_match_review.report.markdown_renderer import MarkdownRenderer
 from post_match_review.engines.stop_verifier import StopVerifier
 from post_match_review.analyzers.fallback_analyzer import FallbackAnalyzer
-from post_match_review.types.state import ReviewAgentState
-from post_match_review.types.match_data import MatchData
+from post_match_review.domain_types.state import ReviewAgentState
+from post_match_review.domain_types.match_data import MatchData
 from post_match_review.interfaces.data_source import IMatchDataSource
 
 

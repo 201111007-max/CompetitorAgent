@@ -1,9 +1,9 @@
-"""Agent 状态定义"""
+﻿"""Agent 状态定义"""
 from dataclasses import dataclass, field
 from typing import List, Optional
-from post_match_review.types.analysis import Conclusion
-from post_match_review.types.strategy import AnalysisStrategy
-from post_match_review.types.match_data import MatchData
+from post_match_review.domain_types.analysis import Conclusion
+from post_match_review.domain_types.strategy import AnalysisStrategy
+from post_match_review.domain_types.match_data import MatchData
 
 
 @dataclass

@@ -1,8 +1,8 @@
-"""提示词构建器单元测试"""
+﻿"""提示词构建器单元测试"""
 import pytest
 from pathlib import Path
 from post_match_review.engines.prompt_builder import PromptBuilder
-from post_match_review.types.match_data import MatchData, PlayerData, PickBan
+from post_match_review.domain_types.match_data import MatchData, PlayerData, PickBan
 
 
 class TestPromptBuilder:
@@ -108,7 +108,7 @@ class TestPromptBuilder:
 
     def test_build_context_layer_includes_completed_results(self) -> None:
         """测试 Context 层包含已完成结果"""
-        from post_match_review.types.analysis import AnalysisResult, Conclusion
+        from post_match_review.domain_types.analysis import AnalysisResult, Conclusion
 
         builder = PromptBuilder()
 

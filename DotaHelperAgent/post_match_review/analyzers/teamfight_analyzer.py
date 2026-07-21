@@ -1,11 +1,11 @@
-"""团战分析器"""
+﻿"""团战分析器"""
 from typing import List, Dict, Any, Optional
 
 from post_match_review.analyzers.base import BaseLLMReviewAnalyzer, parse_json_response
 from post_match_review.interfaces.llm import ILLMClient
 from post_match_review.engines.prompt_builder import PromptBuilder
-from post_match_review.types.analysis import AnalysisContext, Conclusion
-from post_match_review.types.match_data import MatchData, TeamfightData
+from post_match_review.domain_types.analysis import AnalysisContext, Conclusion
+from post_match_review.domain_types.match_data import MatchData, TeamfightData
 from post_match_review.observability.logger import get_logger
 
 logger = get_logger("pmr.analyzers.teamfight")

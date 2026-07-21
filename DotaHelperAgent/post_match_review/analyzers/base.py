@@ -1,4 +1,4 @@
-"""分析器基类"""
+﻿"""分析器基类"""
 import json
 import re
 from abc import ABC, abstractmethod
@@ -6,12 +6,12 @@ from typing import List, Dict, Any, Optional
 
 from post_match_review.interfaces.analyzer import IReviewAnalyzer
 from post_match_review.interfaces.llm import ILLMClient
-from post_match_review.types.analysis import (
+from post_match_review.domain_types.analysis import (
     AnalysisContext,
     AnalysisResult,
     Conclusion,
 )
-from post_match_review.types.match_data import MatchData
+from post_match_review.domain_types.match_data import MatchData
 from post_match_review.observability.logger import get_logger
 
 logger = get_logger("analyzers.base")

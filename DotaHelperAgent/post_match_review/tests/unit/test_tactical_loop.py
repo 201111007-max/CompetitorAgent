@@ -1,15 +1,15 @@
-"""战术循环单元测试"""
+﻿"""战术循环单元测试"""
 import pytest
 from unittest.mock import AsyncMock, Mock
 
 from post_match_review.orchestrator.tactical_loop import TacticalLoop
-from post_match_review.types.analysis import (
+from post_match_review.domain_types.analysis import (
     AnalysisContext,
     AnalysisResult,
     Conclusion,
 )
-from post_match_review.types.match_data import MatchData, PlayerData
-from post_match_review.types.enums import BudgetDecision
+from post_match_review.domain_types.match_data import MatchData, PlayerData
+from post_match_review.domain_types.enums import BudgetDecision
 from post_match_review.engines.budget import IterationBudget
 
 

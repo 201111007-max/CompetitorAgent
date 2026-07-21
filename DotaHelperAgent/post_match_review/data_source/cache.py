@@ -1,4 +1,4 @@
-"""比赛数据本地缓存"""
+﻿"""比赛数据本地缓存"""
 import json
 import time
 from dataclasses import asdict
@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from post_match_review.observability.logger import get_logger
-from post_match_review.types.match_data import MatchData
+from post_match_review.domain_types.match_data import MatchData
 
 logger = get_logger("data_source.cache")
 
@@ -94,7 +94,7 @@ class MatchDataCache:
 
     def _dict_to_match_data(self, data: Dict[str, Any]) -> MatchData:
         """将字典转换回 MatchData"""
-        from post_match_review.types.match_data import (
+        from post_match_review.domain_types.match_data import (
             EconomyData,
             LaneData,
             PickBan,

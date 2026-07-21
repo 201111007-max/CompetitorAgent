@@ -1,10 +1,10 @@
-"""对线期分析器单元测试"""
+﻿"""对线期分析器单元测试"""
 import pytest
 from unittest.mock import Mock
 
 from post_match_review.analyzers.laning_analyzer import LaningAnalyzer
-from post_match_review.types.analysis import AnalysisContext, Conclusion
-from post_match_review.types.match_data import MatchData, PlayerData, LaneData
+from post_match_review.domain_types.analysis import AnalysisContext, Conclusion
+from post_match_review.domain_types.match_data import MatchData, PlayerData, LaneData
 from post_match_review.engines.budget import IterationBudget
 
 

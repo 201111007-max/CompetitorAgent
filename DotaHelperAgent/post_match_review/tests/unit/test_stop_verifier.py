@@ -1,8 +1,8 @@
-"""停止验证器单元测试"""
+﻿"""停止验证器单元测试"""
 import pytest
 from post_match_review.engines.stop_verifier import StopVerifier
-from post_match_review.types.state import ReviewAgentState
-from post_match_review.types.analysis import Conclusion
+from post_match_review.domain_types.state import ReviewAgentState
+from post_match_review.domain_types.analysis import Conclusion
 
 
 class TestStopVerifier:

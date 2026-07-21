@@ -1,4 +1,4 @@
-"""真实比赛ID端到端测试（使用LLM驱动的分析器）"""
+﻿"""真实比赛ID端到端测试（使用LLM驱动的分析器）"""
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
@@ -21,8 +21,8 @@ from post_match_review.analyzers.economy_analyzer import EconomyAnalyzer
 from post_match_review.analyzers.decision_analyzer import DecisionAnalyzer
 from post_match_review.analyzers.vision_analyzer import VisionAnalyzer
 from post_match_review.llm.client import LLMClient
-from post_match_review.types.state import ReviewAgentState
-from post_match_review.types.match_data import MatchData
+from post_match_review.domain_types.state import ReviewAgentState
+from post_match_review.domain_types.match_data import MatchData
 from post_match_review.interfaces.data_source import IMatchDataSource
 
 

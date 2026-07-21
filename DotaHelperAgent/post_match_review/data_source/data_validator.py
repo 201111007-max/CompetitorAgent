@@ -1,8 +1,8 @@
-"""数据完整性校验"""
+﻿"""数据完整性校验"""
 from typing import List, Tuple
 
 from post_match_review.observability.logger import get_logger
-from post_match_review.types.match_data import MatchData
+from post_match_review.domain_types.match_data import MatchData
 
 logger = get_logger("data_source.data_validator")
 
