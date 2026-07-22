@@ -1,4 +1,4 @@
-﻿"""对线期分析器单元测试"""
+"""对线期分析器单元测试"""
 import pytest
 from unittest.mock import Mock
 
@@ -214,7 +214,7 @@ class TestLaningAnalyzer:
         match_data = self._create_match_data()
         lane_data = match_data.lane_data
 
-        formatted = analyzer._format_lane_data(lane_data, match_data)
+        formatted = analyzer._format_domain_data(match_data)
 
         assert "对线期数据" in formatted
         assert "Juggernaut" in formatted

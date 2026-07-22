@@ -4,7 +4,6 @@ import re
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
 
-from post_match_review.interfaces.analyzer import IReviewAnalyzer
 from post_match_review.interfaces.llm import ILLMClient
 from post_match_review.domain_types.analysis import (
     AnalysisContext,
@@ -12,6 +11,7 @@ from post_match_review.domain_types.analysis import (
     Conclusion,
 )
 from post_match_review.domain_types.match_data import MatchData
+from post_match_review.engines.prompt_builder import PromptBuilder
 from post_match_review.observability.logger import get_logger
 
 logger = get_logger("analyzers.base")
@@ -23,13 +23,19 @@ class BaseLLMReviewAnalyzer(ABC):
     提供模板方法模式，子类只需实现特定方法即可完成分析流程。
     """
 
-    def __init__(self, llm_client: ILLMClient) -> None:
+    def __init__(
+        self,
+        llm_client: ILLMClient,
+        prompt_builder: Optional[PromptBuilder] = None,
+    ) -> None:
         """初始化基类
 
         Args:
             llm_client: LLM 客户端实例
+            prompt_builder: 提示词构建器，默认使用内置构建器
         """
         self._llm_client = llm_client
+        self._prompt_builder = prompt_builder or PromptBuilder()
         logger.info("初始化 LLM 分析器基类: %s", self.__class__.__name__)
 
     @property
@@ -38,13 +44,14 @@ class BaseLLMReviewAnalyzer(ABC):
         """分析阶段名称（子类必须实现）"""
         ...
 
-    @abstractmethod
     def build_prompt(
         self,
         match_data: MatchData,
         context: AnalysisContext,
     ) -> List[Dict[str, str]]:
-        """构建提示词（子类必须实现）
+        """通用提示词构建（模板方法）
+
+        子类只需实现 _format_domain_data() 即可。
 
         Args:
             match_data: 结构化比赛数据
@@ -53,11 +60,50 @@ class BaseLLMReviewAnalyzer(ABC):
         Returns:
             List[Dict[str, str]]: OpenAI 风格消息列表
         """
-        ...
+        logger.info(
+            "[%s] 构建提示词 match_id=%s",
+            self.phase_name, match_data.match_id,
+        )
+
+        # 1. 使用 PromptBuilder 构建基础提示词
+        messages = self._prompt_builder.build(
+            match_data=match_data,
+            phase=self.phase_name,
+            completed_results=context.completed_results,
+            iteration_feedback=context.iteration_feedback,
+        )
+
+        # 2. 调用子类的数据格式化方法
+        domain_text = self._format_domain_data(match_data)
+        if domain_text:
+            messages[1]["content"] += "\n\n" + domain_text
+            logger.debug(
+                "[%s] 已追加领域数据，追加长度=%d",
+                self.phase_name, len(domain_text),
+            )
+
+        return messages
 
     @abstractmethod
+    def _format_domain_data(self, match_data: MatchData) -> str:
+        """格式化领域数据为可读文本（子类必须实现）
+
+        Args:
+            match_data: 结构化比赛数据
+
+        Returns:
+            str: 格式化的领域数据文本
+        """
+        ...
+
     def parse_response(self, response: str) -> List[Conclusion]:
-        """解析 LLM 响应为结论列表（子类必须实现）
+        """通用响应解析（从子类提升到基类）
+
+        解析流程：
+        1. 尝试 JSON 解析
+        2. 优先查找 conclusions 键
+        3. 尝试从 analysis 键提取
+        4. Fallback: 文本提取
 
         Args:
             response: LLM 原始响应文本
@@ -65,7 +111,215 @@ class BaseLLMReviewAnalyzer(ABC):
         Returns:
             List[Conclusion]: 解析后的结论列表
         """
-        ...
+        logger.debug(
+            "[%s] 解析响应，长度=%d",
+            self.phase_name,
+            len(response),
+        )
+
+        parsed = parse_json_response(response)
+        conclusions: List[Conclusion] = []
+
+        if parsed:
+            logger.debug(
+                "[%s] JSON 解析成功，顶层键=%s",
+                self.phase_name,
+                list(parsed.keys()),
+            )
+            # 优先查找 conclusions 键
+            if "conclusions" in parsed:
+                logger.debug(
+                    "[%s] 使用 'conclusions' 字段解析",
+                    self.phase_name,
+                )
+                for item in parsed["conclusions"]:
+                    try:
+                        conclusions.append(self._parse_conclusion(item))
+                    except Exception as e:
+                        logger.warning(
+                            "[%s] 解析结论失败: %s, 数据: %s",
+                            self.phase_name,
+                            str(e),
+                            item,
+                        )
+            # 尝试从 analysis 键提取
+            elif "analysis" in parsed:
+                logger.debug(
+                    "[%s] 使用 'analysis' 字段解析",
+                    self.phase_name,
+                )
+                conclusions = self._extract_from_analysis(parsed)
+            else:
+                # 整个 JSON 作为单条结论
+                logger.debug(
+                    "[%s] 未识别结构化字段，将整个 JSON 作为单条结论",
+                    self.phase_name,
+                )
+                conclusions = [self._fallback_single_conclusion(parsed)]
+        else:
+            # Fallback: 文本提取
+            logger.warning(
+                "[%s] JSON 解析失败，降级为文本提取",
+                self.phase_name,
+            )
+            conclusions = self._parse_conclusions_from_text(response)
+
+        logger.info(
+            "[%s] 解析出 %d 条结论",
+            self.phase_name,
+            len(conclusions),
+        )
+        return conclusions
+
+    def _parse_conclusion(self, data: Dict[str, Any]) -> Conclusion:
+        """通用结论解析（从子类提升到基类）
+
+        Args:
+            data: 结论字典数据
+
+        Returns:
+            Conclusion: 解析后的结论
+        """
+        evidence_list = data.get("evidence", [])
+        if isinstance(evidence_list, dict):
+            evidence = [str(v) for v in evidence_list.values()]
+        elif isinstance(evidence_list, list):
+            evidence = [str(e) for e in evidence_list]
+        else:
+            evidence = []
+
+        title = data.get("title", "未命名结论")
+        content = data.get("content", data.get("finding", ""))
+        impact = data.get("impact", "medium")
+        suggestion = data.get("suggestion")
+
+        logger.debug(
+            "[%s] 解析单条结论: title=%s, impact=%s, has_evidence=%s, "
+            "evidence_count=%d, suggestion=%s",
+            self.phase_name,
+            title,
+            impact,
+            len(evidence) > 0,
+            len(evidence),
+            suggestion,
+        )
+
+        return Conclusion(
+            title=title,
+            content=content,
+            evidence=evidence,
+            has_evidence=len(evidence) > 0,
+            impact=impact,
+            suggestion=suggestion,
+        )
+
+    def _extract_from_analysis(
+        self, parsed: Dict[str, Any]
+    ) -> List[Conclusion]:
+        """从 analysis 字段提取结论
+
+        Args:
+            parsed: 解析后的 JSON 字典
+
+        Returns:
+            List[Conclusion]: 提取的结论列表
+        """
+        analysis_data = parsed["analysis"]
+        conclusions: List[Conclusion] = []
+
+        if not isinstance(analysis_data, dict):
+            evidence = []
+            if isinstance(parsed.get("evidence"), list):
+                evidence = [str(e) for e in parsed["evidence"]]
+            return [Conclusion(
+                title=f"{self.phase_name}分析",
+                content=str(analysis_data),
+                evidence=evidence,
+                has_evidence=len(evidence) > 0,
+                impact="medium",
+            )]
+
+        # 从 analysis 中提取关键发现
+        for key, value in analysis_data.items():
+            if isinstance(value, dict) and "conclusion" in value:
+                evidence = []
+                if "evidence" in value:
+                    if isinstance(value["evidence"], list):
+                        evidence = [str(e) for e in value["evidence"]]
+                    else:
+                        evidence = [str(value["evidence"])]
+                conclusions.append(Conclusion(
+                    title=key.replace("_", " ").title(),
+                    content=value.get("conclusion", ""),
+                    evidence=evidence,
+                    has_evidence=len(evidence) > 0,
+                    impact="medium",
+                ))
+
+        if not conclusions:
+            evidence = []
+            if "evidence" in analysis_data:
+                if isinstance(analysis_data["evidence"], list):
+                    evidence = [str(e) for e in analysis_data["evidence"]]
+            conclusions.append(Conclusion(
+                title=f"{self.phase_name}分析",
+                content=str(analysis_data.get("conclusion", analysis_data)),
+                evidence=evidence,
+                has_evidence=len(evidence) > 0,
+                impact="medium",
+            ))
+
+        return conclusions
+
+    def _fallback_single_conclusion(
+        self, parsed: Dict[str, Any]
+    ) -> Conclusion:
+        """将整个 JSON 作为单条结论
+
+        Args:
+            parsed: 解析后的 JSON 字典
+
+        Returns:
+            Conclusion: 单条结论
+        """
+        evidence = []
+        if "evidence" in parsed:
+            if isinstance(parsed["evidence"], list):
+                evidence = [str(e) for e in parsed["evidence"]]
+        
+        # 从 JSON 中提取 impact，如果没有则使用默认值 "medium"
+        impact = parsed.get("impact", "medium")
+        
+        return Conclusion(
+            title="分析结果",
+            content=str(parsed),
+            evidence=evidence,
+            has_evidence=len(evidence) > 0,
+            impact=impact,
+        )
+
+    def _parse_conclusions_from_text(self, text: str) -> List[Conclusion]:
+        """从文本提取结论（fallback）
+
+        Args:
+            text: LLM 响应文本
+
+        Returns:
+            List[Conclusion]: 提取的结论列表
+        """
+        conclusions: List[Conclusion] = []
+        paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+        for i, para in enumerate(paragraphs[:5]):
+            if len(para) < 20:
+                continue
+            lines = para.split("\n")
+            title = lines[0][:50] if lines else f"结论 {i+1}"
+            content = "\n".join(lines[1:]) if len(lines) > 1 else para
+            conclusions.append(Conclusion(
+                title=title, content=content,
+                evidence=[], has_evidence=False, impact="medium",
+            ))
+        return conclusions
 
     async def analyze(
         self,
