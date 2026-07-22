@@ -1,4 +1,4 @@
-﻿"""真实比赛ID端到端测试（使用FallbackAnalyzer，无需LLM）"""
+"""真实比赛ID端到端测试（使用FallbackAnalyzer，无需LLM）"""
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
@@ -153,7 +153,7 @@ async def test_real_match_e2e() -> None:
             print(f"  - {area}")
 
     # 13. 保存Markdown报告
-    output_file = f"test_report_{match_id}.md"
+    output_file = f"reports/test_report_{match_id}.md"
     with open(output_file, "w", encoding="utf-8") as f:
         f.write(report.markdown_report)
     print(f"\n✓ Markdown报告已保存到: {output_file}")

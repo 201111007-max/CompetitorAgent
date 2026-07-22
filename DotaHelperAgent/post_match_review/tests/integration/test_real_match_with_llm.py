@@ -1,4 +1,4 @@
-﻿"""真实比赛ID端到端测试（使用LLM驱动的分析器）"""
+"""真实比赛ID端到端测试（使用LLM驱动的分析器）"""
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
@@ -184,7 +184,7 @@ async def test_real_match_with_llm() -> None:
             print(f"  - {area}")
 
     # 14. 保存Markdown报告
-    output_file = f"test_report_llm_{match_id}.md"
+    output_file = f"reports/test_report_llm_{match_id}.md"
     with open(output_file, "w", encoding="utf-8") as f:
         f.write(report.markdown_report)
     print(f"\n✓ Markdown报告已保存到: {output_file}")
