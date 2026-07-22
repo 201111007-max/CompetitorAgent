@@ -1,4 +1,4 @@
-﻿"""对线期分析器"""
+"""对线期分析器"""
 import json
 from typing import List, Dict, Any, Optional
 
@@ -56,7 +56,12 @@ class LaningAnalyzer(BaseLLMReviewAnalyzer):
         Returns:
             List[Dict[str, str]]: OpenAI 风格消息列表
         """
-        logger.debug("构建对线期分析提示词")
+        logger.info(
+            "[阶段:%s] 构建提示词 match_id=%s, lane_data_available=%s",
+            self.phase_name,
+            match_data.match_id,
+            match_data.lane_data is not None,
+        )
 
         # 使用 PromptBuilder 构建基础提示词
         messages = self._prompt_builder.build(
@@ -71,8 +76,22 @@ class LaningAnalyzer(BaseLLMReviewAnalyzer):
             lane_data_text = self._format_lane_data(match_data.lane_data, match_data)
             # 在 Context 层（第 2 条消息）后追加对线期数据
             messages[1]["content"] += "\n\n" + lane_data_text
+            logger.debug(
+                "[阶段:%s] 已追加对线期数据，追加长度=%d",
+                self.phase_name,
+                len(lane_data_text),
+            )
+        else:
+            logger.warning(
+                "[阶段:%s] 缺少 lane_data，提示词不包含对线期具体数据",
+                self.phase_name,
+            )
 
-        logger.debug("提示词构建完成，消息数: %d", len(messages))
+        logger.debug(
+            "[阶段:%s] 提示词构建完成，消息数=%d",
+            self.phase_name,
+            len(messages),
+        )
         return messages
 
     def parse_response(self, response: str) -> List[Conclusion]:
@@ -84,7 +103,11 @@ class LaningAnalyzer(BaseLLMReviewAnalyzer):
         Returns:
             List[Conclusion]: 解析后的结论列表
         """
-        logger.debug("解析对线期分析响应，长度: %d", len(response))
+        logger.debug(
+            "[阶段:%s] 解析响应，长度=%d",
+            self.phase_name,
+            len(response),
+        )
 
         conclusions: List[Conclusion] = []
 
@@ -92,17 +115,48 @@ class LaningAnalyzer(BaseLLMReviewAnalyzer):
         parsed = parse_json_response(response)
 
         if parsed:
+            logger.debug(
+                "[阶段:%s] JSON 解析成功，顶层键=%s",
+                self.phase_name,
+                list(parsed.keys()),
+            )
             # 优先查找 conclusions 键
             if "conclusions" in parsed:
+                logger.debug(
+                    "[阶段:%s] 使用 'conclusions' 字段解析",
+                    self.phase_name,
+                )
                 for item in parsed["conclusions"]:
                     try:
                         conclusion = self._parse_conclusion_from_dict(item)
                         conclusions.append(conclusion)
                     except Exception as e:
-                        logger.warning("解析结论失败: %s, 数据: %s", str(e), item)
+                        logger.warning(
+                            "[阶段:%s] 解析结论失败: %s, 数据: %s",
+                            self.phase_name,
+                            str(e),
+                            item,
+                        )
             # 尝试从 analysis 键中提取结论
             elif "analysis" in parsed:
+                logger.debug(
+                    "[阶段:%s] 使用 'analysis' 字段解析",
+                    self.phase_name,
+                )
                 analysis_data = parsed["analysis"]
+                if not isinstance(analysis_data, dict):
+                    evidence = []
+                    if isinstance(parsed.get("evidence"), list):
+                        evidence = [str(e) for e in parsed["evidence"]]
+                    conclusions.append(Conclusion(
+                        title="对线期分析",
+                        content=str(analysis_data),
+                        evidence=evidence,
+                        has_evidence=len(evidence) > 0,
+                        impact="medium",
+                    ))
+                    return conclusions
+
                 # 从 analysis 中提取关键发现
                 for key, value in analysis_data.items():
                     if isinstance(value, dict) and "conclusion" in value:
@@ -134,6 +188,10 @@ class LaningAnalyzer(BaseLLMReviewAnalyzer):
                     ))
             else:
                 # 尝试将整个 JSON 作为单条结论
+                logger.debug(
+                    "[阶段:%s] 未识别结构化字段，将整个 JSON 作为单条结论",
+                    self.phase_name,
+                )
                 evidence = []
                 if "evidence" in parsed:
                     if isinstance(parsed["evidence"], list):
@@ -147,9 +205,17 @@ class LaningAnalyzer(BaseLLMReviewAnalyzer):
                 ))
         else:
             # Fallback: 尝试从文本中提取结论
+            logger.warning(
+                "[阶段:%s] JSON 解析失败，降级为文本提取",
+                self.phase_name,
+            )
             conclusions = self._parse_conclusions_from_text(response)
 
-        logger.info("解析出 %d 条结论", len(conclusions))
+        logger.info(
+            "[阶段:%s] 解析出 %d 条结论",
+            self.phase_name,
+            len(conclusions),
+        )
         return conclusions
 
     def _parse_conclusion_from_dict(self, data: Dict[str, Any]) -> Conclusion:
@@ -164,7 +230,7 @@ class LaningAnalyzer(BaseLLMReviewAnalyzer):
         title = data.get("title", "未命名结论")
         content = data.get("content", data.get("finding", ""))
         evidence_list = data.get("evidence", [])
-        
+
         # 处理 evidence 字段（可能是列表或字典）
         if isinstance(evidence_list, dict):
             evidence = [str(v) for v in evidence_list.values()]
@@ -176,6 +242,17 @@ class LaningAnalyzer(BaseLLMReviewAnalyzer):
         has_evidence = len(evidence) > 0
         impact = data.get("impact", "medium")
         suggestion = data.get("suggestion")
+
+        logger.debug(
+            "[阶段:%s] 解析单条结论: title=%s, impact=%s, has_evidence=%s, "
+            "evidence_count=%d, suggestion=%s",
+            self.phase_name,
+            title,
+            impact,
+            has_evidence,
+            len(evidence),
+            suggestion,
+        )
 
         return Conclusion(
             title=title,
@@ -236,7 +313,16 @@ class LaningAnalyzer(BaseLLMReviewAnalyzer):
         Returns:
             str: 格式化的对线期数据文本
         """
-        logger.debug("格式化对线期数据")
+        logger.debug(
+            "[阶段:%s] 格式化对线期数据: players=%d, lh_entries=%d, "
+            "deny_entries=%d, networth_entries=%d, lane_entries=%d",
+            self.phase_name,
+            len(match_data.players),
+            len(lane_data.lh_at_10),
+            len(lane_data.denies_at_10),
+            len(lane_data.networth_at_10),
+            len(lane_data.player_lane),
+        )
 
         parts: List[str] = []
         parts.append("## 对线期数据（0-10 分钟）")

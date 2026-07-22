@@ -1,14 +1,15 @@
-﻿"""战略循环：全局评估与策略制定"""
+"""战略循环：全局评估与策略制定"""
 from typing import Dict, Any, List
 from post_match_review.domain_types.match_data import MatchData
 from post_match_review.domain_types.strategy import AnalysisStrategy
 from post_match_review.domain_types.enums import MatchType
+from post_match_review.interfaces.strategy import IStrategicLoop
 from post_match_review.observability.logger import get_logger
 
 logger = get_logger("pmr.orchestrator.strategic")
 
 
-class StrategicLoop:
+class StrategicLoop(IStrategicLoop):
     """战略循环：全局评估与策略制定"""
 
     def __init__(self, config: Dict[str, Any]) -> None:

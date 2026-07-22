@@ -1,3 +1,21 @@
+[project]
+name = "post_match_review"
+version = "0.1.0"
+description = "Dota 2 赛后复盘 Agent 模块"
+requires-python = ">=3.10"
+dependencies = [
+    "openai>=1.0",
+    "httpx>=0.23.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23.0",
+    "respx>=0.23.0",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = [".."]

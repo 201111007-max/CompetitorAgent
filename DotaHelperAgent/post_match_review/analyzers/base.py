@@ -1,4 +1,4 @@
-﻿"""分析器基类"""
+"""分析器基类"""
 import json
 import re
 from abc import ABC, abstractmethod
@@ -81,19 +81,50 @@ class BaseLLMReviewAnalyzer(ABC):
         Returns:
             AnalysisResult: 分析结果
         """
-        logger.info("开始分析阶段: %s", self.phase_name)
+        completed_phases = [r.phase for r in context.completed_results]
+        logger.info(
+            "[阶段:%s] 开始分析 match_id=%s, 已完成阶段=%s, 反馈=%s",
+            self.phase_name,
+            match_data.match_id,
+            completed_phases,
+            context.iteration_feedback,
+        )
 
         # 1. 构建提示词
         messages = self.build_prompt(match_data, context)
-        logger.debug("构建提示词完成，消息数: %d", len(messages))
+        prompt_text = "\n".join(m.get("content", "") for m in messages)
+        logger.debug(
+            "[阶段:%s] 构建提示词完成，消息数=%d, 提示词长度=%d",
+            self.phase_name,
+            len(messages),
+            len(prompt_text),
+        )
+        logger.debug(
+            "[阶段:%s] 提示词内容:\n%s",
+            self.phase_name,
+            prompt_text,
+        )
 
         # 2. 调用 LLM
         try:
             response = await self._llm_client.chat(messages)
-            logger.debug("LLM 响应长度: %d 字符", len(response))
-            logger.info("LLM 原始响应:\n%s", response)
+            logger.debug(
+                "[阶段:%s] LLM 响应长度: %d 字符",
+                self.phase_name,
+                len(response),
+            )
+            logger.info(
+                "[阶段:%s] LLM 原始响应:\n%s",
+                self.phase_name,
+                response,
+            )
         except Exception as e:
-            logger.error("LLM 调用失败: %s", str(e))
+            logger.error(
+                "[阶段:%s] LLM 调用失败: %s",
+                self.phase_name,
+                str(e),
+                exc_info=True,
+            )
             # 返回空结果，置信度为 0
             return AnalysisResult(
                 phase=self.phase_name,
@@ -106,11 +137,27 @@ class BaseLLMReviewAnalyzer(ABC):
 
         # 3. 解析响应
         conclusions = self.parse_response(response)
-        logger.info("解析出 %d 条结论", len(conclusions))
+        logger.info(
+            "[阶段:%s] 解析出 %d 条结论",
+            self.phase_name,
+            len(conclusions),
+        )
+        for idx, conclusion in enumerate(conclusions):
+            logger.info(
+                "[阶段:%s] 结论 #%d: title=%s, impact=%s, has_evidence=%s, "
+                "evidence=%s, suggestion=%s",
+                self.phase_name,
+                idx + 1,
+                conclusion.title,
+                conclusion.impact,
+                conclusion.has_evidence,
+                conclusion.evidence,
+                conclusion.suggestion,
+            )
 
         # 4. 计算置信度（结论平均置信度）
         confidence = self._calculate_confidence(conclusions)
-        logger.info("阶段置信度: %.2f", confidence)
+        logger.info("[阶段:%s] 阶段置信度: %.2f", self.phase_name, confidence)
 
         # 5. 构建结果
         result = AnalysisResult(
@@ -120,6 +167,15 @@ class BaseLLMReviewAnalyzer(ABC):
             iterations_used=1,
             tokens_consumed=0,  # 由 TacticalLoop 填充
             analysis_text=response,
+        )
+
+        is_valid = self.validate_result(result)
+        logger.info(
+            "[阶段:%s] 结果验证: valid=%s, confidence=%.2f, conclusions=%d",
+            self.phase_name,
+            is_valid,
+            result.confidence,
+            len(result.conclusions),
         )
 
         return result
@@ -167,7 +223,8 @@ class BaseLLMReviewAnalyzer(ABC):
         # 检查置信度 >= 0.6
         if result.confidence < 0.6:
             logger.warning(
-                "置信度过低: %.2f < 0.6",
+                "[阶段:%s] 置信度过低: %.2f < 0.6",
+                self.phase_name,
                 result.confidence,
             )
             return False
@@ -177,10 +234,14 @@ class BaseLLMReviewAnalyzer(ABC):
             1 for c in result.conclusions if c.has_evidence
         )
         if has_evidence_count == 0:
-            logger.warning("无结论包含证据支撑")
+            logger.warning(
+                "[阶段:%s] 无结论包含证据支撑 (conclusions=%d)",
+                self.phase_name,
+                len(result.conclusions),
+            )
             return False
 
-        logger.debug("结果验证通过")
+        logger.debug("[阶段:%s] 结果验证通过", self.phase_name)
         return True
 
 
@@ -227,15 +288,33 @@ class BaseRuleReviewAnalyzer(ABC):
         Returns:
             AnalysisResult: 分析结果
         """
-        logger.info("开始规则分析阶段: %s", self.phase_name)
+        logger.info(
+            "[阶段:%s] 开始规则分析 match_id=%s",
+            self.phase_name,
+            match_data.match_id,
+        )
 
         # 1. 执行规则分析
         conclusions = self.analyze_with_rules(match_data, context)
-        logger.info("规则分析生成 %d 条结论", len(conclusions))
+        logger.info(
+            "[阶段:%s] 规则分析生成 %d 条结论",
+            self.phase_name,
+            len(conclusions),
+        )
+        for idx, conclusion in enumerate(conclusions):
+            logger.info(
+                "[阶段:%s] 结论 #%d: title=%s, impact=%s, has_evidence=%s, evidence=%s",
+                self.phase_name,
+                idx + 1,
+                conclusion.title,
+                conclusion.impact,
+                conclusion.has_evidence,
+                conclusion.evidence,
+            )
 
         # 2. 计算置信度
         confidence = self._calculate_confidence(conclusions)
-        logger.info("阶段置信度: %.2f", confidence)
+        logger.info("[阶段:%s] 阶段置信度: %.2f", self.phase_name, confidence)
 
         # 3. 构建结果
         result = AnalysisResult(
@@ -245,6 +324,15 @@ class BaseRuleReviewAnalyzer(ABC):
             iterations_used=1,
             tokens_consumed=0,
             analysis_text="[规则驱动分析]",
+        )
+
+        is_valid = self.validate_result(result)
+        logger.info(
+            "[阶段:%s] 规则结果验证: valid=%s, confidence=%.2f, conclusions=%d",
+            self.phase_name,
+            is_valid,
+            result.confidence,
+            len(result.conclusions),
         )
 
         return result
@@ -284,12 +372,21 @@ class BaseRuleReviewAnalyzer(ABC):
         # 规则分析的验证标准略低
         if result.confidence < 0.5:
             logger.warning(
-                "规则分析置信度过低: %.2f < 0.5",
+                "[阶段:%s] 规则分析置信度过低: %.2f < 0.5",
+                self.phase_name,
                 result.confidence,
             )
             return False
 
-        return len(result.conclusions) > 0
+        if len(result.conclusions) == 0:
+            logger.warning(
+                "[阶段:%s] 规则分析无结论",
+                self.phase_name,
+            )
+            return False
+
+        logger.debug("[阶段:%s] 规则结果验证通过", self.phase_name)
+        return True
 
 
 def parse_json_response(response: str) -> Optional[Dict[str, Any]]:

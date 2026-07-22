@@ -151,13 +151,15 @@ class DreamRecap:
         # 从 YAML 模板加载
         system_prompt = self._prompt_loader.render(
             "dream_recap",
-            "insight_extraction.system",
+            "insights_extraction.system",
         )
         user_prompt = self._prompt_loader.render(
             "dream_recap",
-            "insight_extraction.user",
+            "insights_extraction.user",
+            match_id=getattr(match_data, "match_id", "unknown"),
             duration=getattr(match_data, "duration", "N/A"),
             winner="Radiant" if getattr(match_data, "radiant_win", False) else "Dire",
+            user_hero=getattr(match_data, "user_hero", "Unknown"),
             report_summary=self._summarize_report(report),
         )
         return f"{system_prompt}\n\n{user_prompt}"
@@ -171,11 +173,11 @@ class DreamRecap:
         # 从 YAML 模板加载
         system_prompt = self._prompt_loader.render(
             "dream_recap",
-            "pattern_recognition.system",
+            "pattern_identification.system",
         )
         user_prompt = self._prompt_loader.render(
             "dream_recap",
-            "pattern_recognition.user",
+            "pattern_identification.user",
             insights_list=insights_text,
         )
         return f"{system_prompt}\n\n{user_prompt}"

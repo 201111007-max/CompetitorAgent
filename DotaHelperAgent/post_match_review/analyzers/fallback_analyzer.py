@@ -1,4 +1,4 @@
-﻿"""降级分析器：LLM 不可用时基于规则生成数据摘要"""
+"""降级分析器：LLM 不可用时基于规则生成数据摘要"""
 from typing import List, Dict, Any
 
 from post_match_review.analyzers.base import BaseRuleReviewAnalyzer
@@ -29,6 +29,11 @@ class FallbackAnalyzer(BaseRuleReviewAnalyzer):
         match_data: MatchData,
         context: AnalysisContext,
     ) -> List[Conclusion]:
+        logger.info(
+            "[阶段:%s] 开始规则分析 match_id=%s",
+            self.phase_name,
+            match_data.match_id,
+        )
         dispatch = {
             "laning": self._analyze_laning,
             "teamfight": self._analyze_teamfight,
@@ -38,7 +43,20 @@ class FallbackAnalyzer(BaseRuleReviewAnalyzer):
         }
         handler = dispatch.get(self._phase, self._analyze_generic)
         conclusions = handler(match_data)
-        logger.info("降级分析器 [%s] 生成 %d 条结论", self._phase, len(conclusions))
+        logger.info(
+            "[阶段:%s] 规则分析生成 %d 条结论",
+            self.phase_name,
+            len(conclusions),
+        )
+        for idx, conclusion in enumerate(conclusions):
+            logger.info(
+                "[阶段:%s] 结论 #%d: title=%s, has_evidence=%s, evidence=%s",
+                self.phase_name,
+                idx + 1,
+                conclusion.title,
+                conclusion.has_evidence,
+                conclusion.evidence,
+            )
         return conclusions
 
     def _get_user_player(self, match_data: MatchData):
@@ -49,6 +67,10 @@ class FallbackAnalyzer(BaseRuleReviewAnalyzer):
 
     def _analyze_generic(self, match_data: MatchData) -> List[Conclusion]:
         """通用兜底：比赛结果 + 用户表现"""
+        logger.debug(
+            "[阶段:%s] 执行通用规则分析",
+            self.phase_name,
+        )
         conclusions: List[Conclusion] = []
         winner = "天辉" if match_data.radiant_win else "夜魇"
         conclusions.append(Conclusion(
@@ -69,6 +91,11 @@ class FallbackAnalyzer(BaseRuleReviewAnalyzer):
 
     def _analyze_laning(self, match_data: MatchData) -> List[Conclusion]:
         """对线期分析：0-10 分钟补刀、伤害、净经济"""
+        logger.debug(
+            "[阶段:%s] 执行对线期规则分析，lane_data_available=%s",
+            self.phase_name,
+            match_data.lane_data is not None,
+        )
         conclusions: List[Conclusion] = []
         lane = match_data.lane_data
 
@@ -79,6 +106,13 @@ class FallbackAnalyzer(BaseRuleReviewAnalyzer):
             if user and user.account_id:
                 user_lh = lane.lh_at_10.get(user.account_id)
                 user_deny = lane.denies_at_10.get(user.account_id)
+                logger.debug(
+                    "[阶段:%s] 用户对线数据: account_id=%s, lh@10=%s, denies@10=%s",
+                    self.phase_name,
+                    user.account_id,
+                    user_lh,
+                    user_deny,
+                )
 
             # 用户补刀表现
             if user_lh is not None:
@@ -119,6 +153,10 @@ class FallbackAnalyzer(BaseRuleReviewAnalyzer):
                         impact="medium",
                     ))
         else:
+            logger.warning(
+                "[阶段:%s] 缺少 lane_data 或 lh_at_10",
+                self.phase_name,
+            )
             conclusions.append(Conclusion(
                 title="对线数据缺失",
                 content="未获取到 10 分钟对线数据，无法进行对线期分析。",
@@ -131,10 +169,16 @@ class FallbackAnalyzer(BaseRuleReviewAnalyzer):
 
     def _analyze_teamfight(self, match_data: MatchData) -> List[Conclusion]:
         """团战分析：次数、死亡、经济收益"""
-        conclusions: List[Conclusion] = []
         tfs = match_data.teamfight_data or []
+        logger.debug(
+            "[阶段:%s] 执行团战规则分析，teamfight_count=%d",
+            self.phase_name,
+            len(tfs),
+        )
+        conclusions: List[Conclusion] = []
 
         if not tfs:
+            logger.warning("[阶段:%s] 缺少 teamfight_data", self.phase_name)
             conclusions.append(Conclusion(
                 title="无团战数据",
                 content="本场比赛未记录到团战数据。",
@@ -147,6 +191,14 @@ class FallbackAnalyzer(BaseRuleReviewAnalyzer):
         total_fights = len(tfs)
         total_deaths = sum(tf.deaths for tf in tfs)
         radiant_delta = sum(tf.radiant_gold_delta for tf in tfs)
+        logger.debug(
+            "[阶段:%s] 团战统计: total_fights=%d, total_deaths=%d, "
+            "radiant_delta=%+d",
+            self.phase_name,
+            total_fights,
+            total_deaths,
+            radiant_delta,
+        )
 
         conclusions.append(Conclusion(
             title="团战总览",
@@ -166,6 +218,11 @@ class FallbackAnalyzer(BaseRuleReviewAnalyzer):
             tf for tf in tfs
             if tf.deaths >= 4 or abs(tf.radiant_gold_delta - tf.dire_gold_delta) >= 3000
         ]
+        logger.debug(
+            "[阶段:%s] 关键团战数量: %d",
+            self.phase_name,
+            len(key_fights),
+        )
         if key_fights:
             sample = key_fights[0]
             minutes = sample.start // 60
@@ -187,6 +244,11 @@ class FallbackAnalyzer(BaseRuleReviewAnalyzer):
 
     def _analyze_economy(self, match_data: MatchData) -> List[Conclusion]:
         """经济分析：团队 GPM 对比、个人 GPM/XPM"""
+        logger.debug(
+            "[阶段:%s] 执行经济规则分析，players=%d",
+            self.phase_name,
+            len(match_data.players),
+        )
         conclusions: List[Conclusion] = []
         radiant = [p for p in match_data.players if p.is_radiant]
         dire = [p for p in match_data.players if not p.is_radiant]
@@ -195,6 +257,13 @@ class FallbackAnalyzer(BaseRuleReviewAnalyzer):
             avg_r = sum(p.gpm for p in radiant) // len(radiant)
             avg_d = sum(p.gpm for p in dire) // len(dire)
             delta = avg_r - avg_d
+            logger.debug(
+                "[阶段:%s] 团队经济: radiant_avg_gpm=%d, dire_avg_gpm=%d, delta=%+d",
+                self.phase_name,
+                avg_r,
+                avg_d,
+                delta,
+            )
             conclusions.append(Conclusion(
                 title="团队经济对比",
                 content=f"天辉平均 GPM {avg_r}，夜魇平均 GPM {avg_d}，差距 {delta:+d}。",
@@ -209,6 +278,14 @@ class FallbackAnalyzer(BaseRuleReviewAnalyzer):
             if teammates:
                 avg_team_gpm = sum(p.gpm for p in teammates) // len(teammates)
                 user_delta = user.gpm - avg_team_gpm
+                logger.debug(
+                    "[阶段:%s] 用户经济: user_gpm=%d, teammate_avg_gpm=%d, "
+                    "delta=%+d",
+                    self.phase_name,
+                    user.gpm,
+                    avg_team_gpm,
+                    user_delta,
+                )
                 conclusions.append(Conclusion(
                     title="用户经济对比队友",
                     content=f"用户 GPM {user.gpm}，队友平均 GPM {avg_team_gpm}，"
@@ -227,14 +304,26 @@ class FallbackAnalyzer(BaseRuleReviewAnalyzer):
 
     def _analyze_decisions(self, match_data: MatchData) -> List[Conclusion]:
         """决策分析：关键目标、推塔节奏、Roshan"""
-        conclusions: List[Conclusion] = []
         raw = match_data.raw_metadata or {}
         objectives = raw.get("objectives") or []
+        logger.debug(
+            "[阶段:%s] 执行决策规则分析，objectives_count=%d",
+            self.phase_name,
+            len(objectives),
+        )
+        conclusions: List[Conclusion] = []
 
         if objectives:
             # 分类关键目标
             roshan_count = sum(1 for o in objectives if o.get("type") == "CHATED_ROSHAN")
             tower_count = sum(1 for o in objectives if o.get("type") == "BUILDING_KILL")
+            logger.debug(
+                "[阶段:%s] 目标事件统计: total=%d, roshan=%d, towers=%d",
+                self.phase_name,
+                len(objectives),
+                roshan_count,
+                tower_count,
+            )
             conclusions.append(Conclusion(
                 title="关键目标事件",
                 content=f"比赛共记录 {len(objectives)} 个关键事件，"
@@ -249,6 +338,7 @@ class FallbackAnalyzer(BaseRuleReviewAnalyzer):
                 suggestion="Roshan 时机与推塔节奏是胜负关键，建议结合时间线复盘。",
             ))
         else:
+            logger.warning("[阶段:%s] 缺少 objectives 数据", self.phase_name)
             conclusions.append(Conclusion(
                 title="目标事件数据缺失",
                 content="未获取到关键目标事件数据，无法进行决策分析。",
@@ -274,11 +364,17 @@ class FallbackAnalyzer(BaseRuleReviewAnalyzer):
 
     def _analyze_vision(self, match_data: MatchData) -> List[Conclusion]:
         """视野分析：守卫放置、反野"""
-        conclusions: List[Conclusion] = []
         raw = match_data.raw_metadata or {}
         vision = raw.get("vision") or {}
+        logger.debug(
+            "[阶段:%s] 执行视野规则分析，vision_data_available=%s",
+            self.phase_name,
+            bool(vision),
+        )
+        conclusions: List[Conclusion] = []
 
         if not vision:
+            logger.warning("[阶段:%s] 缺少 vision 数据", self.phase_name)
             conclusions.append(Conclusion(
                 title="视野数据缺失",
                 content="未获取到守卫放置数据，无法进行视野分析。",
@@ -292,6 +388,12 @@ class FallbackAnalyzer(BaseRuleReviewAnalyzer):
         sen = vision.get("sen") or {}
         obs_count = sum(len(v) if isinstance(v, list) else v for v in obs.values())
         sen_count = sum(len(v) if isinstance(v, list) else v for v in sen.values())
+        logger.debug(
+            "[阶段:%s] 视野统计: obs=%d, sen=%d",
+            self.phase_name,
+            obs_count,
+            sen_count,
+        )
 
         conclusions.append(Conclusion(
             title="守卫放置统计",
@@ -309,6 +411,12 @@ class FallbackAnalyzer(BaseRuleReviewAnalyzer):
                 user_obs = len(user_obs)
             if isinstance(user_sen, list):
                 user_sen = len(user_sen)
+            logger.debug(
+                "[阶段:%s] 用户视野贡献: user_obs=%d, user_sen=%d",
+                self.phase_name,
+                user_obs,
+                user_sen,
+            )
             conclusions.append(Conclusion(
                 title="用户视野贡献",
                 content=f"用户放置 {user_obs} 个守卫，{user_sen} 个真眼。",
@@ -322,6 +430,14 @@ class FallbackAnalyzer(BaseRuleReviewAnalyzer):
 
     def _user_summary_conclusion(self, user) -> Conclusion:
         kda_ratio = (user.kills + user.assists) / max(user.deaths, 1)
+        logger.debug(
+            "[阶段:%s] 用户表现摘要: hero=%s, kda_ratio=%.1f, gpm=%d, xpm=%d",
+            self.phase_name,
+            user.hero_name,
+            kda_ratio,
+            user.gpm,
+            user.xpm,
+        )
         return Conclusion(
             title="用户表现摘要",
             content=f"使用 {user.hero_name}，KDA {user.kills}/{user.deaths}/"

@@ -17,6 +17,7 @@ except ImportError:
 
 from flask import Flask, request, jsonify, Response, g, stream_with_context
 from flask_cors import CORS
+import asyncio
 import json
 import time
 import uuid
@@ -48,6 +49,16 @@ from utils.trace_context import (
 )
 from managers.matchup_data_manager import MatchupDataManager
 from cache.cache_manager import get_cache
+
+# 赛后复盘模块（仅通过 facade 入口接入）
+try:
+    from post_match_review import create_default_api
+    review_api = create_default_api()
+    REVIEW_API_AVAILABLE = True
+except Exception as _review_api_err:
+    review_api = None
+    REVIEW_API_AVAILABLE = False
+    app_logger.warning(f"赛后复盘模块初始化失败: {_review_api_err}")
 
 # Langfuse 监控（可选）
 try:
@@ -3360,6 +3371,116 @@ def generate_hero_query() -> Response:
             "success": False,
             "error": str(e)
         }), 500
+
+
+# === 赛后复盘 API 接口 ===
+
+@app.route('/api/review', methods=['GET', 'POST'])
+def start_review() -> Response:
+    """启动赛后复盘（SSE 流式输出）
+
+    Query Parameters:
+        match_id: 比赛 ID
+
+    Returns:
+        text/event-stream 响应，实时推送分析进度与最终报告
+    """
+    if not REVIEW_API_AVAILABLE or review_api is None:
+        return jsonify({"success": False, "error": "赛后复盘模块未初始化"}), 503
+
+    match_id = request.args.get('match_id') or (request.json.get('match_id') if request.is_json else None)
+    if not match_id:
+        return jsonify({"success": False, "error": "match_id 不能为空"}), 400
+
+    def generate() -> Generator[str, None, None]:
+        """同步生成器：驱动异步 review_stream"""
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            stream = review_api.review_stream(match_id)
+            while True:
+                try:
+                    sse = loop.run_until_complete(stream.__anext__())
+                    yield sse
+                except StopAsyncIteration:
+                    break
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            app_logger.error(f"复盘 SSE 流异常: {e}")
+            yield f"data: {json.dumps({'event': 'error', 'message': str(e), 'progress': 0.0}, ensure_ascii=False)}\n\n"
+        finally:
+            try:
+                loop.run_until_complete(loop.shutdown_asyncgens())
+            finally:
+                loop.close()
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no'
+        }
+    )
+
+
+@app.route('/api/review/<match_id>/status', methods=['GET'])
+def get_review_status(match_id: str) -> Response:
+    """获取复盘任务状态"""
+    if not REVIEW_API_AVAILABLE or review_api is None:
+        return jsonify({"success": False, "error": "赛后复盘模块未初始化"}), 503
+
+    try:
+        status = asyncio.run(review_api.get_status(match_id))
+        return jsonify({"success": True, "status": status})
+    except Exception as e:
+        app_logger.error(f"获取复盘状态失败: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/review/<match_id>/report', methods=['GET'])
+def get_review_report(match_id: str) -> Response:
+    """获取复盘报告"""
+    if not REVIEW_API_AVAILABLE or review_api is None:
+        return jsonify({"success": False, "error": "赛后复盘模块未初始化"}), 503
+
+    try:
+        report = asyncio.run(review_api.get_report(match_id))
+        if report is None:
+            return jsonify({"success": False, "error": "报告不存在"}), 404
+        return jsonify({"success": True, "report": report.to_dict()})
+    except Exception as e:
+        app_logger.error(f"获取复盘报告失败: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/review/<match_id>/interrupt', methods=['POST'])
+def interrupt_review(match_id: str) -> Response:
+    """中断正在进行的复盘任务"""
+    if not REVIEW_API_AVAILABLE or review_api is None:
+        return jsonify({"success": False, "error": "赛后复盘模块未初始化"}), 503
+
+    try:
+        result = asyncio.run(review_api.interrupt(match_id))
+        return jsonify({"success": True, "result": result})
+    except Exception as e:
+        app_logger.error(f"中断复盘失败: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/review/history', methods=['GET'])
+def list_review_history() -> Response:
+    """获取复盘历史列表"""
+    if not REVIEW_API_AVAILABLE or review_api is None:
+        return jsonify({"success": False, "error": "赛后复盘模块未初始化"}), 503
+
+    try:
+        history = asyncio.run(review_api.list_history())
+        return jsonify({"success": True, "history": history})
+    except Exception as e:
+        app_logger.error(f"获取复盘历史失败: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 if __name__ == '__main__':

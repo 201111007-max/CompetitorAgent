@@ -5,12 +5,13 @@ from datetime import datetime
 from post_match_review.domain_types.analysis import AnalysisResult
 from post_match_review.domain_types.match_data import MatchData
 from post_match_review.domain_types.report import ReviewReport, MatchSummary
+from post_match_review.interfaces.report import IReportBuilder
 from post_match_review.observability.logger import get_logger
 
 logger = get_logger("pmr.report.builder")
 
 
-class ReportBuilder:
+class ReportBuilder(IReportBuilder):
     """复盘报告构建器"""
 
     def build(

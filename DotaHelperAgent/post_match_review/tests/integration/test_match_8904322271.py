@@ -4,6 +4,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 import asyncio
+import pytest
 from post_match_review.data_source.opendota_client import OpenDotaClient
 from post_match_review.data_source.match_fetcher import MatchFetcher
 from post_match_review.orchestrator.strategic_loop import StrategicLoop
@@ -28,6 +29,7 @@ class MatchFetcherAdapter:
         return await self._fetcher.fetch_and_parse(match_id)
 
 
+@pytest.mark.asyncio
 async def test_match_8904322271() -> None:
     """测试比赛ID 8904322271"""
     match_id = "8904322271"

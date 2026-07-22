@@ -25,12 +25,32 @@ class OpenDotaClient:
         self._client: httpx.AsyncClient | None = None
 
     async def _get_client(self) -> httpx.AsyncClient:
-        """懒加载 httpx 客户端"""
-        if self._client is None or self._client.is_closed:
+        """懒加载 httpx 客户端
+
+        由于 Flask 每个请求可能运行在独立的 event loop 中，
+        当检测到 loop 变化时重新创建 client，避免 ``Event loop is closed`` 错误。
+
+        清理旧 client 时捕获所有异常，防止旧 loop 已关闭导致初始化失败。
+        """
+        loop = asyncio.get_running_loop()
+        if (
+            self._client is None
+            or self._client.is_closed
+            or getattr(self, "_loop", None) is not loop
+        ):
+            if self._client is not None and not self._client.is_closed:
+                try:
+                    await self._client.aclose()
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "关闭旧 httpx 客户端时忽略异常: %s",
+                        str(exc),
+                    )
             self._client = httpx.AsyncClient(
                 base_url=self._base_url,
                 timeout=httpx.Timeout(self._timeout),
             )
+            self._loop = loop
         return self._client
 
     async def close(self) -> None:

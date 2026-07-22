@@ -1,4 +1,4 @@
-﻿"""经济分析器"""
+"""经济分析器"""
 from typing import List, Dict, Any, Optional
 
 from post_match_review.analyzers.base import BaseLLMReviewAnalyzer, parse_json_response
@@ -35,6 +35,17 @@ class EconomyAnalyzer(BaseLLMReviewAnalyzer):
         match_data: MatchData,
         context: AnalysisContext,
     ) -> List[Dict[str, str]]:
+        logger.info(
+            "[阶段:%s] 构建提示词 match_id=%s, economy_data_available=%s, "
+            "gpm_series=%d, networth_series=%d, purchase_logs=%d",
+            self.phase_name,
+            match_data.match_id,
+            match_data.economy_data is not None,
+            len(match_data.economy_data.gpm_series) if match_data.economy_data else 0,
+            len(match_data.economy_data.networth_series) if match_data.economy_data else 0,
+            len(match_data.economy_data.purchase_log) if match_data.economy_data else 0,
+        )
+
         messages = self._prompt_builder.build(
             match_data=match_data,
             phase=self.phase_name,
@@ -45,24 +56,75 @@ class EconomyAnalyzer(BaseLLMReviewAnalyzer):
         if match_data.economy_data:
             eco_text = self._format_economy_data(match_data.economy_data, match_data)
             messages[1]["content"] += "\n\n" + eco_text
+            logger.debug(
+                "[阶段:%s] 已追加经济数据，追加长度=%d",
+                self.phase_name,
+                len(eco_text),
+            )
+        else:
+            logger.warning(
+                "[阶段:%s] 缺少 economy_data",
+                self.phase_name,
+            )
 
+        logger.debug(
+            "[阶段:%s] 提示词构建完成，消息数=%d",
+            self.phase_name,
+            len(messages),
+        )
         return messages
 
     def parse_response(self, response: str) -> List[Conclusion]:
+        logger.debug(
+            "[阶段:%s] 解析响应，长度=%d",
+            self.phase_name,
+            len(response),
+        )
         parsed = parse_json_response(response)
         conclusions: List[Conclusion] = []
 
         if parsed:
+            logger.debug(
+                "[阶段:%s] JSON 解析成功，顶层键=%s",
+                self.phase_name,
+                list(parsed.keys()),
+            )
             # 优先查找 conclusions 键
             if "conclusions" in parsed:
+                logger.debug(
+                    "[阶段:%s] 使用 'conclusions' 字段解析",
+                    self.phase_name,
+                )
                 for item in parsed["conclusions"]:
                     try:
                         conclusions.append(self._parse_conclusion(item))
                     except Exception as e:
-                        logger.warning("解析结论失败: %s", str(e))
+                        logger.warning(
+                            "[阶段:%s] 解析结论失败: %s",
+                            self.phase_name,
+                            str(e),
+                        )
             # 尝试从 analysis 键中提取结论
             elif "analysis" in parsed:
+                logger.debug(
+                    "[阶段:%s] 使用 'analysis' 字段解析",
+                    self.phase_name,
+                )
                 analysis_data = parsed["analysis"]
+                if not isinstance(analysis_data, dict):
+                    # analysis 字段为字符串或非字典结构时降级为单条结论
+                    evidence = []
+                    if isinstance(parsed.get("evidence"), list):
+                        evidence = [str(e) for e in parsed["evidence"]]
+                    conclusions.append(Conclusion(
+                        title="经济分析",
+                        content=str(analysis_data),
+                        evidence=evidence,
+                        has_evidence=len(evidence) > 0,
+                        impact="medium",
+                    ))
+                    return conclusions
+
                 # 从 analysis 中提取关键发现
                 for key, value in analysis_data.items():
                     if isinstance(value, dict) and "conclusion" in value:
@@ -94,6 +156,10 @@ class EconomyAnalyzer(BaseLLMReviewAnalyzer):
                     ))
             else:
                 # 尝试将整个 JSON 作为单条结论
+                logger.debug(
+                    "[阶段:%s] 未识别结构化字段，将整个 JSON 作为单条结论",
+                    self.phase_name,
+                )
                 evidence = []
                 if "evidence" in parsed:
                     if isinstance(parsed["evidence"], list):
@@ -106,8 +172,17 @@ class EconomyAnalyzer(BaseLLMReviewAnalyzer):
                     impact="medium",
                 ))
         else:
+            logger.warning(
+                "[阶段:%s] JSON 解析失败，降级为文本提取",
+                self.phase_name,
+            )
             conclusions = self._parse_conclusions_from_text(response)
 
+        logger.info(
+            "[阶段:%s] 解析出 %d 条结论",
+            self.phase_name,
+            len(conclusions),
+        )
         return conclusions
 
     def _parse_conclusion(self, data: Dict[str, Any]) -> Conclusion:
@@ -119,12 +194,24 @@ class EconomyAnalyzer(BaseLLMReviewAnalyzer):
         else:
             evidence = []
 
+        title = data.get("title", "未命名结论")
+        impact = data.get("impact", "medium")
+        logger.debug(
+            "[阶段:%s] 解析单条结论: title=%s, impact=%s, has_evidence=%s, "
+            "evidence_count=%d",
+            self.phase_name,
+            title,
+            impact,
+            len(evidence) > 0,
+            len(evidence),
+        )
+
         return Conclusion(
-            title=data.get("title", "未命名结论"),
+            title=title,
             content=data.get("content", data.get("finding", "")),
             evidence=evidence,
             has_evidence=len(evidence) > 0,
-            impact=data.get("impact", "medium"),
+            impact=impact,
             suggestion=data.get("suggestion"),
         )
 
@@ -148,17 +235,29 @@ class EconomyAnalyzer(BaseLLMReviewAnalyzer):
         economy_data: EconomyData,
         match_data: MatchData,
     ) -> str:
+        user_account_id = next(
+            (p.account_id for p in match_data.players if p.is_user and p.account_id),
+            None,
+        )
+        logger.debug(
+            "[阶段:%s] 格式化经济数据: players=%d, user_account_id=%s, "
+            "gpm_series=%d, networth_series=%d, purchase_logs=%d",
+            self.phase_name,
+            len(match_data.players),
+            user_account_id,
+            len(economy_data.gpm_series),
+            len(economy_data.networth_series),
+            len(economy_data.purchase_log),
+        )
+
         parts: List[str] = []
         parts.append("## 经济数据")
         parts.append("")
 
         player_map: Dict[str, str] = {}
-        user_account_id: Optional[str] = None
         for player in match_data.players:
             if player.account_id:
                 player_map[player.account_id] = player.hero_name
-            if player.is_user and player.account_id:
-                user_account_id = player.account_id
 
         # GPM/XPM 摘要
         parts.append("### GPM/XPM 摘要")

@@ -1,6 +1,7 @@
-﻿"""复盘报告类型定义"""
+"""复盘报告类型定义"""
+import dataclasses
 from dataclasses import dataclass, field
-from typing import List
+from typing import Any, Dict, List
 from post_match_review.domain_types.analysis import AnalysisResult
 
 
@@ -16,6 +17,10 @@ class MatchSummary:
     user_team_win: bool
     key_events: List[str] = field(default_factory=list)
 
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典"""
+        return dataclasses.asdict(self)
+
 
 @dataclass
 class ReviewReport:
@@ -30,3 +35,7 @@ class ReviewReport:
     markdown_report: str = ""
     terminal_state: str = ""
     created_at: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典"""
+        return dataclasses.asdict(self)

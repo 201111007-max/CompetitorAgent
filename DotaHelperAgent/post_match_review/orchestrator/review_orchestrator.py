@@ -1,4 +1,5 @@
 ﻿"""复盘主编排器"""
+import asyncio
 from typing import Optional, Callable, List, Dict, Any
 from post_match_review.interfaces.data_source import IMatchDataSource
 from post_match_review.interfaces.verifier import IStopVerifier
@@ -12,6 +13,7 @@ from post_match_review.domain_types.match_data import MatchData
 from post_match_review.domain_types.state import ReviewAgentState
 from post_match_review.domain_types.analysis import AnalysisContext, AnalysisResult
 from post_match_review.domain_types.enums import ReviewTerminalState
+from post_match_review.domain_types.events import ProgressEvent
 from post_match_review.engines.budget import IterationBudget
 from post_match_review.parallel.parallel_runner import ParallelRunner
 from post_match_review.parallel.subagent import SubAgent
@@ -73,11 +75,16 @@ class ReviewOrchestrator:
             background_reviewer is not None,
         )
 
-    async def review(self, match_id: str) -> ReviewReport:
+    async def review(
+        self,
+        match_id: str,
+        progress_callback: Optional[Callable[[ProgressEvent], Any]] = None,
+    ) -> ReviewReport:
         """执行完整复盘
 
         Args:
             match_id: OpenDota 比赛 ID
+            progress_callback: 进度回调，接收 ProgressEvent 事件
 
         Returns:
             ReviewReport: 完整复盘报告
@@ -97,8 +104,31 @@ class ReviewOrchestrator:
                 match_data.dire_score,
                 match_data.radiant_win,
             )
+            await self._emit_progress(
+                progress_callback,
+                ProgressEvent(
+                    event="progress",
+                    progress=0.1,
+                    message="比赛数据获取成功",
+                    payload={
+                        "duration": match_data.duration,
+                        "radiant_score": match_data.radiant_score,
+                        "dire_score": match_data.dire_score,
+                        "radiant_win": match_data.radiant_win,
+                    },
+                ),
+            )
         except Exception as e:
             logger.error("比赛数据获取失败: match_id=%s, error=%s", match_id, str(e))
+            await self._emit_progress(
+                progress_callback,
+                ProgressEvent(
+                    event="error",
+                    progress=0.0,
+                    message=f"数据获取失败: {str(e)}",
+                    payload={"error": str(e)},
+                ),
+            )
             return self._create_error_report(match_id, f"数据获取失败: {str(e)}")
 
         # 2. 战略评估
@@ -112,26 +142,61 @@ class ReviewOrchestrator:
             strategy.budget_allocation,
             strategy.expected_depth,
         )
+        await self._emit_progress(
+            progress_callback,
+            ProgressEvent(
+                event="progress",
+                progress=0.15,
+                message="战略评估完成",
+                payload={
+                    "match_type": strategy.match_type,
+                    "priority_phases": strategy.priority_phases,
+                },
+            ),
+        )
 
         # 3. 多阶段战术分析
         logger.info("[步骤 3/6] 开始战术分析: enable_parallel=%s, phases=%d", self._enable_parallel_phases, len(strategy.priority_phases))
         if self._enable_parallel_phases and self._parallel_runner:
             logger.info("使用并行模式执行战术分析阶段")
-            phase_results = await self._execute_parallel_phases(match_data, strategy)
+            phase_results = await self._execute_parallel_phases(match_data, strategy, progress_callback)
         else:
             logger.info("使用串行模式执行战术分析阶段")
-            phase_results = await self._execute_serial_phases(match_data, strategy)
+            phase_results = await self._execute_serial_phases(match_data, strategy, progress_callback)
 
         logger.info(
             "战术分析完成: 完成阶段数=%d, 总结论数=%d",
             len([r for r in phase_results if r.conclusions]),
             sum(len(r.conclusions) for r in phase_results),
         )
+        completed_phases = [r.phase for r in phase_results if r.conclusions]
+        await self._emit_progress(
+            progress_callback,
+            ProgressEvent(
+                event="progress",
+                progress=0.8,
+                message="战术分析完成",
+                payload={
+                    "completed_phases": completed_phases,
+                    "total_phases": len(strategy.priority_phases),
+                    "total_conclusions": sum(len(r.conclusions) for r in phase_results),
+                },
+            ),
+        )
 
         # 4. 停止验证
         logger.info("[步骤 4/6] 开始停止验证")
         terminal_state = self._verify_and_retry(match_data, phase_results)
         logger.info("停止验证结果: terminal_state=%s", terminal_state)
+        await self._emit_progress(
+            progress_callback,
+            ProgressEvent(
+                event="progress",
+                progress=0.9,
+                message="停止验证完成",
+                payload={"terminal_state": terminal_state},
+            ),
+        )
 
         # 5. 构建报告
         logger.info("[步骤 5/6] 开始构建报告")
@@ -145,6 +210,19 @@ class ReviewOrchestrator:
             report.overall_score,
             report.overall_confidence,
             len(report.key_findings),
+        )
+        await self._emit_progress(
+            progress_callback,
+            ProgressEvent(
+                event="progress",
+                progress=0.95,
+                message="报告构建完成",
+                payload={
+                    "overall_score": report.overall_score,
+                    "overall_confidence": report.overall_confidence,
+                    "key_findings_count": len(report.key_findings),
+                },
+            ),
         )
 
         # 6. 渲染 Markdown
@@ -172,12 +250,14 @@ class ReviewOrchestrator:
         self,
         match_data: MatchData,
         strategy: Any,
+        progress_callback: Optional[Callable[[ProgressEvent], Any]] = None,
     ) -> List[AnalysisResult]:
         """串行执行战术分析阶段
 
         Args:
             match_data: 比赛数据
             strategy: 分析策略
+            progress_callback: 进度回调
 
         Returns:
             List[AnalysisResult]: 阶段结果列表
@@ -188,19 +268,34 @@ class ReviewOrchestrator:
             len(strategy.priority_phases),
         )
         phase_results: List[AnalysisResult] = []
+        total_phases = len(strategy.priority_phases)
+        phase_weight = 0.6 / total_phases if total_phases > 0 else 0.0
 
         for idx, phase in enumerate(strategy.priority_phases):
+            start_progress = 0.2 + idx * phase_weight
+            complete_progress = 0.2 + (idx + 1) * phase_weight
             logger.info(
                 "[串行模式] 开始阶段 %d/%d: phase=%s",
                 idx + 1,
-                len(strategy.priority_phases),
+                total_phases,
                 phase,
             )
 
             # 检查是否被中断
             if self._state.is_interrupted:
-                logger.info("[串行模式] 检测到中断信号，提前返回: completed=%d/%d", idx, len(strategy.priority_phases))
+                logger.info("[串行模式] 检测到中断信号，提前返回: completed=%d/%d", idx, total_phases)
                 return phase_results
+
+            await self._emit_progress(
+                progress_callback,
+                ProgressEvent(
+                    event="phase_start",
+                    phase=phase,
+                    progress=start_progress,
+                    message=f"开始分析阶段: {phase}",
+                    payload={"phase_index": idx, "total_phases": total_phases},
+                ),
+            )
 
             # 获取该阶段预算
             budget_config = strategy.budget_allocation.get(phase, 2)
@@ -237,10 +332,26 @@ class ReviewOrchestrator:
             self._state.total_tokens += result.tokens_consumed
             self._state.update_confidence()
 
+            await self._emit_progress(
+                progress_callback,
+                ProgressEvent(
+                    event="phase_complete",
+                    phase=phase,
+                    progress=complete_progress,
+                    message=f"阶段 {phase} 分析完成",
+                    payload={
+                        "confidence": result.confidence,
+                        "conclusions_count": len(result.conclusions),
+                        "iterations_used": result.iterations_used,
+                        "tokens_consumed": result.tokens_consumed,
+                    },
+                ),
+            )
+
             logger.info(
                 "[串行模式] 阶段 %d/%d 完成: phase=%s, confidence=%.2f, conclusions=%d, iterations=%d, tokens=%d, 累计置信度=%.2f",
                 idx + 1,
-                len(strategy.priority_phases),
+                total_phases,
                 phase,
                 result.confidence,
                 len(result.conclusions),
@@ -260,25 +371,30 @@ class ReviewOrchestrator:
         self,
         match_data: MatchData,
         strategy: Any,
+        progress_callback: Optional[Callable[[ProgressEvent], Any]] = None,
     ) -> List[AnalysisResult]:
         """并行执行战术分析阶段
 
         Args:
             match_data: 比赛数据
             strategy: 分析策略
+            progress_callback: 进度回调
 
         Returns:
             List[AnalysisResult]: 阶段结果列表
         """
         if not self._analyzer_factory or not self._parallel_runner:
             logger.warning("[并行模式] 并行模式未正确配置（analyzer_factory=%s, parallel_runner=%s），降级为串行执行", self._analyzer_factory, self._parallel_runner)
-            return await self._execute_serial_phases(match_data, strategy)
+            return await self._execute_serial_phases(match_data, strategy, progress_callback)
 
         logger.info(
             "[并行模式] 开始创建子代理: phases=%s, total_phases=%d",
             strategy.priority_phases,
             len(strategy.priority_phases),
         )
+
+        total_phases = len(strategy.priority_phases)
+        phase_weight = 0.6 / total_phases if total_phases > 0 else 0.0
 
         # 为每个阶段创建 SubAgent
         subagents: List[SubAgent] = []
@@ -292,7 +408,7 @@ class ReviewOrchestrator:
             logger.info(
                 "[并行模式] 创建子代理 %d/%d: phase=%s, budget_quota=%d, analyzer=%s, depth=%s",
                 idx + 1,
-                len(strategy.priority_phases),
+                total_phases,
                 phase,
                 budget_quota,
                 analyzer.__class__.__name__,
@@ -307,6 +423,17 @@ class ReviewOrchestrator:
             )
             subagents.append(subagent)
 
+            await self._emit_progress(
+                progress_callback,
+                ProgressEvent(
+                    event="phase_start",
+                    phase=phase,
+                    progress=0.2 + idx * phase_weight,
+                    message=f"开始分析阶段: {phase}",
+                    payload={"phase_index": idx, "total_phases": total_phases},
+                ),
+            )
+
         logger.info("[并行模式] 子代理创建完成: count=%d，开始并行执行", len(subagents))
 
         # 并行执行
@@ -315,13 +442,29 @@ class ReviewOrchestrator:
         # 更新状态
         success_count = 0
         fail_count = 0
-        for result in phase_results:
+        for idx, result in enumerate(phase_results):
             if result.conclusions:
                 self._state.completed_phases.append(result.phase)
                 self._state.conclusions.extend(result.conclusions)
                 self._state.total_iterations += result.iterations_used
                 self._state.total_tokens += result.tokens_consumed
                 success_count += 1
+
+                await self._emit_progress(
+                    progress_callback,
+                    ProgressEvent(
+                        event="phase_complete",
+                        phase=result.phase,
+                        progress=0.2 + (idx + 1) * phase_weight,
+                        message=f"阶段 {result.phase} 分析完成",
+                        payload={
+                            "confidence": result.confidence,
+                            "conclusions_count": len(result.conclusions),
+                            "iterations_used": result.iterations_used,
+                            "tokens_consumed": result.tokens_consumed,
+                        },
+                    ),
+                )
             else:
                 fail_count += 1
                 logger.warning(
@@ -348,6 +491,73 @@ class ReviewOrchestrator:
         """中断当前复盘"""
         logger.info("中断复盘")
         self._state.is_interrupted = True
+
+    async def _emit_progress(
+        self,
+        callback: Optional[Callable[[ProgressEvent], Any]],
+        event: ProgressEvent,
+    ) -> None:
+        """发送进度事件
+
+        Args:
+            callback: 进度回调，可为同步或异步函数
+            event: 进度事件
+        """
+        if callback is None:
+            return
+        try:
+            result = callback(event)
+            if asyncio.iscoroutine(result):
+                await result
+        except Exception as e:
+            logger.warning("进度回调执行失败: %s", str(e))
+
+    async def review_with_progress(
+        self,
+        match_id: str,
+    ) -> ProgressEvent:
+        """流式复盘异步生成器
+
+        在 `review()` 执行过程中实时产出进度事件，最终产出包含完整
+        复盘报告的 `report` 事件。
+
+        Args:
+            match_id: OpenDota 比赛 ID
+
+        Yields:
+            ProgressEvent: 进度/阶段/报告事件
+        """
+        import dataclasses
+
+        queue: asyncio.Queue[ProgressEvent] = asyncio.Queue()
+
+        async def progress_callback(event: ProgressEvent) -> None:
+            await queue.put(event)
+
+        task = asyncio.create_task(self.review(match_id, progress_callback=progress_callback))
+
+        while True:
+            # 等待新事件或复盘任务结束
+            get_task = asyncio.create_task(queue.get())
+            done, _ = await asyncio.wait(
+                {get_task, task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if get_task in done:
+                event = get_task.result()
+                yield event
+            if task in done:
+                # 任务已完成，消费剩余队列中的事件
+                while not queue.empty():
+                    yield await queue.get()
+                report = task.result()
+                yield ProgressEvent(
+                    event="report",
+                    progress=1.0,
+                    message="复盘报告生成完成",
+                    payload={"report": dataclasses.asdict(report)},
+                )
+                break
 
     def get_partial_result(self) -> Optional[ReviewReport]:
         """获取中断后的部分结果

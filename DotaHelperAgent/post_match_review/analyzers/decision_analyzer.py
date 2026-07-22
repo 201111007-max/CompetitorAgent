@@ -1,4 +1,4 @@
-﻿"""决策点分析器"""
+"""决策点分析器"""
 from typing import List, Dict, Any, Optional
 
 from post_match_review.analyzers.base import BaseLLMReviewAnalyzer, parse_json_response
@@ -35,6 +35,18 @@ class DecisionAnalyzer(BaseLLMReviewAnalyzer):
         match_data: MatchData,
         context: AnalysisContext,
     ) -> List[Dict[str, str]]:
+        raw = match_data.raw_metadata or {}
+        objectives = raw.get("objectives") or []
+        logger.info(
+            "[阶段:%s] 构建提示词 match_id=%s, duration=%d, "
+            "teamfight_count=%d, objectives_count=%d",
+            self.phase_name,
+            match_data.match_id,
+            match_data.duration,
+            len(match_data.teamfight_data) if match_data.teamfight_data else 0,
+            len(objectives),
+        )
+
         messages = self._prompt_builder.build(
             match_data=match_data,
             phase=self.phase_name,
@@ -45,24 +57,69 @@ class DecisionAnalyzer(BaseLLMReviewAnalyzer):
         # 追加决策相关的全量数据摘要
         decision_text = self._format_decision_data(match_data)
         messages[1]["content"] += "\n\n" + decision_text
+        logger.debug(
+            "[阶段:%s] 已追加决策数据，追加长度=%d",
+            self.phase_name,
+            len(decision_text),
+        )
 
+        logger.debug(
+            "[阶段:%s] 提示词构建完成，消息数=%d",
+            self.phase_name,
+            len(messages),
+        )
         return messages
 
     def parse_response(self, response: str) -> List[Conclusion]:
+        logger.debug(
+            "[阶段:%s] 解析响应，长度=%d",
+            self.phase_name,
+            len(response),
+        )
         parsed = parse_json_response(response)
         conclusions: List[Conclusion] = []
 
         if parsed:
+            logger.debug(
+                "[阶段:%s] JSON 解析成功，顶层键=%s",
+                self.phase_name,
+                list(parsed.keys()),
+            )
             # 优先查找 conclusions 键
             if "conclusions" in parsed:
+                logger.debug(
+                    "[阶段:%s] 使用 'conclusions' 字段解析",
+                    self.phase_name,
+                )
                 for item in parsed["conclusions"]:
                     try:
                         conclusions.append(self._parse_conclusion(item))
                     except Exception as e:
-                        logger.warning("解析结论失败: %s", str(e))
+                        logger.warning(
+                            "[阶段:%s] 解析结论失败: %s",
+                            self.phase_name,
+                            str(e),
+                        )
             # 尝试从 analysis 键中提取结论
             elif "analysis" in parsed:
+                logger.debug(
+                    "[阶段:%s] 使用 'analysis' 字段解析",
+                    self.phase_name,
+                )
                 analysis_data = parsed["analysis"]
+                if not isinstance(analysis_data, dict):
+                    evidence = []
+                    if isinstance(parsed.get("evidence"), list):
+                        evidence = [str(e) for e in parsed["evidence"]]
+                    conclusions.append(Conclusion(
+                        title="决策分析",
+                        content=str(analysis_data),
+                        evidence=evidence,
+                        has_evidence=len(evidence) > 0,
+                        impact="medium",
+                    ))
+                    return conclusions
+
                 # 从 analysis 中提取关键发现
                 for key, value in analysis_data.items():
                     if isinstance(value, dict) and "conclusion" in value:
@@ -94,6 +151,10 @@ class DecisionAnalyzer(BaseLLMReviewAnalyzer):
                     ))
             else:
                 # 尝试将整个 JSON 作为单条结论
+                logger.debug(
+                    "[阶段:%s] 未识别结构化字段，将整个 JSON 作为单条结论",
+                    self.phase_name,
+                )
                 evidence = []
                 if "evidence" in parsed:
                     if isinstance(parsed["evidence"], list):
@@ -106,8 +167,17 @@ class DecisionAnalyzer(BaseLLMReviewAnalyzer):
                     impact="medium",
                 ))
         else:
+            logger.warning(
+                "[阶段:%s] JSON 解析失败，降级为文本提取",
+                self.phase_name,
+            )
             conclusions = self._parse_conclusions_from_text(response)
 
+        logger.info(
+            "[阶段:%s] 解析出 %d 条结论",
+            self.phase_name,
+            len(conclusions),
+        )
         return conclusions
 
     def _parse_conclusion(self, data: Dict[str, Any]) -> Conclusion:
@@ -119,12 +189,24 @@ class DecisionAnalyzer(BaseLLMReviewAnalyzer):
         else:
             evidence = []
 
+        title = data.get("title", "未命名结论")
+        impact = data.get("impact", "medium")
+        logger.debug(
+            "[阶段:%s] 解析单条结论: title=%s, impact=%s, has_evidence=%s, "
+            "evidence_count=%d",
+            self.phase_name,
+            title,
+            impact,
+            len(evidence) > 0,
+            len(evidence),
+        )
+
         return Conclusion(
-            title=data.get("title", "未命名结论"),
+            title=title,
             content=data.get("content", data.get("finding", "")),
             evidence=evidence,
             has_evidence=len(evidence) > 0,
-            impact=data.get("impact", "medium"),
+            impact=impact,
             suggestion=data.get("suggestion"),
         )
 
@@ -144,6 +226,18 @@ class DecisionAnalyzer(BaseLLMReviewAnalyzer):
         return conclusions
 
     def _format_decision_data(self, match_data: MatchData) -> str:
+        raw = match_data.raw_metadata or {}
+        objectives = raw.get("objectives") or []
+        logger.debug(
+            "[阶段:%s] 格式化决策数据: duration=%d, radiant_win=%s, "
+            "teamfight_count=%d, objectives_count=%d",
+            self.phase_name,
+            match_data.duration,
+            match_data.radiant_win,
+            len(match_data.teamfight_data) if match_data.teamfight_data else 0,
+            len(objectives),
+        )
+
         parts: List[str] = []
         parts.append("## 决策分析数据")
         parts.append("")
