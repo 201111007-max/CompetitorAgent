@@ -103,3 +103,7 @@ out_project/
 DotaHelperAgent/docs/bugs/
 DotaHelperAgent/docs/process_md/
 DotaHelperAgent/docs/superpowers/
+
+# ==================== Post Match Review Reports ====================
+# 复盘报告输出目录 - 包含生成的 Markdown 报告，不上传到 git
+DotaHelperAgent/post_match_review/reports/
