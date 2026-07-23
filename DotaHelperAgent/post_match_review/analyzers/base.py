@@ -84,17 +84,20 @@ class BaseLLMReviewAnalyzer(ABC):
 
         return messages
 
-    @abstractmethod
     def _format_domain_data(self, match_data: MatchData) -> str:
-        """格式化领域数据为可读文本（子类必须实现）
+        """格式化领域数据为可读文本
+
+        子类可覆盖此方法提供额外的领域数据格式化。
+        如果 YAML data_requirements 已覆盖全部格式化需求，
+        子类无需覆盖此方法。
 
         Args:
             match_data: 结构化比赛数据
 
         Returns:
-            str: 格式化的领域数据文本
+            str: 格式化的领域数据文本，默认返回空字符串
         """
-        ...
+        return ""
 
     def parse_response(self, response: str) -> List[Conclusion]:
         """通用响应解析（从子类提升到基类）

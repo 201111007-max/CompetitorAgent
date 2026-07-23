@@ -368,23 +368,36 @@ class TestBaseLLMReviewAnalyzer:
         assert "测试项 1" in combined_content
         assert "测试项 2" in combined_content
     
-    # ==================== _format_domain_data() 抽象方法测试 ====================
+    # ==================== _format_domain_data() 默认实现测试 ====================
     
-    def test_format_domain_data_is_abstract(self):
-        """测试 _format_domain_data 是抽象方法"""
-        # 尝试创建不实现 _format_domain_data 的子类应该失败
-        with pytest.raises(TypeError):
-            class IncompleteAnalyzer(BaseLLMReviewAnalyzer):
-                @property
-                def phase_name(self) -> str:
-                    return "incomplete"
-                
-                # 故意不实现 _format_domain_data
+    def test_format_domain_data_default_returns_empty_string(self):
+        """测试基类 _format_domain_data 默认返回空字符串"""
+        class MinimalAnalyzer(BaseLLMReviewAnalyzer):
+            @property
+            def phase_name(self) -> str:
+                return "minimal"
             
-            IncompleteAnalyzer(Mock(spec=ILLMClient))
-    
-    def test_format_domain_data_must_be_implemented(self):
-        """测试子类必须实现 _format_domain_data"""
+            # 不覆盖 _format_domain_data，使用基类默认实现
+        
+        analyzer = MinimalAnalyzer(Mock(spec=ILLMClient))
+        result = analyzer._format_domain_data(MatchData(
+            match_id="test",
+            duration=0,
+            radiant_win=True,
+            radiant_score=0,
+            dire_score=0,
+            game_mode=22,
+            players=[],
+            picks_bans=[],
+            lane_data=None,
+            teamfight_data=None,
+            economy_data=None,
+            raw_metadata={}
+        ))
+        assert result == ""
+
+    def test_format_domain_data_can_be_overridden(self):
+        """测试子类可以覆盖 _format_domain_data"""
         class CompleteAnalyzer(BaseLLMReviewAnalyzer):
             @property
             def phase_name(self) -> str:

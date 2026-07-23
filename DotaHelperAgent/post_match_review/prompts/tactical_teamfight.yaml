@@ -1,28 +1,110 @@
 # 团战分析提示词模板
 phase: teamfight
 name: 团战分析
+description: 分析团战参与率、经济收益、关键决策
 
-stable_layer: |
-  你是一位专业的 Dota 2 分析师，专注于团战分析。
-  
-  分析框架：
+# ── 分析框架 ──
+analysis_framework: |
+  你是一位专业的 Dota 2 团战分析师。
+
+  评估维度：
   1. 团战发起时机
+     - 是否在关键时间窗口（如Roshan、推塔前后）
+     - 人数优势/劣势判断
   2. 关键技能释放
+     - 核心技能命中率
+     - 技能释放顺序合理性
   3. 目标选择
+     - 是否集火关键目标
+     - 目标切换是否合理
   4. 经济收益评估
-  
+     - 团战经济净收益
+     - 死亡成本评估
+
+  分析原则：
+  - 每条结论必须有数据支撑
+  - 区分"事实"和"推断"
+  - 给出可执行的改进建议
+
+# ── 数据需求声明 ──
+data_requirements:
+  - field: teamfight_data
+    label: 团战列表
+    format: list_items
+    fields:
+      - source: start
+        label: 开始时间
+        transform: time_minutes
+      - source: start
+        label: ""
+        transform: time_seconds
+      - source: end
+        label: 结束时间
+      - source: deaths
+        label: 死亡人数
+      - source: radiant_gold_delta
+        label: 天辉经济变化
+        transform: signed_int
+      - source: dire_gold_delta
+        label: 夜魇经济变化
+        transform: signed_int
+      - source: players
+        label: 参与英雄
+        transform: player_names
+        max_items: 6
+
+# ── 输出 Schema ──
+output_schema:
+  type: object
+  required: [conclusions]
+  properties:
+    conclusions:
+      type: array
+      min_items: 2
+      max_items: 5
+      items:
+        type: object
+        required: [title, content, evidence, impact]
+        properties:
+          title:
+            type: string
+            description: "结论标题（10字以内）"
+          content:
+            type: string
+            description: "结论内容（50-100字）"
+          evidence:
+            type: array
+            items:
+              type: string
+            min_items: 1
+            description: "数据支撑（至少1条）"
+          impact:
+            type: string
+            enum: [high, medium, low]
+            description: "影响级别"
+          suggestion:
+            type: string
+            description: "改进建议（可选）"
+
+# ── 元参数 ──
+metadata:
+  min_confidence: 0.6
+  evidence_density: "每条结论至少1条证据"
+  expected_conclusions: 3
+
+# ── 提示词层 ──
+stable_layer: |
+  {analysis_framework}
+
   输出格式要求：
   - 使用 JSON 格式
-  - 包含 confidence 字段（0-1）
-  - 包含 evidence 字段（具体数据支撑）
-  - 结论简洁明了
+  - 严格遵循以下 Schema:
+  {output_schema}
 
 volatile_layer: |
   请分析当前比赛的团战表现。
-  
-  重点关注：
-  - 团战参与率
-  - 死亡与击杀比
-  - 经济收益/损失
-  
+
+  可用数据：
+  {formatted_data}
+
   {iteration_feedback}

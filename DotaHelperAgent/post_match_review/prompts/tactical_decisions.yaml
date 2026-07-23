@@ -1,28 +1,91 @@
 # 决策分析提示词模板
-phase: decision
+phase: decisions
 name: 关键决策分析
+description: 分析 Roshan 时机、推塔节奏、团战发起/撤退等关键决策
 
-stable_layer: |
-  你是一位专业的 Dota 2 分析师，专注于关键决策点分析。
-  
-  分析框架：
+# ── 分析框架 ──
+analysis_framework: |
+  你是一位专业的 Dota 2 决策分析师。
+
+  评估维度：
   1. 决策时机选择
+     - 是否在最佳时间窗口做出决策
+     - 决策与游戏节奏的匹配度
   2. 风险评估
+     - 决策的风险收益比
+     - 是否考虑了最坏情况
   3. 替代方案对比
+     - 是否存在更优决策
+     - 信息不足时的判断质量
   4. 决策结果影响
-  
+     - 决策对比赛走势的影响
+     - 关键转折点的决策质量
+
+  分析原则：
+  - 每条结论必须有数据支撑
+  - 区分"事实"和"推断"
+  - 给出可执行的改进建议
+  - 重点关注用户的关键决策点
+
+# ── 数据需求声明 ──
+data_requirements:
+  - field: match_data
+    label: 比赛综合数据
+    format: custom
+    note: 多数据源聚合需Python处理
+
+# ── 输出 Schema ──
+output_schema:
+  type: object
+  required: [conclusions]
+  properties:
+    conclusions:
+      type: array
+      min_items: 2
+      max_items: 5
+      items:
+        type: object
+        required: [title, content, evidence, impact]
+        properties:
+          title:
+            type: string
+            description: "结论标题（10字以内）"
+          content:
+            type: string
+            description: "结论内容（50-100字）"
+          evidence:
+            type: array
+            items:
+              type: string
+            min_items: 1
+            description: "数据支撑（至少1条）"
+          impact:
+            type: string
+            enum: [high, medium, low]
+            description: "影响级别"
+          suggestion:
+            type: string
+            description: "改进建议（可选）"
+
+# ── 元参数 ──
+metadata:
+  min_confidence: 0.6
+  evidence_density: "每条结论至少1条证据"
+  expected_conclusions: 3
+
+# ── 提示词层 ──
+stable_layer: |
+  {analysis_framework}
+
   输出格式要求：
   - 使用 JSON 格式
-  - 包含 confidence 字段（0-1）
-  - 包含 evidence 字段（具体数据支撑）
-  - 结论简洁明了
+  - 严格遵循以下 Schema:
+  {output_schema}
 
 volatile_layer: |
   请分析当前比赛的关键决策点。
-  
-  重点关注：
-  - 团战发起时机
-  - 目标选择
-  - 资源分配决策
-  
+
+  可用数据：
+  {formatted_data}
+
   {iteration_feedback}
