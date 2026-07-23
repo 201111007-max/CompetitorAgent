@@ -1,10 +1,10 @@
 # 赛后复盘 Agent 架构设计文档
 
-> **版本**: v1.4
+> **版本**: v1.5
 > **创建时间**: 2026-07-15
-> **最新修订**: 2026-07-22
+> **最新修订**: 2026-07-23
 > **定位**: 赛后复盘 Agent 的顶层架构设计蓝图
-> **状态**: 实施中（阶段 1-7 已完成）
+> **状态**: 实施中（阶段 1-8 已完成）
 
 ## 文档说明
 
@@ -1662,6 +1662,7 @@ logger.info_ctx("后台审查完成", extra_data={"quality": 0.85, "skills_extra
 | **阶段 5: 并行优化** | 并行子代理 + 上下文压缩 | 并行分析性能提升 > 30% | 阶段 4 | ✅ 已完成 (2026-07-20) |
 | **阶段 6: 自我进化** | 后台审查 + 技能沉淀 + 记忆扩展 | 复盘后自动生成技能、记忆持久化 | 阶段 4 | ✅ 已完成 (2026-07-21) |
 | **阶段 7: 前端集成** | API 端点 + SSE 流式 + 复盘展示组件 | 前端可实时展示分析进度和报告 | 阶段 4 | ✅ 已完成 (2026-07-22) |
+| **阶段 8: Skill 驱动重构** | 层 A 基类增强 + 层 B YAML 增强 | 分析逻辑声明化，代码精简约 60% | 阶段 4 | ✅ 已完成 (2026-07-23) |
 
 #### 13.1.1 已完成阶段详情
 
@@ -1787,6 +1788,48 @@ logger.info_ctx("后台审查完成", extra_data={"quality": 0.85, "skills_extra
 - ✅ 前端构建成功
 - ✅ 总计测试通过（Phase 1-7）
 
+**阶段 8: Skill 驱动架构重构** (2026-07-23)
+
+基于 `docs/superpowers/plans/post-match-review-agent/2026-07-22-skill-driven-refactor.md` 设计文档，分两层渐进重构分析器架构。
+
+**层 A: 基类增强** — 消除 ~650 行重复代码
+- ✅ BaseLLMReviewAnalyzer: 提升 `parse_response()` 和 `build_prompt()` 到基类
+  - parse_response(): 5 层 JSON 解析降级链（conclusions → analysis → 单对象 → 文本提取）
+  - build_prompt(): 模板方法模式，子类仅需实现 `_format_domain_data()`
+  - 辅助方法: `_parse_conclusion()`、`_extract_from_analysis()`、`_fallback_single_conclusion()`、`_parse_conclusions_from_text()`
+- ✅ 5 个分析器精简: 删除各自重复的 parse_response() 和 build_prompt()（每个约 130 行）
+- ✅ VisionAnalyzer: 保留 `validate_result()` 降级逻辑（置信度阈值 0.4）
+- ✅ 基类单元测试: 19 个测试全部通过
+
+**层 B: YAML 增强** — 分析逻辑声明化
+- ✅ 5 个 YAML 模板增强: 添加 analysis_framework / data_requirements / output_schema / metadata
+  - tactical_laning.yaml: 4 个 data_requirements（player_stats × 3 + player_lane × 1），完全声明化
+  - tactical_teamfight.yaml: 1 个 data_requirements（list_items），列表遍历声明化
+  - tactical_economy/decisions/vision.yaml: data_requirements 使用 format: custom，Python 逻辑保留
+- ✅ DataFormatter: 通用数据格式化器
+  - 支持 5 种格式: player_stats / player_lane / list_items / simple / custom
+  - 值变换: time_minutes / time_seconds / player_names / signed_int
+  - secondary_field: 支持主字段+次字段联合输出（如补刀+反补）
+  - 常量: LANE_NAMES（分路编号→名称映射）
+- ✅ PromptBuilder 增强: 支持 YAML 声明注入
+  - Stable 层: `{analysis_framework}` + `{output_schema}` 占位符替换
+  - Context 层: 自动注入 DataFormatter 格式化的领域数据
+  - Volatile 层: `{formatted_data}` 占位符替换
+  - 向后兼容: 旧 YAML（无 data_requirements）行为不变
+- ✅ 分析器精简:
+  - LaningAnalyzer: 删除 `_format_domain_data()` 和 `_get_lane_name()`（代码量 -60%）
+  - TeamfightAnalyzer: 精简为仅保留汇总统计逻辑
+  - Economy/Decision/Vision: 保留 Python `_format_domain_data()`，YAML 仅声明文档价值
+- ✅ base.py: `_format_domain_data()` 从抽象方法改为普通方法，默认返回空字符串
+- ✅ DataFormatter 单元测试: 25 个测试全部通过
+- ✅ PromptBuilder 增强测试: 6 个新增测试全部通过
+- ✅ 端到端验证: 比赛 ID 8909780728
+  - 5 个阶段提示词构建正常
+  - Stable 层包含 analysis_framework 和 output_schema
+  - Context/Volatile 层包含 DataFormatter 格式化的领域数据
+  - 完整复盘流程正常（FallbackAnalyzer 降级模式）
+- ✅ 总计 69 个层 B 相关测试通过
+
 ### 13.2 执行方式
 
 **采用 Subagent-Driven Development（子代理驱动开发）**
@@ -1884,6 +1927,7 @@ logger.info_ctx("后台审查完成", extra_data={"quality": 0.85, "skills_extra
 | v1.2 | 2026-07-16 | **实施进展更新**: 阶段 1-3 已完成（63 个测试全部通过）。阶段 1 实现数据层（OpenDotaClient/MatchFetcher/DataValidator/Cache/MatchData）；阶段 2 实现核心骨架（IterationBudget/StopVerifier/PromptBuilder）；阶段 3 实现单阶段分析（LLMClient/TacticalLoop/LaningAnalyzer/分析器基类）。下一步：阶段 4 全流程（战略循环 + 全部分析器 + 报告生成）。详见 §13.1.1 |
 | v1.3 | 2026-07-20 | **阶段 4 全流程完成**: 实现战略循环（StrategicLoop）、5 个分析器（Teamfight/Economy/Decision/Vision/Fallback）、报告生成（ReportBuilder/MarkdownRenderer）、主编排器（ReviewOrchestrator）。端到端测试通过（比赛 ID 8905359313），整体置信度 0.68，5 个分析阶段全部完成。修复 4 个关键问题：JSON 解析支持 markdown 代码块、模板名不匹配、置信度计算优化、默认模型改为 deepseek-v4-pro。详见 §13.1.1 |
 | v1.4 | 2026-07-21 | **阶段 6 自我进化完成**: 实现四层记忆系统（SessionArchive/PersistentNotes/SkillStore/DreamRecap）、后台审查器（BackgroundReviewer）、提示词加载器（PromptLoader）。33 个单元测试全部通过。代码审查修复 9 个问题（2 个 major + 7 个 minor）。模块重命名 types/ → domain_types/（避免与标准库冲突）。详见 §13.1.1 |
+| v1.5 | 2026-07-23 | **阶段 8 Skill 驱动重构完成**: 分两层渐进重构分析器架构。层 A 基类增强：将 parse_response() 和 build_prompt() 提升到 BaseLLMReviewAnalyzer，消除 ~650 行重复代码；层 B YAML 增强：5 个 YAML 模板添加 analysis_framework/data_requirements/output_schema/metadata，实现 DataFormatter 通用数据格式化器（5 种格式），PromptBuilder 支持 YAML 声明注入。LaningAnalyzer 代码量 -60%。69 个层 B 相关测试通过。详见 §13.1.1 |
 
 ### D. 自包含设计原则（v1.1 重要约定）
 

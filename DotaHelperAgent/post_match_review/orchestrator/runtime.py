@@ -1,5 +1,5 @@
-﻿"""Runtime 依赖注入容器"""
-from typing import Optional, Dict, Any
+"""Runtime 依赖注入容器"""
+from typing import Optional, Dict, Any, List
 import yaml
 from pathlib import Path
 
@@ -19,6 +19,7 @@ from post_match_review.analyzers.teamfight_analyzer import TeamfightAnalyzer
 from post_match_review.analyzers.economy_analyzer import EconomyAnalyzer
 from post_match_review.analyzers.decision_analyzer import DecisionAnalyzer
 from post_match_review.analyzers.vision_analyzer import VisionAnalyzer
+from post_match_review.analyzers.skill_driven import SkillDrivenAnalyzer
 from post_match_review.observability.logger import get_logger
 
 logger = get_logger("pmr.orchestrator.runtime")
@@ -82,6 +83,20 @@ class Runtime:
             "decisions": DecisionAnalyzer(self._llm_client, prompt_builder),
             "vision": VisionAnalyzer(self._llm_client, prompt_builder),
         }
+
+        # 5.1 加载自定义分析技能
+        custom_skills = self._load_custom_skills()
+        for skill in custom_skills:
+            phase = skill.get("phase")
+            if phase and phase not in analyzers:  # 不覆盖内置阶段
+                analyzers[phase] = SkillDrivenAnalyzer(
+                    llm_client=self._llm_client,
+                    skill_definition=skill,
+                )
+                logger.info(
+                    "注册自定义分析技能: phase=%s, name=%s",
+                    phase, skill.get("name", "unknown"),
+                )
 
         # 6. 创建战术循环工厂
         def tactical_loop_factory(phase: str) -> TacticalLoop:
@@ -163,3 +178,26 @@ class Runtime:
                 "vision": 2,
             },
         }
+
+    def _load_custom_skills(self) -> List[Dict[str, Any]]:
+        """加载自定义分析技能
+
+        从配置的 skills_dir 加载用户自定义的分析技能 YAML 文件。
+
+        Returns:
+            List[Dict[str, Any]]: 自定义分析技能定义列表
+        """
+        skills_dir = self._config.get("skills_dir")
+        if not skills_dir:
+            return []
+
+        try:
+            from post_match_review.memory.skill_store import SkillStore
+            skill_store = SkillStore(skills_dir)
+            skills = skill_store.list_analysis_skills()
+            if skills:
+                logger.info("加载 %d 个自定义分析技能", len(skills))
+            return skills
+        except Exception as e:
+            logger.error("加载自定义技能失败: %s", e)
+            return []

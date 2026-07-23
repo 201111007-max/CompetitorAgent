@@ -382,3 +382,71 @@ class PostMatchReviewAPI:
             List[Dict[str, Any]]: 历史记录列表
         """
         return await self._store.list_history()
+
+    # ── 分析技能管理 API ──
+
+    def list_analysis_skills(self) -> List[Dict[str, Any]]:
+        """列出所有可用的分析技能（内置 + 用户自定义）
+
+        Returns:
+            List[Dict[str, Any]]: 分析技能定义列表
+        """
+        from post_match_review.memory.skill_store import SkillStore
+
+        skills: List[Dict[str, Any]] = []
+
+        # 尝试加载内置技能
+        try:
+            # 使用临时 SkillStore 实例访问 prompts/skills/
+            temp_store = SkillStore(
+                str(Path(__file__).parent.parent / "memory" / "_api_skills"),
+            )
+            builtin = temp_store.list_builtin_skills()
+            skills.extend(builtin)
+        except Exception as e:
+            logger.warning("加载内置分析技能失败: %s", e)
+
+        # 尝试加载用户自定义技能
+        runtime = getattr(self, "_runtime", None)
+        if runtime is not None:
+            skills_dir = runtime._config.get("skills_dir", "")
+            if skills_dir:
+                try:
+                    store = SkillStore(skills_dir)
+                    custom = store.list_analysis_skills()
+                    skills.extend(custom)
+                except Exception as e:
+                    logger.warning("加载自定义分析技能失败: %s", e)
+
+        return skills
+
+    def register_analysis_skill(
+        self,
+        name: str,
+        skill_definition: Dict[str, Any],
+        skills_dir: Optional[str] = None,
+    ) -> None:
+        """注册自定义分析技能
+
+        Args:
+            name: 技能名称
+            skill_definition: 技能定义字典
+            skills_dir: 技能存储目录（可选，默认从 Runtime 配置获取）
+
+        Raises:
+            ValueError: skills_dir 未配置
+        """
+        from post_match_review.memory.skill_store import SkillStore
+
+        if skills_dir is None:
+            runtime = getattr(self, "_runtime", None)
+            if runtime is not None:
+                skills_dir = runtime._config.get("skills_dir", "")
+            if not skills_dir:
+                raise ValueError(
+                    "skills_dir 未配置，请在构造 API 时指定或在配置文件中设置"
+                )
+
+        store = SkillStore(skills_dir)
+        store.save_analysis_skill(name, skill_definition)
+        logger.info("注册分析技能: %s", name)
