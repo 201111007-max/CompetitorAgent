@@ -1,0 +1,117 @@
+# 后期决策分析技能
+phase: late_game_decisions
+name: 后期决策分析
+description: 分析30分钟后的关键决策、买活策略、高地攻防
+
+# ── 分析框架 ──
+analysis_framework: |
+  你是一位专业的 Dota 2 决策分析师，专注于后期决策分析。
+
+  评估维度：
+  1. 高地攻防决策
+     - 推进时机是否合理
+     - 买活策略是否最优
+  2. 买活管理
+     - 买活时机选择
+     - 买活后的推进收益
+  3. 关键装备决策
+     - 核心装备选择是否合理
+     - 装备优先级排序
+  4. 资源分配
+     - 农场分配是否高效
+     - 推塔/打盾/收线的优先级
+
+  分析原则：
+  - 每条结论必须有数据支撑
+  - 区分"事实"和"推断"
+  - 给出可执行的改进建议
+
+# ── 数据需求声明 ──
+data_requirements:
+  - field: economy_data.gpm_series
+    label: GPM曲线
+    format: custom
+    note: 需 Python 计算后期趋势
+  - field: economy_data.purchase_log
+    label: 购买记录
+    format: custom
+    note: 需过滤关键装备
+  - field: teamfight_data
+    label: 团战列表
+    format: list_items
+    fields:
+      - source: start
+        label: 开始时间
+        transform: time_minutes
+      - source: start
+        label: ""
+        transform: time_seconds
+      - source: deaths
+        label: 死亡人数
+      - source: radiant_gold_delta
+        label: 天辉经济变化
+        transform: signed_int
+      - source: players
+        label: 参与英雄
+        transform: player_names
+        max_items: 6
+
+# ── 输出 Schema ──
+output_schema:
+  type: object
+  required: [conclusions]
+  properties:
+    conclusions:
+      type: array
+      min_items: 2
+      max_items: 5
+      items:
+        type: object
+        required: [title, content, evidence, impact]
+        properties:
+          title:
+            type: string
+            description: "结论标题（10字以内）"
+          content:
+            type: string
+            description: "结论内容（50-100字）"
+          evidence:
+            type: array
+            items:
+              type: string
+            min_items: 1
+            description: "数据支撑（至少1条）"
+          impact:
+            type: string
+            enum: [high, medium, low]
+            description: "影响级别"
+          suggestion:
+            type: string
+            description: "改进建议（可选）"
+
+# ── 元参数 ──
+metadata:
+  min_confidence: 0.5
+  evidence_density: "每条结论至少1条证据"
+  expected_conclusions: 3
+  tags:
+    - decisions
+    - late_game
+    - buyback
+
+# ── 提示词层 ──
+stable_layer: |
+  {analysis_framework}
+
+  输出格式要求：
+  - 使用 JSON 格式
+  - 严格遵循以下 Schema:
+  {output_schema}
+
+volatile_layer: |
+  请分析当前比赛的后期决策表现。
+
+  可用数据：
+  {formatted_data}
+
+  {iteration_feedback}
