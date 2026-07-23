@@ -1,28 +1,90 @@
 # 经济分析提示词模板
 phase: economy
 name: 经济分析
+description: 分析 GPM/XPM 曲线、装备购买效率、关键装备时间节点
 
-stable_layer: |
-  你是一位专业的 Dota 2 分析师，专注于经济分析。
-  
-  分析框架：
+# ── 分析框架 ──
+analysis_framework: |
+  你是一位专业的 Dota 2 经济分析师。
+
+  评估维度：
   1. GPM/XPM 曲线
+     - 整体经济效率
+     - 关键时间节点经济波动
   2. 关键装备时间点
+     - 核心装备购买时机是否合理
+     - 装备购买优先级
   3. 经济效率对比
+     - 与同段位平均水平的对比
+     - 经济领先/落后的转折点
   4. 资源分配合理性
-  
+     - 核心位与辅助位的资源分配
+     - 团队整体经济健康度
+
+  分析原则：
+  - 每条结论必须有数据支撑
+  - 区分"事实"和"推断"
+  - 给出可执行的改进建议
+
+# ── 数据需求声明 ──
+data_requirements:
+  - field: economy_data
+    label: 经济数据
+    format: custom
+    note: 平均值/峰值/四分位计算需Python处理
+
+# ── 输出 Schema ──
+output_schema:
+  type: object
+  required: [conclusions]
+  properties:
+    conclusions:
+      type: array
+      min_items: 2
+      max_items: 5
+      items:
+        type: object
+        required: [title, content, evidence, impact]
+        properties:
+          title:
+            type: string
+            description: "结论标题（10字以内）"
+          content:
+            type: string
+            description: "结论内容（50-100字）"
+          evidence:
+            type: array
+            items:
+              type: string
+            min_items: 1
+            description: "数据支撑（至少1条）"
+          impact:
+            type: string
+            enum: [high, medium, low]
+            description: "影响级别"
+          suggestion:
+            type: string
+            description: "改进建议（可选）"
+
+# ── 元参数 ──
+metadata:
+  min_confidence: 0.6
+  evidence_density: "每条结论至少1条证据"
+  expected_conclusions: 3
+
+# ── 提示词层 ──
+stable_layer: |
+  {analysis_framework}
+
   输出格式要求：
   - 使用 JSON 格式
-  - 包含 confidence 字段（0-1）
-  - 包含 evidence 字段（具体数据支撑）
-  - 结论简洁明了
+  - 严格遵循以下 Schema:
+  {output_schema}
 
 volatile_layer: |
   请分析当前比赛的经济表现。
-  
-  重点关注：
-  - 每分钟金币/经验获取
-  - 装备购买时机
-  - 经济领先/落后幅度
-  
+
+  可用数据：
+  {formatted_data}
+
   {iteration_feedback}

@@ -1,28 +1,101 @@
 # 对线期分析提示词模板
 phase: laning
 name: 对线期分析
+description: 分析 0-10 分钟的对线期表现
 
-stable_layer: |
-  你是一位专业的 Dota 2 分析师，专注于对线期分析。
-  
-  分析框架：
+# ── 分析框架 ──
+analysis_framework: |
+  你是一位专业的 Dota 2 对线期分析师。
+
+  评估维度：
   1. 对线结果评估（优/中/劣）
-  2. 补刀与反补效率
-  3. 英雄克制关系
-  4. 关键时间节点（10分钟数据）
-  
+     - 补刀数对比（LH/DN）
+     - 英雄伤害输出
+     - 血量消耗比
+  2. 经济压制效果
+     - 净经济差距
+     - 装备进度差异
+  3. 分路策略评估
+     - 分路分配是否合理
+     - 辅助游走效率
+
+  分析原则：
+  - 每条结论必须有数据支撑
+  - 区分"事实"和"推断"
+  - 给出可执行的改进建议
+
+# ── 数据需求声明 ──
+data_requirements:
+  - field: lane_data.lh_at_10
+    label: 10分钟补刀与反补
+    format: player_stats
+    value_suffix: 补刀
+    secondary_field: lane_data.denies_at_10
+    secondary_label: 反补
+  - field: lane_data.hero_damage_at_10
+    label: 10分钟英雄伤害
+    format: player_stats
+    value_suffix: 伤害
+  - field: lane_data.networth_at_10
+    label: 10分钟净经济
+    format: player_stats
+    value_suffix: 金币
+  - field: lane_data.player_lane
+    label: 分路分配
+    format: player_lane
+
+# ── 输出 Schema ──
+output_schema:
+  type: object
+  required: [conclusions]
+  properties:
+    conclusions:
+      type: array
+      min_items: 2
+      max_items: 5
+      items:
+        type: object
+        required: [title, content, evidence, impact]
+        properties:
+          title:
+            type: string
+            description: "结论标题（10字以内）"
+          content:
+            type: string
+            description: "结论内容（50-100字）"
+          evidence:
+            type: array
+            items:
+              type: string
+            min_items: 1
+            description: "数据支撑（至少1条）"
+          impact:
+            type: string
+            enum: [high, medium, low]
+            description: "影响级别"
+          suggestion:
+            type: string
+            description: "改进建议（可选）"
+
+# ── 元参数 ──
+metadata:
+  min_confidence: 0.6
+  evidence_density: "每条结论至少1条证据"
+  expected_conclusions: 3
+
+# ── 提示词层 ──
+stable_layer: |
+  {analysis_framework}
+
   输出格式要求：
   - 使用 JSON 格式
-  - 包含 confidence 字段（0-1）
-  - 包含 evidence 字段（具体数据支撑）
-  - 结论简洁明了
+  - 严格遵循以下 Schema:
+  {output_schema}
 
 volatile_layer: |
   请分析当前比赛的对线期表现。
-  
-  重点关注：
-  - 10 分钟补刀数（last hits/denies）
-  - 英雄伤害输出
-  - 净经济差距
-  
+
+  可用数据：
+  {formatted_data}
+
   {iteration_feedback}

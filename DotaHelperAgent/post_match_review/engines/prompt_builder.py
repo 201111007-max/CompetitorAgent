@@ -1,16 +1,27 @@
-﻿"""三层提示词构建器"""
+"""三层提示词构建器
+
+增强版支持从 YAML 加载 analysis_framework、data_requirements、
+output_schema，并自动注入到提示词中。旧格式 YAML 完全兼容。
+"""
+import json
 import yaml
 from pathlib import Path
 from typing import List, Dict, Any, Optional
+
 from post_match_review.domain_types.match_data import MatchData
 from post_match_review.domain_types.analysis import AnalysisResult
+from post_match_review.engines.data_formatter import DataFormatter
 from post_match_review.observability.logger import get_logger
 
 logger = get_logger("engines.prompt_builder")
 
 
 class PromptBuilder:
-    """三层提示词构建器（Stable/Context/Volatile）"""
+    """三层提示词构建器（Stable/Context/Volatile）
+
+    增强版支持从 YAML 加载 analysis_framework、data_requirements、
+    output_schema，并自动注入到提示词中。旧格式 YAML 完全兼容。
+    """
 
     def __init__(self, prompts_dir: Optional[Path] = None) -> None:
         """初始化提示词构建器
@@ -22,7 +33,7 @@ class PromptBuilder:
             self._prompts_dir = Path(__file__).parent.parent / "prompts"
         else:
             self._prompts_dir = prompts_dir
-        
+
         self._template_cache: Dict[str, Dict[str, Any]] = {}
         logger.info("提示词构建器初始化: prompts_dir=%s", self._prompts_dir)
 
@@ -45,17 +56,22 @@ class PromptBuilder:
             List[Dict[str, str]]: OpenAI 风格消息列表
         """
         messages: List[Dict[str, str]] = []
+        template = self._load_template(phase)
 
         # Layer 1: Stable（稳定层）
-        stable_content = self._build_stable_layer(phase)
+        stable_content = self._build_stable_layer(template)
         messages.append({"role": "system", "content": stable_content})
 
         # Layer 2: Context（上下文层）
-        context_content = self._build_context_layer(match_data, completed_results)
+        context_content = self._build_context_layer(
+            match_data, completed_results, template,
+        )
         messages.append({"role": "user", "content": context_content})
 
         # Layer 3: Volatile（易变层）
-        volatile_content = self._build_volatile_layer(phase, iteration_feedback)
+        volatile_content = self._build_volatile_layer(
+            template, match_data, iteration_feedback,
+        )
         messages.append({"role": "user", "content": volatile_content})
 
         logger.debug(
@@ -66,35 +82,57 @@ class PromptBuilder:
 
         return messages
 
-    def _build_stable_layer(self, phase: str) -> str:
+    def _build_stable_layer(self, template: Dict[str, Any]) -> str:
         """构建 Stable 层（系统提示）
 
+        支持从 YAML 注入 analysis_framework 和 output_schema 占位符。
+
         Args:
-            phase: 当前分析阶段
+            template: YAML 模板内容
 
         Returns:
             str: Stable 层内容
         """
-        template = self._load_template(phase)
-        return template.get("stable_layer", "")
+        stable = template.get("stable_layer", "")
+
+        # 注入 analysis_framework
+        if "{analysis_framework}" in stable:
+            framework = template.get("analysis_framework", "")
+            stable = stable.replace("{analysis_framework}", framework)
+
+        # 注入 output_schema
+        if "{output_schema}" in stable:
+            schema = template.get("output_schema", {})
+            if schema:
+                schema_str = json.dumps(schema, ensure_ascii=False, indent=2)
+            else:
+                schema_str = ""
+            stable = stable.replace("{output_schema}", schema_str)
+
+        return stable
 
     def _build_context_layer(
         self,
         match_data: MatchData,
         completed_results: Optional[List[AnalysisResult]],
+        template: Dict[str, Any],
     ) -> str:
         """构建 Context 层（比赛数据 + 已有结论）
+
+        如果 YAML 声明了 data_requirements 且包含非 custom 格式，
+        自动使用 DataFormatter 格式化领域数据并追加到 Context 层。
 
         Args:
             match_data: 结构化比赛数据
             completed_results: 已完成的阶段结果
+            template: YAML 模板内容
 
         Returns:
             str: Context 层内容
         """
         context_parts: List[str] = []
 
-        # 比赛基本信息
+        # 比赛基本信息（保持现有行为）
         context_parts.append("## 比赛基本信息")
         context_parts.append(f"- 比赛 ID: {match_data.match_id}")
         context_parts.append(f"- 时长: {match_data.duration} 秒")
@@ -103,7 +141,7 @@ class PromptBuilder:
         context_parts.append(f"- 游戏模式: {match_data.game_mode}")
         context_parts.append("")
 
-        # 玩家数据摘要
+        # 玩家数据摘要（保持现有行为）
         context_parts.append("## 玩家数据摘要")
         for i, player in enumerate(match_data.players[:2], 1):  # 只展示前 2 个玩家示例
             context_parts.append(f"### 玩家 {i}")
@@ -116,7 +154,16 @@ class PromptBuilder:
                 context_parts.append("- **这是用户**")
             context_parts.append("")
 
-        # 已完成阶段结论
+        # YAML 声明的领域数据（新增：DataFormatter 自动格式化）
+        data_requirements = template.get("data_requirements", [])
+        if data_requirements and DataFormatter.has_declarative_requirements(template):
+            formatter = DataFormatter(data_requirements)
+            formatted_data = formatter.format_with_secondary(match_data)
+            if formatted_data:
+                context_parts.append(formatted_data)
+                context_parts.append("")
+
+        # 已完成阶段结论（保持现有行为）
         if completed_results:
             context_parts.append("## 已完成的分析阶段")
             for result in completed_results:
@@ -133,28 +180,46 @@ class PromptBuilder:
 
     def _build_volatile_layer(
         self,
-        phase: str,
+        template: Dict[str, Any],
+        match_data: MatchData,
         iteration_feedback: Optional[str],
     ) -> str:
         """构建 Volatile 层（当前阶段指令 + 反馈）
 
+        支持从 YAML 注入 formatted_data 和 iteration_feedback 占位符。
+
         Args:
-            phase: 当前分析阶段
+            template: YAML 模板内容
+            match_data: 结构化比赛数据
             iteration_feedback: 上一轮迭代反馈
 
         Returns:
             str: Volatile 层内容
         """
-        template = self._load_template(phase)
         volatile_template = template.get("volatile_layer", "")
+
+        # 注入格式化数据（如果 volatile_layer 引用了 {formatted_data}）
+        if "{formatted_data}" in volatile_template:
+            data_requirements = template.get("data_requirements", [])
+            if data_requirements and DataFormatter.has_declarative_requirements(template):
+                formatter = DataFormatter(data_requirements)
+                formatted_data = formatter.format_with_secondary(match_data)
+            else:
+                formatted_data = ""
+            volatile_template = volatile_template.replace(
+                "{formatted_data}", formatted_data,
+            )
 
         # 注入迭代反馈
         if iteration_feedback:
             feedback_text = f"\n\n上一轮反馈:\n{iteration_feedback}"
         else:
             feedback_text = ""
+        volatile_template = volatile_template.replace(
+            "{iteration_feedback}", feedback_text,
+        )
 
-        return volatile_template.format(iteration_feedback=feedback_text)
+        return volatile_template
 
     def _load_template(self, phase: str) -> Dict[str, Any]:
         """加载提示词模板
@@ -169,7 +234,7 @@ class PromptBuilder:
             return self._template_cache[phase]
 
         template_file = self._prompts_dir / f"tactical_{phase}.yaml"
-        
+
         if not template_file.exists():
             logger.warning("模板文件不存在: %s, 使用默认模板", template_file)
             return self._get_default_template()
