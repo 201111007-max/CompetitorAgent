@@ -2,7 +2,7 @@
 name = "post_match_review"
 version = "0.1.0"
 description = "Dota 2 赛后复盘 Agent 模块"
-requires-python = ">=3.10"
+requires-python = ">=3.9"
 dependencies = [
     "openai>=1.0",
     "httpx>=0.23.0",

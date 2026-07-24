@@ -1,5 +1,6 @@
-﻿"""迭代预算控制器（令牌桶 + 边际递减）"""
+"""迭代预算控制器（令牌桶 + 边际递减）"""
 from threading import Lock
+from typing import List
 from post_match_review.interfaces.budget import IIterationBudget
 from post_match_review.domain_types.enums import BudgetDecision
 from post_match_review.observability.logger import get_logger
@@ -35,7 +36,7 @@ class IterationBudget(IIterationBudget):
         
         self._used_iterations = 0
         self._used_tokens = 0
-        self._recent_deltas: list[int] = []
+        self._recent_deltas: List[int] = []
         self._lock = Lock()
         
         logger.info(

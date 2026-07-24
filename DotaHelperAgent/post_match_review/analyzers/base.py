@@ -14,7 +14,30 @@ from post_match_review.domain_types.match_data import MatchData
 from post_match_review.engines.prompt_builder import PromptBuilder
 from post_match_review.observability.logger import get_logger
 
+# P0-2: Token 估算默认字符/Token 比率（中文约 1.5 字符/Token，英文约 4 字符/Token）
+_DEFAULT_CHARS_PER_TOKEN = 3.0
+
 logger = get_logger("analyzers.base")
+
+
+def estimate_tokens(text: str, chars_per_token: float = _DEFAULT_CHARS_PER_TOKEN) -> int:
+    """估算文本的 Token 消耗量
+
+    基于 prompt + response 的字符数估算 Token 数。
+    对于中文内容偏保守（中文字符/Token 比约 1.5），
+    对于英文内容偏激进（英文字符/Token 比约 4），
+    取折中值 3.0 作为默认比率。
+
+    Args:
+        text: 待估算文本
+        chars_per_token: 字符/Token 比率
+
+    Returns:
+        int: 估算的 Token 数
+    """
+    if not text:
+        return 0
+    return max(1, int(len(text) / chars_per_token))
 
 
 class BaseLLMReviewAnalyzer(ABC):
@@ -382,13 +405,14 @@ class BaseLLMReviewAnalyzer(ABC):
                 str(e),
                 exc_info=True,
             )
-            # 返回空结果，置信度为 0
+            # 返回空结果，置信度为 0，但估算已消耗的 prompt tokens
+            prompt_tokens = estimate_tokens(prompt_text)
             return AnalysisResult(
                 phase=self.phase_name,
                 conclusions=[],
                 confidence=0.0,
                 iterations_used=1,
-                tokens_consumed=0,
+                tokens_consumed=prompt_tokens,
                 analysis_text=f"LLM 调用失败: {str(e)}",
             )
 
@@ -416,13 +440,23 @@ class BaseLLMReviewAnalyzer(ABC):
         confidence = self._calculate_confidence(conclusions)
         logger.info("[阶段:%s] 阶段置信度: %.2f", self.phase_name, confidence)
 
-        # 5. 构建结果
+        # 5. P0-2: 估算 Token 消耗（prompt + response）
+        tokens_consumed = estimate_tokens(prompt_text) + estimate_tokens(response)
+        logger.debug(
+            "[阶段:%s] Token 估算: prompt=%d, response=%d, total=%d",
+            self.phase_name,
+            estimate_tokens(prompt_text),
+            estimate_tokens(response),
+            tokens_consumed,
+        )
+
+        # 6. 构建结果
         result = AnalysisResult(
             phase=self.phase_name,
             conclusions=conclusions,
             confidence=confidence,
             iterations_used=1,
-            tokens_consumed=0,  # 由 TacticalLoop 填充
+            tokens_consumed=tokens_consumed,
             analysis_text=response,
         )
 

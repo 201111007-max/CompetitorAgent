@@ -1,10 +1,10 @@
 # 赛后复盘 Agent 架构设计文档
 
-> **版本**: v1.5
+> **版本**: v1.6
 > **创建时间**: 2026-07-15
-> **最新修订**: 2026-07-23
+> **最新修订**: 2026-07-24
 > **定位**: 赛后复盘 Agent 的顶层架构设计蓝图
-> **状态**: 实施中（阶段 1-8 已完成）
+> **状态**: 实施中（阶段 1-8 已完成，含层 C Skill 驱动扩展）
 
 ## 文档说明
 
@@ -144,6 +144,11 @@
 │  │ Laning   │ │ Teamfight │ │ Economy  │ │ Decision  │ │ Vision  │ │
 │  │ Analyzer │ │ Analyzer  │ │ Analyzer │ │ Analyzer  │ │ Analyzer│ │
 │  └──────────┘ └───────────┘ └──────────┘ └───────────┘ └─────────┘ │
+│  ┌──────────────────────────────────────────────────────────────┐    │
+│  │ Skill 驱动扩展层 (Layer C)                                   │    │
+│  │ SkillDrivenAnalyzer ← YAML 技能定义 + SkillDrivenPromptBuilder│   │
+│  │ 内置: roshan_timing / ward_efficiency / late_game_decisions  │    │
+│  └──────────────────────────────────────────────────────────────┘    │
 ├──────────────────────────────────────────────────────────────────────┤
 │                         基础设施层 (Infrastructure)                   │
 │  ┌──────────┐ ┌───────────┐ ┌──────────┐ ┌───────────┐ ┌─────────┐ │
@@ -213,7 +218,7 @@ DotaHelperAgent/
     │   ├── memory.py                       # IFourLayerMemory / ILevelN
     │   ├── llm.py                          # ILLMClient
     │   ├── data_source.py                  # IMatchDataSource
-    │   ├── skill.py                        # IReviewSkill
+    │   ├── skill.py                        # ISkillStore / IAnalysisSkillStore
     │   └── tracer.py                       # ITracer
     │
     ├── domain_types/                       # ── 数据模型/枚举/状态（v1.4: 重命名避免与标准库冲突）
@@ -239,7 +244,8 @@ DotaHelperAgent/
     │   ├── budget.py                       # IterationBudget(令牌桶 + 边际递减)
     │   ├── stop_verifier.py                # StopVerifier(三段验证)
     │   ├── compressor.py                   # ContextCompressor(修剪+保护+LLM 摘要)
-    │   └── prompt_builder.py               # PromptBuilder(Stable/Context/Volatile 三层)
+    │   ├── prompt_builder.py               # PromptBuilder(Stable/Context/Volatile 三层)
+    │   └── data_formatter.py               # DataFormatter(YAML 声明驱动的数据格式化,层 B)
     │
     ├── analyzers/                          # ── 分析能力层
     │   ├── __init__.py
@@ -249,7 +255,8 @@ DotaHelperAgent/
     │   ├── economy_analyzer.py             # 经济分析
     │   ├── decision_analyzer.py            # 关键决策点分析
     │   ├── vision_analyzer.py              # 视野分析
-    │   └── fallback_analyzer.py            # 规则驱动降级(LLM 不可用时)
+    │   ├── fallback_analyzer.py            # 规则驱动降级(LLM 不可用时)
+    │   └── skill_driven.py                 # SkillDrivenAnalyzer + SkillDrivenPromptBuilder（层 C）
     │
     ├── data_source/                        # ── 数据源层(独立 OpenDota 客户端)
     │   ├── __init__.py
@@ -306,7 +313,11 @@ DotaHelperAgent/
     │   ├── report_generation.yaml
     │   ├── background_review.yaml
     │   ├── dream_recap.yaml
-    │   └── stop_verification.yaml
+    │   ├── stop_verification.yaml
+    │   └── skills/                        # ── 内置分析技能定义(层 C)
+    │       ├── roshan_timing.yaml          # Roshan 时机分析
+    │       ├── ward_efficiency.yaml        # 守卫效率分析
+    │       └── late_game_decisions.yaml    # 后期决策分析
     │
     ├── config/                             # ── 配置文件
     │   └── review_config.yaml
@@ -316,6 +327,7 @@ DotaHelperAgent/
     │   ├── progress/                       # 中断恢复进度文件 {match_id}.json
     │   ├── memory/                         # 记忆持久化(SQLite + JSON)
     │   ├── skills/                         # 提取/进化的技能(SKILL.md)
+    │   │   └── analysis/                  # 用户自定义分析技能(YAML,层 C)
     │   └── cache/                          # 比赛数据缓存
     │
     ├── tests/                              # ── 测试(独立 pytest 配置)
@@ -327,6 +339,11 @@ DotaHelperAgent/
     │   │   ├── test_stop_verifier.py
     │   │   ├── test_compressor.py
     │   │   ├── test_prompt_builder.py
+    │   │   ├── test_data_formatter.py         # DataFormatter 测试(层 B)
+    │   │   ├── test_base_analyzer.py          # BaseLLMReviewAnalyzer 基类测试(层 A)
+    │   │   ├── test_skill_driven_analyzer.py  # SkillDrivenAnalyzer 测试(层 C)
+    │   │   ├── test_skill_driven_prompt_builder.py  # SkillDrivenPromptBuilder 测试(层 C)
+    │   │   ├── test_skill_store_enhanced.py   # IAnalysisSkillStore 双协议测试(层 C)
     │   │   └── test_runtime.py
     │   ├── analyzers/
     │   │   ├── __init__.py
@@ -989,6 +1006,9 @@ Phase 5: 后台自我审查（异步，不阻塞主流程）
 | **EconomyAnalyzer** | 经济分析（GPM/XPM、装备效率） | 继承 BaseReviewAnalyzer |
 | **DecisionAnalyzer** | 决策分析（Roshan、推塔、团战决策） | 继承 BaseReviewAnalyzer |
 | **VisionAnalyzer** | 视野分析（守卫、盲区、反野） | 继承 BaseReviewAnalyzer |
+| **SkillDrivenAnalyzer** | Skill 驱动分析器（YAML 技能定义动态生成） | `from_yaml()`, `from_skill_store()`, 继承 BaseReviewAnalyzer |
+| **SkillDrivenPromptBuilder** | Skill 驱动提示词构建器（从 YAML 加载模板） | 继承 PromptBuilder |
+| **DataFormatter** | YAML 声明驱动的通用数据格式化器 | `format(match_data, data_requirements) -> str` |
 
 ### 6.4 基础设施层组件（包内自包含 v1.1）
 
@@ -1004,7 +1024,7 @@ Phase 5: 后台自我审查（异步，不阻塞主流程）
 | **FourLayerMemory** | 四层记忆(Prompt/Session/Persistent/Skills) | `post_match_review/memory/four_layer_memory.py` |
 | **SessionArchive** | Level 1: 复盘报告归档(SQLite) | `post_match_review/memory/session_archive.py` |
 | **PersistentNotes** | Level 2: 用户画像(结构化 JSON) | `post_match_review/memory/persistent_notes.py` |
-| **SkillStore** | Level 3: 技能沉淀(SKILL.md 文件) | `post_match_review/memory/skill_store.py` |
+| **SkillStore** | Level 3: 技能沉淀 + 分析技能管理（双协议 ISkillStore + IAnalysisSkillStore） | `post_match_review/memory/skill_store.py` |
 | **DreamRecap** | 复盘后整合与持久化 | `post_match_review/memory/dream_recap.py` |
 | **Tracer** | 链路追踪(本地 + Langfuse) | `post_match_review/observability/tracer.py` |
 | **LangfuseAdapter** | Langfuse 可选适配器(SDK 缺失时降级) | `post_match_review/observability/langfuse_adapter.py` |
@@ -1013,6 +1033,7 @@ Phase 5: 后台自我审查（异步，不阻塞主流程）
 | **TokenCounter** | Token 计数(支撑预算控制) | `post_match_review/llm/token_counter.py` |
 | **DataCache** | 比赛数据本地缓存 | `post_match_review/data_source/cache.py` |
 | **DataValidator** | 数据完整性校验 | `post_match_review/data_source/data_validator.py` |
+| **DataFormatter** | YAML 声明驱动数据格式化(5 种格式 + 值变换) | `post_match_review/engines/data_formatter.py` |
 
 ---
 
@@ -1149,6 +1170,94 @@ class IStopVerifier(Protocol):
 
         Returns:
             VerificationResult: 验证结果
+        """
+        ...
+```
+
+### 7.5 分析技能存储接口
+
+```python
+class IAnalysisSkillStore(Protocol):
+    """分析技能存储接口（YAML 格式）
+
+    分析技能以纯 YAML 文件存储，包含分析框架、数据需求、
+    输出 Schema 等完整定义，供 SkillDrivenAnalyzer 使用。
+    与 ISkillStore（经验技能，Markdown 格式）互补，
+    共同构成 SkillStore 的双协议支持。
+    """
+
+    def save_analysis_skill(
+        self,
+        name: str,
+        skill_definition: Dict[str, Any],
+    ) -> None:
+        """保存分析技能定义
+
+        Args:
+            name: 技能名称（不含扩展名）
+            skill_definition: 完整的 YAML 技能定义字典
+        """
+        ...
+
+    def load_analysis_skill(self, name: str) -> Optional[Dict[str, Any]]:
+        """加载分析技能定义
+
+        Args:
+            name: 技能名称（不含扩展名）
+
+        Returns:
+            Optional[Dict[str, Any]]: 技能定义字典，不存在时返回 None
+        """
+        ...
+
+    def list_analysis_skills(self) -> List[Dict[str, Any]]:
+        """列出所有分析技能
+
+        Returns:
+            List[Dict[str, Any]]: 分析技能定义列表
+        """
+        ...
+```
+
+### 7.6 SkillDrivenAnalyzer 创建接口
+
+```python
+class SkillDrivenAnalyzer(BaseLLMReviewAnalyzer):
+    """Skill 驱动分析器
+
+    从 YAML 技能定义文件动态创建分析能力，无需编写 Python 子类。
+    """
+
+    @classmethod
+    def from_yaml(
+        cls, llm_client: ILLMClient, yaml_path: Path
+    ) -> "SkillDrivenAnalyzer":
+        """从 YAML 文件创建分析器
+
+        Args:
+            llm_client: LLM 客户端实例
+            yaml_path: YAML 技能定义文件路径
+
+        Returns:
+            SkillDrivenAnalyzer: 分析器实例
+        """
+        ...
+
+    @classmethod
+    def from_skill_store(
+        cls, llm_client: ILLMClient, skill_store: IAnalysisSkillStore,
+        skill_name: str, use_builtin: bool = False,
+    ) -> "SkillDrivenAnalyzer":
+        """从 SkillStore 加载技能定义并创建分析器
+
+        Args:
+            llm_client: LLM 客户端实例
+            skill_store: 技能存储实例
+            skill_name: 技能名称
+            use_builtin: 是否从内置目录加载
+
+        Returns:
+            SkillDrivenAnalyzer: 分析器实例
         """
         ...
 ```
@@ -1389,6 +1498,15 @@ POST /api/review/{match_id}/interrupt
 GET /api/review/history
   Response: 复盘历史记录列表
   接入: review_api.list_history()
+
+GET /api/review/skills
+  Response: 所有可用分析技能列表（内置 + 用户自定义）
+  接入: review_api.list_analysis_skills()
+
+POST /api/review/skills
+  Body: { "name": "my_custom", "skill_definition": {...} }
+  Response: { "success": true }
+  接入: review_api.register_analysis_skill(name, definition)
 
 GET /api/review/{match_id}/stream/ws        # 可选 WebSocket 端点
   接入: review_api.review_ws(match_id)
@@ -1662,7 +1780,7 @@ logger.info_ctx("后台审查完成", extra_data={"quality": 0.85, "skills_extra
 | **阶段 5: 并行优化** | 并行子代理 + 上下文压缩 | 并行分析性能提升 > 30% | 阶段 4 | ✅ 已完成 (2026-07-20) |
 | **阶段 6: 自我进化** | 后台审查 + 技能沉淀 + 记忆扩展 | 复盘后自动生成技能、记忆持久化 | 阶段 4 | ✅ 已完成 (2026-07-21) |
 | **阶段 7: 前端集成** | API 端点 + SSE 流式 + 复盘展示组件 | 前端可实时展示分析进度和报告 | 阶段 4 | ✅ 已完成 (2026-07-22) |
-| **阶段 8: Skill 驱动重构** | 层 A 基类增强 + 层 B YAML 增强 | 分析逻辑声明化，代码精简约 60% | 阶段 4 | ✅ 已完成 (2026-07-23) |
+| **阶段 8: Skill 驱动重构** | 层 A 基类增强 + 层 B YAML 增强 + 层 C Skill 驱动扩展 | 分析逻辑声明化，代码精简约 70%，支持 YAML 技能扩展 | 阶段 4 | ✅ 已完成 (2026-07-24) |
 
 #### 13.1.1 已完成阶段详情
 
@@ -1788,9 +1906,9 @@ logger.info_ctx("后台审查完成", extra_data={"quality": 0.85, "skills_extra
 - ✅ 前端构建成功
 - ✅ 总计测试通过（Phase 1-7）
 
-**阶段 8: Skill 驱动架构重构** (2026-07-23)
+**阶段 8: Skill 驱动架构重构** (2026-07-24)
 
-基于 `docs/superpowers/plans/post-match-review-agent/2026-07-22-skill-driven-refactor.md` 设计文档，分两层渐进重构分析器架构。
+基于 `docs/superpowers/plans/post-match-review-agent/2026-07-22-skill-driven-refactor.md` 设计文档，分三层渐进重构分析器架构。
 
 **层 A: 基类增强** — 消除 ~650 行重复代码
 - ✅ BaseLLMReviewAnalyzer: 提升 `parse_response()` 和 `build_prompt()` 到基类
@@ -1829,6 +1947,39 @@ logger.info_ctx("后台审查完成", extra_data={"quality": 0.85, "skills_extra
   - Context/Volatile 层包含 DataFormatter 格式化的领域数据
   - 完整复盘流程正常（FallbackAnalyzer 降级模式）
 - ✅ 总计 69 个层 B 相关测试通过
+
+**层 C: Skill 驱动扩展** — YAML 技能定义动态生成分析能力
+- ✅ IAnalysisSkillStore 协议: 分析技能存储接口（YAML 格式）
+  - save_analysis_skill / load_analysis_skill / list_analysis_skills
+  - 与 ISkillStore（经验技能，Markdown 格式）互补
+- ✅ SkillStore 双协议实现: `SkillStore(ISkillStore, IAnalysisSkillStore)`
+  - 经验技能: `{skills_dir}/*.md`（Markdown + YAML frontmatter）
+  - 分析技能: `{skills_dir}/analysis/*.yaml`（纯 YAML）
+  - 内置技能: `prompts/skills/*.yaml`（通过 load_builtin_skill / list_builtin_skills 访问）
+- ✅ SkillDrivenAnalyzer: Skill 驱动分析器主类
+  - 继承 BaseLLMReviewAnalyzer，复用 parse_response() 和 build_prompt()
+  - 创建方式: `from_yaml()` / `from_skill_store()` / 构造函数
+  - phase_name 和 _format_domain_data() 均从 YAML 技能定义动态生成
+  - validate_result() 使用技能定义中的 min_confidence 阈值
+  - _validate_skill_definition(): 验证必要字段（phase/name/stable_layer/volatile_layer）
+- ✅ SkillDrivenPromptBuilder: 技能驱动提示词构建器
+  - 继承 PromptBuilder，从 skill_definition 字典直接加载模板
+  - 不依赖 prompts/tactical_{phase}.yaml 文件
+  - 复用父类 _build_stable_layer / _build_context_layer / _build_volatile_layer
+- ✅ 3 个内置分析技能 YAML:
+  - roshan_timing.yaml: Roshan 时机分析（objectives + teamfight_data）
+  - ward_efficiency.yaml: 守卫效率分析
+  - late_game_decisions.yaml: 后期决策分析
+- ✅ Runtime 集成: `_load_custom_skills()` 自动发现并注册 SkillDrivenAnalyzer
+  - 不覆盖内置分析阶段（laning/teamfight/economy/decisions/vision）
+- ✅ PostMatchReviewAPI 集成:
+  - list_analysis_skills(): 列出所有可用分析技能（内置 + 用户自定义）
+  - register_analysis_skill(): 注册用户自定义分析技能
+- ✅ 层 C 单元测试:
+  - test_skill_driven_analyzer.py: 19 个测试（创建、验证、格式化、SkillStore 集成）
+  - test_skill_driven_prompt_builder.py: SkillDrivenPromptBuilder 测试
+  - test_skill_store_enhanced.py: 12 个测试（IAnalysisSkillStore 双协议、内置技能加载）
+- ✅ 总代码精简: ~70%（层 A -650 行 + 层 B 分析器精简 + 层 C 零 Python 扩展）
 
 ### 13.2 执行方式
 
@@ -1927,7 +2078,8 @@ logger.info_ctx("后台审查完成", extra_data={"quality": 0.85, "skills_extra
 | v1.2 | 2026-07-16 | **实施进展更新**: 阶段 1-3 已完成（63 个测试全部通过）。阶段 1 实现数据层（OpenDotaClient/MatchFetcher/DataValidator/Cache/MatchData）；阶段 2 实现核心骨架（IterationBudget/StopVerifier/PromptBuilder）；阶段 3 实现单阶段分析（LLMClient/TacticalLoop/LaningAnalyzer/分析器基类）。下一步：阶段 4 全流程（战略循环 + 全部分析器 + 报告生成）。详见 §13.1.1 |
 | v1.3 | 2026-07-20 | **阶段 4 全流程完成**: 实现战略循环（StrategicLoop）、5 个分析器（Teamfight/Economy/Decision/Vision/Fallback）、报告生成（ReportBuilder/MarkdownRenderer）、主编排器（ReviewOrchestrator）。端到端测试通过（比赛 ID 8905359313），整体置信度 0.68，5 个分析阶段全部完成。修复 4 个关键问题：JSON 解析支持 markdown 代码块、模板名不匹配、置信度计算优化、默认模型改为 deepseek-v4-pro。详见 §13.1.1 |
 | v1.4 | 2026-07-21 | **阶段 6 自我进化完成**: 实现四层记忆系统（SessionArchive/PersistentNotes/SkillStore/DreamRecap）、后台审查器（BackgroundReviewer）、提示词加载器（PromptLoader）。33 个单元测试全部通过。代码审查修复 9 个问题（2 个 major + 7 个 minor）。模块重命名 types/ → domain_types/（避免与标准库冲突）。详见 §13.1.1 |
-| v1.5 | 2026-07-23 | **阶段 8 Skill 驱动重构完成**: 分两层渐进重构分析器架构。层 A 基类增强：将 parse_response() 和 build_prompt() 提升到 BaseLLMReviewAnalyzer，消除 ~650 行重复代码；层 B YAML 增强：5 个 YAML 模板添加 analysis_framework/data_requirements/output_schema/metadata，实现 DataFormatter 通用数据格式化器（5 种格式），PromptBuilder 支持 YAML 声明注入。LaningAnalyzer 代码量 -60%。69 个层 B 相关测试通过。详见 §13.1.1 |
+| v1.5 | 2026-07-23 | **阶段 8 层 A/B 完成**: 层 A 基类增强：将 parse_response() 和 build_prompt() 提升到 BaseLLMReviewAnalyzer，消除 ~650 行重复代码；层 B YAML 增强：5 个 YAML 模板添加 analysis_framework/data_requirements/output_schema/metadata，实现 DataFormatter 通用数据格式化器（5 种格式），PromptBuilder 支持 YAML 声明注入。LaningAnalyzer 代码量 -60%。69 个层 B 相关测试通过。详见 §13.1.1 |
+| v1.6 | 2026-07-24 | **阶段 8 层 C Skill 驱动扩展完成**: 新增 IAnalysisSkillStore 协议（YAML 分析技能存储接口）；SkillStore 双协议实现（ISkillStore + IAnalysisSkillStore）；SkillDrivenAnalyzer 从 YAML 技能定义动态创建分析器（from_yaml/from_skill_store）；SkillDrivenPromptBuilder 从 YAML 加载模板；3 个内置技能（roshan_timing/ward_efficiency/late_game_decisions）；Runtime 自动注册自定义技能；PostMatchReviewAPI 暴露技能管理接口。31 个层 C 新增测试通过。总代码精简约 70%。详见 §13.1.1 |
 
 ### D. 自包含设计原则（v1.1 重要约定）
 

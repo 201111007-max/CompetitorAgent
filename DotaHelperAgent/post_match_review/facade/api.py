@@ -388,6 +388,8 @@ class PostMatchReviewAPI:
     def list_analysis_skills(self) -> List[Dict[str, Any]]:
         """列出所有可用的分析技能（内置 + 用户自定义）
 
+        P2-3: 通过 Runtime 公共方法访问配置，不直接触碰 _runtime._config。
+
         Returns:
             List[Dict[str, Any]]: 分析技能定义列表
         """
@@ -409,7 +411,8 @@ class PostMatchReviewAPI:
         # 尝试加载用户自定义技能
         runtime = getattr(self, "_runtime", None)
         if runtime is not None:
-            skills_dir = runtime._config.get("skills_dir", "")
+            # P2-3: 通过公共方法获取 skills_dir
+            skills_dir = runtime.get_skills_dir()
             if skills_dir:
                 try:
                     store = SkillStore(skills_dir)
@@ -428,6 +431,8 @@ class PostMatchReviewAPI:
     ) -> None:
         """注册自定义分析技能
 
+        P2-3: 通过 Runtime 公共方法访问配置，不直接触碰 _runtime._config。
+
         Args:
             name: 技能名称
             skill_definition: 技能定义字典
@@ -441,7 +446,8 @@ class PostMatchReviewAPI:
         if skills_dir is None:
             runtime = getattr(self, "_runtime", None)
             if runtime is not None:
-                skills_dir = runtime._config.get("skills_dir", "")
+                # P2-3: 通过公共方法获取 skills_dir
+                skills_dir = runtime.get_skills_dir()
             if not skills_dir:
                 raise ValueError(
                     "skills_dir 未配置，请在构造 API 时指定或在配置文件中设置"

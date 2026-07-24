@@ -1,6 +1,6 @@
 """独立 OpenDota HTTP 客户端"""
 import asyncio
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import httpx
 
@@ -22,7 +22,8 @@ class OpenDotaClient:
         self._base_url = base_url
         self._timeout = timeout
         self._max_retries = max_retries
-        self._client: httpx.AsyncClient | None = None
+        # P0-3: 使用 Optional[X] 替代 X | None，兼容 Python 3.9
+        self._client: Optional[httpx.AsyncClient] = None
 
     async def _get_client(self) -> httpx.AsyncClient:
         """懒加载 httpx 客户端
@@ -59,6 +60,15 @@ class OpenDotaClient:
             await self._client.aclose()
             self._client = None
 
+    # P3-4: async context manager 支持
+    async def __aenter__(self) -> "OpenDotaClient":
+        """异步上下文管理器入口"""
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        """异步上下文管理器出口，确保 aclose() 被可靠调用"""
+        await self.close()
+
     async def get_match_details(self, match_id: str) -> Dict[str, Any]:
         """获取比赛详情
 
@@ -71,7 +81,7 @@ class OpenDotaClient:
         Raises:
             OpenDotaAPIError: API 调用失败
         """
-        last_error: Exception | None = None
+        last_error: Optional[Exception] = None
         for attempt in range(1, self._max_retries + 1):
             try:
                 client = await self._get_client()

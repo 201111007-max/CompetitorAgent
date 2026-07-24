@@ -1,5 +1,5 @@
 ﻿"""并行子代理：独立上下文和执行环境"""
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from post_match_review.interfaces.analyzer import IReviewAnalyzer
 from post_match_review.domain_types.analysis import AnalysisContext, AnalysisResult
 from post_match_review.domain_types.match_data import MatchData
@@ -36,8 +36,8 @@ class SubAgent:
         self._budget_quota = budget_quota
         self._context = context
         self._messages: List[Dict[str, str]] = []  # 独立上下文消息列表
-        self._result: AnalysisResult | None = None
-        self._error: Exception | None = None
+        self._result: Optional[AnalysisResult] = None
+        self._error: Optional[Exception] = None
 
         logger.info(
             "子代理初始化: name=%s, budget_quota=%d",
@@ -51,12 +51,12 @@ class SubAgent:
         return self._name
 
     @property
-    def result(self) -> AnalysisResult | None:
+    def result(self) -> Optional[AnalysisResult]:
         """分析结果"""
         return self._result
 
     @property
-    def error(self) -> Exception | None:
+    def error(self) -> Optional[Exception]:
         """执行过程中的错误"""
         return self._error
 
