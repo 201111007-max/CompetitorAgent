@@ -270,36 +270,9 @@ class AgentConfig:
     ])
     
     def to_dict(self) -> dict:
-        """转换为字典"""
-        return {
-            "api_key": self.api_key,
-            "rate_limit": {
-                "delay_seconds": self.rate_limit.delay_seconds,
-                "timeout_seconds": self.rate_limit.timeout_seconds,
-                "max_retries": self.rate_limit.max_retries,
-            },
-            "cache": {
-                "enabled": self.cache.enabled,
-                "cache_dir": self.cache.cache_dir,
-                "ttl_hours": self.cache.ttl_hours,
-                "max_size_mb": self.cache.max_size_mb,
-                "max_items": self.cache.max_items,
-            },
-            "matchup": {
-                "min_games_threshold": self.matchup.min_games_threshold,
-                "min_winrate_threshold": self.matchup.min_winrate_threshold,
-                "score_weight": self.matchup.score_weight,
-            },
-            "log": {
-                "level": self.log.level,
-                "file": self.log.file,
-            },
-            "llm": {
-                "enabled": self.llm.enabled,
-                "base_url": self.llm.base_url,
-                "model": self.llm.model,
-                "temperature": self.llm.temperature,
-                "max_tokens": self.llm.max_tokens,
-            },
-            "top_n_default": self.top_n_default,
-        }
+        """转换为字典
+
+        P2-5: 使用 dataclasses.asdict 替代手动序列化。
+        """
+        from dataclasses import asdict
+        return asdict(self)

@@ -259,9 +259,20 @@ class SkillStore(ISkillStore, IAnalysisSkillStore):
             return None
 
     def _calculate_similarity(self, text1: str, text2: str) -> float:
-        """计算文本相似度（简单Jaccard相似度）"""
-        words1 = set(text1.lower().split())
-        words2 = set(text2.lower().split())
+        """计算文本相似度（P1-5: 支持中文的词元级 Jaccard 相似度）
+
+        使用正则提取中英文词元，解决中文无空格分隔的问题。
+        中文连续字符作为单个词元，英文按空格分词。
+
+        Args:
+            text1: 第一段文本
+            text2: 第二段文本
+
+        Returns:
+            float: Jaccard 相似度 [0, 1]
+        """
+        words1 = self._tokenize(text1)
+        words2 = self._tokenize(text2)
 
         if not words1 or not words2:
             return 0.0
@@ -270,3 +281,34 @@ class SkillStore(ISkillStore, IAnalysisSkillStore):
         union = words1 | words2
 
         return len(intersection) / len(union)
+
+    @staticmethod
+    def _tokenize(text: str) -> set[str]:
+        """提取中英文词元
+
+        中文连续字符每 2 个字符作为一个词元（bigram），
+        英文按空格分词后取小写形式。
+
+        Args:
+            text: 输入文本
+
+        Returns:
+            set[str]: 词元集合
+        """
+        tokens: set[str] = set()
+        # 提取中文片段
+        chinese_segments = re.findall(r'[\u4e00-\u9fff]+', text)
+        for segment in chinese_segments:
+            # 使用 bigram（每 2 个字符一个词元）提升匹配粒度
+            for i in range(len(segment) - 1):
+                tokens.add(segment[i:i + 2])
+            # 单字符也加入（短词场景）
+            for char in segment:
+                tokens.add(char)
+
+        # 提取英文词元
+        english_words = re.findall(r'[a-zA-Z]+', text)
+        for word in english_words:
+            tokens.add(word.lower())
+
+        return tokens

@@ -1,4 +1,4 @@
-﻿"""战术循环：单阶段深度分析"""
+"""战术循环：单阶段深度分析"""
 from typing import Optional
 from post_match_review.interfaces.analyzer import IReviewAnalyzer
 from post_match_review.interfaces.budget import IIterationBudget
@@ -62,7 +62,7 @@ class TacticalLoop:
         )
 
         budget = context.budget
-        best_result: AnalysisResult | None = None
+        best_result: Optional[AnalysisResult] = None
         iterations_used = 0
         tokens_consumed = 0
 
@@ -100,6 +100,19 @@ class TacticalLoop:
             result = await self._analyzer.analyze(match_data, context)
             iterations_used += 1
             tokens_consumed += result.tokens_consumed
+
+            # P0-2: 使用分析器返回的实际 token 消耗更新预算
+            # 在分析执行后补充消耗 token 数（初始 consume 仅检查迭代配额）
+            if result.tokens_consumed > 0:
+                with budget._lock:
+                    budget._used_tokens += result.tokens_consumed
+            logger.info(
+                "[迭代 %d/%d] Token 消耗更新: consumed=%d, remaining_tokens=%d",
+                iteration + 1,
+                self._max_iterations,
+                result.tokens_consumed,
+                budget.remaining_tokens,
+            )
 
             logger.info(
                 "[迭代 %d/%d] 分析完成: confidence=%.2f, conclusions=%d, tokens=%d",

@@ -23,18 +23,24 @@ class PromptBuilder:
     output_schema，并自动注入到提示词中。旧格式 YAML 完全兼容。
     """
 
-    def __init__(self, prompts_dir: Optional[Path] = None) -> None:
+    def __init__(self, prompts_dir: Optional[Path] = None, context_max_players: int = 10, context_max_conclusions: int = 5) -> None:
         """初始化提示词构建器
 
         Args:
             prompts_dir: 提示词模板目录，默认为 post_match_review/prompts/
+            context_max_players: P2-4: 上下文层最大展示玩家数（默认 10，覆盖旧值 2）
+            context_max_conclusions: P2-4: 上下文层最大展示结论数（默认 5，覆盖旧值 3）
         """
         if prompts_dir is None:
             self._prompts_dir = Path(__file__).parent.parent / "prompts"
         else:
             self._prompts_dir = prompts_dir
 
+        self._context_max_players = context_max_players
+        self._context_max_conclusions = context_max_conclusions
         self._template_cache: Dict[str, Dict[str, Any]] = {}
+        # P3-2: DataFormatter 缓存（按 phase 名称）
+        self._formatter_cache: Dict[str, DataFormatter] = {}
         logger.info("提示词构建器初始化: prompts_dir=%s", self._prompts_dir)
 
     def build(
@@ -64,7 +70,7 @@ class PromptBuilder:
 
         # Layer 2: Context（上下文层）
         context_content = self._build_context_layer(
-            match_data, completed_results, template,
+            match_data, completed_results, template, phase,
         )
         messages.append({"role": "user", "content": context_content})
 
@@ -116,6 +122,7 @@ class PromptBuilder:
         match_data: MatchData,
         completed_results: Optional[List[AnalysisResult]],
         template: Dict[str, Any],
+        phase: str = "",
     ) -> str:
         """构建 Context 层（比赛数据 + 已有结论）
 
@@ -126,6 +133,7 @@ class PromptBuilder:
             match_data: 结构化比赛数据
             completed_results: 已完成的阶段结果
             template: YAML 模板内容
+            phase: 当前分析阶段名称
 
         Returns:
             str: Context 层内容
@@ -141,9 +149,9 @@ class PromptBuilder:
         context_parts.append(f"- 游戏模式: {match_data.game_mode}")
         context_parts.append("")
 
-        # 玩家数据摘要（保持现有行为）
+        # 玩家数据摘要（P2-4: 使用可配置的最大玩家数）
         context_parts.append("## 玩家数据摘要")
-        for i, player in enumerate(match_data.players[:2], 1):  # 只展示前 2 个玩家示例
+        for i, player in enumerate(match_data.players[:self._context_max_players], 1):
             context_parts.append(f"### 玩家 {i}")
             context_parts.append(f"- 英雄: {player.hero_name} (ID: {player.hero_id})")
             context_parts.append(f"- KDA: {player.kills}/{player.deaths}/{player.assists}")
@@ -157,8 +165,10 @@ class PromptBuilder:
         # YAML 声明的领域数据（新增：DataFormatter 自动格式化）
         data_requirements = template.get("data_requirements", [])
         if data_requirements and DataFormatter.has_declarative_requirements(template):
-            formatter = DataFormatter(data_requirements)
-            formatted_data = formatter.format_with_secondary(match_data)
+            # P3-2: 复用 DataFormatter 实例（按 phase 缓存）
+            if phase not in self._formatter_cache:
+                self._formatter_cache[phase] = DataFormatter(data_requirements)
+            formatted_data = self._formatter_cache[phase].format_with_secondary(match_data)
             if formatted_data:
                 context_parts.append(formatted_data)
                 context_parts.append("")
@@ -172,7 +182,7 @@ class PromptBuilder:
                 context_parts.append(f"- 迭代次数: {result.iterations_used}")
                 if result.conclusions:
                     context_parts.append("- 主要发现:")
-                    for conclusion in result.conclusions[:3]:  # 最多展示 3 条结论
+                    for conclusion in result.conclusions[:self._context_max_conclusions]:
                         context_parts.append(f"  - {conclusion.title}")
                 context_parts.append("")
 

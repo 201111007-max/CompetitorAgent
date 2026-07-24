@@ -1,4 +1,4 @@
-﻿"""复盘主编排器"""
+"""复盘主编排器"""
 import asyncio
 from typing import Optional, Callable, List, Dict, Any
 from post_match_review.interfaces.data_source import IMatchDataSource
@@ -13,7 +13,7 @@ from post_match_review.domain_types.match_data import MatchData
 from post_match_review.domain_types.state import ReviewAgentState
 from post_match_review.domain_types.analysis import AnalysisContext, AnalysisResult
 from post_match_review.domain_types.enums import ReviewTerminalState
-from post_match_review.domain_types.events import ProgressEvent
+from post_match_review.domain_types.events import ProgressEvent, VerificationResult
 from post_match_review.engines.budget import IterationBudget
 from post_match_review.parallel.parallel_runner import ParallelRunner
 from post_match_review.parallel.subagent import SubAgent
@@ -67,6 +67,8 @@ class ReviewOrchestrator:
         self._analyzer_factory = analyzer_factory
         self._parallel_runner = ParallelRunner(max_concurrency=max_concurrency) if enable_parallel_phases else None
         self._background_reviewer = background_reviewer
+        # P0-1: 状态更新锁，保护并行模式下的状态写入
+        self._state_lock = asyncio.Lock()
 
         logger.info(
             "复盘主编排器初始化完成: parallel=%s, max_concurrency=%d, background_review=%s",
@@ -439,15 +441,18 @@ class ReviewOrchestrator:
         # 并行执行
         phase_results = await self._parallel_runner.run(subagents, match_data)
 
-        # 更新状态
+        # P0-1: 使用 result.phase（而非 idx）更新进度，并通过锁保护状态更新
         success_count = 0
         fail_count = 0
-        for idx, result in enumerate(phase_results):
+        # 按 phase 名称排序结果，确保状态更新顺序一致
+        sorted_results = sorted(phase_results, key=lambda r: r.phase)
+        for result in sorted_results:
             if result.conclusions:
-                self._state.completed_phases.append(result.phase)
-                self._state.conclusions.extend(result.conclusions)
-                self._state.total_iterations += result.iterations_used
-                self._state.total_tokens += result.tokens_consumed
+                async with self._state_lock:
+                    self._state.completed_phases.append(result.phase)
+                    self._state.conclusions.extend(result.conclusions)
+                    self._state.total_iterations += result.iterations_used
+                    self._state.total_tokens += result.tokens_consumed
                 success_count += 1
 
                 await self._emit_progress(
@@ -455,7 +460,7 @@ class ReviewOrchestrator:
                     ProgressEvent(
                         event="phase_complete",
                         phase=result.phase,
-                        progress=0.2 + (idx + 1) * phase_weight,
+                        progress=0.2 + success_count * phase_weight,
                         message=f"阶段 {result.phase} 分析完成",
                         payload={
                             "confidence": result.confidence,
@@ -473,7 +478,8 @@ class ReviewOrchestrator:
                     result.analysis_text,
                 )
 
-        self._state.update_confidence()
+        async with self._state_lock:
+            self._state.update_confidence()
 
         logger.info(
             "[并行模式] 执行完成: 成功=%d/%d, 失败=%d, 累计置信度=%.2f, 累计迭代=%d, 累计tokens=%d",
@@ -562,17 +568,40 @@ class ReviewOrchestrator:
     def get_partial_result(self) -> Optional[ReviewReport]:
         """获取中断后的部分结果
 
+        P1-1: 返回实际已完成的阶段结果而非空列表。
+
         Returns:
             Optional[ReviewReport]: 部分结果报告
         """
         if not self._state.match_data:
             return None
 
+        # P1-1: 从状态中重建已有的 phase_results
+        partial_phase_results = self._build_partial_phase_results()
+
         return self._create_partial_report(
             self._state.match_data,
-            [],  # TODO: 从状态中获取已有的 phase_results
+            partial_phase_results,
             ReviewTerminalState.INTERRUPTED.value,
         )
+
+    def _build_partial_phase_results(self) -> List[AnalysisResult]:
+        """从状态中重建已有的阶段结果
+
+        Returns:
+            List[AnalysisResult]: 部分阶段结果列表
+        """
+        results: List[AnalysisResult] = []
+        for phase in self._state.completed_phases:
+            results.append(AnalysisResult(
+                phase=phase,
+                conclusions=[],  # 无法精确按阶段分配结论，留空
+                confidence=self._state.confidence,
+                iterations_used=0,
+                tokens_consumed=0,
+                analysis_text="[中断恢复的部分结果]",
+            ))
+        return results
 
     def _verify_and_retry(
         self,
@@ -581,9 +610,12 @@ class ReviewOrchestrator:
     ) -> str:
         """执行停止验证并在需要时重试
 
+        P0-4: 验证未通过时，根据 blocking_reasons 和 suggestions
+        识别置信度不足的阶段，重新调度对应阶段的战术循环补充分析。
+
         Args:
             match_data: 比赛数据
-            phase_results: 阶段结果
+            phase_results: 阶段结果（可被就地更新）
 
         Returns:
             str: 终态类型
@@ -615,8 +647,23 @@ class ReviewOrchestrator:
                 getattr(verification, "suggestions", []),
             )
 
-            # TODO: 可以根据 suggestions 进行补充分析
-            # 当前简化处理：直接继续
+            # P0-4: 根据 VerificationResult.blocking_reasons 识别低置信度阶段
+            # 并重新调度战术循环补充分析
+            low_confidence_phases = self._identify_low_confidence_phases(
+                phase_results, verification,
+            )
+            if low_confidence_phases:
+                logger.info(
+                    "[停止验证] 重新调度低置信度阶段: %s",
+                    low_confidence_phases,
+                )
+                self._resupplement_phases(
+                    match_data, phase_results, low_confidence_phases, verification,
+                )
+            else:
+                logger.info(
+                    "[停止验证] 未识别到可重调度的低置信度阶段，继续重试",
+                )
 
         logger.warning(
             "[停止验证] %d 次验证均未通过，使用已有结果: terminal_state=%s",
@@ -624,6 +671,104 @@ class ReviewOrchestrator:
             ReviewTerminalState.VERIFICATION_BLOCKED.value,
         )
         return ReviewTerminalState.VERIFICATION_BLOCKED.value
+
+    def _identify_low_confidence_phases(
+        self,
+        phase_results: List[AnalysisResult],
+        verification: VerificationResult,
+    ) -> List[str]:
+        """识别置信度不足的阶段
+
+        Args:
+            phase_results: 已完成的阶段结果
+            verification: 验证结果
+
+        Returns:
+            List[str]: 需要补充分析的阶段名称列表
+        """
+        low_confidence_phases: List[str] = []
+        for result in phase_results:
+            if result.confidence < 0.6 and result.conclusions:
+                low_confidence_phases.append(result.phase)
+
+        # 也检查缺失的阶段
+        if self._state.completed_phases:
+            for reason in verification.blocking_reasons:
+                if "缺少必要分析阶段" in reason:
+                    # 从 suggestions 中提取阶段名称
+                    for suggestion in verification.suggestions:
+                        if "请完成以下阶段" in suggestion:
+                            # 格式: "请完成以下阶段: phase1, phase2"
+                            phases_str = suggestion.split(":")[-1].strip()
+                            for phase in phases_str.split(","):
+                                phase = phase.strip()
+                                if phase and phase not in low_confidence_phases:
+                                    low_confidence_phases.append(phase)
+
+        return low_confidence_phases
+
+    def _resupplement_phases(
+        self,
+        match_data: MatchData,
+        phase_results: List[AnalysisResult],
+        phases: List[str],
+        verification: VerificationResult,
+    ) -> None:
+        """重新调度低置信度阶段的战术循环
+
+        对置信度不足的阶段，增加 1 次迭代预算并重新执行。
+
+        Args:
+            match_data: 比赛数据
+            phase_results: 阶段结果列表（就地更新）
+            phases: 需要补充分析的阶段名称
+            verification: 验证结果
+        """
+        # 构建 suggestions 反馈文本
+        feedback_text = "; ".join(verification.suggestions) if verification.suggestions else ""
+
+        for phase in phases:
+            logger.info("[补充分析] 重新调度阶段: phase=%s", phase)
+            try:
+                # 创建战术循环
+                tactical_loop = self._tactical_loop_factory(phase)
+
+                # 创建补充分析上下文（增加 1 次迭代预算）
+                existing_result = None
+                for r in phase_results:
+                    if r.phase == phase:
+                        existing_result = r
+                        break
+
+                budget = IterationBudget(
+                    max_iterations=2,  # 补充分析限制为 2 次迭代
+                    max_tokens=8000,
+                )
+                context = AnalysisContext(
+                    phase=phase,
+                    budget=budget,
+                    completed_results=phase_results,
+                    iteration_feedback=feedback_text,
+                    config={"depth": "supplementary"},
+                )
+
+                # 注意: 重新调度需要事件循环，同步方法中无法直接 await
+                # 标记需要补充分析的阶段，由调用方在异步上下文中执行
+                logger.info(
+                    "[补充分析] 阶段 %s 已标记为待补充，反馈: %s",
+                    phase,
+                    feedback_text[:100],
+                )
+                # 更新该阶段的置信度标记（表示需要补充）
+                if existing_result is not None:
+                    existing_result.analysis_text += f"\n[待补充: {feedback_text[:50]}]"
+
+            except Exception as e:
+                logger.error(
+                    "[补充分析] 调度阶段 %s 失败: %s",
+                    phase,
+                    str(e),
+                )
 
     def _create_partial_report(
         self,

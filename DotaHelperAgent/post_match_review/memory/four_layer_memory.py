@@ -1,4 +1,5 @@
 """四层记忆系统统一入口"""
+import asyncio
 from typing import Any, Dict, List, Optional
 
 from post_match_review.interfaces.memory import IFourLayerMemory
@@ -65,11 +66,10 @@ class FourLayerMemory(IFourLayerMemory):
 
     async def load_skills(self) -> List[Dict[str, Any]]:
         """Level 3: 加载技能
-        
-        注意: 当前实现为同步操作包装在异步方法中，以保持接口一致性。
-        未来如果 SkillStore 支持异步 I/O，可直接替换为异步实现。
+
+        P3-3: 使用 asyncio.to_thread 包装同步 I/O 为真异步。
         """
-        return self._skill_store.list_skills()
+        return await asyncio.to_thread(self._skill_store.list_skills)
 
     @property
     def session_archive(self) -> SessionArchive:

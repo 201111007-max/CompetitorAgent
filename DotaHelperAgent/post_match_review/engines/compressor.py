@@ -1,5 +1,5 @@
 """上下文压缩器：修剪 + 保护 + LLM 摘要"""
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from post_match_review.interfaces.compressor import IContextCompressor
 from post_match_review.interfaces.llm import ILLMClient
@@ -25,7 +25,7 @@ class ContextCompressor:
         tail_token_budget: int = 20000,
         target_max_tokens: int = 15250,
         summary_token_budget: int = 750,
-        token_counter: TokenCounter | None = None,
+        token_counter: Optional[TokenCounter] = None,
     ) -> None:
         """初始化压缩器
 

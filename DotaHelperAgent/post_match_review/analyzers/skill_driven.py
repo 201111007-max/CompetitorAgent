@@ -45,6 +45,11 @@ class SkillDrivenPromptBuilder(PromptBuilder):
         self._skill_definition = skill_definition
         self._prompts_dir = None  # type: ignore[assignment]
         self._template_cache: Dict[str, Dict[str, Any]] = {}
+        # P2-4: 继承父类的配置化截断参数
+        self._context_max_players = 10
+        self._context_max_conclusions = 5
+        # P3-2: DataFormatter 缓存
+        self._formatter_cache: Dict[str, DataFormatter] = {}
         logger.info(
             "SkillDrivenPromptBuilder 初始化: skill=%s",
             skill_definition.get("name", "unknown"),

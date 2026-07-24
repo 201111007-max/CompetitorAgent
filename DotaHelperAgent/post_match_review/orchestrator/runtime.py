@@ -9,6 +9,7 @@ from post_match_review.interfaces.verifier import IStopVerifier
 from post_match_review.orchestrator.strategic_loop import StrategicLoop
 from post_match_review.orchestrator.tactical_loop import TacticalLoop
 from post_match_review.orchestrator.review_orchestrator import ReviewOrchestrator
+from post_match_review.orchestrator.review_config import ReviewConfig
 from post_match_review.report.report_builder import ReportBuilder
 from post_match_review.report.markdown_renderer import MarkdownRenderer
 from post_match_review.domain_types.state import ReviewAgentState
@@ -44,6 +45,7 @@ class Runtime:
             data_source: 比赛数据源，可选
             llm_client: LLM 客户端，可选
         """
+        # P1-3: 使用类型安全的 ReviewConfig 替代 Dict[str, Any]
         self._config = self._load_config(config_path)
         self._data_source = data_source
         self._llm_client = llm_client
@@ -103,12 +105,12 @@ class Runtime:
             analyzer = analyzers.get(phase)
             if analyzer is None:
                 raise ValueError(f"未知的分析阶段: {phase}")
-            max_iterations = self._config.get("max_iterations_per_phase", 3)
+            max_iterations = self._config.tactical_loop.max_iterations_per_phase
             return TacticalLoop(analyzer=analyzer, max_iterations=max_iterations)
 
         # 7. 创建停止验证器
-        required_phases = self._config.get("required_phases", ["laning", "teamfight", "economy", "decisions"])
-        min_confidence = self._config.get("min_confidence", 0.6)
+        required_phases = self._config.stop_verifier.required_phases
+        min_confidence = self._config.stop_verifier.min_confidence
         stop_verifier = StopVerifier(
             required_phases=required_phases,
             min_confidence=min_confidence,
@@ -135,49 +137,38 @@ class Runtime:
         logger.info("ReviewOrchestrator 构建完成")
         return orchestrator
 
-    def _load_config(self, config_path: Optional[Path]) -> Dict[str, Any]:
+    def _load_config(self, config_path: Optional[Path]) -> ReviewConfig:
         """加载配置文件
 
         Args:
             config_path: 配置文件路径
 
         Returns:
-            Dict[str, Any]: 配置字典
+            ReviewConfig: 类型安全的配置实例
         """
         if config_path is None:
-            config_path = Path(__file__).parent.parent / "config" / "review_config.yaml"
+            config_path = Path(__file__).parent.parent / "review_config.yaml"
 
         if not config_path.exists():
             logger.warning("配置文件不存在: %s，使用默认配置", config_path)
-            return self._get_default_config()
+            return ReviewConfig()
 
         try:
             with open(config_path, "r", encoding="utf-8") as f:
                 config = yaml.safe_load(f)
             logger.info("加载配置文件: %s", config_path)
-            return config
+            return ReviewConfig.from_dict(config)
         except Exception as e:
             logger.error("加载配置文件失败: %s，使用默认配置", e)
-            return self._get_default_config()
+            return ReviewConfig()
 
-    def _get_default_config(self) -> Dict[str, Any]:
+    def _get_default_config(self) -> ReviewConfig:
         """获取默认配置
 
         Returns:
-            Dict[str, Any]: 默认配置字典
+            ReviewConfig: 默认配置实例
         """
-        return {
-            "max_iterations_per_phase": 3,
-            "required_phases": ["laning", "teamfight", "economy", "decisions"],
-            "min_confidence": 0.6,
-            "default_budgets": {
-                "laning": 2,
-                "teamfight": 2,
-                "economy": 2,
-                "decisions": 2,
-                "vision": 2,
-            },
-        }
+        return ReviewConfig()
 
     def _load_custom_skills(self) -> List[Dict[str, Any]]:
         """加载自定义分析技能
@@ -187,7 +178,7 @@ class Runtime:
         Returns:
             List[Dict[str, Any]]: 自定义分析技能定义列表
         """
-        skills_dir = self._config.get("skills_dir")
+        skills_dir = self._config.skills_dir
         if not skills_dir:
             return []
 
@@ -201,3 +192,23 @@ class Runtime:
         except Exception as e:
             logger.error("加载自定义技能失败: %s", e)
             return []
+
+    # P2-3: 公共方法，避免外部直接访问 _config
+    def get_skills_dir(self) -> Optional[str]:
+        """获取技能存储目录
+
+        Returns:
+            Optional[str]: 技能目录路径
+        """
+        return self._config.skills_dir
+
+    def get_analysis_skills_dir(self) -> Optional[str]:
+        """获取分析技能目录
+
+        Returns:
+            Optional[str]: 分析技能目录路径
+        """
+        skills_dir = self._config.skills_dir
+        if not skills_dir:
+            return None
+        return str(Path(skills_dir) / "analysis")
