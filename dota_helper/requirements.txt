@@ -1,0 +1,22 @@
+# dota_helper - Dota 2 赛后复盘 Agent
+# 安装: pip install -r requirements.txt
+
+# ── 核心依赖 ──
+openai>=1.0              # LLM 客户端（OpenAI/DeepSeek 兼容）
+httpx>=0.23.0            # 异步 HTTP 客户端（OpenDota API）
+pyyaml>=6.0              # YAML 配置和 Prompt 模板加载
+
+# ── MCP Server 依赖 ──
+mcp>=1.0                 # FastMCP Server 框架
+python-dotenv>=1.0       # .env 环境变量加载
+
+# ── 数据处理依赖 ──
+numpy>=1.24              # 数值计算（MCP 工具）
+pandas>=2.0              # 数据处理（MCP 工具）
+
+# ── Web 服务依赖 ──
+fastapi>=0.110.0         # FastAPI Web 框架
+uvicorn[standard]>=0.29.0 # ASGI 服务器（含高性能依赖）
+
+# ── 开发/测试依赖（可选） ──
+# pip install -r requirements.txt -r requirements-dev.txt

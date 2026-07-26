@@ -7,13 +7,31 @@ dependencies = [
     "openai>=1.0",
     "httpx>=0.23.0",
     "pyyaml>=6.0",
+    "mcp>=1.0",
+    "python-dotenv>=1.0",
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.29.0",
 ]
 
 [project.optional-dependencies]
+mcp = [
+    "mcp>=1.0",
+    "python-dotenv>=1.0",
+]
 test = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23.0",
     "respx>=0.23.0",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23.0",
+    "respx>=0.23.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0",
+    "pytest-cov>=4.0",
 ]
 
 [tool.pytest.ini_options]

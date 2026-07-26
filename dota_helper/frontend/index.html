@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dota Helper</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div id="app" class="app">
+    <!-- 侧边栏：会话历史 -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <h1 class="logo">Dota Helper</h1>
+        <button class="new-chat-btn" id="new-chat-btn" title="新建会话">+ 新会话</button>
+      </div>
+      <div class="sidebar-content">
+        <div class="session-list" id="session-list">
+          <!-- 会话列表由 JS 渲染 -->
+        </div>
+      </div>
+      <div class="sidebar-footer">
+        <span class="hint">原生 HTML + JS</span>
+      </div>
+    </aside>
+
+    <!-- 主聊天区 -->
+    <main class="main">
+      <header class="main-header">
+        <button class="menu-toggle" id="menu-toggle" title="切换侧边栏">☰</button>
+        <h2 class="chat-title" id="chat-title">新会话</h2>
+        <div class="header-actions">
+          <button class="icon-btn" id="clear-chat-btn" title="清空当前会话">清空</button>
+        </div>
+      </header>
+
+      <div class="chat-container">
+        <div class="message-list" id="message-list">
+          <div class="welcome" id="welcome">
+            <h3>👋 欢迎来到 Dota Helper</h3>
+            <p>输入任意 Dota 2 相关问题，Agent 会自动判断并调用合适工具。</p>
+            <div class="preset-cards" id="preset-cards">
+              <button class="preset-card" data-message="复盘比赛 8909780728">复盘比赛 8909780728</button>
+              <button class="preset-card" data-message="分析这场比赛的眼位">分析这场比赛的眼位</button>
+              <button class="preset-card" data-message="Yatoro 最近战绩如何">Yatoro 最近战绩如何</button>
+              <button class="preset-card" data-message="当前版本幽鬼怎么出装">当前版本幽鬼怎么出装</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="input-area">
+          <div class="input-wrapper">
+            <textarea
+              id="message-input"
+              class="message-input"
+              rows="1"
+              placeholder="输入问题，按 Enter 发送，Shift+Enter 换行..."
+            ></textarea>
+            <button class="send-btn" id="send-btn" title="发送">发送</button>
+          </div>
+          <div class="input-hint">Agent 会展示思考、行动、观察与最终回答的完整过程</div>
+        </div>
+      </div>
+    </main>
+
+    <!-- 右侧可视化面板 -->
+    <aside class="viz-panel" id="viz-panel">
+      <div class="viz-header">
+        <h3>可视化</h3>
+        <button class="icon-btn" id="close-viz-btn" title="关闭可视化">关闭</button>
+      </div>
+      <div class="viz-content" id="viz-content">
+        <div class="viz-placeholder" id="viz-placeholder">
+          <p>当分析结果包含地图或图表时会在这里显示</p>
+        </div>
+        <iframe id="viz-iframe" class="viz-iframe" sandbox="allow-scripts allow-same-origin"></iframe>
+      </div>
+    </aside>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
