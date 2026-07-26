@@ -2,10 +2,19 @@
 
 全模块 LLM 优先，数据驱动兜底的混合模式实现
 集成 Memory 系统支持
+集成 MCP Client 支持（可选）
 """
 
 from typing import List, Dict, Optional, Any
 import time
+
+# MCP 可选依赖
+try:
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+    HAS_MCP = True
+except ImportError:
+    HAS_MCP = False
 
 # 支持两种导入方式：包导入和直接运行
 try:
@@ -314,16 +323,119 @@ class DotaHelperAgent:
     
     def get_memory_stats(self) -> Dict[str, Any]:
         """获取记忆系统统计信息
-        
+
         Returns:
             统计信息字典
         """
         if not self.enable_memory or not self.memory:
             return {"enabled": False}
-        
+
         try:
             stats = self.memory.get_stats()
             stats["enabled"] = True
             return stats
         except Exception as e:
             return {"enabled": False, "error": str(e)}
+
+    # ── MCP Client 集成 ──
+
+    async def connect_mcp_server(
+        self,
+        server_command: Optional[str] = None,
+        server_args: Optional[List[str]] = None,
+    ) -> bool:
+        """连接 MCP Server 以获取扩展工具
+
+        Args:
+            server_command: MCP Server 启动命令（默认 python -m DotaHelperAgent.post_match_review.mcp_server）
+            server_args: MCP Server 启动参数
+
+        Returns:
+            bool: 连接是否成功
+        """
+        if not HAS_MCP:
+            logger.warning("MCP 库未安装，跳过 MCP Server 连接")
+            return False
+
+        try:
+            if server_command is None:
+                server_command = "python"
+            if server_args is None:
+                server_args = ["-m", "DotaHelperAgent.post_match_review.mcp_server"]
+
+            server_params = StdioServerParameters(
+                command=server_command,
+                args=server_args,
+            )
+
+            self._mcp_stdio_context = stdio_client(server_params)
+            read, write = await self._mcp_stdio_context.__aenter__()
+            self._mcp_session = ClientSession(read, write)
+            await self._mcp_session.__aenter__()
+            await self._mcp_session.initialize()
+
+            # 发现可用工具
+            tools_result = await self._mcp_session.list_tools()
+            self._mcp_tools: List[Dict[str, Any]] = [
+                {
+                    "name": t.name,
+                    "description": t.description or "",
+                    "parameters": t.inputSchema or {},
+                }
+                for t in tools_result.tools
+            ]
+
+            logger.info(f"MCP Server 已连接: {len(self._mcp_tools)} 个工具可用")
+            return True
+
+        except Exception as e:
+            logger.error(f"MCP Server 连接失败: {e}")
+            self._mcp_session = None
+            self._mcp_tools = []
+            return False
+
+    async def call_mcp_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Any:
+        """调用 MCP 工具
+
+        Args:
+            tool_name: 工具名称
+            arguments: 工具参数
+
+        Returns:
+            Any: 工具执行结果
+
+        Raises:
+            RuntimeError: MCP Server 未连接
+        """
+        if not hasattr(self, "_mcp_session") or not self._mcp_session:
+            raise RuntimeError("MCP Server 未连接，请先调用 connect_mcp_server()")
+
+        result = await self._mcp_session.call_tool(tool_name, arguments)
+        return result
+
+    def get_mcp_tools(self) -> List[Dict[str, Any]]:
+        """获取已发现的 MCP 工具列表
+
+        Returns:
+            List[Dict[str, Any]]: 工具信息列表（name, description, parameters）
+        """
+        return getattr(self, "_mcp_tools", [])
+
+    async def disconnect_mcp_server(self) -> None:
+        """断开 MCP Server 连接"""
+        if hasattr(self, "_mcp_session") and self._mcp_session:
+            try:
+                await self._mcp_session.__aexit__(None, None, None)
+            except Exception:
+                pass
+            self._mcp_session = None
+
+        if hasattr(self, "_mcp_stdio_context") and self._mcp_stdio_context:
+            try:
+                await self._mcp_stdio_context.__aexit__(None, None, None)
+            except Exception:
+                pass
+            self._mcp_stdio_context = None
+
+        self._mcp_tools = []
+        logger.info("MCP Server 已断开")
