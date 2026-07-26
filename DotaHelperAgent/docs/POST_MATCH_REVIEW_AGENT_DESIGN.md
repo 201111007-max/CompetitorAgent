@@ -1,10 +1,10 @@
 # 赛后复盘 Agent 架构设计文档
 
-> **版本**: v1.6
+> **版本**: v1.7
 > **创建时间**: 2026-07-15
-> **最新修订**: 2026-07-24
+> **最新修订**: 2026-07-26
 > **定位**: 赛后复盘 Agent 的顶层架构设计蓝图
-> **状态**: 实施中（阶段 1-8 已完成，含层 C Skill 驱动扩展）
+> **状态**: 实施中（阶段 1-8 已完成，含层 C Skill 驱动扩展 + MCP Server 集成）
 
 ## 文档说明
 
@@ -156,6 +156,15 @@
 │  │ Client   │ │ API       │ │ Memory   │ │ Skill     │ │ Langfuse│ │
 │  │          │ │ Client    │ │          │ │ Registry  │ │         │ │
 │  └──────────┘ └───────────┘ └──────────┘ └───────────┘ └─────────┘ │
+│                                                                       │
+│  ┌──────────────────────────────────────────────────────────────┐    │
+│  │ MCP Server 工具层 (53 tools)                                  │    │
+│  │ ┌────────┐ ┌──────┐ ┌────────┐ ┌──────┐ ┌────────┐          │    │
+│  │ │match   │ │hero  │ │player  │ │team  │ │ward    │ ...      │    │
+│  │ │6 tools │ │12    │ │7 tools │ │9     │ │5 tools │          │    │
+│  │ └────────┘ └──────┘ └────────┘ └──────┘ └────────┘          │    │
+│  │ helpers: AsyncOpenDotaClient / hero_names / map_config / RAG  │    │
+│  └──────────────────────────────────────────────────────────────┘    │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -363,6 +372,38 @@ DotaHelperAgent/
         ├── ARCHITECTURE.md                 # 详细架构说明
         ├── INTERFACES.md                   # 接口契约参考
         └── USAGE.md                        # 使用指南
+
+    └── mcp_server/                          # ── MCP Server 工具层(统一 FastMCP 入口)
+        ├── __init__.py                      # 包初始化
+        ├── server.py                        # FastMCP 入口 + 生命周期管理(startup/shutdown)
+        │
+        ├── helpers/                         # ── 辅助基础设施
+        │   ├── __init__.py
+        │   ├── opendota.py                  # 统一异步 OpenDota 客户端(AsyncOpenDotaClient)
+        │   │                                #   特性: httpx.AsyncClient + 指数退避 + 429 处理
+        │   │                                #         实例级缓存 + 单例模式 + Python 3.9 兼容
+        │   ├── hero_names.py                # 英雄中文名映射 + 段位格式化
+        │   ├── map_config.py                # 地图配置 + 区域模板 + 时间格式化
+        │   ├── rag_index.py                 # 英雄 RAG 检索(FAISS 可选)
+        │   ├── text_processing.py           # 全文抓取 + 处理(SerpApi 搜索辅助)
+        │   └── ward_visualization.py         # 眼位可视化核心(热力图/散点图/HTML报告)
+        │
+        ├── tools/                           # ── MCP 工具模块(53 个 @mcp.tool() 注册)
+        │   ├── __init__.py                  # 统一导入所有工具模块
+        │   ├── match_tools.py               # 6 工具: 比赛详情/物品/解析
+        │   ├── hero_tools.py                # 12 工具: 英雄列表/克制/统计/RAG
+        │   ├── player_tools.py              # 7 工具: 玩家信息/战绩/英雄池
+        │   ├── team_tools.py                # 9 工具: 战队/职业比赛/联赛
+        │   ├── ward_tools.py                # 5 工具: 眼位分析/热力图/HTML报告
+        │   ├── search_tools.py              # 1 工具: Dota 历史搜索(SerpApi)
+        │   ├── stats_tools.py               # 7 工具: MMR分布/记录/场景统计
+        │   └── review_tools.py              # 6 工具: 赛后复盘/趋势/对比(新增)
+        │
+        └── resources/                       # ── 静态资源
+            ├── maps/                        # Dota 2 地图图片(738-7401)
+            ├── figure/                      # 眼位图标(天辉/夜魇 观察守卫/岗哨守卫)
+            ├── heroes_txt/                  # 英雄文本数据(RAG 检索源)
+            └── ward_region_template.json    # 眼位区域模板
 ```
 
 **目录结构关键约束**:
@@ -1035,6 +1076,30 @@ Phase 5: 后台自我审查（异步，不阻塞主流程）
 | **DataValidator** | 数据完整性校验 | `post_match_review/data_source/data_validator.py` |
 | **DataFormatter** | YAML 声明驱动数据格式化(5 种格式 + 值变换) | `post_match_review/engines/data_formatter.py` |
 
+### 6.5 MCP Server 工具层组件
+
+> **v1.7 新增**: MCP Server 从单体文件 `dota2_fastmcp.py`（6503 行）拆分为模块化结构，
+> 位于 `post_match_review/mcp_server/`。包含 47 个迁移工具 + 6 个新增复盘工具 = 53 个工具。
+> 所有同步 `requests` 调用已转换为异步 `httpx.AsyncClient`，CPU 密集型操作使用 `asyncio.to_thread()`。
+
+| 组件 | 职责 | 包内位置 |
+|------|------|---------|
+| **FastMCP Server** | MCP Server 入口，生命周期管理，工具注册 | `mcp_server/server.py` |
+| **AsyncOpenDotaClient** | 统一异步 OpenDota HTTP 客户端（含 `AsyncOpenDotaClient` 别名） | `mcp_server/helpers/opendota.py` |
+| **match_tools** | 6 工具: get_match_details / get_match_items / get_item_id_map / request_match_parse / request_match_parses / get_parse_request | `mcp_server/tools/match_tools.py` |
+| **hero_tools** | 12 工具: get_heroes / rag_hero_intro / get_hero_matchups / get_hero_item_popularity 等 | `mcp_server/tools/hero_tools.py` |
+| **player_tools** | 7 工具: get_player_info / get_player_matches / get_player_win_loss 等 | `mcp_server/tools/player_tools.py` |
+| **team_tools** | 9 工具: get_pro_matches / get_teams / get_team_matches / search_team 等 | `mcp_server/tools/team_tools.py` |
+| **ward_tools** | 5 工具: analyze_match_wards / analyze_multi_match_wards / get_ward_statistics 等 | `mcp_server/tools/ward_tools.py` |
+| **search_tools** | 1 工具: search_dota_history（SerpApi + 中文/英文回退） | `mcp_server/tools/search_tools.py` |
+| **stats_tools** | 7 工具: get_mmr_distribution / get_records / get_constants 等 | `mcp_server/tools/stats_tools.py` |
+| **review_tools** | 6 新增工具: analyze_ward_efficiency / analyze_roshan_timing / generate_review_report 等 | `mcp_server/tools/review_tools.py` |
+| **WardDataExtractor** | 眼位数据提取（从比赛数据提取守卫/反眼/击杀事件） | `mcp_server/helpers/ward_visualization.py` |
+| **WardAnalyzer** | 眼位分析（区域分析/热力图/散点图/HTML报告生成） | `mcp_server/helpers/ward_visualization.py` |
+| **hero_names** | 英雄中文名映射 + 段位格式化（get_cn_name / get_rank_display） | `mcp_server/helpers/hero_names.py` |
+| **map_config** | 地图配置 + 区域模板加载 + 时间格式化 | `mcp_server/helpers/map_config.py` |
+| **rag_index** | 英雄 RAG 检索（FAISS 可选，SerpApi 文本嵌入） | `mcp_server/helpers/rag_index.py` |
+
 ---
 
 ## 七、接口契约
@@ -1512,6 +1577,58 @@ GET /api/review/{match_id}/stream/ws        # 可选 WebSocket 端点
   接入: review_api.review_ws(match_id)
 ```
 
+### 9.3a MCP Server 集成
+
+> **v1.7 新增**: `core/agent.py` 中的 `DotaHelperAgent` 集成了 MCP Client，
+> 可通过 `connect_mcp_server()` 连接 `post_match_review/mcp_server` 获取 53 个扩展工具。
+
+```
+MCP 集成架构:
+
+  ┌──────────────────────────────────────────────────────┐
+  │  DotaHelperAgent (core/agent.py)                      │
+  │                                                        │
+  │  connect_mcp_server() ──stdio──▶ MCP Server            │
+  │  call_mcp_tool(name, args) ──▶ 53 个工具                │
+  │  get_mcp_tools() ──▶ 工具发现列表                       │
+  │  disconnect_mcp_server() ──▶ 断开连接                   │
+  └──────────────────────────────────────────────────────┘
+         │ stdio
+         ▼
+  ┌──────────────────────────────────────────────────────┐
+  │  post_match_review/mcp_server/                         │
+  │  FastMCP("Dota2 Helper Agent")                        │
+  │                                                        │
+  │  ┌─────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐  │
+  │  │ match   │ │ hero     │ │ player   │ │ team     │  │
+  │  │ 6 tools │ │ 12 tools │ │ 7 tools  │ │ 9 tools  │  │
+  │  └─────────┘ └──────────┘ └──────────┘ └──────────┘  │
+  │  ┌─────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐  │
+  │  │ ward    │ │ search   │ │ stats    │ │ review   │  │
+  │  │ 5 tools │ │ 1 tool   │ │ 7 tools  │ │ 6 tools  │  │
+  │  └─────────┘ └──────────┘ └──────────┘ └──────────┘  │
+  │                                                        │
+  │  helpers: AsyncOpenDotaClient (单例, 实例级缓存)        │
+  └──────────────────────────────────────────────────────┘
+```
+
+**启动命令**:
+
+```bash
+# 方式 1: 作为 MCP Server 独立运行
+python -m DotaHelperAgent.post_match_review.mcp_server
+
+# 方式 2: 通过 DotaHelperAgent MCP Client 连接
+agent = DotaHelperAgent()
+await agent.connect_mcp_server()  # 默认连接 post_match_review.mcp_server
+```
+
+**MCP Server 启动生命周期**:
+1. `startup()` — 初始化 `AsyncOpenDotaClient`，预加载英雄列表缓存
+2. 工具注册 — `tools/__init__.py` 导入 8 个工具模块，触发 `@mcp.tool()` 注册
+3. `mcp.run_stdio()` — 进入 stdio 事件循环
+4. `shutdown()` — 关闭 `AsyncOpenDotaClient`，释放 httpx 连接
+
 ### 9.4 前端集成（既有 frontend/ 目录内新增）
 
 > 前端组件仍位于 `frontend/src/`,但仅通过 HTTP/SSE 与后端交互,
@@ -1781,6 +1898,7 @@ logger.info_ctx("后台审查完成", extra_data={"quality": 0.85, "skills_extra
 | **阶段 6: 自我进化** | 后台审查 + 技能沉淀 + 记忆扩展 | 复盘后自动生成技能、记忆持久化 | 阶段 4 | ✅ 已完成 (2026-07-21) |
 | **阶段 7: 前端集成** | API 端点 + SSE 流式 + 复盘展示组件 | 前端可实时展示分析进度和报告 | 阶段 4 | ✅ 已完成 (2026-07-22) |
 | **阶段 8: Skill 驱动重构** | 层 A 基类增强 + 层 B YAML 增强 + 层 C Skill 驱动扩展 | 分析逻辑声明化，代码精简约 70%，支持 YAML 技能扩展 | 阶段 4 | ✅ 已完成 (2026-07-24) |
+| **阶段 9: MCP Server 集成** | 单体文件拆分为模块化 MCP Server + 异步转换 + Agent MCP Client 集成 | 53 个工具注册，MCP Client 可连接调用 | 阶段 8 | ✅ 已完成 (2026-07-26) |
 
 #### 13.1.1 已完成阶段详情
 
@@ -1981,6 +2099,45 @@ logger.info_ctx("后台审查完成", extra_data={"quality": 0.85, "skills_extra
   - test_skill_store_enhanced.py: 12 个测试（IAnalysisSkillStore 双协议、内置技能加载）
 - ✅ 总代码精简: ~70%（层 A -650 行 + 层 B 分析器精简 + 层 C 零 Python 扩展）
 
+**阶段 9: MCP Server 集成** (2026-07-26)
+
+基于 `docs/bugs/002_post_match_review_optimization_items.md` 优化清单，将单体 MCP Server 拆分为模块化结构。
+
+- ✅ 单体拆分: `dota2_fastmcp.py`（6503 行）→ 8 个工具模块 + 6 个辅助模块
+- ✅ 异步转换: 所有同步 `requests` 调用 → `httpx.AsyncClient`，`time.sleep()` → `asyncio.sleep()`
+- ✅ 统一客户端: `AsyncOpenDotaClient`（单例模式，实例级缓存，指数退避重试 + 429 处理）
+- ✅ 47 个迁移工具（8 个模块）:
+  - match_tools: 6 工具（比赛详情/物品/解析请求）
+  - hero_tools: 12 工具（英雄列表/克制/RAG/统计/能力）
+  - player_tools: 7 工具（玩家信息/战绩/英雄池/队友/总计）
+  - team_tools: 9 工具（职业比赛/战队/联赛/搜索）
+  - ward_tools: 5 工具（眼位分析/热力图/HTML报告/统计）
+  - search_tools: 1 工具（SerpApi 搜索，中文→英文回退）
+  - stats_tools: 7 工具（MMR/记录/场景统计/常量）
+- ✅ 6 个新增复盘工具（review_tools）:
+  - analyze_ward_efficiency / analyze_roshan_timing / analyze_late_game_decisions
+  - generate_review_report / search_player_trends / compare_match_performance
+- ✅ 辅助模块:
+  - opendota.py: 统一异步 OpenDota 客户端（含 `AsyncOpenDotaClient = OpenDotaClient` 别名）
+  - hero_names.py: 英雄中文名映射 + 段位格式化
+  - map_config.py: 地图配置 + 区域模板 + 时间格式化
+  - rag_index.py: 英雄 RAG 检索（FAISS 可选降级）
+  - text_processing.py: 全文抓取 + 处理
+  - ward_visualization.py: 眼位可视化核心（热力图/散点图/交互HTML）
+- ✅ 静态资源迁移: 地图图片 + 眼位图标 + 英雄文本 + 区域模板 → `mcp_server/resources/`
+- ✅ MCP Client 集成: `core/agent.py` 添加 `connect_mcp_server()` / `call_mcp_tool()` / `get_mcp_tools()`
+- ✅ 日志增强: 8 个工具文件添加 351 条 logger 调用（189 info / 125 warning / 26 error / 11 debug）
+  - 所有 53 个工具函数均有入口日志、API 调用日志、异常日志、完成日志
+  - 关键分支覆盖: API 错误/数据校验/重试逻辑/回退策略/缓存命中/文件 I/O
+- ✅ Bug 修复:
+  - ward_tools.py:993 中文引号与外层双引号冲突
+  - opendota.py: 添加 `AsyncOpenDotaClient` 别名
+  - tools/__init__.py: 补全所有 8 个工具模块导入
+- ✅ 验证:
+  - 53 个工具全部注册成功（`create_server()._tool_manager._tools` 验证）
+  - 18 个 Python 文件语法检查通过
+  - 226 个 PostMatchReview 单元测试通过
+
 ### 13.2 执行方式
 
 **采用 Subagent-Driven Development（子代理驱动开发）**
@@ -2080,6 +2237,7 @@ logger.info_ctx("后台审查完成", extra_data={"quality": 0.85, "skills_extra
 | v1.4 | 2026-07-21 | **阶段 6 自我进化完成**: 实现四层记忆系统（SessionArchive/PersistentNotes/SkillStore/DreamRecap）、后台审查器（BackgroundReviewer）、提示词加载器（PromptLoader）。33 个单元测试全部通过。代码审查修复 9 个问题（2 个 major + 7 个 minor）。模块重命名 types/ → domain_types/（避免与标准库冲突）。详见 §13.1.1 |
 | v1.5 | 2026-07-23 | **阶段 8 层 A/B 完成**: 层 A 基类增强：将 parse_response() 和 build_prompt() 提升到 BaseLLMReviewAnalyzer，消除 ~650 行重复代码；层 B YAML 增强：5 个 YAML 模板添加 analysis_framework/data_requirements/output_schema/metadata，实现 DataFormatter 通用数据格式化器（5 种格式），PromptBuilder 支持 YAML 声明注入。LaningAnalyzer 代码量 -60%。69 个层 B 相关测试通过。详见 §13.1.1 |
 | v1.6 | 2026-07-24 | **阶段 8 层 C Skill 驱动扩展完成**: 新增 IAnalysisSkillStore 协议（YAML 分析技能存储接口）；SkillStore 双协议实现（ISkillStore + IAnalysisSkillStore）；SkillDrivenAnalyzer 从 YAML 技能定义动态创建分析器（from_yaml/from_skill_store）；SkillDrivenPromptBuilder 从 YAML 加载模板；3 个内置技能（roshan_timing/ward_efficiency/late_game_decisions）；Runtime 自动注册自定义技能；PostMatchReviewAPI 暴露技能管理接口。31 个层 C 新增测试通过。总代码精简约 70%。详见 §13.1.1 |
+| v1.7 | 2026-07-26 | **阶段 9 MCP Server 集成完成**: 将单体 `dota2_fastmcp.py`（6503 行）拆分为模块化 MCP Server（8 个工具模块 + 6 个辅助模块），位于 `post_match_review/mcp_server/`。47 个迁移工具全部异步化（`requests` → `httpx.AsyncClient`），新增 6 个复盘工具（review_tools）。统一 `AsyncOpenDotaClient`（单例 + 缓存 + 指数退避）。`core/agent.py` 集成 MCP Client（`connect_mcp_server()` / `call_mcp_tool()`）。8 个工具文件添加 351 条日志调用。53 个工具注册验证通过。详见 §6.5 / §9.3a / §13.1.1 |
 
 ### D. 自包含设计原则（v1.1 重要约定）
 
