@@ -1,10 +1,10 @@
 # 赛后复盘 Agent 架构设计文档
 
-> **版本**: v1.7
+> **版本**: v1.8
 > **创建时间**: 2026-07-15
-> **最新修订**: 2026-07-26
+> **最新修订**: 2026-07-27
 > **定位**: 赛后复盘 Agent 的顶层架构设计蓝图
-> **状态**: 实施中（阶段 1-8 已完成，含层 C Skill 驱动扩展 + MCP Server 集成）
+> **状态**: 实施中（阶段 1-9 已完成；阶段 10 ReAct Agent Chat 待实施）
 
 ## 文档说明
 
@@ -118,17 +118,18 @@
 │                          接入层 (Gateway)                             │
 │  ┌─────────────┐  ┌──────────────┐  ┌─────────────────────────────┐  │
 │  │  Web API    │  │  Frontend    │  │  CLI / 脚本入口              │  │
-│  │  /api/review│  │  Vue 3 + TS  │  │  python -m review            │  │
+│  │  /api/chat  │  │  Vue 3 + TS  │  │  python -m review            │  │
+│  │  /api/review│  │  Chat UI     │  │                              │  │
 │  └──────┬──────┘  └──────┬───────┘  └──────────────┬──────────────┘  │
 ├─────────┼────────────────┼─────────────────────────┼─────────────────┤
 │         │           编排层 (Orchestration)          │                 │
 │  ┌──────▼──────────────────────────────────────────▼──────────────┐  │
-│  │                    ReviewOrchestrator                           │  │
-│  │  ┌────────────┐ ┌──────────────┐ ┌──────────────────────────┐  │  │
-│  │  │ 战略循环    │ │ 战术循环      │ │ 后台自我审查              │  │  │
-│  │  │ Strategic  │ │ Tactical     │ │ BackgroundReview         │  │  │
-│  │  │ Loop       │ │ Loop         │ │ Spawner                  │  │  │
-│  │  └────────────┘ └──────────────┘ └──────────────────────────┘  │  │
+│  │  ReviewOrchestrator          │          ReAct Agent            │  │
+│  │  ┌────────────┐ ┌──────────────┐  ┌────────────────────────┐  │  │
+│  │  │ 战略循环    │ │ 战术循环      │  │ Thought→Action→Observ  │  │  │
+│  │  │ Strategic  │ │ Tactical     │  │ → Final Answer          │  │  │
+│  │  │ Loop       │ │ Loop         │  │ (MCP 工具调用)          │  │  │
+│  │  └────────────┘ └──────────────┘  └────────────────────────┘  │  │
 │  └───────────────────────────┬────────────────────────────────────┘  │
 ├──────────────────────────────┼───────────────────────────────────────┤
 │                         核心引擎层 (Engine)                          │
@@ -1629,31 +1630,57 @@ await agent.connect_mcp_server()  # 默认连接 dota_helper.mcp_server
 3. `mcp.run_stdio()` — 进入 stdio 事件循环
 4. `shutdown()` — 关闭 `AsyncOpenDotaClient`，释放 httpx 连接
 
-### 9.4 前端集成（既有 frontend/ 目录内新增）
+### 9.4 前端集成
 
-> 前端组件仍位于 `frontend/src/`,但仅通过 HTTP/SSE 与后端交互,
+> 前端采用 **Vue 3 + TypeScript + Vite** 实现，通过 HTTP/SSE 与后端交互，
 > 不直接 `import` 任何 `dota_helper.*` 模块。
+>
+> v1.8 新增：聊天界面组件，交互模式从
+> "输入 match_id → 一键触发复盘"改为"自由文本聊天 → ReAct Agent 推理"。
+> 既有 Vue 3 复盘组件与新增聊天组件并存。
 
 ```
-新增前端组件(均位于既有 frontend/src/ 内):
+前端文件结构:
 
   frontend/src/
   ├── components/
-  │   └── review/
-  │       ├── ReviewPanel.vue            # 复盘面板(主组件)
-  │       ├── ReviewProgress.vue         # 分析进度展示
-  │       ├── ReviewReport.vue           # 复盘报告展示
-  │       ├── ReviewTimeline.vue         # 分析时间线
-  │       └── ReviewHistory.vue          # 复盘历史列表
+  │   ├── chat/                            # 新增：聊天组件
+  │   │   ├── ChatView.vue                 # 聊天主页面
+  │   │   ├── ChatInput.vue                # 消息输入框
+  │   │   ├── ChatMessage.vue              # 单条消息渲染（含 Markdown）
+  │   │   ├── ChatBubble.vue               # Agent 思考/行动/观察气泡
+  │   │   ├── WardIframe.vue               # Ward HTML iframe 嵌入
+  │   │   └── PresetCards.vue              # 预设问题卡片
+  │   └── review/                          # 既有：复盘组件（保留）
+  │       ├── ReviewPanel.vue
+  │       ├── ReviewProgress.vue
+  │       ├── ReviewReport.vue
+  │       ├── ReviewTimeline.vue
+  │       └── ReviewHistory.vue
   ├── composables/
-  │   └── useReview.ts                   # 复盘 SSE 流式处理
+  │   ├── useChat.ts                       # 新增：聊天 SSE 流式处理
+  │   └── useReview.ts                     # 既有：复盘 SSE 流式处理
   ├── stores/
-  │   └── review.ts                      # 复盘状态管理(Pinia)
+  │   ├── chat.ts                          # 新增：聊天状态管理(Pinia)
+  │   └── review.ts                        # 既有：复盘状态管理(Pinia)
   ├── types/
-  │   └── review.ts                      # 复盘类型定义(镜像后端 types)
+  │   ├── chat.ts                          # 新增：聊天类型定义
+  │   └── review.ts                        # 既有：复盘类型定义
   └── api/
-      └── review.ts                      # 复盘 API 客户端(fetch 封装)
+      ├── chat.ts                          # 新增：聊天 API 客户端
+      └── review.ts                        # 既有：复盘 API 客户端
 ```
+
+**聊天界面核心功能**（详见 §13.1.2 阶段 10）：
+
+| 功能 | 说明 |
+|------|------|
+| 自由文本输入 | 用户输入任意问题（如"分析比赛 XXX 的视野"） |
+| SSE 流式展示 | 实时展示 Agent Thought/Action/Observation 推理过程 |
+| 最终答案渲染 | Markdown 渲染 Final Answer 内容 |
+| Ward HTML 嵌入 | 检测 ward_html 路径，通过 iframe 嵌入交互式眼位分析 |
+| 会话历史 | 侧边栏展示聊天会话历史，支持回看和继续 |
+| 预设问题卡片 | 首页展示快速入口卡片 |
 
 ### 9.5 LLM 配置共享（最小耦合）
 
@@ -1899,6 +1926,7 @@ logger.info_ctx("后台审查完成", extra_data={"quality": 0.85, "skills_extra
 | **阶段 7: 前端集成** | API 端点 + SSE 流式 + 复盘展示组件 | 前端可实时展示分析进度和报告 | 阶段 4 | ✅ 已完成 (2026-07-22) |
 | **阶段 8: Skill 驱动重构** | 层 A 基类增强 + 层 B YAML 增强 + 层 C Skill 驱动扩展 | 分析逻辑声明化，代码精简约 70%，支持 YAML 技能扩展 | 阶段 4 | ✅ 已完成 (2026-07-24) |
 | **阶段 9: MCP Server 集成** | 单体文件拆分为模块化 MCP Server + 异步转换 + Agent MCP Client 集成 | 53 个工具注册，MCP Client 可连接调用 | 阶段 8 | ✅ 已完成 (2026-07-26) |
+| **阶段 10: ReAct Agent Chat** | ReAct Agent + 聊天前端 + SSE 思考过程流式展示 + 会话管理 | 用户可自由文本对话，Agent 自主推理并调用 MCP 工具，前端实时展示 Thought/Action/Observation 过程 | 阶段 9 | 🔲 待实施 |
 
 #### 13.1.1 已完成阶段详情
 
@@ -2138,6 +2166,339 @@ logger.info_ctx("后台审查完成", extra_data={"quality": 0.85, "skills_extra
   - 18 个 Python 文件语法检查通过
   - 226 个 PostMatchReview 单元测试通过
 
+#### 13.1.2 待实施阶段详情
+
+**阶段 10: ReAct Agent Chat** (待实施)
+
+> **设计目标**: 将 dota_helper 从"输入 match_id → 一键触发复盘"模式升级为
+> **"自由文本聊天 → ReAct Agent 推理"**模式，与 Dota2-Agent 交互范式对齐。
+> 用户可自由提问（如"分析比赛 8909780728 的视野"、"幻影刺客克制谁"），
+> Agent 通过 ReAct 循环（Thought → Action → Observation）自主调用 53 个 MCP 工具完成多步推理，
+> 前端实时展示推理过程，历史记录以聊天会话形式组织。
+
+**10.1 ReAct Agent 核心实现**
+
+新建 `dota_helper/agent/` 模块，实现 ReAct 推理循环：
+
+```
+dota_helper/agent/
+├── __init__.py
+├── react_agent.py          # DotaHelperReActAgent 主类
+├── react_loop.py           # ReAct 循环核心（think → act → observe）
+├── tool_dispatcher.py      # MCP 工具调用分发器
+├── response_parser.py      # LLM 响应解析（Action/Final Answer/Thought 提取）
+├── session_manager.py      # 会话管理（会话创建/加载/持久化）
+└── prompts/
+    └── react_system.py     # ReAct 系统提示词构建
+```
+
+**DotaHelperReActAgent 类设计**（参照 Dota2-Agent `dota2_agent.py`）：
+
+```python
+class DotaHelperReActAgent:
+    """dota_helper ReAct Agent
+    
+    ReAct (Reasoning + Acting) 范式:
+    1. Thought — Agent 思考分析当前问题
+    2. Action  — 调用 MCP 工具获取数据
+    3. Observation — 观察工具返回结果
+    4. 循环或给出 Final Answer
+    """
+    
+    def __init__(
+        self,
+        mcp_server_path: Optional[str] = None,
+        llm_api_key: Optional[str] = None,
+        llm_base_url: Optional[str] = None,
+        llm_model: Optional[str] = None,
+        max_iterations: int = 20,
+        max_observation_chars: int = 12000,
+        log_dir: str = "logs",
+        enable_logging: bool = True,
+    ) -> None: ...
+    
+    async def connect_mcp(self) -> None:
+        """连接 MCP Server（stdio 模式）"""
+        ...
+    
+    async def disconnect_mcp(self) -> None:
+        """断开 MCP Server"""
+        ...
+    
+    async def call_mcp_tool(self, tool_name: str, arguments: Dict[str, Any]) -> str:
+        """调用 MCP 工具"""
+        ...
+    
+    async def run(self, user_input: str) -> str:
+        """执行 ReAct 循环，返回最终答案"""
+        ...
+    
+    async def run_stream(self, user_input: str) -> AsyncGenerator[Dict[str, Any], None]:
+        """执行 ReAct 循环（流式输出）
+        
+        Yields:
+            Dict: 事件字典，类型包括:
+                - {"type": "session", "session_id": ..., "conversation_id": ...}
+                - {"type": "thought", "content": "思考内容"}
+                - {"type": "action", "content": "工具名", "input": {...}}
+                - {"type": "observation", "content": "工具返回结果"}
+                - {"type": "final", "content": "最终答案", "ward_html": "..."}
+        """
+        ...
+    
+    def start_new_session(self) -> None: ...
+    def load_recent_context_from_session(self, conversations: List[Dict]) -> None: ...
+```
+
+**ReAct 循环流程**（与 Dota2-Agent `run_stream()` 对齐）：
+
+```
+用户自由文本输入
+     │
+     ▼
+┌──────────────────┐
+│ 构建消息列表      │ ─── 系统提示 + 历史上下文 + 记忆检索 + 用户输入
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────────────────────────────────────┐
+│ ReAct 循环（最多 max_iterations 次迭代）          │
+│                                                    │
+│  1. 调用 LLM（流式）                               │
+│     │                                              │
+│     ▼                                              │
+│  2. 解析 LLM 响应                                  │
+│     │                                              │
+│     ├── 检测到 "Thought:" → yield thought 事件     │
+│     │                                              │
+│     ├── 检测到 "Final Answer:" → 结束循环          │
+│     │   yield final 事件（含 ward_html）           │
+│     │                                              │
+│     ├── 检测到 "Action:" + "Action Input:"         │
+│     │   │                                          │
+│     │   ├── yield action 事件                      │
+│     │   ├── 调用 MCP 工具 → observation            │
+│     │   ├── yield observation 事件                  │
+│     │   └── 追加到消息列表，继续循环                │
+│     │                                              │
+│     └── 无有效格式 → 追加格式纠正提示，继续循环      │
+│                                                    │
+└──────────────────────────────────────────────────┘
+         │
+         ▼
+┌──────────────────┐
+│ 后处理             │ ─── 记忆提交 + 日志归档 + ward HTML 提取
+└──────────────────┘
+```
+
+**系统提示词构建**：将 53 个 MCP 工具的名称、参数 Schema 和功能描述注入系统提示，
+使 LLM 知道可调用哪些工具。支持 Skill 懒加载（按需 load_skill 获取工具详细用法）。
+
+**10.2 Web 服务层**
+
+新建 `dota_helper/web_app.py`，基于 FastAPI 提供 Web 服务：
+
+```python
+# dota_helper/web_app.py
+from fastapi import FastAPI
+from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+
+app = FastAPI(title="Dota Helper ReAct Chat")
+agent = DotaHelperReActAgent(enable_logging=True)
+
+# 静态文件服务
+app.mount("/ward_analysis", StaticFiles(directory="ward_analysis", html=True))
+
+@app.get("/")
+async def index() -> FileResponse:
+    """主页"""
+    return FileResponse(WEB_DIR / "index.html")
+
+@app.get("/api/history")
+async def history() -> Dict:
+    """获取会话历史列表"""
+    ...
+
+@app.get("/api/sessions/{session_id}")
+async def session(session_id: str) -> Dict:
+    """获取指定会话的所有对话"""
+    ...
+
+@app.post("/api/chat")
+async def chat(request: ChatRequest) -> StreamingResponse:
+    """聊天流式响应（SSE/NDJSON）"""
+    # 调用 agent.run_stream() → 流式返回 thought/action/observation/final 事件
+    ...
+
+@app.on_event("startup")
+async def startup() -> None:
+    await agent.connect_mcp()
+
+@app.on_event("shutdown")
+async def shutdown() -> None:
+    await agent.disconnect_mcp()
+```
+
+**API 端点汇总**（与 Dota2-Agent 对齐 + 保留复盘专用端点）：
+
+| 端点 | 方法 | 说明 | 事件源 |
+|------|------|------|--------|
+| `/` | GET | 主页（聊天界面） | — |
+| `/api/chat` | POST | 聊天流式响应 | `agent.run_stream()` |
+| `/api/history` | GET | 会话历史列表 | 日志文件 |
+| `/api/sessions/{id}` | GET | 指定会话详情 | 日志文件 |
+| `/api/conversations/{sid}/{cid}` | GET | 单条对话详情 | 日志文件 |
+| `/ward_analysis/` | Static | Ward HTML 静态文件 | MCP 工具生成 |
+
+**保留既有复盘端点**（§9.3 中定义的端点仍然可用，供程序化接入）：
+- `POST /api/review` → `PostMatchReviewAPI.review_stream()`
+- `GET /api/review/{match_id}/status` → `PostMatchReviewAPI.get_status()`
+- `GET /api/review/{match_id}/report` → `PostMatchReviewAPI.get_report()`
+
+**10.3 聊天前端**
+
+新增 Vue 3 + TypeScript 聊天组件，位于 `frontend/src/components/chat/`：
+
+```
+frontend/src/
+├── components/chat/
+│   ├── ChatView.vue         # 聊天主页面（路由 /chat）
+│   ├── ChatInput.vue        # 消息输入框
+│   ├── ChatMessage.vue      # 单条消息渲染（Markdown 渲染）
+│   ├── ChatBubble.vue       # Agent 推理气泡（Thought/Action/Observation）
+│   ├── WardIframe.vue       # Ward HTML iframe 嵌入组件
+│   └── PresetCards.vue      # 预设问题卡片
+├── composables/useChat.ts   # 聊天 SSE 流式处理
+├── stores/chat.ts           # 聊天状态管理（Pinia）
+├── types/chat.ts            # 聊天类型定义
+└── api/chat.ts              # 聊天 API 客户端（fetch 封装）
+```
+
+**前端交互模式**：
+
+| 维度 | 设计 |
+|------|------|
+| **输入方式** | 自由文本聊天输入（非 match_id 输入框） |
+| **推理展示** | SSE 流实时展示 Thought/Action/Observation 过程 |
+| **最终答案** | Markdown 渲染 Final Answer 内容 |
+| **可视化嵌入** | 检测到 `ward_html` 路径时，通过 `<iframe>` 嵌入交互式眼位分析 HTML |
+| **历史记录** | 侧边栏显示聊天会话历史，点击可回看 |
+| **预设问题** | 首页展示预设问题卡片（"分析比赛 XXX 的视野"、"英雄克制关系"等） |
+
+**SSE 事件消费**（`useChat.ts` composable）：
+
+```typescript
+// composables/useChat.ts
+export function useChat() {
+  const messages = ref<ChatMessage[]>([]);
+  const isConnected = ref(false);
+
+  async function sendMessage(text: string, sessionId?: string) {
+    const response = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: text, session_id: sessionId }),
+    });
+
+    // NDJSON 流解析
+    for await (const event of parseNDJSON(response)) {
+      switch (event.type) {
+        case "session":
+          // 更新会话信息
+          break;
+        case "thought":
+          // 追加思考气泡
+          messages.value.push({ role: "agent", type: "thought", content: event.content });
+          break;
+        case "action":
+          // 追加行动气泡
+          messages.value.push({ role: "agent", type: "action", content: event.content, input: event.input });
+          break;
+        case "observation":
+          // 追加观察气泡
+          messages.value.push({ role: "agent", type: "observation", content: event.content });
+          break;
+        case "final":
+          // 追加最终答案 + 嵌入 Ward HTML
+          messages.value.push({ role: "agent", type: "final", content: event.content, wardHtml: event.ward_html });
+          break;
+      }
+    }
+  }
+
+  return { messages, isConnected, sendMessage };
+}
+```
+
+**预设问题卡片**（引导用户快速开始）：
+
+| 卡片标题 | 触发消息 |
+|---------|---------|
+| 📊 分析最近比赛 | "分析我最近的一场比赛" |
+| 👁️ 视野分析 | "分析比赛 [match_id] 的视野" |
+| ⚔️ 英雄克制 | "[英雄名]的克制英雄有哪些" |
+| 🏆 战队分析 | "分析 [战队名] 最近的比赛" |
+| 📈 玩家趋势 | "查看 [玩家名] 的最近趋势" |
+
+**10.4 会话管理**
+
+| 组件 | 说明 |
+|------|------|
+| **会话创建** | 新对话自动创建 session，分配 session_id |
+| **会话持久化** | 每次对话完成后保存到 `logs/session_{id}.json` |
+| **会话加载** | 从历史列表选择会话后，加载历史对话到 Agent 上下文 |
+| **上下文窗口** | 保留最近 N 轮对话作为 Agent 上下文，超出部分摘要压缩 |
+| **Ward HTML 关联** | 对话中产生的 ward_html 路径记录到会话数据，历史回看时恢复 iframe |
+
+**10.5 与既有模块的集成关系**
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                    新增: ReAct Agent 层                       │
+│  ┌────────────────────────────────────────────────────────┐  │
+│  │  agent/react_agent.py  (DotaHelperReActAgent)          │  │
+│  │  ├─ ReAct 循环: Thought → Action → Observation         │  │
+│  │  ├─ MCP Client → 调用 53 个工具                        │  │
+│  │  ├─ 会话管理: 日志持久化 + 上下文维护                    │  │
+│  │  └─ 记忆检索: 四层记忆系统                               │  │
+│  └──────────────┬─────────────────────────────────────────┘  │
+├─────────────────┼────────────────────────────────────────────┤
+│                 │ 复用                                       │
+│  ┌──────────────▼─────────────────────────────────────────┐  │
+│  │  既有模块 (零修改)                                      │  │
+│  │  ├─ mcp_server/ — 53 个 MCP 工具                       │  │
+│  │  ├─ facade/ — PostMatchReviewAPI (复盘专用)             │  │
+│  │  ├─ llm/ — LLMClient                                   │  │
+│  │  ├─ memory/ — 四层记忆系统                              │  │
+│  │  └─ data_source/ — OpenDotaClient                      │  │
+│  └────────────────────────────────────────────────────────┘  │
+├──────────────────────────────────────────────────────────────┤
+│  新增: Web 层                                                │
+│  ├─ web_app.py — FastAPI 入口 (chat + review API)          │
+│  └─ frontend/src/components/chat/ — Vue 3 聊天组件          │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**关键约束**：
+- `agent/` 模块仅依赖 `mcp_server/`、`llm/`、`memory/`，**不依赖** `orchestrator/` 或 `analyzers/`
+- ReAct Agent 和 PostMatchReviewAPI **并存**：前者面向聊天交互，后者面向程序化复盘
+- `web_app.py` 同时暴露聊天端点和复盘端点
+- 前端使用 **Vue 3 + TypeScript + Vite**，聊天组件与既有复盘组件并存于 `frontend/src/`
+- 前端**不包含解析逻辑**，所有业务逻辑和解析由后端统一处理（§D.3 约定保留）
+
+**10.6 实施子任务**
+
+| 子任务 | 依赖 | 产出 |
+|--------|------|------|
+| 10a. ReAct Agent 核心实现 | 阶段 9 | `agent/react_agent.py` + `react_loop.py` + `response_parser.py` + 单元测试 |
+| 10b. MCP 工具分发器 | 10a | `agent/tool_dispatcher.py`（MCP Client stdio 连接 + 工具调用） |
+| 10c. 会话管理 | 10a | `agent/session_manager.py`（会话创建/持久化/加载/上下文维护） |
+| 10d. ReAct 系统提示词 | 10a | `agent/prompts/react_system.py`（53 工具描述注入 + Skill 懒加载） |
+| 10e. Web 服务层 | 10a-10d | `web_app.py`（FastAPI + 静态文件 + chat/review 端点） |
+| 10f. 聊天前端 | 10e | Vue 3 聊天组件（ChatView/Input/Message/Bubble/WardIframe/PresetCards）+ useChat.ts + chat.ts store |
+| 10g. 集成测试 | 10e-10f | 端到端测试（自由文本 → ReAct 推理 → 工具调用 → 前端展示） |
+
 ### 13.2 执行方式
 
 **采用 Subagent-Driven Development（子代理驱动开发）**
@@ -2238,6 +2599,7 @@ logger.info_ctx("后台审查完成", extra_data={"quality": 0.85, "skills_extra
 | v1.5 | 2026-07-23 | **阶段 8 层 A/B 完成**: 层 A 基类增强：将 parse_response() 和 build_prompt() 提升到 BaseLLMReviewAnalyzer，消除 ~650 行重复代码；层 B YAML 增强：5 个 YAML 模板添加 analysis_framework/data_requirements/output_schema/metadata，实现 DataFormatter 通用数据格式化器（5 种格式），PromptBuilder 支持 YAML 声明注入。LaningAnalyzer 代码量 -60%。69 个层 B 相关测试通过。详见 §13.1.1 |
 | v1.6 | 2026-07-24 | **阶段 8 层 C Skill 驱动扩展完成**: 新增 IAnalysisSkillStore 协议（YAML 分析技能存储接口）；SkillStore 双协议实现（ISkillStore + IAnalysisSkillStore）；SkillDrivenAnalyzer 从 YAML 技能定义动态创建分析器（from_yaml/from_skill_store）；SkillDrivenPromptBuilder 从 YAML 加载模板；3 个内置技能（roshan_timing/ward_efficiency/late_game_decisions）；Runtime 自动注册自定义技能；PostMatchReviewAPI 暴露技能管理接口。31 个层 C 新增测试通过。总代码精简约 70%。详见 §13.1.1 |
 | v1.7 | 2026-07-26 | **阶段 9 MCP Server 集成完成**: 将单体 `dota2_fastmcp.py`（6503 行）拆分为模块化 MCP Server（8 个工具模块 + 6 个辅助模块），位于 `dota_helper/mcp_server/`。47 个迁移工具全部异步化（`requests` → `httpx.AsyncClient`），新增 6 个复盘工具（review_tools）。统一 `AsyncOpenDotaClient`（单例 + 缓存 + 指数退避）。`core/agent.py` 集成 MCP Client（`connect_mcp_server()` / `call_mcp_tool()`）。8 个工具文件添加 351 条日志调用。53 个工具注册验证通过。详见 §6.5 / §9.3a / §13.1.1 |
+| v1.8 | 2026-07-27 | **阶段 10 ReAct Agent Chat 设计**: 新增"自由文本聊天 → ReAct Agent 推理"交互模式设计，与 Dota2-Agent 范式对齐。新增 `agent/` 模块（DotaHelperReActAgent + ReAct 循环 + 工具分发器 + 响应解析器 + 会话管理），`web_app.py`（FastAPI 聊天端点 + 静态文件服务），Vue 3 聊天组件（ChatView/Input/Message/Bubble/WardIframe/PresetCards + useChat.ts composable + chat.ts Pinia store）。SSE 流式展示 Thought/Action/Observation + iframe 嵌入 Ward HTML。ReAct Agent 与 PostMatchReviewAPI 并存。详见 §13.1.2 |
 
 ### D. 自包含设计原则（v1.1 重要约定）
 
