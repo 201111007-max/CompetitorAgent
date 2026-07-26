@@ -42,23 +42,23 @@ dmypy.json
 *~
 
 # ==================== Logs ====================
-# 日志文件 - DotaHelperAgent/logs/ 目录
+# 日志文件 - dota_helper/logs/ 目录
 # 结构: logs/YYYY-MM-DD/part-N/*.log
-DotaHelperAgent/logs/
+dota_helper/logs/
 *.log
 *.json.log
 
 # ==================== Cache ====================
-# 缓存数据库文件 - DotaHelperAgent/cache/cache.db
-DotaHelperAgent/cache/*.db
+# 缓存数据库文件 - dota_helper/cache/cache.db
+dota_helper/cache/*.db
 
 # API数据缓存文件 - 英雄克制数据等
 # 这些文件可以通过API重新获取，不需要提交到git
-DotaHelperAgent/cache/hero_matchups_*.json
-DotaHelperAgent/cache/heroes_list.json
+dota_helper/cache/hero_matchups_*.json
+dota_helper/cache/heroes_list.json
 
 # Matchup 数据目录 - 英雄对局数据本地存储
-DotaHelperAgent/data/matchups/
+dota_helper/data/matchups/
 
 # 通用数据库文件
 *.db
@@ -67,7 +67,7 @@ DotaHelperAgent/data/matchups/
 
 # ==================== Knowledge Management ====================
 # 向量数据库存储目录 - Chroma 持久化数据
-DotaHelperAgent/data/chroma_db/
+dota_helper/data/chroma_db/
 
 # 本地 Embedding 模型缓存
 .cache/
@@ -86,7 +86,7 @@ cache_runtime/
 # 测试数据目录
 test_memory/
 test_prefix/
-DotaHelperAgent/test_cache/
+dota_helper/test_cache/
 
 # OS files
 .DS_Store
@@ -100,10 +100,10 @@ out_project/
 
 # ==================== Local Docs (not for GitHub) ====================
 # 个人/过程性文档 - 仅本地保留，不上传到 GitHub
-DotaHelperAgent/docs/bugs/
-DotaHelperAgent/docs/process_md/
-DotaHelperAgent/docs/superpowers/
+dota_helper/docs/bugs/
+dota_helper/docs/process_md/
+dota_helper/docs/superpowers/
 
 # ==================== Post Match Review Reports ====================
 # 复盘报告输出目录 - 包含生成的 Markdown 报告，不上传到 git
-DotaHelperAgent/post_match_review/reports/
+dota_helper/reports/
