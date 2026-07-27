@@ -3,6 +3,7 @@
 提供零配置创建 `PostMatchReviewAPI` 的能力：
 - 自动组装 OpenDota 数据源
 - 自动检测 LLM 密钥，未配置时降级为规则驱动的 FallbackAnalyzer
+- 默认集成四层记忆系统与后台审查器
 - 外部调用方保持 `from dota_helper import create_default_api`
 """
 import os
@@ -12,9 +13,11 @@ from typing import Any, Dict, Optional
 from dota_helper.facade.api import PostMatchReviewAPI
 from dota_helper.interfaces.data_source import IMatchDataSource
 from dota_helper.interfaces.llm import ILLMClient
+from dota_helper.interfaces.memory import IFourLayerMemory
 from dota_helper.orchestrator.review_orchestrator import ReviewOrchestrator
 from dota_helper.orchestrator.strategic_loop import StrategicLoop
 from dota_helper.orchestrator.tactical_loop import TacticalLoop
+from dota_helper.orchestrator.runtime import Runtime
 from dota_helper.engines.stop_verifier import StopVerifier
 from dota_helper.engines.budget import IterationBudget
 from dota_helper.report.report_builder import ReportBuilder
@@ -121,6 +124,7 @@ def _load_strategic_config(config_path: Path) -> Dict[str, Any]:
 
     tactical = raw.get("tactical_loop", {})
     verifier = raw.get("stop_verifier", {})
+    memory = raw.get("memory", {})
     return {
         "max_iterations_per_phase": tactical.get("max_iterations_per_phase", 3),
         "required_phases": verifier.get(
@@ -137,6 +141,9 @@ def _load_strategic_config(config_path: Path) -> Dict[str, Any]:
                 "vision": 1,
             },
         ),
+        "memory_enabled": memory.get("enabled", True),
+        "memory_background_review": memory.get("background_review", True),
+        "memory_confidence_threshold": memory.get("confidence_threshold", 0.7),
     }
 
 
@@ -192,18 +199,27 @@ def create_default_api(
     config_path: Optional[Path] = None,
     data_source: Optional[IMatchDataSource] = None,
     llm_client: Optional[ILLMClient] = None,
+    memory: Optional[IFourLayerMemory] = None,
+    enable_background_review: Optional[bool] = None,
+    data_dir: Optional[Path] = None,
+    background_reviewer_config: Optional[Dict[str, Any]] = None,
 ) -> PostMatchReviewAPI:
     """创建默认配置的 PostMatchReviewAPI 实例
 
     自动完成以下装配：
     1. OpenDota 数据源（未提供时）
     2. LLM 客户端（未提供时）
-    3. 未配置 LLM 密钥时，自动降级为 FallbackAnalyzer 规则分析
+    3. 四层记忆系统与后台审查器（默认启用）
+    4. 未配置 LLM 密钥时，自动降级为 FallbackAnalyzer 规则分析
 
     Args:
         config_path: 复盘模块配置文件路径
         data_source: 比赛数据源（可选，覆盖默认）
         llm_client: LLM 客户端（可选，覆盖默认）
+        memory: 四层记忆系统实例（可选）
+        enable_background_review: 是否开启后台审查（None 则读取配置）
+        data_dir: 记忆数据持久化根目录（可选）
+        background_reviewer_config: 后台审查器额外配置（可选）
 
     Returns:
         PostMatchReviewAPI: 默认 API 实例
@@ -228,8 +244,36 @@ def create_default_api(
 
     # 3. 无 LLM 时直接使用自定义工厂，避免 Runtime 创建 LLM 驱动分析器
     if not use_llm:
-        factory = _create_fallback_orchestrator_factory(data_source, config_path)
-        return PostMatchReviewAPI(orchestrator_factory=factory)
+        # Fallback 分支无法运行后台审查器（依赖 LLM），强制关闭
+        if enable_background_review is True:
+            logger.warning(
+                "Fallback 模式下不支持后台审查器（依赖 LLM），"
+                "enable_background_review 已强制关闭"
+            )
+        elif enable_background_review is None:
+            # 读取配置默认开启时，也需要在 fallback 下关闭
+            config = _load_strategic_config(config_path)
+            if config.get("memory_enabled", True) and config.get(
+                "memory_background_review", True
+            ):
+                logger.warning(
+                    "Fallback 模式下记忆系统后台审查自动关闭（依赖 LLM），"
+                    "FourLayerMemory 实例仍会创建用于后续手动查询"
+                )
+        enable_background_review = False
+
+        return PostMatchReviewAPI(
+            orchestrator_factory=_create_fallback_orchestrator_factory(
+                data_source, config_path
+            ),
+            config_path=config_path,
+            data_source=data_source,
+            llm_client=llm_client,
+            memory=memory,
+            enable_background_review=False,
+            data_dir=data_dir,
+            background_reviewer_config=background_reviewer_config,
+        )
 
     # 4. 有 LLM 密钥时尝试 LLM 驱动；若 openai 不可用则降级
     try:
@@ -239,8 +283,18 @@ def create_default_api(
             "openai 模块未安装或导入失败 (%s)，复盘将使用 FallbackAnalyzer 规则分析降级运行",
             e,
         )
-        factory = _create_fallback_orchestrator_factory(data_source, config_path)
-        return PostMatchReviewAPI(orchestrator_factory=factory)
+        return PostMatchReviewAPI(
+            orchestrator_factory=_create_fallback_orchestrator_factory(
+                data_source, config_path
+            ),
+            config_path=config_path,
+            data_source=data_source,
+            llm_client=llm_client,
+            memory=memory,
+            enable_background_review=False,
+            data_dir=data_dir,
+            background_reviewer_config=background_reviewer_config,
+        )
 
     if llm_client is None:
         llm_client = LLMClient()
@@ -250,4 +304,8 @@ def create_default_api(
         config_path=config_path,
         data_source=data_source,
         llm_client=llm_client,
+        memory=memory,
+        enable_background_review=enable_background_review,
+        data_dir=data_dir,
+        background_reviewer_config=background_reviewer_config,
     )
