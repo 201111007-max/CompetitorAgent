@@ -5,12 +5,20 @@
 """
 import asyncio
 import dataclasses
+import inspect
 from datetime import datetime
 from pathlib import Path
 from typing import Any, AsyncGenerator, Callable, Dict, List, Optional
 
 from dota_helper.interfaces.data_source import IMatchDataSource
 from dota_helper.interfaces.llm import ILLMClient
+from dota_helper.interfaces.memory import IFourLayerMemory
+from dota_helper.memory.four_layer_memory import FourLayerMemory
+from dota_helper.memory.persistent_notes import PersistentNotes
+from dota_helper.memory.session_archive import SessionArchive
+from dota_helper.memory.skill_store import SkillStore
+from dota_helper.orchestrator.background_reviewer import BackgroundReviewer
+from dota_helper.orchestrator.review_config import MemoryConfig
 from dota_helper.orchestrator.runtime import Runtime
 from dota_helper.orchestrator.review_orchestrator import ReviewOrchestrator
 from dota_helper.domain_types.report import ReviewReport
@@ -220,6 +228,10 @@ class PostMatchReviewAPI:
         config_path: Optional[Path] = None,
         data_source: Optional[IMatchDataSource] = None,
         llm_client: Optional[ILLMClient] = None,
+        memory: Optional[IFourLayerMemory] = None,
+        enable_background_review: Optional[bool] = None,
+        data_dir: Optional[Path] = None,
+        background_reviewer_config: Optional[Dict[str, Any]] = None,
     ) -> None:
         """初始化复盘 API 门面
 
@@ -229,10 +241,23 @@ class PostMatchReviewAPI:
             config_path: 复盘模块配置文件路径
             data_source: 比赛数据源
             llm_client: LLM 客户端
+            memory: 四层记忆系统实例（可选）
+            enable_background_review: 是否开启后台审查（None 则读取配置）
+            data_dir: 记忆数据持久化根目录（可选）
+            background_reviewer_config: 后台审查器额外配置（可选）
         """
+        self._store = ReviewStateStore()
+        self._runtime: Optional[Runtime] = None
+        self._memory: Optional[IFourLayerMemory] = memory
+        self._background_reviewer: Optional[BackgroundReviewer] = None
+        self._llm_client = llm_client
+
+        # 1. 确定编排器来源并保存 Runtime 引用（如果提供）
         if orchestrator_factory is not None:
+            self._runtime = None
             self._orchestrator_factory = orchestrator_factory
         elif runtime is not None:
+            self._runtime = runtime
             self._orchestrator_factory = runtime.build_orchestrator
         else:
             self._runtime = Runtime(
@@ -242,8 +267,190 @@ class PostMatchReviewAPI:
             )
             self._orchestrator_factory = self._runtime.build_orchestrator
 
-        self._store = ReviewStateStore()
+        # 2. 读取记忆配置
+        memory_config = self._get_memory_config()
+
+        # 3. 解析是否启用记忆系统
+        enable_memory = memory is not None or memory_config.enabled
+
+        # 4. 解析是否开启后台审查
+        if enable_background_review is None:
+            enable_background_review = (
+                memory_config.enabled and memory_config.background_review
+            )
+        # 后台审查依赖记忆系统
+        if enable_background_review and not enable_memory:
+            logger.warning("后台审查需要记忆系统，自动启用记忆系统")
+            enable_memory = True
+        self._enable_background_review = enable_background_review
+
+        # 5. 若启用记忆系统，创建或保存实例
+        if enable_memory and self._memory is None:
+            resolved_data_dir = self._resolve_data_dir(data_dir, memory_config)
+            try:
+                self._memory = self._create_default_memory(resolved_data_dir)
+            except Exception as e:
+                logger.error("创建默认记忆系统失败: %s", e)
+                self._memory = None
+                self._enable_background_review = False
+
+        # 6. 若开启后台审查，组装审查器
+        if self._enable_background_review and self._memory is not None:
+            self._setup_background_review(
+                memory=self._memory,
+                memory_config=memory_config,
+                background_reviewer_config=background_reviewer_config,
+            )
+
         logger.info("PostMatchReviewAPI 初始化完成")
+
+    def _get_memory_config(self) -> MemoryConfig:
+        """获取记忆系统配置
+
+        Returns:
+            MemoryConfig: 配置实例
+        """
+        if self._runtime is not None:
+            return self._runtime.get_memory_config()
+        return MemoryConfig()
+
+    def _resolve_data_dir(
+        self,
+        data_dir: Optional[Path],
+        memory_config: MemoryConfig,
+    ) -> Path:
+        """解析最终数据目录
+
+        优先级：参数 > 配置 > 默认用户目录
+
+        Args:
+            data_dir: 显式指定的数据目录
+            memory_config: 记忆配置
+
+        Returns:
+            Path: 数据目录路径
+        """
+        if data_dir is not None:
+            return data_dir
+        if memory_config.data_dir is not None:
+            return Path(memory_config.data_dir)
+        return Path.home() / ".dota_helper" / "data"
+
+    def _create_default_memory(self, data_dir: Path) -> IFourLayerMemory:
+        """创建默认四层记忆系统
+
+        Args:
+            data_dir: 数据根目录
+
+        Returns:
+            IFourLayerMemory: 四层记忆系统实例
+        """
+        data_dir.mkdir(parents=True, exist_ok=True)
+        memory_dir = data_dir / "memory"
+        skills_dir = data_dir / "skills"
+        memory_dir.mkdir(parents=True, exist_ok=True)
+        skills_dir.mkdir(parents=True, exist_ok=True)
+
+        session_archive = SessionArchive(str(memory_dir / "session_archive.db"))
+        persistent_notes = PersistentNotes(str(memory_dir / "persistent_notes.json"))
+        skill_store = SkillStore(str(skills_dir))
+
+        return FourLayerMemory(
+            session_archive=session_archive,
+            persistent_notes=persistent_notes,
+            skill_store=skill_store,
+            data_dir=str(data_dir),
+        )
+
+    def _resolve_llm_client(self) -> Optional[ILLMClient]:
+        """解析最终 LLM 客户端
+
+        优先级：构造参数 > Runtime
+
+        Returns:
+            Optional[ILLMClient]: LLM 客户端（可能为 None）
+        """
+        if self._llm_client is not None:
+            return self._llm_client
+        if self._runtime is not None:
+            return self._runtime.get_llm_client()
+        return None
+
+    def _wrap_factory_with_background_reviewer(
+        self,
+        background_reviewer: BackgroundReviewer,
+    ) -> None:
+        """将后台审查器注入编排器工厂
+
+        如果工厂来源于 Runtime，直接调用 build_orchestrator(match_id, reviewer)。
+        如果是外部工厂，检测其是否接受 background_reviewer 参数。
+
+        Args:
+            background_reviewer: 后台审查器实例
+        """
+        if self._runtime is not None:
+            # 来自 Runtime，直接调用支持透传的方法
+            self._orchestrator_factory = lambda match_id: self._runtime.build_orchestrator(
+                match_id,
+                background_reviewer=background_reviewer,
+            )
+            return
+
+        # 外部工厂：通过 inspect 检测参数
+        factory = self._orchestrator_factory
+        sig = inspect.signature(factory)
+        if "background_reviewer" in sig.parameters:
+            self._orchestrator_factory = lambda match_id: factory(
+                match_id,
+                background_reviewer=background_reviewer,
+            )
+        else:
+            logger.warning(
+                "外部 orchestrator_factory 不接受 background_reviewer 参数，"
+                "后台审查器未注入"
+            )
+
+    def _setup_background_review(
+        self,
+        memory: IFourLayerMemory,
+        memory_config: MemoryConfig,
+        background_reviewer_config: Optional[Dict[str, Any]],
+    ) -> None:
+        """组装并注入后台审查器
+
+        Args:
+            memory: 记忆系统实例
+            memory_config: 记忆配置
+            background_reviewer_config: 审查器额外配置
+        """
+        llm_client = self._resolve_llm_client()
+        if llm_client is None:
+            logger.warning(
+                "未配置 LLM 客户端，后台审查器无法启动，记忆系统仅保留实例"
+            )
+            return
+
+        reviewer_config = background_reviewer_config or {}
+        if "confidence_threshold" not in reviewer_config:
+            reviewer_config["confidence_threshold"] = memory_config.confidence_threshold
+
+        self._background_reviewer = BackgroundReviewer(
+            llm_client=llm_client,
+            memory=memory,
+            config=reviewer_config,
+        )
+        self._wrap_factory_with_background_reviewer(self._background_reviewer)
+        logger.info("后台审查器已启用")
+
+    @property
+    def memory(self) -> Optional[IFourLayerMemory]:
+        """获取四层记忆系统实例（如果已创建）"""
+        return self._memory
+
+    @property
+    def background_reviewer(self) -> Optional[BackgroundReviewer]:
+        """获取后台审查器实例（如果已启用）"""
+        return self._background_reviewer
 
     async def review(self, match_id: str) -> ReviewReport:
         """执行完整复盘

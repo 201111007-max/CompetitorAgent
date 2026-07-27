@@ -61,6 +61,15 @@ class LoggingConfig:
 
 
 @dataclass
+class MemoryConfig:
+    """四层记忆系统配置"""
+    enabled: bool = True
+    data_dir: Optional[str] = None
+    background_review: bool = True
+    confidence_threshold: float = 0.7
+
+
+@dataclass
 class ReviewConfig:
     """复盘总配置
 
@@ -83,6 +92,7 @@ class ReviewConfig:
     stop_verifier: StopVerifierConfig = field(default_factory=StopVerifierConfig)
     report: ReportConfig = field(default_factory=ReportConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
+    memory: MemoryConfig = field(default_factory=MemoryConfig)
 
     # 技能目录（可选）
     skills_dir: Optional[str] = None
@@ -131,6 +141,7 @@ class ReviewConfig:
         verifier_data = data.get("stop_verifier", {})
         report_data = data.get("report", {})
         logging_data = data.get("logging", {})
+        memory_data = data.get("memory", {})
 
         return cls(
             api_base_url=data.get("api_base_url", cls.api_base_url),
@@ -174,6 +185,12 @@ class ReviewConfig:
             logging=LoggingConfig(
                 level=logging_data.get("level", "INFO"),
                 format=logging_data.get("format", LoggingConfig.format),
+            ),
+            memory=MemoryConfig(
+                enabled=memory_data.get("enabled", True),
+                data_dir=memory_data.get("data_dir"),
+                background_review=memory_data.get("background_review", True),
+                confidence_threshold=memory_data.get("confidence_threshold", 0.7),
             ),
             skills_dir=data.get("skills_dir"),
         )

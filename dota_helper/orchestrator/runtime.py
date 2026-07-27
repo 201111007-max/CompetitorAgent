@@ -9,7 +9,7 @@ from dota_helper.interfaces.verifier import IStopVerifier
 from dota_helper.orchestrator.strategic_loop import StrategicLoop
 from dota_helper.orchestrator.tactical_loop import TacticalLoop
 from dota_helper.orchestrator.review_orchestrator import ReviewOrchestrator
-from dota_helper.orchestrator.review_config import ReviewConfig
+from dota_helper.orchestrator.review_config import ReviewConfig, MemoryConfig
 from dota_helper.report.report_builder import ReportBuilder
 from dota_helper.report.markdown_renderer import MarkdownRenderer
 from dota_helper.domain_types.state import ReviewAgentState
@@ -52,11 +52,16 @@ class Runtime:
 
         logger.info("Runtime 初始化完成")
 
-    def build_orchestrator(self, match_id: str) -> ReviewOrchestrator:
+    def build_orchestrator(
+        self,
+        match_id: str,
+        background_reviewer: Optional[Any] = None,
+    ) -> ReviewOrchestrator:
         """构建 ReviewOrchestrator 实例
 
         Args:
             match_id: 比赛 ID（用于初始化状态）
+            background_reviewer: 可选的后台审查器实例
 
         Returns:
             ReviewOrchestrator: 编排器实例
@@ -132,6 +137,7 @@ class Runtime:
             report_builder=report_builder,
             state=state,
             markdown_renderer=markdown_renderer,
+            background_reviewer=background_reviewer,
         )
 
         logger.info("ReviewOrchestrator 构建完成")
@@ -212,3 +218,19 @@ class Runtime:
         if not skills_dir:
             return None
         return str(Path(skills_dir) / "analysis")
+
+    def get_llm_client(self) -> Optional[ILLMClient]:
+        """获取当前 Runtime 使用的 LLM 客户端
+
+        Returns:
+            Optional[ILLMClient]: LLM 客户端实例（可能为 None）
+        """
+        return self._llm_client
+
+    def get_memory_config(self) -> MemoryConfig:
+        """获取记忆系统配置
+
+        Returns:
+            MemoryConfig: 记忆配置实例
+        """
+        return self._config.memory
