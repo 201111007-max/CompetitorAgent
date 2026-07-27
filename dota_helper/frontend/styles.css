@@ -130,6 +130,7 @@ body {
   flex-direction: column;
   background: var(--bg-primary);
   min-width: 0;
+  overflow: hidden;
 }
 
 .main-header {
@@ -191,6 +192,7 @@ body {
 .message-list {
   flex: 1;
   overflow-y: auto;
+  min-height: 0;
   padding: 16px;
   scroll-behavior: smooth;
 }
