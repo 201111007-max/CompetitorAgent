@@ -100,9 +100,7 @@ out_project/
 
 # ==================== Local Docs (not for GitHub) ====================
 # 个人/过程性文档 - 仅本地保留，不上传到 GitHub
-dota_helper/docs/bugs/
-dota_helper/docs/process_md/
-dota_helper/docs/superpowers/
+dota_helper/docs/
 
 # ==================== Post Match Review Reports ====================
 # 复盘报告输出目录 - 包含生成的 Markdown 报告，不上传到 git
