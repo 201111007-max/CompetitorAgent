@@ -17,7 +17,10 @@ from dota_helper.domain_types.events import ProgressEvent, VerificationResult
 from dota_helper.engines.budget import IterationBudget
 from dota_helper.parallel.parallel_runner import ParallelRunner
 from dota_helper.parallel.subagent import SubAgent
+from dota_helper.observability import get_tracer
 from dota_helper.observability.logger import get_logger
+from dota_helper.persistence.review_repository import ReviewRepository
+from dota_helper.persistence.progress_store import ProgressStore
 
 logger = get_logger("orchestrator.review")
 
@@ -39,6 +42,8 @@ class ReviewOrchestrator:
         analyzer_factory: Optional[Callable[[str], IReviewAnalyzer]] = None,
         max_concurrency: int = 4,
         background_reviewer: Optional[Any] = None,
+        review_repository: Optional[ReviewRepository] = None,
+        progress_store: Optional[ProgressStore] = None,
     ) -> None:
         """初始化主编排器
 
@@ -54,6 +59,9 @@ class ReviewOrchestrator:
             enable_parallel_phases: 是否启用并行阶段执行
             analyzer_factory: 分析器工厂函数（并行模式需要）
             max_concurrency: 最大并发数（并行模式）
+            background_reviewer: 可选的后台审查器实例
+            review_repository: 可选的报告持久化仓库
+            progress_store: 可选的进度快照存储
         """
         self._data_source = data_source
         self._strategic_loop = strategic_loop
@@ -67,6 +75,8 @@ class ReviewOrchestrator:
         self._analyzer_factory = analyzer_factory
         self._parallel_runner = ParallelRunner(max_concurrency=max_concurrency) if enable_parallel_phases else None
         self._background_reviewer = background_reviewer
+        self._review_repository = review_repository
+        self._progress_store = progress_store
         # P0-1: 状态更新锁，保护并行模式下的状态写入
         self._state_lock = asyncio.Lock()
 
@@ -92,161 +102,193 @@ class ReviewOrchestrator:
             ReviewReport: 完整复盘报告
         """
         logger.info("开始复盘: match_id=%s", match_id)
+        tracer = get_tracer()
 
-        # 1. 获取比赛数据
-        logger.info("[步骤 1/6] 开始获取比赛数据: match_id=%s", match_id)
-        try:
-            match_data = await self._data_source.fetch_match(match_id)
-            self._state.match_data = match_data
+        async with tracer.span("review.full", match_id=match_id) as root_span:
+            # 1. 获取比赛数据
+            logger.info("[步骤 1/6] 开始获取比赛数据: match_id=%s", match_id)
+            try:
+                async with tracer.span("review.data_fetch", match_id=match_id) as data_span:
+                    match_data = await self._data_source.fetch_match(match_id)
+                    data_span.set_attribute("duration", match_data.duration)
+                    data_span.set_attribute("radiant_win", match_data.radiant_win)
+                self._state.match_data = match_data
+                logger.info(
+                    "比赛数据获取成功: match_id=%s, duration=%ds, score=%d:%d, radiant_win=%s",
+                    match_data.match_id,
+                    match_data.duration,
+                    match_data.radiant_score,
+                    match_data.dire_score,
+                    match_data.radiant_win,
+                )
+                await self._emit_progress(
+                    progress_callback,
+                    ProgressEvent(
+                        event="progress",
+                        progress=0.1,
+                        message="比赛数据获取成功",
+                        payload={
+                            "duration": match_data.duration,
+                            "radiant_score": match_data.radiant_score,
+                            "dire_score": match_data.dire_score,
+                            "radiant_win": match_data.radiant_win,
+                        },
+                    ),
+                )
+            except Exception as e:
+                logger.error("比赛数据获取失败: match_id=%s, error=%s", match_id, str(e))
+                await self._emit_progress(
+                    progress_callback,
+                    ProgressEvent(
+                        event="error",
+                        progress=0.0,
+                        message=f"数据获取失败: {str(e)}",
+                        payload={"error": str(e)},
+                    ),
+                )
+                return self._create_error_report(match_id, f"数据获取失败: {str(e)}")
+
+            # 2. 战略评估
+            logger.info("[步骤 2/6] 开始战略评估: match_id=%s", match_id)
+            async with tracer.span("review.strategic", match_id=match_id) as strategic_span:
+                strategy = self._strategic_loop.evaluate(match_data)
+                strategic_span.set_attribute("match_type", strategy.match_type)
+                strategic_span.set_attribute("phases_count", len(strategy.priority_phases))
+            self._state.strategy = strategy
             logger.info(
-                "比赛数据获取成功: match_id=%s, duration=%ds, score=%d:%d, radiant_win=%s",
-                match_data.match_id,
-                match_data.duration,
-                match_data.radiant_score,
-                match_data.dire_score,
-                match_data.radiant_win,
+                "战略评估完成: match_type=%s, priority_phases=%s, budget_allocation=%s, expected_depth=%s",
+                strategy.match_type,
+                strategy.priority_phases,
+                strategy.budget_allocation,
+                strategy.expected_depth,
             )
             await self._emit_progress(
                 progress_callback,
                 ProgressEvent(
                     event="progress",
-                    progress=0.1,
-                    message="比赛数据获取成功",
+                    progress=0.15,
+                    message="战略评估完成",
                     payload={
-                        "duration": match_data.duration,
-                        "radiant_score": match_data.radiant_score,
-                        "dire_score": match_data.dire_score,
-                        "radiant_win": match_data.radiant_win,
+                        "match_type": strategy.match_type,
+                        "priority_phases": strategy.priority_phases,
                     },
                 ),
             )
-        except Exception as e:
-            logger.error("比赛数据获取失败: match_id=%s, error=%s", match_id, str(e))
+
+            # 3. 多阶段战术分析
+            logger.info("[步骤 3/6] 开始战术分析: enable_parallel=%s, phases=%d", self._enable_parallel_phases, len(strategy.priority_phases))
+            if self._enable_parallel_phases and self._parallel_runner:
+                logger.info("使用并行模式执行战术分析阶段")
+                phase_results = await self._execute_parallel_phases(match_data, strategy, progress_callback)
+            else:
+                logger.info("使用串行模式执行战术分析阶段")
+                phase_results = await self._execute_serial_phases(match_data, strategy, progress_callback)
+
+            logger.info(
+                "战术分析完成: 完成阶段数=%d, 总结论数=%d",
+                len([r for r in phase_results if r.conclusions]),
+                sum(len(r.conclusions) for r in phase_results),
+            )
+            completed_phases = [r.phase for r in phase_results if r.conclusions]
             await self._emit_progress(
                 progress_callback,
                 ProgressEvent(
-                    event="error",
-                    progress=0.0,
-                    message=f"数据获取失败: {str(e)}",
-                    payload={"error": str(e)},
+                    event="progress",
+                    progress=0.8,
+                    message="战术分析完成",
+                    payload={
+                        "completed_phases": completed_phases,
+                        "total_phases": len(strategy.priority_phases),
+                        "total_conclusions": sum(len(r.conclusions) for r in phase_results),
+                    },
                 ),
             )
-            return self._create_error_report(match_id, f"数据获取失败: {str(e)}")
 
-        # 2. 战略评估
-        logger.info("[步骤 2/6] 开始战略评估: match_id=%s", match_id)
-        strategy = self._strategic_loop.evaluate(match_data)
-        self._state.strategy = strategy
-        logger.info(
-            "战略评估完成: match_type=%s, priority_phases=%s, budget_allocation=%s, expected_depth=%s",
-            strategy.match_type,
-            strategy.priority_phases,
-            strategy.budget_allocation,
-            strategy.expected_depth,
-        )
-        await self._emit_progress(
-            progress_callback,
-            ProgressEvent(
-                event="progress",
-                progress=0.15,
-                message="战略评估完成",
-                payload={
-                    "match_type": strategy.match_type,
-                    "priority_phases": strategy.priority_phases,
-                },
-            ),
-        )
+            # 4. 停止验证
+            logger.info("[步骤 4/6] 开始停止验证")
+            async with tracer.span("review.stop_verify", match_id=match_id) as verify_span:
+                terminal_state = await self._verify_and_retry(match_data, phase_results)
+                verify_span.set_attribute("terminal_state", terminal_state)
+            logger.info("停止验证结果: terminal_state=%s", terminal_state)
+            await self._emit_progress(
+                progress_callback,
+                ProgressEvent(
+                    event="progress",
+                    progress=0.9,
+                    message="停止验证完成",
+                    payload={"terminal_state": terminal_state},
+                ),
+            )
 
-        # 3. 多阶段战术分析
-        logger.info("[步骤 3/6] 开始战术分析: enable_parallel=%s, phases=%d", self._enable_parallel_phases, len(strategy.priority_phases))
-        if self._enable_parallel_phases and self._parallel_runner:
-            logger.info("使用并行模式执行战术分析阶段")
-            phase_results = await self._execute_parallel_phases(match_data, strategy, progress_callback)
-        else:
-            logger.info("使用串行模式执行战术分析阶段")
-            phase_results = await self._execute_serial_phases(match_data, strategy, progress_callback)
+            # 5. 构建报告
+            logger.info("[步骤 5/6] 开始构建报告")
+            async with tracer.span("review.report_build", match_id=match_id) as report_span:
+                report = self._report_builder.build(
+                    match_data=match_data,
+                    phase_results=phase_results,
+                    terminal_state=terminal_state,
+                )
+                report_span.set_attribute("overall_score", report.overall_score)
+                report_span.set_attribute("overall_confidence", report.overall_confidence)
+                report_span.set_attribute("key_findings_count", len(report.key_findings))
+            logger.info(
+                "报告构建完成: overall_score=%.2f, overall_confidence=%.2f, key_findings=%d",
+                report.overall_score,
+                report.overall_confidence,
+                len(report.key_findings),
+            )
+            await self._emit_progress(
+                progress_callback,
+                ProgressEvent(
+                    event="progress",
+                    progress=0.95,
+                    message="报告构建完成",
+                    payload={
+                        "overall_score": report.overall_score,
+                        "overall_confidence": report.overall_confidence,
+                        "key_findings_count": len(report.key_findings),
+                    },
+                ),
+            )
 
-        logger.info(
-            "战术分析完成: 完成阶段数=%d, 总结论数=%d",
-            len([r for r in phase_results if r.conclusions]),
-            sum(len(r.conclusions) for r in phase_results),
-        )
-        completed_phases = [r.phase for r in phase_results if r.conclusions]
-        await self._emit_progress(
-            progress_callback,
-            ProgressEvent(
-                event="progress",
-                progress=0.8,
-                message="战术分析完成",
-                payload={
-                    "completed_phases": completed_phases,
-                    "total_phases": len(strategy.priority_phases),
-                    "total_conclusions": sum(len(r.conclusions) for r in phase_results),
-                },
-            ),
-        )
+            # 6. 渲染 Markdown
+            logger.info("[步骤 6/6] 开始渲染 Markdown 报告")
+            report.markdown_report = self._markdown_renderer.render(report)
+            logger.info("Markdown 渲染完成: 报告长度=%d 字符", len(report.markdown_report))
 
-        # 4. 停止验证
-        logger.info("[步骤 4/6] 开始停止验证")
-        terminal_state = self._verify_and_retry(match_data, phase_results)
-        logger.info("停止验证结果: terminal_state=%s", terminal_state)
-        await self._emit_progress(
-            progress_callback,
-            ProgressEvent(
-                event="progress",
-                progress=0.9,
-                message="停止验证完成",
-                payload={"terminal_state": terminal_state},
-            ),
-        )
+            # 6.5 持久化报告
+            if self._review_repository:
+                try:
+                    await self._review_repository.save(report)
+                    logger.info("复盘报告已持久化: match_id=%s", match_id)
+                except Exception as e:
+                    logger.warning("报告持久化失败（不影响返回）: %s", str(e))
 
-        # 5. 构建报告
-        logger.info("[步骤 5/6] 开始构建报告")
-        report = self._report_builder.build(
-            match_data=match_data,
-            phase_results=phase_results,
-            terminal_state=terminal_state,
-        )
-        logger.info(
-            "报告构建完成: overall_score=%.2f, overall_confidence=%.2f, key_findings=%d",
-            report.overall_score,
-            report.overall_confidence,
-            len(report.key_findings),
-        )
-        await self._emit_progress(
-            progress_callback,
-            ProgressEvent(
-                event="progress",
-                progress=0.95,
-                message="报告构建完成",
-                payload={
-                    "overall_score": report.overall_score,
-                    "overall_confidence": report.overall_confidence,
-                    "key_findings_count": len(report.key_findings),
-                },
-            ),
-        )
+            # 7. 启动后台审查（如果启用）
+            if self._background_reviewer:
+                logger.info("[步骤 7] 启动后台审查任务")
+                try:
+                    self._background_reviewer.spawn(match_data, report)
+                except Exception as e:
+                    logger.error(f"启动后台审查失败: {e}", exc_info=True)
 
-        # 6. 渲染 Markdown
-        logger.info("[步骤 6/6] 开始渲染 Markdown 报告")
-        report.markdown_report = self._markdown_renderer.render(report)
-        logger.info("Markdown 渲染完成: 报告长度=%d 字符", len(report.markdown_report))
+            root_span.set_attribute("terminal_state", terminal_state)
+            root_span.set_attribute("overall_confidence", report.overall_confidence)
 
-        # 7. 启动后台审查（如果启用）
-        if self._background_reviewer:
-            logger.info("[步骤 7] 启动后台审查任务")
-            try:
-                self._background_reviewer.spawn(match_data, report)
-            except Exception as e:
-                logger.error(f"启动后台审查失败: {e}", exc_info=True)
+            # 8. 清除进度快照（复盘完成）
+            if self._progress_store:
+                try:
+                    await self._progress_store.clear_snapshot(match_id)
+                except Exception as e:
+                    logger.warning("进度快照清除失败（不影响返回）: %s", str(e))
 
-        logger.info(
-            "复盘完成: match_id=%s, terminal_state=%s, confidence=%.2f",
-            match_id,
-            terminal_state,
-            report.overall_confidence,
-        )
-        return report
+            logger.info(
+                "复盘完成: match_id=%s, terminal_state=%s, confidence=%.2f",
+                match_id,
+                terminal_state,
+                report.overall_confidence,
+            )
+            return report
 
     async def _execute_serial_phases(
         self,
@@ -333,6 +375,13 @@ class ReviewOrchestrator:
             self._state.total_iterations += result.iterations_used
             self._state.total_tokens += result.tokens_consumed
             self._state.update_confidence()
+
+            # 保存进度快照
+            if self._progress_store:
+                try:
+                    await self._progress_store.save_snapshot(self._state)
+                except Exception as e:
+                    logger.warning("进度快照保存失败（不影响分析）: %s", str(e))
 
             await self._emit_progress(
                 progress_callback,
@@ -603,7 +652,7 @@ class ReviewOrchestrator:
             ))
         return results
 
-    def _verify_and_retry(
+    async def _verify_and_retry(
         self,
         match_data: MatchData,
         phase_results: List[AnalysisResult],

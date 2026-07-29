@@ -5,6 +5,7 @@ from typing import List, Dict, Any, Optional
 
 from openai import AsyncOpenAI
 
+from dota_helper.observability import get_tracer, get_metrics_collector
 from dota_helper.observability.logger import get_logger
 
 logger = get_logger("llm.client")
@@ -102,47 +103,56 @@ class LLMClient:
         """
         target_model = model or self._default_model
         client = self._get_client()
+        tracer = get_tracer()
+        metrics = get_metrics_collector()
 
-        last_exception: Optional[Exception] = None
+        async with tracer.span("llm.chat", model=target_model, messages_count=len(messages)) as llm_span:
+            last_exception: Optional[Exception] = None
 
-        for attempt in range(self._max_retries + 1):
-            try:
-                logger.debug(
-                    "调用 LLM: model=%s, messages=%d, attempt=%d/%d",
-                    target_model,
-                    len(messages),
-                    attempt + 1,
-                    self._max_retries + 1,
-                )
+            for attempt in range(self._max_retries + 1):
+                try:
+                    logger.debug(
+                        "调用 LLM: model=%s, messages=%d, attempt=%d/%d",
+                        target_model,
+                        len(messages),
+                        attempt + 1,
+                        self._max_retries + 1,
+                    )
 
-                response = await client.chat.completions.create(
-                    model=target_model,
-                    messages=messages,
-                    temperature=temperature,
-                    **kwargs,
-                )
+                    response = await client.chat.completions.create(
+                        model=target_model,
+                        messages=messages,
+                        temperature=temperature,
+                        **kwargs,
+                    )
 
-                content = response.choices[0].message.content or ""
-                logger.debug("LLM 响应长度: %d 字符", len(content))
+                    content = response.choices[0].message.content or ""
+                    logger.debug("LLM 响应长度: %d 字符", len(content))
 
-                return content
+                    # 记录 span 属性和指标
+                    llm_span.set_attribute("response_length", len(content))
+                    llm_span.set_attribute("attempt", attempt + 1)
+                    metrics.increment_counter("llm.calls")
+                    metrics.increment_counter("llm.tokens.estimated", len(content) // 4)
 
-            except Exception as e:
-                last_exception = e
-                logger.warning(
-                    "LLM 调用失败 (attempt %d/%d): %s",
-                    attempt + 1,
-                    self._max_retries + 1,
-                    str(e),
-                )
+                    return content
 
-                if attempt < self._max_retries:
-                    wait_time = 2 ** attempt  # 指数退避：1s, 2s
-                    logger.info("等待 %.1f 秒后重试...", wait_time)
-                    await asyncio.sleep(wait_time)
+                except Exception as e:
+                    last_exception = e
+                    logger.warning(
+                        "LLM 调用失败 (attempt %d/%d): %s",
+                        attempt + 1,
+                        self._max_retries + 1,
+                        str(e),
+                    )
 
-        logger.error("LLM 调用在 %d 次重试后仍然失败", self._max_retries + 1)
-        raise last_exception
+                    if attempt < self._max_retries:
+                        wait_time = 2 ** attempt  # 指数退避：1s, 2s
+                        logger.info("等待 %.1f 秒后重试...", wait_time)
+                        await asyncio.sleep(wait_time)
+
+            logger.error("LLM 调用在 %d 次重试后仍然失败", self._max_retries + 1)
+            raise last_exception
 
     async def close(self) -> None:
         """关闭客户端连接"""

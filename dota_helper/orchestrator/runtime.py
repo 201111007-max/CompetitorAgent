@@ -11,6 +11,8 @@ from dota_helper.orchestrator.tactical_loop import TacticalLoop
 from dota_helper.orchestrator.review_orchestrator import ReviewOrchestrator
 from dota_helper.orchestrator.review_config import ReviewConfig, MemoryConfig
 from dota_helper.data_path_manager import DataPathManager
+from dota_helper.persistence.review_repository import ReviewRepository
+from dota_helper.persistence.progress_store import ProgressStore
 from dota_helper.report.report_builder import ReportBuilder
 from dota_helper.report.markdown_renderer import MarkdownRenderer
 from dota_helper.domain_types.state import ReviewAgentState
@@ -113,12 +115,29 @@ class Runtime:
                 )
 
         # 6. 创建战术循环工厂
+        # 6.1 创建上下文压缩器（如果配置启用）
+        compressor = None
+        if self._config.compression.enabled and self._llm_client:
+            from dota_helper.engines.compressor import ContextCompressor
+            compressor = ContextCompressor(
+                llm_client=self._llm_client,
+                head_protect_count=self._config.compression.head_protect_count,
+                tail_token_budget=self._config.compression.tail_token_budget,
+                target_max_tokens=self._config.compression.target_max_tokens,
+                summary_token_budget=self._config.compression.summary_token_budget,
+            )
+            logger.info("上下文压缩器已创建并注入战术循环")
+
         def tactical_loop_factory(phase: str) -> TacticalLoop:
             analyzer = analyzers.get(phase)
             if analyzer is None:
                 raise ValueError(f"未知的分析阶段: {phase}")
             max_iterations = self._config.tactical_loop.max_iterations_per_phase
-            return TacticalLoop(analyzer=analyzer, max_iterations=max_iterations)
+            return TacticalLoop(
+                analyzer=analyzer,
+                max_iterations=max_iterations,
+                compressor=compressor,
+            )
 
         # 7. 创建停止验证器
         required_phases = self._config.stop_verifier.required_phases
@@ -135,7 +154,22 @@ class Runtime:
         # 9. 创建 Agent 状态
         state = ReviewAgentState(match_id=match_id)
 
-        # 10. 组装编排器
+        # 10. 创建持久化组件
+        review_repository = ReviewRepository(self._path_manager)
+        progress_store = ProgressStore(self._path_manager)
+
+        # 10.1 自动构建 analyzer_factory（并行模式需要）
+        enable_parallel = self._config.enable_parallel_phases
+        analyzer_factory = None
+        if enable_parallel:
+            def analyzer_factory(phase: str) -> IReviewAnalyzer:
+                a = analyzers.get(phase)
+                if a is None:
+                    raise ValueError(f"未知的分析阶段: {phase}")
+                return a
+            logger.info("并行模式启用: 自动构建 analyzer_factory")
+
+        # 11. 组装编排器
         orchestrator = ReviewOrchestrator(
             data_source=self._data_source,
             strategic_loop=strategic_loop,
@@ -144,7 +178,11 @@ class Runtime:
             report_builder=report_builder,
             state=state,
             markdown_renderer=markdown_renderer,
+            enable_parallel_phases=enable_parallel,
+            analyzer_factory=analyzer_factory,
             background_reviewer=background_reviewer,
+            review_repository=review_repository,
+            progress_store=progress_store,
         )
 
         logger.info("ReviewOrchestrator 构建完成")

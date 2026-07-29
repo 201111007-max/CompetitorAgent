@@ -1,4 +1,4 @@
-﻿"""比赛数据获取与结构化转换"""
+"""比赛数据获取与结构化转换"""
 from typing import Any, Dict, List, Optional
 
 from dota_helper.data_source.exceptions import DataSourceError
@@ -47,9 +47,18 @@ class MatchFetcher:
         self,
         client: OpenDotaClient,
         target_account_id: Optional[str] = None,
+        cache: Optional[Any] = None,
     ) -> None:
+        """初始化比赛数据获取器
+
+        Args:
+            client: OpenDota API 客户端
+            target_account_id: 目标账号 ID
+            cache: 可选的比赛数据缓存（MatchDataCache 实例）
+        """
         self._client = client
         self._target_account_id = target_account_id
+        self._cache = cache
 
     async def fetch_and_parse(self, match_id: str) -> MatchData:
         """获取并解析比赛数据
@@ -63,6 +72,16 @@ class MatchFetcher:
         Raises:
             DataSourceError: 数据解析失败
         """
+        # 先查缓存
+        if self._cache is not None:
+            try:
+                cached = self._cache.read(match_id)
+                if cached is not None:
+                    logger.info("缓存命中: match_id=%s", match_id)
+                    return cached
+            except Exception as e:
+                logger.warning("缓存读取失败（忽略）: match_id=%s, error=%s", match_id, str(e))
+
         raw = await self._client.get_match_details(match_id)
         try:
             match_data = self._parse(raw, match_id)
@@ -72,6 +91,15 @@ class MatchFetcher:
                 match_data.duration,
                 len(match_data.players),
             )
+
+            # 写入缓存
+            if self._cache is not None:
+                try:
+                    self._cache.write(match_data)
+                    logger.info("缓存写入成功: match_id=%s", match_id)
+                except Exception as e:
+                    logger.warning("缓存写入失败（忽略）: match_id=%s, error=%s", match_id, str(e))
+
             return match_data
         except Exception as e:
             raise DataSourceError(f"比赛数据解析失败: {e}") from e

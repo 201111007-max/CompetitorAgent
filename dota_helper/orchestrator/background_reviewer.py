@@ -7,6 +7,7 @@ from dota_helper.interfaces.llm import ILLMClient
 from dota_helper.memory.four_layer_memory import FourLayerMemory
 from dota_helper.memory.dream_recap import DreamRecap
 from dota_helper.prompt.loader import get_prompt_loader
+from dota_helper.observability import get_tracer
 from dota_helper.observability.logger import get_logger
 
 logger = get_logger("orchestrator.background")
@@ -86,121 +87,129 @@ class BackgroundReviewer:
             match_id = str(getattr(match_data, "match_id", "unknown"))
             logger.info(f"[_review_worker] 开始后台审查: match_id={match_id}")
 
-            # 步骤1: 质量评估
-            logger.info(f"[_review_worker] 步骤1/4: 开始质量评估")
-            quality = await self._assess_quality(report)
-            overall_score = quality.get("overall_score", 0.0)
-            logger.info(
-                f"[_review_worker] 质量评估完成: overall_score={overall_score:.2f}, "
-                f"data_support={quality.get('data_support', 0):.2f}, "
-                f"analysis_depth={quality.get('analysis_depth', 0):.2f}, "
-                f"actionability={quality.get('actionability', 0):.2f}, "
-                f"completeness={quality.get('completeness', 0):.2f}"
-            )
-
-            metadata = {
-                "quality_score": overall_score,
-                "quality_dimensions": quality,
-            }
-
-            # 步骤2: 归档会话
-            logger.info(f"[_review_worker] 步骤2/4: 开始归档会话")
-            serialized_report = self._serialize_report(report)
-            logger.debug(f"[_review_worker] 报告序列化完成: 字段数={len(serialized_report)}")
-            
-            await self._memory.archive_session(
-                match_id=match_id,
-                report=serialized_report,
-                metadata=metadata,
-            )
-            logger.info(f"[_review_worker] 会话归档完成: match_id={match_id}")
-
-            # 步骤3: 模式提取
-            logger.info(f"[_review_worker] 步骤3/4: 开始模式提取")
-            patterns = await self._extract_patterns(match_data, report)
-            logger.info(f"[_review_worker] 模式提取完成: 提取到 {len(patterns)} 个模式")
-            
-            for i, pattern in enumerate(patterns, 1):
-                pattern_name = pattern.get("name", "unnamed")
-                pattern_type = pattern.get("type", "unknown")
-                confidence = pattern.get("confidence", 0)
+            tracer = get_tracer()
+            async with tracer.span("background.review", match_id=match_id) as bg_span:
+                # 步骤1: 质量评估
+                logger.info(f"[_review_worker] 步骤1/4: 开始质量评估")
+                quality = await self._assess_quality(report)
+                overall_score = quality.get("overall_score", 0.0)
                 logger.info(
-                    f"[_review_worker] 模式 {i}/{len(patterns)}: "
-                    f"name={pattern_name}, type={pattern_type}, confidence={confidence:.2f}"
+                    f"[_review_worker] 质量评估完成: overall_score={overall_score:.2f}, "
+                    f"data_support={quality.get('data_support', 0):.2f}, "
+                    f"analysis_depth={quality.get('analysis_depth', 0):.2f}, "
+                    f"actionability={quality.get('actionability', 0):.2f}, "
+                    f"completeness={quality.get('completeness', 0):.2f}"
                 )
 
-            # 步骤4: 持久化高置信度模式
-            logger.info(
-                f"[_review_worker] 步骤4/4: 开始持久化 "
-                f"(置信度阈值={self._confidence_threshold:.2f})"
-            )
-            persisted_count = 0
-            for pattern in patterns:
-                confidence = pattern.get("confidence", 0)
-                pattern_name = pattern.get("name", "unnamed")
+                bg_span.set_attribute("quality_score", overall_score)
+
+                metadata = {
+                    "quality_score": overall_score,
+                    "quality_dimensions": quality,
+                }
+
+                # 步骤2: 归档会话
+                logger.info(f"[_review_worker] 步骤2/4: 开始归档会话")
+                serialized_report = self._serialize_report(report)
+                logger.debug(f"[_review_worker] 报告序列化完成: 字段数={len(serialized_report)}")
                 
-                if confidence >= self._confidence_threshold:
-                    if pattern.get("type") == "skill":
-                        logger.info(
-                            f"[_review_worker] 沉淀技能: name={pattern_name}, "
-                            f"confidence={confidence:.2f}"
-                        )
-                        self._memory.skill_store.save_skill(
-                            name=pattern_name,
-                            content=pattern.get("content", ""),
-                            metadata={
-                                "description": pattern.get("description", ""),
-                                "confidence": confidence,
-                                "source_match": match_id,
-                                "tags": pattern.get("tags", []),
-                            },
-                        )
-                        logger.info(f"[_review_worker] 技能沉淀完成: {pattern_name}")
+                await self._memory.archive_session(
+                    match_id=match_id,
+                    report=serialized_report,
+                    metadata=metadata,
+                )
+                logger.info(f"[_review_worker] 会话归档完成: match_id={match_id}")
+
+                # 步骤3: 模式提取
+                logger.info(f"[_review_worker] 步骤3/4: 开始模式提取")
+                patterns = await self._extract_patterns(match_data, report)
+                logger.info(f"[_review_worker] 模式提取完成: 提取到 {len(patterns)} 个模式")
+                
+                for i, pattern in enumerate(patterns, 1):
+                    pattern_name = pattern.get("name", "unnamed")
+                    pattern_type = pattern.get("type", "unknown")
+                    confidence = pattern.get("confidence", 0)
+                    logger.info(
+                        f"[_review_worker] 模式 {i}/{len(patterns)}: "
+                        f"name={pattern_name}, type={pattern_type}, confidence={confidence:.2f}"
+                    )
+
+                bg_span.set_attribute("patterns_count", len(patterns))
+
+                # 步骤4: 持久化高置信度模式
+                logger.info(
+                    f"[_review_worker] 步骤4/4: 开始持久化 "
+                    f"(置信度阈值={self._confidence_threshold:.2f})"
+                )
+                persisted_count = 0
+                for pattern in patterns:
+                    confidence = pattern.get("confidence", 0)
+                    pattern_name = pattern.get("name", "unnamed")
+                    
+                    if confidence >= self._confidence_threshold:
+                        if pattern.get("type") == "skill":
+                            logger.info(
+                                f"[_review_worker] 沉淀技能: name={pattern_name}, "
+                                f"confidence={confidence:.2f}"
+                            )
+                            self._memory.skill_store.save_skill(
+                                name=pattern_name,
+                                content=pattern.get("content", ""),
+                                metadata={
+                                    "description": pattern.get("description", ""),
+                                    "confidence": confidence,
+                                    "source_match": match_id,
+                                    "tags": pattern.get("tags", []),
+                                },
+                            )
+                            logger.info(f"[_review_worker] 技能沉淀完成: {pattern_name}")
+                        else:
+                            logger.info(
+                                f"[_review_worker] 沉淀笔记: name={pattern_name}, "
+                                f"category={pattern.get('category', 'general')}, "
+                                f"confidence={confidence:.2f}"
+                            )
+                            await self._memory.add_persistent_note(
+                                category=pattern.get("category", "general"),
+                                content=pattern.get("content", ""),
+                                evidence=pattern.get("evidence", []),
+                            )
+                            logger.info(f"[_review_worker] 笔记沉淀完成: {pattern_name}")
+                        persisted_count += 1
                     else:
                         logger.info(
-                            f"[_review_worker] 沉淀笔记: name={pattern_name}, "
-                            f"category={pattern.get('category', 'general')}, "
-                            f"confidence={confidence:.2f}"
+                            f"[_review_worker] 跳过低置信度模式: name={pattern_name}, "
+                            f"confidence={confidence:.2f} < threshold={self._confidence_threshold:.2f}"
                         )
-                        await self._memory.add_persistent_note(
-                            category=pattern.get("category", "general"),
-                            content=pattern.get("content", ""),
-                            evidence=pattern.get("evidence", []),
-                        )
-                        logger.info(f"[_review_worker] 笔记沉淀完成: {pattern_name}")
-                    persisted_count += 1
-                else:
-                    logger.info(
-                        f"[_review_worker] 跳过低置信度模式: name={pattern_name}, "
-                        f"confidence={confidence:.2f} < threshold={self._confidence_threshold:.2f}"
-                    )
-            
-            logger.info(
-                f"[_review_worker] 持久化完成: "
-                f"{persisted_count}/{len(patterns)} 个模式已沉淀"
-            )
+                
+                logger.info(
+                    f"[_review_worker] 持久化完成: "
+                    f"{persisted_count}/{len(patterns)} 个模式已沉淀"
+                )
 
-            # 步骤5: DreamRecap 整合
-            logger.info(f"[_review_worker] 开始 DreamRecap 整合")
-            recap_result = await self._dream_recap.integrate(
-                match_data=match_data,
-                report=report,
-                quality_assessment=quality,
-            )
-            logger.info(
-                f"[_review_worker] DreamRecap 整合完成: "
-                f"insights={len(recap_result.get('insights', []))}, "
-                f"patterns={len(recap_result.get('patterns', []))}, "
-                f"persisted_notes={recap_result.get('persisted_notes', 0)}, "
-                f"persisted_skills={recap_result.get('persisted_skills', 0)}"
-            )
+                # 步骤5: DreamRecap 整合
+                logger.info(f"[_review_worker] 开始 DreamRecap 整合")
+                recap_result = await self._dream_recap.integrate(
+                    match_data=match_data,
+                    report=report,
+                    quality_assessment=quality,
+                )
+                logger.info(
+                    f"[_review_worker] DreamRecap 整合完成: "
+                    f"insights={len(recap_result.get('insights', []))}, "
+                    f"patterns={len(recap_result.get('patterns', []))}, "
+                    f"persisted_notes={recap_result.get('persisted_notes', 0)}, "
+                    f"persisted_skills={recap_result.get('persisted_skills', 0)}"
+                )
 
-            logger.info(
-                f"[_review_worker] 后台审查工作全部完成: match_id={match_id}, "
-                f"quality_score={overall_score:.2f}, "
-                f"patterns_extracted={len(patterns)}, "
-                f"patterns_persisted={persisted_count}"
-            )
+                bg_span.set_attribute("persisted_count", persisted_count)
+
+                logger.info(
+                    f"[_review_worker] 后台审查工作全部完成: match_id={match_id}, "
+                    f"quality_score={overall_score:.2f}, "
+                    f"patterns_extracted={len(patterns)}, "
+                    f"patterns_persisted={persisted_count}"
+                )
 
         except Exception as e:
             logger.error(f"[_review_worker] 后台审查工作失败: {e}", exc_info=True)
