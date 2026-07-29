@@ -1,4 +1,4 @@
-﻿"""并行子代理：独立上下文和执行环境"""
+"""并行子代理：独立上下文和执行环境"""
 from typing import Any, Dict, List, Optional
 from dota_helper.interfaces.analyzer import IReviewAnalyzer
 from dota_helper.domain_types.analysis import AnalysisContext, AnalysisResult
@@ -22,6 +22,7 @@ class SubAgent:
         analyzer: IReviewAnalyzer,
         budget_quota: int,
         context: Dict[str, Any],
+        compressor: Optional[Any] = None,
     ) -> None:
         """初始化子代理
 
@@ -30,11 +31,13 @@ class SubAgent:
             analyzer: 分析器实例
             budget_quota: 分配的预算配额（迭代次数）
             context: 初始上下文配置
+            compressor: 可选的上下文压缩器（IContextCompressor 实例）
         """
         self._name = name
         self._analyzer = analyzer
         self._budget_quota = budget_quota
         self._context = context
+        self._compressor = compressor
         self._messages: List[Dict[str, str]] = []  # 独立上下文消息列表
         self._result: Optional[AnalysisResult] = None
         self._error: Optional[Exception] = None
@@ -116,6 +119,24 @@ class SubAgent:
 
             # 更新独立消息列表（用于后续压缩）
             self._messages = context.messages
+
+            # 分析后压缩（如果配置了压缩器）
+            if self._compressor and context.messages:
+                from dota_helper.llm.token_counter import TokenCounter
+                token_counter = TokenCounter()
+                current_tokens = token_counter.count_messages(context.messages)
+                if self._compressor.should_compress(current_tokens):
+                    logger.info(
+                        "[子代理] 触发上下文压缩: name=%s, current_tokens=%d",
+                        self._name,
+                        current_tokens,
+                    )
+                    context.messages = await self._compressor.compress(
+                        context.messages,
+                        current_tokens,
+                    )
+                    self._messages = context.messages
+
             logger.info(
                 "[子代理] 分析完成: name=%s, confidence=%.2f, conclusions=%d, messages_count=%d",
                 self._name,

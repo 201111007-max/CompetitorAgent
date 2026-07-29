@@ -27,6 +27,8 @@ from dota_helper.domain_types.analysis import AnalysisContext
 from dota_helper.domain_types.match_data import MatchData
 from dota_helper.data_source.opendota_client import OpenDotaClient
 from dota_helper.data_source.match_fetcher import MatchFetcher
+from dota_helper.data_source.cache import MatchDataCache
+from dota_helper.data_path_manager import DataPathManager
 from dota_helper.analyzers.fallback_analyzer import FallbackAnalyzer
 from dota_helper.observability.logger import get_logger
 
@@ -229,10 +231,17 @@ def create_default_api(
 
     # 1. 创建数据源
     if data_source is None:
+        # 初始化 DataPathManager 并创建缓存
+        path_manager = DataPathManager(
+            data_dir=str(data_dir) if data_dir else None,
+        )
+        path_manager.ensure_dirs()
+        cache = MatchDataCache(cache_dir=path_manager.cache_dir)
+
         opendota_client = OpenDotaClient(timeout=30.0, max_retries=3)
-        match_fetcher = MatchFetcher(client=opendota_client)
+        match_fetcher = MatchFetcher(client=opendota_client, cache=cache)
         data_source = MatchFetcherAdapter(match_fetcher)
-        logger.info("使用默认 OpenDota 数据源")
+        logger.info("使用默认 OpenDota 数据源（缓存已启用）")
 
     # 2. 判断是否有 LLM 能力
     use_llm = _has_llm_key()

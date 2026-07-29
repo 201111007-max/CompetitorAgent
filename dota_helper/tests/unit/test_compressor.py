@@ -95,20 +95,31 @@ def test_prune_tool_results() -> None:
 def test_protect_tail() -> None:
     """测试：保护尾部消息"""
     llm_client = MockLLMClient()
+    # 使用 TokenCounter 计算实际 token 数，确保测试与估算逻辑一致
+    from dota_helper.llm.token_counter import TokenCounter
+    tc = TokenCounter()
+
+    msg1 = {"role": "user", "content": "消息1" * 50}
+    msg2 = {"role": "assistant", "content": "消息2" * 10}
+    msg3 = {"role": "user", "content": "消息3" * 10}
+
+    msg3_tokens = tc.count_text(msg3["content"])
+    msg2_tokens = tc.count_text(msg2["content"])
+    msg1_tokens = tc.count_text(msg1["content"])
+
+    # 设置预算 = msg3 + msg2 的 token 数，使前两条能纳入但 msg1 超出
+    budget = msg3_tokens + msg2_tokens
+
     compressor = ContextCompressor(
         llm_client=llm_client,
-        tail_token_budget=100,
+        tail_token_budget=budget,
     )
 
-    messages = [
-        {"role": "user", "content": "消息1" * 50},  # ~250 tokens
-        {"role": "assistant", "content": "消息2" * 10},  # ~50 tokens
-        {"role": "user", "content": "消息3" * 10},  # ~50 tokens
-    ]
+    messages = [msg1, msg2, msg3]
 
-    tail = compressor._protect_tail(messages, token_budget=100)
+    tail = compressor._protect_tail(messages, token_budget=budget)
 
-    # 应该只包含最后 2 条消息（约 100 tokens）
+    # 应该只包含最后 2 条消息（msg2 + msg3 刚好等于预算）
     assert len(tail) <= 2
 
 
