@@ -2,15 +2,17 @@
 
 增强版支持从 YAML 加载 analysis_framework、data_requirements、
 output_schema，并自动注入到提示词中。旧格式 YAML 完全兼容。
+
+模板加载统一委托给 PromptLoader，使用 mtime 自动失效缓存。
 """
 import json
-import yaml
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
 from dota_helper.domain_types.match_data import MatchData
 from dota_helper.domain_types.analysis import AnalysisResult
 from dota_helper.engines.data_formatter import DataFormatter
+from dota_helper.prompt.loader import PromptLoader, get_prompt_loader
 from dota_helper.observability.logger import get_logger
 
 logger = get_logger("engines.prompt_builder")
@@ -23,25 +25,36 @@ class PromptBuilder:
     output_schema，并自动注入到提示词中。旧格式 YAML 完全兼容。
     """
 
-    def __init__(self, prompts_dir: Optional[Path] = None, context_max_players: int = 10, context_max_conclusions: int = 5) -> None:
+    def __init__(
+        self,
+        prompts_dir: Optional[Path] = None,
+        context_max_players: int = 10,
+        context_max_conclusions: int = 5,
+        prompt_loader: Optional[PromptLoader] = None,
+    ) -> None:
         """初始化提示词构建器
 
         Args:
-            prompts_dir: 提示词模板目录，默认为 dota_helper/prompts/
+            prompts_dir: 提示词模板目录（已委托给 PromptLoader，保留参数向后兼容）
             context_max_players: P2-4: 上下文层最大展示玩家数（默认 10，覆盖旧值 2）
             context_max_conclusions: P2-4: 上下文层最大展示结论数（默认 5，覆盖旧值 3）
+            prompt_loader: 统一提示词加载器（None 时使用全局单例）
         """
-        if prompts_dir is None:
-            self._prompts_dir = Path(__file__).parent.parent / "prompts"
-        else:
-            self._prompts_dir = prompts_dir
-
         self._context_max_players = context_max_players
         self._context_max_conclusions = context_max_conclusions
-        self._template_cache: Dict[str, Dict[str, Any]] = {}
+
+        # 使用注入的 PromptLoader 或全局单例
+        if prompt_loader is not None:
+            self._prompt_loader = prompt_loader
+        else:
+            self._prompt_loader = get_prompt_loader()
+
         # P3-2: DataFormatter 缓存（按 phase 名称）
         self._formatter_cache: Dict[str, DataFormatter] = {}
-        logger.info("提示词构建器初始化: prompts_dir=%s", self._prompts_dir)
+        logger.info(
+            "提示词构建器初始化: prompt_loader=%s",
+            type(self._prompt_loader).__name__,
+        )
 
     def build(
         self,
@@ -232,7 +245,9 @@ class PromptBuilder:
         return volatile_template
 
     def _load_template(self, phase: str) -> Dict[str, Any]:
-        """加载提示词模板
+        """加载提示词模板（委托给 PromptLoader）
+
+        使用 PromptLoader 的 mtime 自动失效缓存，消除内置永久缓存。
 
         Args:
             phase: 分析阶段名称
@@ -240,24 +255,13 @@ class PromptBuilder:
         Returns:
             Dict[str, Any]: 模板内容
         """
-        if phase in self._template_cache:
-            return self._template_cache[phase]
+        template = self._prompt_loader.load_tactical(phase)
 
-        template_file = self._prompts_dir / f"tactical_{phase}.yaml"
-
-        if not template_file.exists():
-            logger.warning("模板文件不存在: %s, 使用默认模板", template_file)
+        if not template:
+            logger.warning("模板加载失败: phase=%s, 使用默认模板", phase)
             return self._get_default_template()
 
-        try:
-            with open(template_file, "r", encoding="utf-8") as f:
-                template = yaml.safe_load(f)
-            self._template_cache[phase] = template
-            logger.debug("加载模板: %s", template_file)
-            return template
-        except Exception as e:
-            logger.error("加载模板失败: %s, 错误: %s", template_file, e)
-            return self._get_default_template()
+        return template
 
     def _get_default_template(self) -> Dict[str, Any]:
         """获取默认模板

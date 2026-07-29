@@ -10,6 +10,7 @@ from dota_helper.orchestrator.strategic_loop import StrategicLoop
 from dota_helper.orchestrator.tactical_loop import TacticalLoop
 from dota_helper.orchestrator.review_orchestrator import ReviewOrchestrator
 from dota_helper.orchestrator.review_config import ReviewConfig, MemoryConfig
+from dota_helper.data_path_manager import DataPathManager
 from dota_helper.report.report_builder import ReportBuilder
 from dota_helper.report.markdown_renderer import MarkdownRenderer
 from dota_helper.domain_types.state import ReviewAgentState
@@ -50,7 +51,13 @@ class Runtime:
         self._data_source = data_source
         self._llm_client = llm_client
 
-        logger.info("Runtime 初始化完成")
+        # 初始化统一数据路径管理器
+        self._path_manager = DataPathManager(
+            data_dir=self._config.memory.data_dir
+        )
+        self._path_manager.ensure_dirs()
+
+        logger.info("Runtime 初始化完成: data_dir=%s", self._path_manager.data_dir)
 
     def build_orchestrator(
         self,
@@ -200,6 +207,15 @@ class Runtime:
             return []
 
     # P2-3: 公共方法，避免外部直接访问 _config
+    @property
+    def path_manager(self) -> DataPathManager:
+        """获取数据路径管理器
+
+        Returns:
+            DataPathManager: 统一数据路径管理器实例
+        """
+        return self._path_manager
+
     def get_skills_dir(self) -> Optional[str]:
         """获取技能存储目录
 
