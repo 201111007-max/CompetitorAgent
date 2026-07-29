@@ -1,13 +1,11 @@
 """Dota Helper Web 入口
 
 同时暴露赛后复盘端点（PostMatchReviewAPI）与 ReAct Agent Chat 端点。
-Chat 后端在阶段 10 之前由 MockReActAgent 填充，前端按真实事件契约实现。
+Chat 后端由 DotaHelperReActAgent 驱动，通过 MCP 工具分发器调用 53 个分析工具。
 """
 import asyncio
 import json
 import os
-import time
-import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
@@ -18,6 +16,8 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from dota_helper import PostMatchReviewAPI, create_default_api
+from dota_helper.agent.react_agent import DotaHelperReActAgent
+from dota_helper.agent.session_manager import SessionManager
 from dota_helper.domain_types.events import ProgressEvent
 from dota_helper.observability.logger import get_logger
 
@@ -29,154 +29,11 @@ WARD_DIR = PACKAGE_ROOT / "ward_analysis"
 FRONTEND_DIR = PACKAGE_ROOT / "frontend"
 INDEX_HTML = FRONTEND_DIR / "index.html"
 
-# 内存聊天会话存储（阶段 10 替换为持久化存储）
-_chat_sessions: Dict[str, Dict[str, Any]] = {}
-_chat_history: List[Dict[str, Any]] = []
-
-
-class MockReActAgent:
-    """阶段 7 占位用 ReAct Agent
-
-    按阶段 10 设计的事件契约产出 session/thought/action/observation/final，
-    支持 ward_html 路径以验证 WardIframe 组件。
-    """
-
-    def __init__(self) -> None:
-        """初始化 Mock Agent"""
-        self._closed = False
-
-    async def run_stream(
-        self,
-        message: str,
-        session_id: Optional[str] = None,
-    ) -> AsyncGenerator[Dict[str, Any], None]:
-        """模拟 ReAct Agent 流式输出
-
-        Args:
-            message: 用户输入
-            session_id: 已有会话 ID（可选）
-
-        Yields:
-            Dict[str, Any]: ChatEvent 字典
-        """
-        if self._closed:
-            return
-
-        sid = session_id or f"sess_{uuid.uuid4().hex[:12]}"
-        cid = f"conv_{uuid.uuid4().hex[:12]}"
-        lower = message.lower()
-        is_ward = any(k in lower for k in ("ward", "眼位", "视野", "vision"))
-
-        # session 事件
-        yield {
-            "type": "session",
-            "session_id": sid,
-            "conversation_id": cid,
-        }
-        await asyncio.sleep(0.05)
-
-        # thought
-        yield {
-            "type": "thought",
-            "session_id": sid,
-            "conversation_id": cid,
-            "content": f"正在分析用户问题：{message[:50]}",
-        }
-        await asyncio.sleep(0.05)
-
-        # action
-        action_input: Dict[str, Any] = {"query": message[:50]}
-        if is_ward:
-            action_input["tool"] = "analyze_ward"
-            action_input["match_id"] = "demo"
-        yield {
-            "type": "action",
-            "session_id": sid,
-            "conversation_id": cid,
-            "content": "调用分析工具",
-            "input": action_input,
-        }
-        await asyncio.sleep(0.05)
-
-        # observation
-        observation_content = "已获取相关数据。"
-        if is_ward:
-            observation_content = "已生成眼位热力图数据。"
-        yield {
-            "type": "observation",
-            "session_id": sid,
-            "conversation_id": cid,
-            "content": observation_content,
-        }
-        await asyncio.sleep(0.05)
-
-        # final
-        final_payload: Dict[str, Any] = {
-            "type": "final",
-            "session_id": sid,
-            "conversation_id": cid,
-            "content": f"这是关于「{message[:30]}」的模拟回答。",
-        }
-        if is_ward:
-            final_payload["ward_html"] = "/ward_analysis/demo.html"
-        yield final_payload
-
-        # 持久化会话
-        await self._save_session(sid, cid, message, final_payload["content"])
-
-    async def _save_session(
-        self,
-        session_id: str,
-        conversation_id: str,
-        message: str,
-        answer: str,
-    ) -> None:
-        """将会话保存到内存存储
-
-        Args:
-            session_id: 会话 ID
-            conversation_id: 对话 ID
-            message: 用户消息
-            answer: Agent 回答
-        """
-        now = time.time()
-        if session_id not in _chat_sessions:
-            _chat_sessions[session_id] = {
-                "session_id": session_id,
-                "title": message[:20] or "新会话",
-                "created_at": now,
-                "updated_at": now,
-                "messages": [],
-            }
-            _chat_history.append({
-                "session_id": session_id,
-                "title": _chat_sessions[session_id]["title"],
-                "updated_at": now,
-            })
-        session = _chat_sessions[session_id]
-        session["messages"].append({
-            "conversation_id": conversation_id,
-            "role": "user",
-            "content": message,
-            "created_at": now,
-        })
-        session["messages"].append({
-            "conversation_id": conversation_id,
-            "role": "agent",
-            "content": answer,
-            "created_at": now,
-        })
-        session["updated_at"] = now
-        # 同步更新历史列表中的时间
-        for item in _chat_history:
-            if item["session_id"] == session_id:
-                item["updated_at"] = now
-                item["title"] = session["title"]
-
 
 # 全局状态
 review_api: Optional[PostMatchReviewAPI] = None
-chat_agent: MockReActAgent = MockReActAgent()
+chat_agent: Optional[DotaHelperReActAgent] = None
+session_manager: Optional[SessionManager] = None
 
 
 def _ensure_directories() -> None:
@@ -186,7 +43,7 @@ def _ensure_directories() -> None:
 
 
 def _create_ward_demo() -> None:
-    """创建示例 ward HTML，供 Mock Agent 引用"""
+    """创建示例 ward HTML，供 Agent 引用"""
     demo_path = WARD_DIR / "demo.html"
     if demo_path.exists():
         return
@@ -220,19 +77,52 @@ def _create_ward_demo() -> None:
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """应用生命周期管理
 
+    初始化 PostMatchReviewAPI、DotaHelperReActAgent 和 SessionManager。
+    Agent 通过 MCP Client 连接 MCP Server 获取 53 个工具描述。
+
     Args:
         app: FastAPI 应用实例
     """
-    global review_api
+    global review_api, chat_agent, session_manager
     _ensure_directories()
     _create_ward_demo()
+
+    # 初始化复盘 API
     if review_api is None:
         logger.info("正在初始化 PostMatchReviewAPI...")
         review_api = create_default_api()
         logger.info("PostMatchReviewAPI 初始化完成")
     else:
         logger.info("PostMatchReviewAPI 已由外部注入，跳过默认初始化")
+
+    # 初始化 ReAct Agent 和会话管理器
+    if chat_agent is None:
+        try:
+            logger.info("正在初始化 DotaHelperReActAgent...")
+            chat_agent = await DotaHelperReActAgent.create(enable_mcp=True)
+            await chat_agent.__aenter__()
+            session_manager = chat_agent._session_manager
+            logger.info("DotaHelperReActAgent 初始化完成，MCP 已连接")
+        except Exception as e:
+            logger.warning(
+                "DotaHelperReActAgent 初始化失败，聊天功能不可用: %s",
+                str(e),
+            )
+            # 降级：创建独立的 SessionManager，聊天端点将返回错误提示
+            session_manager = SessionManager()
+    else:
+        logger.info("DotaHelperReActAgent 已由外部注入，跳过默认初始化")
+        session_manager = chat_agent._session_manager
+
     yield
+
+    # 清理：关闭 MCP 连接
+    if chat_agent is not None:
+        try:
+            await chat_agent.__aexit__(None, None, None)
+        except Exception as e:
+            logger.debug("Agent 清理异常（可忽略）: %s", str(e))
+
     logger.info("Web 应用关闭")
 
 
@@ -351,11 +241,51 @@ async def list_review_history() -> List[Dict[str, Any]]:
     return await review_api.list_history()
 
 
-# ── Chat API（阶段 10 前由 MockReActAgent 填充） ──
+@app.get("/api/review/skills")
+async def list_analysis_skills() -> List[Dict[str, Any]]:
+    """列出所有可用的分析技能（内置 + 用户自定义）
+
+    Returns:
+        List[Dict[str, Any]]: 分析技能定义列表
+    """
+    if review_api is None:
+        raise HTTPException(status_code=503, detail="复盘 API 尚未初始化")
+    return review_api.list_analysis_skills()
+
+
+@app.post("/api/review/skills")
+async def register_analysis_skill(request: Dict[str, Any]) -> Dict[str, Any]:
+    """注册用户自定义分析技能
+
+    Args:
+        request: JSON body，包含 name 和 skill_definition
+
+    Returns:
+        Dict[str, Any]: 注册结果
+    """
+    if review_api is None:
+        raise HTTPException(status_code=503, detail="复盘 API 尚未初始化")
+    name = request.get("name")
+    skill_definition = request.get("skill_definition")
+    if not name:
+        raise HTTPException(status_code=422, detail="缺少 name")
+    if not skill_definition:
+        raise HTTPException(status_code=422, detail="缺少 skill_definition")
+    try:
+        review_api.register_analysis_skill(name, skill_definition)
+        return {"status": "ok", "name": name}
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+# ── Chat API（DotaHelperReActAgent 驱动） ──
 
 @app.post("/api/chat")
 async def chat(request: Dict[str, Any]) -> StreamingResponse:
     """聊天流式响应
+
+    由 DotaHelperReActAgent 驱动，通过 MCP 工具分发器调用 53 个分析工具。
+    Agent 不可用时返回错误提示。
 
     Args:
         request: JSON body，包含 message 与可选 session_id
@@ -367,6 +297,22 @@ async def chat(request: Dict[str, Any]) -> StreamingResponse:
     session_id = request.get("session_id")
     if not message:
         raise HTTPException(status_code=422, detail="缺少 message")
+
+    if chat_agent is None:
+        # Agent 不可用时返回降级提示
+        async def fallback_stream() -> AsyncGenerator[str, None]:
+            import uuid
+            sid = session_id or f"sess_{uuid.uuid4().hex[:12]}"
+            error_event = {
+                "type": "error",
+                "session_id": sid,
+                "content": "Agent 暂时不可用，请稍后重试。",
+            }
+            yield f"data: {json.dumps(error_event, ensure_ascii=False)}\n\n"
+        return StreamingResponse(
+            fallback_stream(),
+            media_type="text/event-stream",
+        )
 
     async def event_stream() -> AsyncGenerator[str, None]:
         async for event in chat_agent.run_stream(str(message), session_id):
@@ -389,14 +335,10 @@ async def list_chat_history() -> List[Dict[str, Any]]:
     Returns:
         List[Dict[str, Any]]: 会话历史
     """
-    return [
-        {
-            "session_id": item["session_id"],
-            "title": item["title"],
-            "updated_at": item["updated_at"],
-        }
-        for item in reversed(_chat_history)
-    ]
+    if session_manager is None:
+        return []
+    summaries = await session_manager.list_sessions()
+    return [s.to_dict() for s in summaries]
 
 
 @app.get("/api/sessions/{session_id}")
@@ -409,16 +351,12 @@ async def get_chat_session(session_id: str) -> Dict[str, Any]:
     Returns:
         Dict[str, Any]: 会话详情
     """
-    session = _chat_sessions.get(session_id)
+    if session_manager is None:
+        raise HTTPException(status_code=503, detail="会话管理器未初始化")
+    session = await session_manager.get_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    return {
-        "session_id": session["session_id"],
-        "title": session["title"],
-        "created_at": session["created_at"],
-        "updated_at": session["updated_at"],
-        "messages": session["messages"],
-    }
+    return session.to_dict()
 
 
 # ── 前端路由 ──
