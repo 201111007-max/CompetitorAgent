@@ -67,3 +67,5 @@ memory:
   data_dir: null
   background_review: true
   confidence_threshold: 0.7
+  max_persistent_notes: 100
+  max_skills: 50

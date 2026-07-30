@@ -351,9 +351,18 @@ class PostMatchReviewAPI:
         memory_dir.mkdir(parents=True, exist_ok=True)
         skills_dir.mkdir(parents=True, exist_ok=True)
 
+        # 从 MemoryConfig 获取容量配置
+        memory_config = self._get_memory_config()
+
         session_archive = SessionArchive(str(memory_dir / "session_archive.db"))
-        persistent_notes = PersistentNotes(str(memory_dir / "persistent_notes.json"))
-        skill_store = SkillStore(str(skills_dir))
+        persistent_notes = PersistentNotes(
+            str(memory_dir / "persistent_notes.json"),
+            max_entries=memory_config.max_persistent_notes,
+        )
+        skill_store = SkillStore(
+            str(skills_dir),
+            max_skills=memory_config.max_skills,
+        )
 
         return FourLayerMemory(
             session_archive=session_archive,

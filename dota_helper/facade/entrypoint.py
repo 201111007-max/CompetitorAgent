@@ -15,6 +15,7 @@ from dota_helper.interfaces.data_source import IMatchDataSource
 from dota_helper.interfaces.llm import ILLMClient
 from dota_helper.interfaces.memory import IFourLayerMemory
 from dota_helper.orchestrator.review_orchestrator import ReviewOrchestrator
+from dota_helper.orchestrator.review_config import ReviewConfig
 from dota_helper.orchestrator.strategic_loop import StrategicLoop
 from dota_helper.orchestrator.tactical_loop import TacticalLoop
 from dota_helper.orchestrator.runtime import Runtime
@@ -80,95 +81,54 @@ def _has_llm_key() -> bool:
     )
 
 
-def _load_strategic_config(config_path: Path) -> Dict[str, Any]:
-    """加载战略循环相关配置
+def _load_review_config(config_path: Path) -> ReviewConfig:
+    """加载类型安全的复盘配置
+
+    统一使用 ReviewConfig dataclass 替代手动 Dict[str, Any] 解析，
+    确保 fallback 分支与 Runtime 分支使用完全一致的类型安全路径。
 
     Args:
         config_path: 配置文件路径
 
     Returns:
-        Dict[str, Any]: 战略配置字典
+        ReviewConfig: 类型安全的配置实例
     """
     import yaml
 
     if not config_path.exists():
         logger.warning("配置文件不存在: %s，使用默认配置", config_path)
-        return {
-            "max_iterations_per_phase": 3,
-            "required_phases": ["laning", "teamfight", "economy", "decisions"],
-            "min_confidence": 0.6,
-            "default_budgets": {
-                "laning": 3,
-                "teamfight": 3,
-                "economy": 2,
-                "decisions": 2,
-                "vision": 1,
-            },
-        }
+        return ReviewConfig()
 
     try:
         with open(config_path, "r", encoding="utf-8") as f:
             raw = yaml.safe_load(f) or {}
+        logger.info("加载配置文件: %s", config_path)
+        return ReviewConfig.from_dict(raw)
     except Exception as e:
         logger.error("读取配置文件失败: %s，使用默认配置", e)
-        return {
-            "max_iterations_per_phase": 3,
-            "required_phases": ["laning", "teamfight", "economy", "decisions"],
-            "min_confidence": 0.6,
-            "default_budgets": {
-                "laning": 3,
-                "teamfight": 3,
-                "economy": 2,
-                "decisions": 2,
-                "vision": 1,
-            },
-        }
-
-    tactical = raw.get("tactical_loop", {})
-    verifier = raw.get("stop_verifier", {})
-    memory = raw.get("memory", {})
-    return {
-        "max_iterations_per_phase": tactical.get("max_iterations_per_phase", 3),
-        "required_phases": verifier.get(
-            "required_phases", ["laning", "teamfight", "economy", "decisions"]
-        ),
-        "min_confidence": verifier.get("min_confidence", 0.6),
-        "default_budgets": tactical.get(
-            "default_budgets",
-            {
-                "laning": 3,
-                "teamfight": 3,
-                "economy": 2,
-                "decisions": 2,
-                "vision": 1,
-            },
-        ),
-        "memory_enabled": memory.get("enabled", True),
-        "memory_background_review": memory.get("background_review", True),
-        "memory_confidence_threshold": memory.get("confidence_threshold", 0.7),
-    }
+        return ReviewConfig()
 
 
 def _create_fallback_orchestrator_factory(
     data_source: IMatchDataSource,
-    config_path: Path,
+    config: ReviewConfig,
 ) -> Any:
     """创建使用 FallbackAnalyzer 的编排器工厂
 
     当未配置 LLM 密钥时使用，确保复盘流程仍可运行。
+    统一使用 ReviewConfig dataclass 替代手动字典配置。
 
     Args:
         data_source: 比赛数据源
-        config_path: 配置文件路径
+        config: 类型安全的复盘配置
 
     Returns:
         Callable[[str], ReviewOrchestrator]: 编排器工厂函数
     """
-    config = _load_strategic_config(config_path)
     strategic_loop = StrategicLoop(config=config)
     stop_verifier = StopVerifier(
-        required_phases=config["required_phases"],
-        min_confidence=config["min_confidence"],
+        required_phases=config.stop_verifier.required_phases,
+        min_confidence=config.stop_verifier.min_confidence,
     )
     report_builder = ReportBuilder()
     markdown_renderer = MarkdownRenderer()
@@ -181,7 +141,7 @@ def _create_fallback_orchestrator_factory(
             analyzer = FallbackAnalyzer(phase=phase)
             return TacticalLoop(
                 analyzer=analyzer,
-                max_iterations=config["max_iterations_per_phase"],
+                max_iterations=config.tactical_loop.max_iterations_per_phase,
             )
 
         return ReviewOrchestrator(
@@ -253,6 +213,9 @@ def create_default_api(
 
     # 3. 无 LLM 时直接使用自定义工厂，避免 Runtime 创建 LLM 驱动分析器
     if not use_llm:
+        # 统一使用 ReviewConfig 加载配置（差异4 消除：不再手动解析 YAML）
+        config = _load_review_config(config_path)
+
         # Fallback 分支无法运行后台审查器（依赖 LLM），强制关闭
         if enable_background_review is True:
             logger.warning(
@@ -261,10 +224,7 @@ def create_default_api(
             )
         elif enable_background_review is None:
             # 读取配置默认开启时，也需要在 fallback 下关闭
-            config = _load_strategic_config(config_path)
-            if config.get("memory_enabled", True) and config.get(
-                "memory_background_review", True
-            ):
+            if config.memory.enabled and config.memory.background_review:
                 logger.warning(
                     "Fallback 模式下记忆系统后台审查自动关闭（依赖 LLM），"
                     "FourLayerMemory 实例仍会创建用于后续手动查询"
@@ -273,7 +233,7 @@ def create_default_api(
 
         return PostMatchReviewAPI(
             orchestrator_factory=_create_fallback_orchestrator_factory(
-                data_source, config_path
+                data_source, config
             ),
             config_path=config_path,
             data_source=data_source,
@@ -292,9 +252,10 @@ def create_default_api(
             "openai 模块未安装或导入失败 (%s)，复盘将使用 FallbackAnalyzer 规则分析降级运行",
             e,
         )
+        config = _load_review_config(config_path)
         return PostMatchReviewAPI(
             orchestrator_factory=_create_fallback_orchestrator_factory(
-                data_source, config_path
+                data_source, config
             ),
             config_path=config_path,
             data_source=data_source,
