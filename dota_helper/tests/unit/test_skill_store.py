@@ -122,3 +122,70 @@ class TestSkillStore:
         """测试加载不存在的技能"""
         loaded = skill_store.load_skill("not_found")
         assert loaded is None
+
+
+class TestSkillStoreCapacityProtection:
+    """SkillStore 容量保护测试（差异8 消除）"""
+
+    def test_max_skills_limits_experience_skills(self, temp_dir):
+        """测试 max_skills 限制经验技能数量"""
+        skills_dir = Path(temp_dir) / "skills_limited"
+        store = SkillStore(str(skills_dir), max_skills=3)
+
+        # 保存 3 个技能（达到上限）
+        for i in range(3):
+            store.save_skill(
+                name=f"skill_{i}",
+                content=f"Content {i}",
+                metadata={"description": f"Skill {i}"},
+            )
+
+        assert len(store.list_skills()) == 3
+
+        # 保存第 4 个技能，应触发淘汰
+        store.save_skill(
+            name="skill_new",
+            content="New content",
+            metadata={"description": "New skill"},
+        )
+
+        # 总数仍为 3（淘汰了最旧的）
+        assert len(store.list_skills()) == 3
+        names = [s["name"] for s in store.list_skills()]
+        assert "skill_new" in names
+
+    def test_update_existing_skill_does_not_trigger_eviction(self, temp_dir):
+        """测试更新已有技能不触发淘汰"""
+        skills_dir = Path(temp_dir) / "skills_update"
+        store = SkillStore(str(skills_dir), max_skills=2)
+
+        store.save_skill(name="skill_a", content="A", metadata={"description": "A"})
+        store.save_skill(name="skill_b", content="B", metadata={"description": "B"})
+
+        # 更新已有技能，不应淘汰
+        store.save_skill(name="skill_a", content="A updated", metadata={"description": "A2"})
+
+        skills = store.list_skills()
+        assert len(skills) == 2
+
+    def test_max_skills_limits_analysis_skills(self, temp_dir):
+        """测试 max_skills 限制分析技能数量"""
+        skills_dir = Path(temp_dir) / "analysis_limited"
+        store = SkillStore(str(skills_dir), max_skills=2)
+
+        store.save_analysis_skill("analy_a", {"name": "A"})
+        store.save_analysis_skill("analy_b", {"name": "B"})
+
+        # 保存第 3 个，应触发淘汰
+        store.save_analysis_skill("analy_c", {"name": "C"})
+
+        skills = store.list_analysis_skills()
+        assert len(skills) == 2
+        names = [s["name"] for s in skills]
+        assert "C" in names
+
+    def test_default_max_skills_is_50(self, temp_dir):
+        """测试默认 max_skills 为 50"""
+        skills_dir = Path(temp_dir) / "skills_default"
+        store = SkillStore(str(skills_dir))
+        assert store._max_skills == 50

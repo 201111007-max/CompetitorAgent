@@ -67,6 +67,8 @@ class MemoryConfig:
     data_dir: Optional[str] = None
     background_review: bool = True
     confidence_threshold: float = 0.7
+    max_persistent_notes: int = 100
+    max_skills: int = 50
 
 
 @dataclass
@@ -191,6 +193,8 @@ class ReviewConfig:
                 data_dir=memory_data.get("data_dir"),
                 background_review=memory_data.get("background_review", True),
                 confidence_threshold=memory_data.get("confidence_threshold", 0.7),
+                max_persistent_notes=memory_data.get("max_persistent_notes", 100),
+                max_skills=memory_data.get("max_skills", 50),
             ),
             skills_dir=data.get("skills_dir"),
         )

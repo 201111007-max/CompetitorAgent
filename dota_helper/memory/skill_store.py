@@ -30,14 +30,15 @@ class SkillStore(ISkillStore, IAnalysisSkillStore):
             └── *.yaml     # 用户自定义分析技能
     """
 
-    def __init__(self, skills_dir: str) -> None:
+    def __init__(self, skills_dir: str, max_skills: int = 50) -> None:
         self._skills_dir = Path(skills_dir)
         self._skills_dir.mkdir(parents=True, exist_ok=True)
         self._analysis_skills_dir = self._skills_dir / "analysis"
         self._analysis_skills_dir.mkdir(parents=True, exist_ok=True)
+        self._max_skills = max_skills
         logger.info(
-            "SkillStore 初始化完成: skills_dir=%s, analysis_dir=%s",
-            self._skills_dir, self._analysis_skills_dir,
+            "SkillStore 初始化完成: skills_dir=%s, analysis_dir=%s, max_skills=%d",
+            self._skills_dir, self._analysis_skills_dir, self._max_skills,
         )
 
     # ── 经验技能方法（ISkillStore 协议）──
@@ -48,8 +49,15 @@ class SkillStore(ISkillStore, IAnalysisSkillStore):
         content: str,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """保存或更新经验技能"""
+        """保存或更新经验技能
+
+        当技能数量达到 max_skills 上限时，自动淘汰最旧的技能（版本号最低且非新建）。
+        """
+        # 容量保护：检查是否达到上限（更新已有技能不触发淘汰）
         skill_path = self._skills_dir / f"{name}.md"
+        if not skill_path.exists() and self._needs_eviction():
+            self._evict_oldest_skill()
+
         metadata = metadata or {}
 
         if skill_path.exists():
@@ -129,11 +137,19 @@ class SkillStore(ISkillStore, IAnalysisSkillStore):
     ) -> None:
         """保存分析技能定义为 YAML 文件
 
+        当分析技能数量达到 max_skills 上限时，自动淘汰最早创建的技能。
+
         Args:
             name: 技能名称（不含扩展名）
             skill_definition: 完整的 YAML 技能定义字典
         """
+        # 容量保护：检查是否达到上限
         skill_path = self._analysis_skills_dir / f"{name}.yaml"
+        if not skill_path.exists():
+            existing_count = len(list(self._analysis_skills_dir.glob("*.yaml")))
+            if existing_count >= self._max_skills:
+                self._evict_oldest_analysis_skill()
+
         with open(skill_path, "w", encoding="utf-8") as f:
             yaml.dump(skill_definition, f, allow_unicode=True, default_flow_style=False)
         logger.info("分析技能保存完成: %s", name)
@@ -233,6 +249,43 @@ class SkillStore(ISkillStore, IAnalysisSkillStore):
         return skills
 
     # ── 私有辅助方法 ──
+
+    def _needs_eviction(self) -> bool:
+        """检查经验技能是否达到容量上限
+
+        Returns:
+            bool: 是否需要淘汰
+        """
+        current_count = len(list(self._skills_dir.glob("*.md")))
+        return current_count >= self._max_skills
+
+    def _evict_oldest_skill(self) -> None:
+        """淘汰最旧的经验技能（按修改时间排序，删除最早的）"""
+        skill_files = sorted(
+            self._skills_dir.glob("*.md"),
+            key=lambda f: f.stat().st_mtime,
+        )
+        if skill_files:
+            oldest = skill_files[0]
+            oldest.unlink()
+            logger.warning(
+                "技能容量达到上限(%d)，淘汰最旧技能: %s",
+                self._max_skills, oldest.stem,
+            )
+
+    def _evict_oldest_analysis_skill(self) -> None:
+        """淘汰最旧的分析技能（按修改时间排序，删除最早的）"""
+        skill_files = sorted(
+            self._analysis_skills_dir.glob("*.yaml"),
+            key=lambda f: f.stat().st_mtime,
+        )
+        if skill_files:
+            oldest = skill_files[0]
+            oldest.unlink()
+            logger.warning(
+                "分析技能容量达到上限(%d)，淘汰最旧技能: %s",
+                self._max_skills, oldest.stem,
+            )
 
     def _parse_skill_file(self, skill_path: Path) -> Optional[Dict[str, Any]]:
         """解析经验技能文件（Markdown + YAML frontmatter）
