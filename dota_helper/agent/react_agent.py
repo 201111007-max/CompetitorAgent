@@ -169,9 +169,13 @@ class DotaHelperReActAgent:
                 role = "assistant" if msg.role == "agent" else msg.role
                 existing_messages.append({"role": role, "content": msg.content})
 
+        # 使用会话管理器的 data_dir 作为 checkpoint 目录
+        checkpoint_dir = str(self._session_manager.data_dir)
+
         context = ReActContext(
             session_id=session_id,
             messages=existing_messages,
+            checkpoint_dir=checkpoint_dir,
         )
 
         # 追加用户消息到会话
@@ -198,6 +202,9 @@ class DotaHelperReActAgent:
             # 捕获 final 事件内容用于持久化
             if event.get("type") == "final":
                 final_content = event.get("content", "")
+
+        # 推理完成，清理 checkpoint
+        context.clear_checkpoint()
 
         # 持久化 Agent 回答
         if final_content:

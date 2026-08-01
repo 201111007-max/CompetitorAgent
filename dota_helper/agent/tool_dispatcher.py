@@ -8,14 +8,24 @@ ToolDispatcher 是 Agent 与 MCP Server 之间的桥梁：
 
 > 耦合说明：ToolDispatcher 依赖 MCP Client 连接 MCP Server，
 > 详见 MCP Client 集成设计文档。
+
+可靠性特性：
+- 熔断器：连续失败 3 次后自动暂停调用 30 秒
+- 重试：MCP 超时和连接丢失自动重试（最多 2 次，指数退避）
 """
+import asyncio
 from typing import Any, Dict, List, Optional, Union
 
+from dota_helper.agent.circuit_breaker import CircuitBreakerRegistry
 from dota_helper.mcp_client.client import MCPClient, NoOpMCPClient
 from dota_helper.mcp_client.types import ToolInfo, MCPConnectionError
 from dota_helper.observability.logger import get_logger
 
 logger = get_logger("agent.tool_dispatcher")
+
+# 重试参数
+_MAX_RETRY_ATTEMPTS = 2
+_RETRY_BASE_DELAY = 1.0  # 秒
 
 
 class ToolDispatcher:
@@ -31,15 +41,18 @@ class ToolDispatcher:
     def __init__(
         self,
         mcp_client: Optional[Union[MCPClient, NoOpMCPClient]] = None,
+        circuit_breaker_registry: Optional[CircuitBreakerRegistry] = None,
     ) -> None:
         """初始化工具分发器
 
         Args:
             mcp_client: MCP Client 实例（MCPClient 或降级模式 NoOpMCPClient）
+            circuit_breaker_registry: 熔断器注册表（可选，默认创建新实例）
         """
         self._mcp_client: Optional[Union[MCPClient, NoOpMCPClient]] = mcp_client
         self._available_tools: List[Dict[str, Any]] = []
         self._tool_name_set: set = set()
+        self._circuit_breaker = circuit_breaker_registry or CircuitBreakerRegistry()
 
         # 如果 MCP Client 已连接且有工具缓存，自动加载
         if mcp_client is not None and hasattr(mcp_client, "tools") and mcp_client.tools:
@@ -93,7 +106,7 @@ class ToolDispatcher:
         tool_name: str,
         args: Dict[str, Any],
     ) -> str:
-        """分发工具调用到 MCP Server
+        """分发工具调用到 MCP Server（含熔断检查和自动重试）
 
         Args:
             tool_name: 工具名称（如 'get_match_details'）
@@ -104,7 +117,7 @@ class ToolDispatcher:
 
         Raises:
             ValueError: 工具名不在可用列表中
-            MCPConnectionError: MCP 连接错误
+            MCPConnectionError: MCP 连接错误（重试耗尽后抛出）
             RuntimeError: MCP Client 未连接
         """
         if not self.validate_tool(tool_name):
@@ -119,17 +132,50 @@ class ToolDispatcher:
             logger.error("MCP Client 未连接，无法调用工具: %s", tool_name)
             raise RuntimeError("MCP Client 未连接，请先调用 connect()")
 
+        # 熔断检查
+        if not self._circuit_breaker.allow_request(tool_name):
+            raise MCPConnectionError(
+                MCPConnectionError.CONNECTION_LOST,
+                f"工具 '{tool_name}' 已被熔断，暂时无法调用",
+            )
+
         logger.info("分发工具调用: tool=%s, args=%s", tool_name, args)
 
-        try:
-            result = await self._mcp_client.call_tool(tool_name, args)
-            logger.debug("工具调用成功: tool=%s, result_len=%d", tool_name, len(str(result)))
-            return str(result)
-        except MCPConnectionError:
-            raise
-        except Exception as e:
-            logger.error("工具调用失败: tool=%s, error=%s", tool_name, str(e))
-            raise
+        # 带重试的调用
+        last_error: Optional[Exception] = None
+        for attempt in range(1, _MAX_RETRY_ATTEMPTS + 1):
+            try:
+                result = await self._mcp_client.call_tool(tool_name, args)
+                logger.debug(
+                    "工具调用成功: tool=%s, result_len=%d",
+                    tool_name, len(str(result)),
+                )
+                self._circuit_breaker.on_success(tool_name)
+                return str(result)
+
+            except MCPConnectionError as e:
+                last_error = e
+                # 仅对超时和连接丢失重试
+                if e.reason in (MCPConnectionError.TIMEOUT, MCPConnectionError.CONNECTION_LOST):
+                    if attempt < _MAX_RETRY_ATTEMPTS:
+                        delay = _RETRY_BASE_DELAY * (2 ** (attempt - 1))
+                        logger.warning(
+                            "工具调用重试 %d/%d: tool=%s, delay=%.1fs",
+                            attempt, _MAX_RETRY_ATTEMPTS, tool_name, delay,
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+                # 其他 MCP 错误不重试
+                break
+
+            except Exception as e:
+                last_error = e
+                logger.error("工具调用失败: tool=%s, error=%s", tool_name, str(e))
+                break
+
+        # 所有重试耗尽
+        self._circuit_breaker.on_failure(tool_name)
+        raise last_error  # type: ignore[misc]
 
     def get_tool_descriptions(self) -> str:
         """获取所有工具的格式化描述（注入系统提示词）

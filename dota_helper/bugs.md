@@ -59,51 +59,49 @@ def validate_tool(self, tool_name: str) -> bool:
 
 ## 🟡 P1 — 可靠性问题
 
-### 4. 错误分类与自动恢复缺失
+### 4. 错误分类与自动恢复缺失 ✅ 已修复
 
-**位置**: `agent/react_loop.py:235-246`
+**位置**: `agent/error_classifier.py`（新增）
 
-**问题**: 异常处理为 `catch Exception → yield error → break`，无分级恢复策略。任何异常（包括可恢复的瞬时故障）都直接终止推理循环。
+**修复**: 新增 `ErrorClassifier`，按 `ErrorCategory`（RECOVERABLE / DEGRADABLE / TERMINAL / UNKNOWN）分级处理异常：
+- MCP 超时、LLM 限流（429/503/504）→ **RECOVERABLE**：自动重试
+- MCP 连接断开、ValueError、RuntimeError → **DEGRADABLE**：跳过本轮继续
+- LLM 认证错误（401/403/API Key）→ **TERMINAL**：终止推理
+- 未知错误 → **UNKNOWN**：降级为 Thought 继续
 
-```python
-# react_loop.py:235-246 — 当前错误处理
-except Exception as e:
-    logger.error("推理循环异常 (iteration=%d): %s", context.iteration, str(e))
-    yield {"type": "error", ...}
-    break  # 直接终止，无重试/降级/恢复
-```
-
-**影响**: 网络抖动、LLM 临时限流等可恢复错误也会导致整个推理失败。
+**测试**: `tests/unit/test_error_classifier.py`（20 个用例）
 
 ---
 
-### 5. Agent 层熔断器缺失
+### 5. Agent 层熔断器缺失 ✅ 已修复
 
-**位置**: `agent/tool_dispatcher.py:124-132`
+**位置**: `agent/circuit_breaker.py`（新增）
 
-**问题**: MCP 客户端层有超时重连（3 次指数退避），但 Agent 层无熔断机制。连续失败的工具调用不会被暂时屏蔽，导致反复重试浪费资源。
+**修复**: 新增 `CircuitBreaker` + `CircuitBreakerRegistry`：
+- 连续失败 3 次 → OPEN（熔断 30s）
+- 超时后 → HALF_OPEN（允许试探）
+- HALF_OPEN 失败 → OPEN（超时加倍，最大 5min）
+- 每个工具独立熔断，互不影响
 
-**影响**: 某个工具持续故障时，Agent 会在每次推理循环中都尝试调用它，直到预算耗尽。
-
----
-
-### 6. 工具调用重试缺失
-
-**位置**: `agent/tool_dispatcher.py:124-132`
-
-**问题**: `dispatch()` 无重试逻辑，工具调用失败直接抛出异常。
-
-**影响**: 瞬时故障（如网络超时）导致整个推理步骤失败，无法自动重试。
+**测试**: `tests/unit/test_circuit_breaker.py`（20 个用例）
 
 ---
 
-### 7. ReAct 循环状态无持久化
+### 6. 工具调用重试缺失 ✅ 已修复
+
+**位置**: `agent/tool_dispatcher.py:150-175`
+
+**修复**: `dispatch()` 集成熔断器检查 + 自动重试（超时/连接丢失重试 1 次，指数退避 1s→2s）。成功调用重置熔断器，重试耗尽记录失败。
+
+**测试**: `tests/unit/test_tool_dispatcher_reliability.py`（11 个用例）
+
+---
+
+### 7. ReAct 循环状态无持久化 ✅ 已修复
 
 **位置**: `agent/react_loop.py:27-44`（`ReActContext`）
 
-**问题**: 复盘流程有 `ProgressStore` 快照机制，但 ReAct 循环的 `ReActContext`（推理历史、迭代计数、Token 消耗）无持久化。Agent 重启后推理上下文完全丢失。
-
-**影响**: 无法从中断点恢复推理，长对话场景下进程重启意味着全部重来。
+**修复**: `ReActContext` 新增 `checkpoint_dir` + `save_checkpoint()` / `load_checkpoint()` / `clear_checkpoint()`。`execute()` 启动时优先从 checkpoint 恢复，每轮迭代后自动保存，推理完成后清理。
 
 ---
 

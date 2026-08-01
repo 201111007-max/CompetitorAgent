@@ -8,21 +8,36 @@
       → yield thought/action/observation 事件
       → 追加到上下文 → 重新调用 LLM
       → 循环直到 Final Answer 或预算耗尽
+
+可靠性特性：
+- 错误分类：RECOVERABLE 重试 / DEGRADABLE 跳过 / TERMINAL 终止 / UNKNOWN 降级
+- 熔断器：连续失败工具自动暂停调用
+- Checkpoint：每轮迭代持久化推理状态，支持进程重启恢复
 """
+import json
+import os
 import re
+import time
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
+from dota_helper.agent.error_classifier import ErrorCategory, ErrorClassifier
 from dota_helper.agent.response_parser import ResponseParser, ReActStep, StepType
 from dota_helper.agent.tool_dispatcher import ToolDispatcher
 from dota_helper.agent.prompts.react_system import ReactSystemPrompt
 from dota_helper.domain_types.enums import BudgetDecision
 from dota_helper.engines.budget import IterationBudget
 from dota_helper.interfaces.llm import ILLMClient
+from dota_helper.mcp_client.types import MCPConnectionError
 from dota_helper.observability.logger import get_logger
 
 logger = get_logger("agent.react_loop")
+
+# 重试参数
+_LLM_MAX_RETRIES = 2
+_LLM_RETRY_BASE_DELAY = 1.0  # 秒
 
 
 @dataclass
@@ -37,12 +52,85 @@ class ReActContext:
         messages: OpenAI 风格消息列表（system + user + assistant 历史）
         iteration: 当前迭代次数
         total_tokens: 累计 Token 消耗
+        checkpoint_dir: Checkpoint 持久化目录（可选）
     """
     session_id: str = ""
     conversation_id: str = ""
     messages: List[Dict[str, str]] = field(default_factory=list)
     iteration: int = 0
     total_tokens: int = 0
+    checkpoint_dir: Optional[str] = None
+
+    @property
+    def _checkpoint_path(self) -> Optional[Path]:
+        """Checkpoint 文件路径
+
+        Returns:
+            Optional[Path]: 文件路径，checkpoint_dir 未设置时返回 None
+        """
+        if not self.checkpoint_dir or not self.session_id:
+            return None
+        return Path(self.checkpoint_dir) / f"{self.session_id}_checkpoint.json"
+
+    def save_checkpoint(self) -> None:
+        """保存当前推理状态到 checkpoint 文件"""
+        path = self._checkpoint_path
+        if path is None:
+            return
+
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            data = {
+                "session_id": self.session_id,
+                "conversation_id": self.conversation_id,
+                "iteration": self.iteration,
+                "total_tokens": self.total_tokens,
+                "messages": self.messages,
+                "saved_at": time.time(),
+            }
+            path.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            logger.debug("Checkpoint 已保存: session=%s, iteration=%d", self.session_id, self.iteration)
+        except Exception as e:
+            logger.warning("Checkpoint 保存失败: %s", str(e))
+
+    def load_checkpoint(self) -> bool:
+        """从 checkpoint 恢复推理状态
+
+        Returns:
+            bool: 是否成功恢复
+        """
+        path = self._checkpoint_path
+        if path is None or not path.exists():
+            return False
+
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.session_id = data.get("session_id", self.session_id)
+            self.conversation_id = data.get("conversation_id", self.conversation_id)
+            self.iteration = data.get("iteration", 0)
+            self.total_tokens = data.get("total_tokens", 0)
+            self.messages = data.get("messages", self.messages)
+            logger.info(
+                "Checkpoint 已恢复: session=%s, iteration=%d, messages=%d",
+                self.session_id, self.iteration, len(self.messages),
+            )
+            return True
+        except Exception as e:
+            logger.warning("Checkpoint 恢复失败: %s", str(e))
+            return False
+
+    def clear_checkpoint(self) -> None:
+        """清理 checkpoint 文件"""
+        path = self._checkpoint_path
+        if path is not None and path.exists():
+            try:
+                path.unlink()
+                logger.debug("Checkpoint 已清理: session=%s", self.session_id)
+            except Exception as e:
+                logger.warning("Checkpoint 清理失败: %s", str(e))
 
 
 class ReActLoop:
@@ -68,6 +156,7 @@ class ReActLoop:
         tool_dispatcher: ToolDispatcher,
         parser: Optional[ResponseParser] = None,
         prompt_builder: Optional[ReactSystemPrompt] = None,
+        error_classifier: Optional[ErrorClassifier] = None,
         max_iterations: int = 15,
         max_tokens: int = 40000,
         diminishing_threshold: int = 500,
@@ -78,6 +167,7 @@ class ReActLoop:
         self._tool_dispatcher = tool_dispatcher
         self._parser = parser or ResponseParser()
         self._prompt_builder = prompt_builder or ReactSystemPrompt()
+        self._error_classifier = error_classifier or ErrorClassifier()
         self._max_iterations = max_iterations
         self._max_tokens = max_tokens
         self._diminishing_threshold = diminishing_threshold
@@ -98,10 +188,12 @@ class ReActLoop:
 
         完整的 ReAct 循环实现：
         1. 构建系统提示词（含工具描述）
-        2. 迭代调用 LLM 获取 Thought/Action/Final Answer
-        3. Action → ToolDispatcher 分发 → Observation
-        4. 预算控制检测是否继续
-        5. 错误恢复与降级
+        2. 尝试从 checkpoint 恢复推理状态
+        3. 迭代调用 LLM 获取 Thought/Action/Final Answer
+        4. Action → ToolDispatcher 分发 → Observation
+        5. 错误分类与恢复（重试/跳过/降级/终止）
+        6. 预算控制检测是否继续
+        7. 每轮迭代保存 checkpoint
 
         Args:
             initial_message: 用户输入消息
@@ -122,12 +214,14 @@ class ReActLoop:
         tool_descriptions = self._tool_dispatcher.get_tool_descriptions()
         system_prompt = self._prompt_builder.build(tool_descriptions=tool_descriptions)
 
-        # 初始化消息列表
+        # 初始化消息列表（优先从 checkpoint 恢复）
         if not context.messages:
-            context.messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": initial_message},
-            ]
+            restored = context.load_checkpoint()
+            if not restored:
+                context.messages = [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": initial_message},
+                ]
 
         # yield session 事件
         if not context.session_id:
@@ -141,16 +235,26 @@ class ReActLoop:
             "conversation_id": context.conversation_id,
         }
 
+        # 如果从 checkpoint 恢复，通知前端
+        if context.iteration > 0:
+            yield {
+                "type": "progress",
+                "session_id": context.session_id,
+                "conversation_id": context.conversation_id,
+                "iteration": context.iteration,
+                "max_iterations": self._max_iterations,
+                "progress": context.iteration / self._max_iterations,
+                "restored": True,
+            }
+
         # 迭代推理循环
         while True:
             context.iteration += 1
             iteration_delta = 0
 
             try:
-                # 调用 LLM
-                llm_output = await self._llm_client.chat(
-                    messages=context.messages,
-                )
+                # ── 调用 LLM（带重试） ──
+                llm_output = await self._call_llm_with_retry(context)
 
                 # 解析 LLM 输出
                 step = self._parser.parse(llm_output)
@@ -211,11 +315,41 @@ class ReActLoop:
                         if match_id:
                             step.tool_args["match_id"] = match_id
 
-                    # 分发工具调用
-                    observation = await self._tool_dispatcher.dispatch(
-                        tool_name=step.tool_name,
-                        args=step.tool_args,
-                    )
+                    # 分发工具调用（含熔断检查和自动重试）
+                    try:
+                        observation = await self._tool_dispatcher.dispatch(
+                            tool_name=step.tool_name,
+                            args=step.tool_args,
+                        )
+                    except Exception as tool_error:
+                        # 工具调用失败 → 分类处理
+                        classified = self._error_classifier.classify(
+                            tool_error, context=step.tool_name
+                        )
+
+                        if classified.category == ErrorCategory.RECOVERABLE:
+                            # 可恢复错误（已在 dispatch 内重试过，仍失败）
+                            observation = f"⚠️ 工具 {step.tool_name} 调用失败（已重试）: {classified.message}"
+                        elif classified.category == ErrorCategory.DEGRADABLE:
+                            # 可降级错误：跳过当前 Action，继续循环
+                            observation = f"⚠️ 工具 {step.tool_name} 不可用: {classified.message}"
+                        elif classified.category == ErrorCategory.TERMINAL:
+                            # 致命错误：终止
+                            yield {
+                                "type": "error",
+                                "session_id": context.session_id,
+                                "conversation_id": context.conversation_id,
+                                "content": f"致命错误: {classified.message}",
+                            }
+                            break
+                        else:
+                            # 未知错误：降级为 Observation
+                            observation = f"⚠️ 工具 {step.tool_name} 调用异常: {classified.message}"
+
+                        logger.warning(
+                            "工具调用异常已处理: tool=%s, category=%s, detail=%s",
+                            step.tool_name, classified.category.value, classified.detail,
+                        )
 
                     # yield observation 事件
                     yield {
@@ -254,17 +388,64 @@ class ReActLoop:
                     }
 
             except Exception as e:
-                # 错误恢复：yield error 事件并终止
-                logger.error(
-                    "推理循环异常 (iteration=%d): %s", context.iteration, str(e)
-                )
-                yield {
-                    "type": "error",
-                    "session_id": context.session_id,
-                    "conversation_id": context.conversation_id,
-                    "content": f"推理过程中发生错误：{str(e)}",
-                }
-                break
+                # ── 错误分类与恢复 ──
+                classified = self._error_classifier.classify(e)
+
+                if classified.category == ErrorCategory.RECOVERABLE:
+                    # 可恢复错误（LLM 重试已耗尽）
+                    logger.warning(
+                        "LLM 调用失败（重试耗尽）: iteration=%d, error=%s",
+                        context.iteration, classified.detail,
+                    )
+                    yield {
+                        "type": "error",
+                        "session_id": context.session_id,
+                        "conversation_id": context.conversation_id,
+                        "content": f"LLM 服务暂时不可用: {classified.message}",
+                    }
+                    break
+
+                elif classified.category == ErrorCategory.DEGRADABLE:
+                    # 可降级错误：跳过本轮，继续循环
+                    logger.warning(
+                        "降级跳过本轮: iteration=%d, error=%s",
+                        context.iteration, classified.detail,
+                    )
+                    yield {
+                        "type": "thought",
+                        "session_id": context.session_id,
+                        "conversation_id": context.conversation_id,
+                        "content": f"[系统] {classified.message}，继续推理...",
+                    }
+                    continue
+
+                elif classified.category == ErrorCategory.TERMINAL:
+                    # 致命错误：终止
+                    logger.error(
+                        "致命错误终止: iteration=%d, error=%s",
+                        context.iteration, classified.detail,
+                    )
+                    yield {
+                        "type": "error",
+                        "session_id": context.session_id,
+                        "conversation_id": context.conversation_id,
+                        "content": f"推理终止: {classified.message}",
+                    }
+                    break
+
+                else:
+                    # 未知错误：降级为纯 Thought 继续
+                    logger.warning(
+                        "未知错误降级: iteration=%d, error=%s",
+                        context.iteration, classified.detail,
+                    )
+                    yield {
+                        "type": "thought",
+                        "session_id": context.session_id,
+                        "conversation_id": context.conversation_id,
+                        "content": f"[系统] {classified.message}，尝试继续推理...",
+                    }
+                    continue
 
             # 预算控制
             decision = budget.consume(delta_tokens=iteration_delta)
@@ -281,6 +462,44 @@ class ReActLoop:
                     "content": "推理预算耗尽，分析已达到当前条件下的最优结论。",
                 }
                 break
+
+            # 每轮迭代后保存 checkpoint
+            context.save_checkpoint()
+
+    async def _call_llm_with_retry(self, context: ReActContext) -> str:
+        """调用 LLM，带自动重试
+
+        对可恢复错误（超时、限流）进行最多 _LLM_MAX_RETRIES 次重试，
+        指数退避。其他错误直接抛出。
+
+        Args:
+            context: 推理上下文
+
+        Returns:
+            str: LLM 输出文本
+
+        Raises:
+            Exception: 重试耗尽后仍失败，抛出最后一次异常
+        """
+        last_error: Optional[Exception] = None
+        for attempt in range(1, _LLM_MAX_RETRIES + 1):
+            try:
+                return await self._llm_client.chat(
+                    messages=context.messages,
+                )
+            except Exception as e:
+                last_error = e
+                classified = self._error_classifier.classify(e)
+                if classified.category == ErrorCategory.RECOVERABLE and attempt < _LLM_MAX_RETRIES:
+                    delay = _LLM_RETRY_BASE_DELAY * (2 ** (attempt - 1))
+                    logger.warning(
+                        "LLM 调用重试 %d/%d: delay=%.1fs, error=%s",
+                        attempt, _LLM_MAX_RETRIES, delay, classified.detail,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                # 不可恢复错误或重试耗尽
+                raise last_error  # type: ignore[misc]
 
     def should_continue(self, iteration: int, token_delta: int) -> BudgetDecision:
         """判断是否继续迭代（预算控制 + 边际递减检测）
