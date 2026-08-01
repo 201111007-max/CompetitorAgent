@@ -212,6 +212,15 @@ class RagEngine:
             from sentence_transformers import SentenceTransformer  # type: ignore[import-untyped]
             self._has_sentence_transformers = True
             logger.info("正在加载 embedding 模型: all-MiniLM-L6-v2")
+
+            # 企业网络环境可能需要禁用 SSL 验证
+            import httpx
+            original_init = httpx.Client.__init__
+            def _ssl_disabled_init(self, *args, **kwargs):
+                kwargs.setdefault("verify", False)
+                original_init(self, *args, **kwargs)
+            httpx.Client.__init__ = _ssl_disabled_init
+
             self._embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
             logger.info("embedding 模型加载完成")
             return True

@@ -21,6 +21,8 @@ dependencies = [
 
 [tool.setuptools.packages.find]
 include = ["dota_helper*"]
+where = ["."]
+namespaces = false
 
 [project.optional-dependencies]
 mcp = [
