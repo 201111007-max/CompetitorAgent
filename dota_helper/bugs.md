@@ -107,42 +107,27 @@ def validate_tool(self, tool_name: str) -> bool:
 
 ## 🟡 P2 — 扩展性问题
 
-### 8. 插件系统缺失
+### 8. 插件系统缺失 ✅ 已修复
 
-**位置**: 全局
+**位置**: `agent/plugin.py`
 
-**问题**: 无 `register_plugin()` API、无生命周期钩子（`before_action` / `after_action` / `before_llm_call` / `after_llm_call`）、无中间件管道。
-
-**影响**: 所有功能硬编码，无法热插拔。添加新能力必须修改核心代码。
+**修复**: 新增 `Plugin` 抽象基类（7 个生命周期钩子：`on_start`/`on_end`/`before_llm_call`/`after_llm_call`/`before_action`/`after_action`/`on_error`）+ `PluginRegistry`（注册/卸载/事件分发，管道模式，单个插件异常不中断链）。`react_loop.py` 的 `execute()` 中集成了 6 个钩子点。
 
 ---
 
-### 9. 本地工具注册机制缺失
+### 9. 本地工具注册机制缺失 ✅ 已修复
 
-**位置**: `agent/tool_dispatcher.py`
+**位置**: `agent/tool_registry.py`、`agent/tool_dispatcher.py`
 
-**问题**: 工具发现完全依赖 MCP 的 `list_tools()`，无本地 `register_tool(name, handler, schema)` API。无法注册本地工具或组合多个工具为复合操作。
-
-**影响**: 所有工具必须通过 MCP Server 暴露，无法轻量级注册本地函数作为工具。
+**修复**: 新增 `ToolSchema`/`LocalTool`/`ToolRegistry`，支持 `register(name, handler, description, schema)`、同步/异步 handler 自动检测、`get_descriptions()` 格式化输出。`ToolDispatcher.dispatch()` 优先检查本地工具（本地 > MCP），`get_tool_descriptions()` 合并本地和 MCP 工具描述。
 
 ---
 
-### 10. Agent 间协作机制缺失
+### 10. Agent 间协作机制缺失 ✅ 已修复
 
-**位置**: `parallel/subagent.py:108-113`
+**位置**: `agent/message_bus.py`
 
-**问题**: `SubAgent` 完全独立执行，无消息总线、无投票/共识机制。子代理之间不能交换中间结果。
-
-```python
-# subagent.py:108-113 — 子代理完全隔离
-context = AnalysisContext(
-    phase=self._name,
-    budget=budget,
-    completed_results=[],  # ← 硬编码为空，不共享结果
-)
-```
-
-**影响**: 无法实现多 Agent 协同推理（如交叉验证、分工协作）。
+**修复**: 新增 `MessageBus` 发布/订阅模式，`EventType` 枚举（`RESULT_READY`/`ERROR`/`STATUS_CHANGE`/`CUSTOM`），支持 `sender_filter`、消息历史查询、`max_history` 限制。子代理可通过共享 `MessageBus` 实例交换中间结果。
 
 ---
 

@@ -17,6 +17,7 @@ import asyncio
 from typing import Any, Dict, List, Optional, Union
 
 from dota_helper.agent.circuit_breaker import CircuitBreakerRegistry
+from dota_helper.agent.tool_registry import ToolRegistry
 from dota_helper.mcp_client.client import MCPClient, NoOpMCPClient
 from dota_helper.mcp_client.types import ToolInfo, MCPConnectionError
 from dota_helper.observability.logger import get_logger
@@ -42,17 +43,20 @@ class ToolDispatcher:
         self,
         mcp_client: Optional[Union[MCPClient, NoOpMCPClient]] = None,
         circuit_breaker_registry: Optional[CircuitBreakerRegistry] = None,
+        tool_registry: Optional[ToolRegistry] = None,
     ) -> None:
         """初始化工具分发器
 
         Args:
             mcp_client: MCP Client 实例（MCPClient 或降级模式 NoOpMCPClient）
             circuit_breaker_registry: 熔断器注册表（可选，默认创建新实例）
+            tool_registry: 本地工具注册表（可选）
         """
         self._mcp_client: Optional[Union[MCPClient, NoOpMCPClient]] = mcp_client
         self._available_tools: List[Dict[str, Any]] = []
         self._tool_name_set: set = set()
         self._circuit_breaker = circuit_breaker_registry or CircuitBreakerRegistry()
+        self._tool_registry = tool_registry or ToolRegistry()
 
         # 如果 MCP Client 已连接且有工具缓存，自动加载
         if mcp_client is not None and hasattr(mcp_client, "tools") and mcp_client.tools:
@@ -120,6 +124,11 @@ class ToolDispatcher:
             MCPConnectionError: MCP 连接错误（重试耗尽后抛出）
             RuntimeError: MCP Client 未连接
         """
+        # 优先检查本地工具
+        if self._tool_registry.has_tool(tool_name):
+            logger.info("分发本地工具调用: tool=%s, args=%s", tool_name, args)
+            return await self._tool_registry.call_tool(tool_name, args)
+
         if not self.validate_tool(tool_name):
             logger.warning("工具不存在: %s", tool_name)
             raise ValueError(f"工具 '{tool_name}' 不在可用工具列表中")
@@ -139,7 +148,7 @@ class ToolDispatcher:
                 f"工具 '{tool_name}' 已被熔断，暂时无法调用",
             )
 
-        logger.info("分发工具调用: tool=%s, args=%s", tool_name, args)
+        logger.info("分发 MCP 工具调用: tool=%s, args=%s", tool_name, args)
 
         # 带重试的调用
         last_error: Optional[Exception] = None
@@ -182,37 +191,47 @@ class ToolDispatcher:
 
         将可用工具列表格式化为 LLM 可理解的自然语言描述，
         包含工具名、功能说明和参数 schema。
+        优先包含本地注册工具，再包含 MCP 工具。
 
         Returns:
             str: 格式化的工具描述文本
         """
-        if not self._available_tools:
-            return "（暂无可用工具 — MCP Client 未连接）"
-
         descriptions = []
-        for tool in self._available_tools:
-            name = tool.get("name", "unknown")
-            desc = tool.get("description", "无描述")
-            schema = tool.get("schema", {})
 
-            # 格式化单个工具描述
-            tool_desc = f"- {name}: {desc}"
-            if schema:
-                params = schema.get("properties", {})
-                if params:
-                    param_strs = []
-                    for param_name, param_info in params.items():
-                        param_type = param_info.get("type", "any")
-                        param_desc = param_info.get("description", "")
-                        param_strs.append(f"  - {param_name} ({param_type}): {param_desc}")
-                    tool_desc += "\n" + "\n".join(param_strs)
+        # 本地工具
+        local_desc = self._tool_registry.get_descriptions()
+        if local_desc:
+            descriptions.append("【本地工具】")
+            descriptions.append(local_desc)
 
-            descriptions.append(tool_desc)
+        # MCP 工具
+        if self._available_tools:
+            descriptions.append("【MCP 工具】")
+            for tool in self._available_tools:
+                name = tool.get("name", "unknown")
+                desc = tool.get("description", "无描述")
+                schema = tool.get("schema", {})
+
+                tool_desc = f"- {name}: {desc}"
+                if schema:
+                    params = schema.get("properties", {})
+                    if params:
+                        param_strs = []
+                        for param_name, param_info in params.items():
+                            param_type = param_info.get("type", "any")
+                            param_desc = param_info.get("description", "")
+                            param_strs.append(f"  - {param_name} ({param_type}): {param_desc}")
+                        tool_desc += "\n" + "\n".join(param_strs)
+
+                descriptions.append(tool_desc)
+
+        if not descriptions:
+            return "（暂无可用工具）"
 
         return "\n".join(descriptions)
 
     def validate_tool(self, tool_name: str) -> bool:
-        """校验工具名是否存在于可用工具列表
+        """校验工具名是否存在于可用工具列表（含本地工具）
 
         Args:
             tool_name: 工具名称
@@ -220,7 +239,7 @@ class ToolDispatcher:
         Returns:
             bool: 工具是否可用
         """
-        return tool_name in self._tool_name_set
+        return tool_name in self._tool_name_set or self._tool_registry.has_tool(tool_name)
 
     @property
     def tool_count(self) -> int:
