@@ -143,13 +143,421 @@ def validate_tool(self, tool_name: str) -> bool:
 
 ---
 
-### 12. RAG 未集成到 Agent 循环
+### 12. RAG 知识库框架与内容扩充
 
-**位置**: `mcp_server/helpers/rag_index.py` vs `agent/react_loop.py`
+**位置**: `mcp_server/helpers/rag_index.py`、`mcp_server/resources/heroes_txt/`
 
-**问题**: MCP Server 内有完整的 TF-IDF/FAISS 向量检索实现，但 Agent 必须通过 MCP 工具显式调用才能使用，ReAct 循环无自动 RAG 检索能力。
+#### 12.1 现有 RAG 实现分析
 
-**影响**: Agent 无法在推理过程中自动检索相关知识，依赖 LLM 自身知识或用户显式触发。
+当前 RAG 是纯 TF-IDF 词袋模型，不是真正的语义检索：
+
+| 维度 | 现状 |
+|------|------|
+| 向量化 | 纯 NumPy 手写 TF-IDF，无 embedding 模型 |
+| 检索 | 关键词匹配（0.7）+ 余弦相似度（0.3）混合评分 |
+| 知识源 | 仅 127 个英雄 `.txt` 文件（技能说明书，无攻略内容） |
+| 向量库 | 无（FAISS 可选，仅加速内积搜索） |
+| 依赖 | 无 sentence-transformers / chromadb / faiss 声明 |
+
+**知识源质量评估**：每个英雄 txt 仅包含官方技能数值（命石、技能、先天、魔晶、A杖），**没有出装推荐、对线技巧、团战定位、连招策略**等用户真正需要的攻略知识。用户问"幽鬼怎么玩"时 LLM 只能看到技能描述。
+
+#### 12.2 知识缺口
+
+| 知识类型 | 当前状态 | 用户问的频率 | 获取难度 |
+|---------|---------|------------|---------|
+| 英雄攻略（出装、连招、对线） | ❌ 没有 | 高 | 中 |
+| 版本补丁说明 | ⚠️ 有 API 但未结构化入库 | 中 | 低 |
+| 游戏机制（护甲、魔抗、中立物品） | ❌ 没有 | 中 | 低 |
+| 策略知识（打盾时机、推高决策） | ⚠️ 有 YAML 提示模板但未入库 | 中 | 低 |
+| 历史复盘结论 | ❌ 没有 | 低 | 高 |
+| 装备信息 | ⚠️ 有 API constants 但未结构化 | 中 | 低 |
+
+#### 12.3 RAG 选型建议
+
+**推荐方案：Embedding + chromadb（方案二）**
+
+| 方案 | 描述 | 复杂度 | 效果 |
+|------|------|--------|------|
+| ① 纯 TF-IDF 升级 | 保持现有，只扩充知识源 | ⭐ 极低 | ⭐⭐ 关键词匹配，语义理解差 |
+| **② Embedding + chromadb** | **sentence-transformers + chromadb 嵌入式向量库** | **⭐⭐ 低** | **⭐⭐⭐⭐ 语义检索** |
+| ③ 重排序 + LLM 生成 | 加 cross-encoder reranker + LLM 摘要 | ⭐⭐⭐⭐⭐ 极高 | ⭐⭐⭐⭐⭐ 最好但过度设计 |
+| ④ 双通道混合 | TF-IDF + Embedding 并行检索合并排序 | ⭐⭐⭐ 中 | ⭐⭐⭐⭐ 兼容性好 |
+
+**选型理由**：
+- 当前 TF-IDF 无法处理语义查询（"后期怎么打"搜不到"后期决策"文档），Embedding 能解决
+- 知识源已存在（127 个英雄 txt），只需新增 embedding 层
+- chromadb 嵌入式无服务进程，pip install 即可，改动最小
+- 未来可扩展：换 embedding 模型或加 reranker 都不需要改检索接口
+
+**不选方案③**：DotaHelper 是单用户工具，重排序 + LLM 生成对游戏问答场景收益不大但复杂度翻倍。
+**不选方案④**：纯 Embedding 语义检索已能覆盖关键词匹配场景（"幽鬼"的 embedding 和文档中"幽鬼"的 embedding 相似度自然高），无需维护两套检索。
+
+#### 12.4 知识库目录结构设计
+
+```
+dota_helper/rag/
+├── engine.py                  # RAG 引擎（embedding + chromadb 封装）
+├── knowledge_base/            # 知识源目录（Markdown 文件，可 Git 管理）
+│   ├── heroes/                # 英雄攻略（手动整理 + 爬取）
+│   │   ├── spectre.md         # 幽鬼攻略：出装、连招、对线、团战
+│   │   └── pudge.md
+│   ├── mechanics/             # 游戏机制（手动整理）
+│   │   ├── armor.md           # 护甲减伤公式
+│   │   ├── magic_resist.md    # 魔抗叠加规则
+│   │   └── neutral_items.md   # 中立物品机制
+│   ├── patches/               # 版本补丁（自动爬取）
+│   │   └── 7_41.md
+│   └── strategies/            # 策略知识（从 YAML 提取）
+│       ├── roshan_timing.md
+│       └── ward_efficiency.md
+└── chromadb_data/             # chromadb 持久化目录（自动生成，不 Git 管理）
+```
+
+**设计原则**：
+- 知识源和检索分离：知识源是 Markdown 文件（人类可读、可 Git 管理），检索用 chromadb（向量索引自动构建）
+- Metadata 过滤：每个文档带 tag（hero/mechanic/patch/strategy），检索时按类型过滤
+- 增量更新：chromadb 支持 upsert，新增文档不需要重建整个索引
+- 回退机制：chromadb 查询无结果时回退到现有 TF-IDF 搜索
+
+#### 12.5 知识获取方案（按投入产出比排序）
+
+**Phase 1 — 结构化现有数据（半天）**
+
+| 数据 | 位置 | 做法 |
+|------|------|------|
+| 复盘技能 YAML | `prompts/skills/*.yaml` | 解析为 Markdown 文档入库 |
+| 战术分析 YAML | `prompts/tactical_*.yaml` | 同上 |
+| OpenDota constants | `api_samples/constants_*.json` | 定时拉取，结构化后入库 |
+| 历史复盘报告 | SQLite session_archive | 提取结论，去重后入库 |
+
+**Phase 2 — 爬取公开攻略站点（1 天）**
+
+| 站点 | 内容 | 爬取方式 | 更新频率 |
+|------|------|---------|---------|
+| Dotabuff | 英雄胜率、出装统计、对位数据 | 页面解析（已有 httpx） | 每周 |
+| Liquipedia | 英雄攻略、版本 Meta、赛事数据 | 页面解析（已有站点过滤） | 每月 |
+| Dota 2 Wiki | 游戏机制、技能机制、物品机制 | API 或页面解析 | 每版本 |
+
+**爬虫策略**：不实时爬，用定时任务（GitHub Actions / 系统 cron）每周更新一次。用户查询时只查本地知识库。
+
+**Phase 3 — 复盘结论自动沉淀（2 天）**
+
+```
+复盘完成 → 提取结论（conclusions） → 向量化 → 存入 chromadb
+下次类似比赛 → 检索历史结论 → 作为 context 注入 LLM
+```
+
+**过滤条件**：只存置信度 > 0.7 的结论，避免垃圾数据污染知识库。
+
+**Phase 4 — 手动整理热门英雄攻略（2 天）**
+
+挑选 10 个热门英雄（幽鬼、帕吉、影魔、卡尔等），人工整理出装推荐、对线技巧、团战定位，写入 Markdown 文件。
+
+#### 12.6 知识库扩充管道
+
+```
+┌─────────────────────────────────────────────────┐
+│                 知识库扩充管道                      │
+├─────────────────────────────────────────────────┤
+│                                                   │
+│  定时任务（每周）                                   │
+│  ├── 爬取 Dotabuff 英雄出装统计 → heroes/          │
+│  ├── 爬取 Liquipedia 版本更新 → patches/           │
+│  └── 爬取 Dota 2 Wiki 机制变更 → mechanics/        │
+│                                                   │
+│  触发式（每次复盘后）                               │
+│  ├── 提取复盘结论（confidence > 0.7）              │
+│  ├── 去重（检查 chromadb 中是否已有相似文档）       │
+│  └── 存入 chromadb（带 metadata: match_id, patch） │
+│                                                   │
+│  手动（开发者操作）                                 │
+│  ├── 新增英雄攻略 Markdown                         │
+│  ├── 更新游戏机制文档                              │
+│  └── 运行索引重建脚本                              │
+│                                                   │
+└─────────────────────────────────────────────────┘
+```
+
+#### 12.7 集成到 Agent 循环的设计
+
+##### 12.7.1 当前架构的问题
+
+现有 RAG 使用方式是**被动调用**——LLM 自己决定是否调 `rag_hero_intro` 工具：
+
+```
+用户输入 → LLM（无知识注入）→ LLM 决定是否调 rag_hero_intro → 拿到知识 → 回答
+```
+
+问题：
+1. LLM 不知道什么时候该查知识库，系统提示词说"英雄攻略直接 Final Answer"，但 LLM 自身知识可能过时
+2. RAG 结果只给 LLM 看一次，没有自动注入机制
+3. 知识检索和 LLM 推理是串行的，LLM 必须先调工具才能拿到知识
+
+##### 12.7.2 三层 RAG 集成架构
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    三层 RAG 集成架构                          │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  第一层：系统提示词注入（初始化时）                             │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │  ReactSystemPrompt.build()                          │    │
+│  │  ├── 角色定义 + 工具描述                             │    │
+│  │  └── + RAG 知识摘要（可选，注入高频知识片段）          │    │
+│  └─────────────────────────────────────────────────────┘    │
+│                                                              │
+│  第二层：before_llm_call 插件（每轮迭代）                      │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │  RagPlugin.before_llm_call(messages)                │    │
+│  │  ├── 提取最后一条 user message 作为 query            │    │
+│  │  ├── 检索 chromadb → top_k 结果                     │    │
+│  │  ├── 如果相似度 > threshold → 注入为 system 消息      │    │
+│  │  └── 返回修改后的 messages                           │    │
+│  └─────────────────────────────────────────────────────┘    │
+│                                                              │
+│  第三层：MCP 工具（LLM 主动调用）                              │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │  rag_hero_intro(query, top_k) — 已有，保留不变       │    │
+│  │  rag_search(query, type_filter) — 新增通用检索工具    │    │
+│  └─────────────────────────────────────────────────────┘    │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+##### 12.7.3 新增文件
+
+```
+dota_helper/rag/
+├── __init__.py              # 包入口
+├── engine.py                # RAG 引擎：embedding + chromadb 封装
+├── plugin.py                # RagPlugin：before_llm_call 自动注入
+└── knowledge_base/          # 知识源目录（Markdown，可 Git 管理）
+    ├── heroes/              # 英雄攻略
+    ├── mechanics/           # 游戏机制
+    ├── patches/             # 版本补丁
+    └── strategies/          # 策略知识
+```
+
+##### 12.7.4 RagEngine 设计
+
+```python
+class RagEngine:
+    """RAG 引擎 — Embedding + chromadb 封装
+
+    职责：
+    1. 从 knowledge_base/ 加载 Markdown 文档
+    2. 用 sentence-transformers 生成 embedding
+    3. 存入 chromadb（带 metadata 过滤）
+    4. 提供 search() 接口供插件和工具调用
+    """
+
+    def __init__(self, kb_dir="knowledge_base", persist_dir="chromadb_data"):
+        self._kb_dir = Path(kb_dir)
+        self._persist_dir = Path(persist_dir)
+        self._embedding_model = None   # 懒加载
+        self._collection = None        # 懒加载
+
+    def _load_embedding_model(self):
+        """懒加载 sentence-transformers 模型（首次 ~2s，之后常驻内存）"""
+        from sentence_transformers import SentenceTransformer
+        self._embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
+
+    def _get_collection(self):
+        """懒加载 chromadb collection"""
+        import chromadb
+        client = chromadb.PersistentClient(str(self._persist_dir))
+        self._collection = client.get_or_create_collection(
+            name="dota_knowledge", metadata={"hnsw:space": "cosine"},
+        )
+        return self._collection
+
+    def index_all(self):
+        """扫描 knowledge_base/ 下所有 .md 文件，重建索引
+        - 遍历 knowledge_base/{category}/*.md
+        - 每个文件按 ## 标题切分为段落
+        - 每段独立 embedding → upsert to chromadb
+        - metadata: {category, filename, title, source}
+        """
+
+    def search(self, query, top_k=3, category=None, min_score=0.3):
+        """语义检索
+        - query → embedding
+        - chromadb query(where={"category": category} if category)
+        - 过滤 score < min_score
+        - 返回 [{"content": "...", "metadata": {...}, "score": 0.95}]
+        """
+
+    def search_hero(self, hero_name):
+        """快捷方法：按英雄名精确检索（metadata 过滤 category=hero + filename 匹配）"""
+```
+
+**关键设计点**：
+- **懒加载模型**：`SentenceTransformer` 首次调用时加载，之后常驻内存
+- **段落切分**：Markdown 按 `##` 标题切分，每段独立 embedding，检索粒度更细
+- **相似度阈值**：低于 0.3 的结果丢弃，避免注入无关知识污染 LLM context
+- **回退机制**：chromadb 查询无结果时调用现有 `rag_index.rank_hero_documents()` 回退
+
+##### 12.7.5 RagPlugin 设计
+
+```python
+class RagPlugin(Plugin):
+    """RAG 插件 — 在 LLM 调用前自动注入相关知识
+
+    通过 PluginRegistry 注册到 ReActLoop，
+    在 before_llm_call 钩子中检索并注入知识。
+    """
+
+    def __init__(self, engine: RagEngine, threshold=0.4):
+        self._engine = engine
+        self._threshold = threshold
+        self._last_query = ""        # 避免重复检索
+        self._last_injected = ""     # 避免重复注入
+
+    async def before_llm_call(self, messages):
+        """在 LLM 调用前注入 RAG 检索结果
+
+        流程：
+        1. 取最后一条 user 消息作为 query
+        2. 如果 query 和上次一样 → 跳过（避免重复检索）
+        3. 检索 chromadb
+        4. 如果最高分 > threshold → 注入为 system 消息
+        5. 如果最高分 < threshold → 跳过（不污染 context）
+        """
+        last_user = self._get_last_user_message(messages)
+        if not last_user or last_user == self._last_query:
+            return messages
+        self._last_query = last_user
+
+        results = self._engine.search(last_user, top_k=2)
+        if not results or results[0]["score"] < self._threshold:
+            return messages
+
+        content = self._format_context(results)
+        if content == self._last_injected:
+            return messages
+        self._last_injected = content
+
+        messages = self._inject_context(messages, content)
+        return messages
+
+    def _format_context(self, results):
+        """格式化检索结果为 LLM 可读的上下文"""
+        lines = ["\n## 相关知识", ""]
+        for r in results:
+            cat = r["metadata"].get("category", "general")
+            title = r["metadata"].get("title", "")
+            lines.append(f"[{cat}] {title}:")
+            lines.append(r["content"][:500])
+            lines.append("")
+        return "\n".join(lines)
+```
+
+**关键设计点**：
+- **去重机制**：`_last_query` 和 `_last_injected` 避免同一轮迭代重复检索和重复注入
+- **阈值过滤**：相似度低于 0.4 的不注入，避免无关知识干扰 LLM
+- **注入位置**：追加到已有 system 消息末尾，不破坏 system/user/assistant 消息顺序
+- **不阻塞**：检索失败或超时不影响主流程，静默跳过
+
+##### 12.7.6 集成到现有代码
+
+**修改 `react_agent.py`**（约 10 行）：
+
+```python
+# 在 create() 工厂方法中注册 RagPlugin
+from dota_helper.rag.engine import RagEngine
+from dota_helper.rag.plugin import RagPlugin
+
+rag_engine = RagEngine()
+rag_plugin = RagPlugin(engine=rag_engine)
+
+plugin_registry = PluginRegistry()
+plugin_registry.register(rag_plugin)
+
+self._loop = ReActLoop(
+    llm_client=self._llm_client,
+    tool_dispatcher=self._tool_dispatcher,
+    parser=self._parser,
+    prompt_builder=self._prompt_builder,
+    plugin_registry=plugin_registry,  # ← 新增
+    ...
+)
+```
+
+**修改 `react_system.py`**（约 5 行）：
+
+```python
+# 在系统提示词中告知 LLM 有自动 RAG 能力
+_SYSTEM_ROLE_TEMPLATE = """...
+## 自动知识检索
+
+系统会自动检索相关知识库并注入到你的上下文中。
+你无需主动调用 rag_hero_intro 工具来获取英雄知识，
+直接使用注入的知识即可。
+
+如果你需要更详细的特定知识，仍然可以调用 rag_hero_intro 工具。
+..."""
+```
+
+##### 12.7.7 数据流完整链路
+
+```
+用户输入："幽鬼怎么玩"
+  │
+  ├─→ ReActLoop.execute()
+  │     │
+  │     ├─→ before_llm_call 插件
+  │     │     └─→ RagPlugin.before_llm_call(messages)
+  │     │           ├─ 提取 "幽鬼怎么玩" 作为 query
+  │     │           ├─ engine.search("幽鬼怎么玩", top_k=2)
+  │     │           │     └─ chromadb query → [{content: "幽鬼攻略...", score: 0.87}]
+  │     │           ├─ score 0.87 > threshold 0.4 → 注入
+  │     │           └─ messages 追加 system 消息：
+  │     │              "相关知识：[hero] 幽鬼攻略：出装推荐..."
+  │     │
+  │     ├─→ LLM 调用（messages 已包含 RAG 知识）
+  │     │     └─ LLM 看到 RAG 知识 + 系统提示词 → 直接 Final Answer
+  │     │
+  │     └─→ yield final 事件
+  │
+  └─→ 用户看到："幽鬼推荐出装：辉耀→分身斧→蝴蝶..."
+```
+
+##### 12.7.8 三种使用方式对比
+
+| 方式 | 触发时机 | 优点 | 缺点 | 适用场景 |
+|------|---------|------|------|---------|
+| **插件自动注入** | 每轮 LLM 调用前 | 无感，LLM 不需要主动调工具 | 多一次 embedding 查询（~10ms） | 通用知识问答 |
+| **MCP 工具调用** | LLM 主动选择 | LLM 可控，可指定参数 | LLM 可能忘记调 | 需要详细知识的场景 |
+| **系统提示词注入** | 初始化时一次 | 零开销 | 提示词变长，不能动态适配 | 高频知识片段 |
+
+**推荐组合**：插件自动注入（兜底）+ MCP 工具（补充），系统提示词注入暂不做。
+
+##### 12.7.9 实施步骤
+
+| 步骤 | 内容 | 文件 | 行数 |
+|------|------|------|------|
+| 1 | 创建 `rag/engine.py` — RAG 引擎 | 新增 | ~120 |
+| 2 | 创建 `rag/plugin.py` — RagPlugin | 新增 | ~80 |
+| 3 | 创建 `rag/__init__.py` | 新增 | ~5 |
+| 4 | 修改 `react_agent.py` — 注册 RagPlugin | 修改 | ~10 |
+| 5 | 修改 `react_system.py` — 告知 LLM 自动 RAG | 修改 | ~5 |
+| 6 | 创建 `knowledge_base/` 目录 + 示例文档 | 新增 | ~50 |
+| 7 | 安装依赖 `sentence-transformers` + `chromadb` | pyproject.toml | ~2 |
+
+**总计**：新增 ~200 行，修改 ~15 行，安装 2 个依赖。
+
+#### 12.8 实施优先级
+
+| 阶段 | 内容 | 工作量 | 收益 |
+|------|------|--------|------|
+| Phase 1 | 把现有 YAML 技能/战术模板结构化入库 | 半天 | 中 |
+| Phase 2 | 爬取 Dotabuff 英雄出装统计 | 1 天 | 高 |
+| Phase 3 | 爬取 Dota 2 Wiki 游戏机制 | 1 天 | 高 |
+| Phase 4 | 复盘结论自动沉淀 | 2 天 | 中（需积累） |
+| Phase 5 | 手动整理 10 个热门英雄攻略 | 2 天 | 高 |
+
+**建议**：先做 Phase 1 + Phase 2，两天内让 RAG 知识库从"只有技能说明书"变成"有出装统计 + 策略知识"。Phase 3-5 看用户反馈再决定是否投入。
 
 ---
 
