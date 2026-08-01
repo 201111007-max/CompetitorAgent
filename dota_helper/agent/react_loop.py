@@ -9,6 +9,7 @@
       → 追加到上下文 → 重新调用 LLM
       → 循环直到 Final Answer 或预算耗尽
 """
+import re
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Dict, List, Optional
@@ -200,6 +201,16 @@ class ReActLoop:
                         },
                     }
 
+                    # 自动补全缺失的 match_id 参数
+                    if not step.tool_args.get("match_id") and step.tool_name in (
+                        "get_match_details", "get_match_items", "generate_review_report",
+                        "analyze_ward_efficiency", "analyze_roshan_timing",
+                        "analyze_late_game_decisions", "compare_match_performance",
+                    ):
+                        match_id = self._extract_match_id(context, step.thought)
+                        if match_id:
+                            step.tool_args["match_id"] = match_id
+
                     # 分发工具调用
                     observation = await self._tool_dispatcher.dispatch(
                         tool_name=step.tool_name,
@@ -213,6 +224,16 @@ class ReActLoop:
                         "conversation_id": context.conversation_id,
                         "content": observation,
                     }
+
+                    # generate_review_report 返回完整报告后自动终止
+                    if step.tool_name == "generate_review_report":
+                        yield {
+                            "type": "final",
+                            "session_id": context.session_id,
+                            "conversation_id": context.conversation_id,
+                            "content": observation,
+                        }
+                        break
 
                     # 追加到上下文
                     context.messages.append(
@@ -278,3 +299,28 @@ class ReActLoop:
             return BudgetDecision.STOP_DIMINISHING
 
         return BudgetDecision.CONTINUE
+
+    @staticmethod
+    def _extract_match_id(context: "ReActContext", thought: str) -> Optional[int]:
+        """从用户消息或 Thought 中提取 match_id
+
+        Args:
+            context: ReAct 上下文
+            thought: LLM 的 Thought 文本
+
+        Returns:
+            Optional[int]: 提取到的 match_id，未找到返回 None
+        """
+        # 1. 从 Thought 中提取
+        match = re.search(r"(\d{10})", thought)
+        if match:
+            return int(match.group(1))
+
+        # 2. 从用户消息中提取
+        for msg in reversed(context.messages):
+            if msg["role"] == "user":
+                match = re.search(r"(\d{10})", msg["content"])
+                if match:
+                    return int(match.group(1))
+
+        return None

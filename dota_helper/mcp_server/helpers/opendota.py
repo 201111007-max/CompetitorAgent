@@ -137,9 +137,13 @@ class OpenDotaClient:
                     await self._client.aclose()
                 except Exception as exc:  # noqa: BLE001
                     logger.debug("Closing old httpx client, ignoring: %s", exc)
+            # 读取代理配置
+            _proxy_url = os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY")
             self._client = httpx.AsyncClient(
                 base_url=self._base_url,
                 timeout=httpx.Timeout(self._timeout),
+                proxy=_proxy_url,
+                verify=False,  # 公司网络自签名证书
             )
             self._loop = loop
         return self._client
@@ -395,14 +399,15 @@ class OpenDotaClient:
         """Fetch item constants and cache as ``{item_id: item_dict}``."""
         if use_cache and self._items_cache is not None:
             return self._items_cache
-        constants = await self.get_constants(use_cache=use_cache)
-        raw_items = constants.get("items", [])
+        raw_items = await self.get_cached_constants("items")
         items_map: Dict[int, Dict[str, Any]] = {}
-        if isinstance(raw_items, list):
-            for item in raw_items:
-                item_id = item.get("id")
+        if isinstance(raw_items, dict):
+            for key, info in raw_items.items():
+                if not isinstance(info, dict):
+                    continue
+                item_id = info.get("id")
                 if item_id is not None:
-                    items_map[item_id] = item
+                    items_map[item_id] = info
         self._items_cache = items_map
         return items_map
 
@@ -524,8 +529,7 @@ class OpenDotaClient:
         """
         if self._items_map_cache is not None:
             return self._items_map_cache
-        constants = await self.get_constants()
-        raw_items = constants.get("items", {})
+        raw_items = await self.get_cached_constants("items")
         items_map: Dict[int, Dict[str, Any]] = {}
         if isinstance(raw_items, dict):
             for key, info in raw_items.items():

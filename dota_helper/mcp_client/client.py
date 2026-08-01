@@ -15,6 +15,7 @@
 - SDK 不可用 → 自动降级为 NoOpMCPClient
 """
 import asyncio
+import os
 import sys
 from typing import Any, Dict, List, Optional
 
@@ -25,7 +26,11 @@ logger = get_logger("mcp_client.client")
 
 # 默认 MCP Server 启动命令
 _DEFAULT_SERVER_COMMAND = sys.executable  # 当前 Python 解释器
-_DEFAULT_SERVER_ARGS = ["-m", "dota_helper.mcp_server.server"]
+# 使用绝对路径避免子进程 CWD 问题
+_DEFAULT_SERVER_SCRIPT = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "run_server.py")
+)
+_DEFAULT_SERVER_ARGS = [_DEFAULT_SERVER_SCRIPT]
 
 # 重连参数
 _MAX_RECONNECT_ATTEMPTS = 3
@@ -65,6 +70,11 @@ class MCPClient:
         """
         self._server_command = server_command or _DEFAULT_SERVER_COMMAND
         self._server_args = server_args or _DEFAULT_SERVER_ARGS
+        # 自动继承父进程的 PYTHONPATH，确保子进程能找到 dota_helper 包
+        if server_env is None:
+            pythonpath = os.environ.get("PYTHONPATH", "")
+            if pythonpath:
+                server_env = {"PYTHONPATH": pythonpath}
         self._server_env = server_env
         self._call_timeout = call_timeout
 

@@ -3,6 +3,7 @@ import os
 import asyncio
 from typing import List, Dict, Any, Optional
 
+import httpx
 from openai import AsyncOpenAI
 
 from dota_helper.observability import get_tracer, get_metrics_collector
@@ -18,7 +19,7 @@ class LLMClient:
         self,
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
-        default_model: str = "deepseek-v4-pro",
+        default_model: str = "deepseek-v4-flash",
         max_retries: int = 2,
         timeout: float = 30.0,
     ) -> None:
@@ -74,6 +75,15 @@ class LLMClient:
             }
             if self._base_url:
                 client_kwargs["base_url"] = self._base_url
+
+            # 读取代理配置（支持 HTTP_PROXY / HTTPS_PROXY 环境变量）
+            proxy_url = os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY") or ""
+            if proxy_url.strip():
+                client_kwargs["http_client"] = httpx.AsyncClient(
+                    proxy=proxy_url,
+                    verify=False,  # 公司网络自签名证书
+                )
+                logger.info("LLM 客户端使用代理: %s", proxy_url)
 
             self._client = AsyncOpenAI(**client_kwargs)
             logger.debug("创建 AsyncOpenAI 客户端实例")

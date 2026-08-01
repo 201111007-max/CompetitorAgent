@@ -8,6 +8,16 @@ import json
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
+
+from dotenv import load_dotenv
+
+# 加载 .env 环境变量（优先 dota_helper/.env，其次项目根目录 .env）
+_env_path = Path(__file__).parent / ".env"
+if _env_path.exists():
+    load_dotenv(_env_path, override=False)
+else:
+    load_dotenv(Path(__file__).parent.parent / ".env", override=False)
+
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, Request
@@ -298,25 +308,33 @@ async def chat(request: Dict[str, Any]) -> StreamingResponse:
     if not message:
         raise HTTPException(status_code=422, detail="缺少 message")
 
+    print(f"[DEBUG] chat endpoint: message={message[:50]}, session_id={session_id}, chat_agent={'YES' if chat_agent is not None else 'NONE'}", flush=True)
     if chat_agent is None:
         # Agent 不可用时返回降级提示
         async def fallback_stream() -> AsyncGenerator[str, None]:
             import uuid
             sid = session_id or f"sess_{uuid.uuid4().hex[:12]}"
+            print(f"[DEBUG] fallback_stream: yielding error event for session {sid}", flush=True)
             error_event = {
                 "type": "error",
                 "session_id": sid,
                 "content": "Agent 暂时不可用，请稍后重试。",
             }
             yield f"data: {json.dumps(error_event, ensure_ascii=False)}\n\n"
+            print("[DEBUG] fallback_stream: done", flush=True)
         return StreamingResponse(
             fallback_stream(),
             media_type="text/event-stream",
         )
 
     async def event_stream() -> AsyncGenerator[str, None]:
+        print("[DEBUG] event_stream: starting", flush=True)
+        event_count = 0
         async for event in chat_agent.run_stream(str(message), session_id):
+            event_count += 1
+            print(f"[DEBUG] event_stream: yielding event #{event_count} type={event.get('type')}", flush=True)
             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+        print(f"[DEBUG] event_stream: done, total events={event_count}", flush=True)
 
     return StreamingResponse(
         event_stream(),
@@ -409,5 +427,11 @@ async def serve_spa(request: Request, path: str) -> FileResponse:
     # 尝试服务具体静态文件
     file_path = FRONTEND_DIR / path
     if path and file_path.exists() and file_path.is_file():
-        return FileResponse(str(file_path))
-    return FileResponse(str(INDEX_HTML))
+        return FileResponse(
+            str(file_path),
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
+    return FileResponse(
+        str(INDEX_HTML),
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
