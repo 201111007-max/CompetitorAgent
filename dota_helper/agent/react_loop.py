@@ -24,8 +24,10 @@ from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from dota_helper.agent.error_classifier import ErrorCategory, ErrorClassifier
+from dota_helper.agent.plugin import PluginRegistry
 from dota_helper.agent.response_parser import ResponseParser, ReActStep, StepType
 from dota_helper.agent.tool_dispatcher import ToolDispatcher
+from dota_helper.agent.tool_registry import ToolRegistry
 from dota_helper.agent.prompts.react_system import ReactSystemPrompt
 from dota_helper.domain_types.enums import BudgetDecision
 from dota_helper.engines.budget import IterationBudget
@@ -157,6 +159,8 @@ class ReActLoop:
         parser: Optional[ResponseParser] = None,
         prompt_builder: Optional[ReactSystemPrompt] = None,
         error_classifier: Optional[ErrorClassifier] = None,
+        plugin_registry: Optional[PluginRegistry] = None,
+        tool_registry: Optional[ToolRegistry] = None,
         max_iterations: int = 15,
         max_tokens: int = 40000,
         diminishing_threshold: int = 500,
@@ -168,6 +172,8 @@ class ReActLoop:
         self._parser = parser or ResponseParser()
         self._prompt_builder = prompt_builder or ReactSystemPrompt()
         self._error_classifier = error_classifier or ErrorClassifier()
+        self._plugin_registry = plugin_registry or PluginRegistry()
+        self._tool_registry = tool_registry or ToolRegistry()
         self._max_iterations = max_iterations
         self._max_tokens = max_tokens
         self._diminishing_threshold = diminishing_threshold
@@ -247,14 +253,30 @@ class ReActLoop:
                 "restored": True,
             }
 
+        # ── 插件：on_start ──
+        await self._plugin_registry.dispatch_on_start({
+            "session_id": context.session_id,
+            "conversation_id": context.conversation_id,
+            "messages": context.messages,
+            "iteration": context.iteration,
+        })
+
         # 迭代推理循环
         while True:
             context.iteration += 1
             iteration_delta = 0
 
             try:
+                # ── 插件：before_llm_call ──
+                context.messages = await self._plugin_registry.dispatch_before_llm_call(
+                    context.messages
+                )
+
                 # ── 调用 LLM（带重试） ──
                 llm_output = await self._call_llm_with_retry(context)
+
+                # ── 插件：after_llm_call ──
+                llm_output = await self._plugin_registry.dispatch_after_llm_call(llm_output)
 
                 # 解析 LLM 输出
                 step = self._parser.parse(llm_output)
@@ -315,13 +337,32 @@ class ReActLoop:
                         if match_id:
                             step.tool_args["match_id"] = match_id
 
+                    # ── 插件：before_action ──
+                    plugin_args = await self._plugin_registry.dispatch_before_action(
+                        step.tool_name, step.tool_args
+                    )
+                    if plugin_args is None:
+                        # 插件阻止了工具调用
+                        observation = f"⚠️ 工具 {step.tool_name} 已被插件阻止"
+                    else:
+                        step.tool_args = plugin_args
+
                     # 分发工具调用（含熔断检查和自动重试）
                     try:
                         observation = await self._tool_dispatcher.dispatch(
                             tool_name=step.tool_name,
                             args=step.tool_args,
                         )
+                        # ── 插件：after_action ──
+                        observation = await self._plugin_registry.dispatch_after_action(
+                            step.tool_name, step.tool_args, observation
+                        )
                     except Exception as tool_error:
+                        # ── 插件：on_error ──
+                        await self._plugin_registry.dispatch_on_error(
+                            tool_error, context=f"tool:{step.tool_name}"
+                        )
+
                         # 工具调用失败 → 分类处理
                         classified = self._error_classifier.classify(
                             tool_error, context=step.tool_name
@@ -465,6 +506,14 @@ class ReActLoop:
 
             # 每轮迭代后保存 checkpoint
             context.save_checkpoint()
+
+        # ── 插件：on_end ──
+        await self._plugin_registry.dispatch_on_end({
+            "session_id": context.session_id,
+            "conversation_id": context.conversation_id,
+            "messages": context.messages,
+            "iteration": context.iteration,
+        })
 
     async def _call_llm_with_retry(self, context: ReActContext) -> str:
         """调用 LLM，带自动重试
