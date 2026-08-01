@@ -95,7 +95,7 @@ async def test_real_match_with_llm() -> None:
     # 4. 创建LLM客户端
     print(f"\n步骤 4: 创建 LLM 客户端...")
     llm_client = LLMClient(
-        default_model="deepseek-v4-pro",  # DeepSeek 模型
+        default_model="deepseek-v4-flash",  # DeepSeek 模型
         max_retries=2,
         timeout=60.0,
     )

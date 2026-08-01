@@ -18,8 +18,8 @@ logger = logging.getLogger(__name__)
 
 def _get_review_api():
     """懒加载 PostMatchReviewAPI（避免循环导入）"""
-    from dota_helper.facade.api import PostMatchReviewAPI
-    return PostMatchReviewAPI()
+    from dota_helper.facade.entrypoint import create_default_api
+    return create_default_api()
 
 
 # ---------------------------------------------------------------------------

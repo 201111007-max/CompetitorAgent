@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=64.0"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "dota_helper"
 version = "0.1.0"
@@ -14,6 +18,9 @@ dependencies = [
     "fastapi>=0.110.0",
     "uvicorn[standard]>=0.29.0",
 ]
+
+[tool.setuptools.packages.find]
+include = ["dota_helper*"]
 
 [project.optional-dependencies]
 mcp = [

@@ -77,7 +77,7 @@ class TestReviewConfigFromDict:
         assert config.memory.enabled is True
         assert config.memory.max_persistent_notes == 100
         assert config.memory.max_skills == 50
-        assert config.model == "gpt-4o-mini"
+        assert config.model == "deepseek-v4-flash"
 
 
 class TestEntrypointConfigLoading:
@@ -119,7 +119,7 @@ class TestEntrypointConfigLoading:
 
         config = _load_review_config(Path("/nonexistent/config.yaml"))
         assert isinstance(config, ReviewConfig)
-        assert config.model == "gpt-4o-mini"
+        assert config.model == "deepseek-v4-flash"
         assert config.memory.max_persistent_notes == 100
 
     def test_load_review_config_invalid_yaml_returns_defaults(self) -> None:
@@ -135,7 +135,7 @@ class TestEntrypointConfigLoading:
         try:
             config = _load_review_config(config_path)
             assert isinstance(config, ReviewConfig)
-            assert config.model == "gpt-4o-mini"
+            assert config.model == "deepseek-v4-flash"
         finally:
             config_path.unlink(missing_ok=True)
 

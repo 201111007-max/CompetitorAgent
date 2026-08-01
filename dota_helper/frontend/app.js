@@ -26,7 +26,6 @@
  * @property {ChatMessageType} type
  * @property {string} content
  * @property {Object.<string, any>|undefined} [input]
- * @property {string|undefined} [wardHtml]
  * @property {number|undefined} [progress]
  * @property {string|undefined} [phase]
  * @property {Object.<string, any>|undefined} [payload]
@@ -48,7 +47,6 @@
  * @property {string|undefined} [conversation_id]
  * @property {string|undefined} [content]
  * @property {Object.<string, any>|undefined} [input]
- * @property {string|undefined} [ward_html]
  * @property {number|undefined} [progress]
  * @property {string|undefined} [phase]
  * @property {string|undefined} [message]
@@ -57,14 +55,13 @@
 
 // ── 状态管理 ──
 
-/** @type {{ sessionId?: string, conversationId?: string, messages: ChatMessage[], sessions: ChatSession[], isStreaming: boolean, activeWardHtml?: string }} */
+/** @type {{ sessionId?: string, conversationId?: string, messages: ChatMessage[], sessions: ChatSession[], isStreaming: boolean }} */
 const chatState = {
   sessionId: undefined,
   conversationId: undefined,
   messages: [],
   sessions: [],
   isStreaming: false,
-  activeWardHtml: undefined,
 };
 
 // ── DOM 元素缓存 ──
@@ -82,11 +79,6 @@ const elements = {
   presetCards: /** @type {HTMLElement} */ (document.getElementById('preset-cards')),
   messageInput: /** @type {HTMLTextAreaElement} */ (document.getElementById('message-input')),
   sendBtn: /** @type {HTMLButtonElement} */ (document.getElementById('send-btn')),
-  vizPanel: /** @type {HTMLElement} */ (document.getElementById('viz-panel')),
-  vizContent: /** @type {HTMLElement} */ (document.getElementById('viz-content')),
-  vizPlaceholder: /** @type {HTMLElement} */ (document.getElementById('viz-placeholder')),
-  vizIframe: /** @type {HTMLIFrameElement} */ (document.getElementById('viz-iframe')),
-  closeVizBtn: /** @type {HTMLButtonElement} */ (document.getElementById('close-viz-btn')),
 };
 
 // ── API 客户端 ──
@@ -210,14 +202,8 @@ function appendAgentChunk(event) {
     createdAt: new Date().toISOString(),
   };
 
-  if (event.type === 'final' && event.ward_html) {
-    message.wardHtml = event.ward_html;
-    chatState.activeWardHtml = event.ward_html;
-  }
-
   chatState.messages.push(message);
   renderMessages();
-  renderWardIframe();
 }
 
 /**
@@ -319,7 +305,12 @@ function createAgentMessageNode(message) {
   content.className = 'step-content';
 
   const text = document.createElement('div');
-  text.innerHTML = simpleMarkdown(message.content);
+  try {
+    text.innerHTML = simpleMarkdown(message.content);
+  } catch (e) {
+    console.error('Markdown 渲染失败:', e);
+    text.textContent = message.content;
+  }
   content.appendChild(text);
 
   if (message.input && Object.keys(message.input).length > 0) {
@@ -403,27 +394,6 @@ function renderSessions() {
   }
 }
 
-/**
- * 渲染 Ward iframe。
- */
-function renderWardIframe() {
-  if (!chatState.activeWardHtml) {
-    elements.vizPlaceholder.classList.remove('hidden');
-    elements.vizIframe.classList.add('hidden');
-    return;
-  }
-
-  elements.vizPlaceholder.classList.add('hidden');
-  elements.vizIframe.classList.remove('hidden');
-
-  const src = chatState.activeWardHtml.startsWith('http') || chatState.activeWardHtml.startsWith('/')
-    ? chatState.activeWardHtml
-    : `/ward_analysis/${chatState.activeWardHtml}`;
-  elements.vizIframe.src = src;
-  elements.vizPanel.classList.remove('hidden');
-  elements.vizPanel.classList.add('open');
-}
-
 // ── 工具函数 ──
 
 /**
@@ -455,9 +425,11 @@ function simpleMarkdown(text) {
   html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   // 斜体
   html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-  // 无序列表
-  html = html.replace(/(^|\n)- (.+)/g, '$1<li>$2</li>');
-  html = html.replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>');
+  // 无序列表（逐行处理，避免贪婪匹配问题）
+  html = html.replace(/(^|\n)- ([^\n]+)/g, '$1<li>$2</li>');
+  html = html.replace(/(<li>[^<]*<\/li>)/g, '<ul>$1</ul>');
+  // 合并相邻的 <ul>
+  html = html.replace(/<\/ul>\n?<ul>/g, '\n');
   // 换行
   html = html.replace(/\n/g, '<br>');
 
@@ -545,6 +517,11 @@ async function streamChat(content) {
   } finally {
     chatState.isStreaming = false;
     elements.sendBtn.disabled = false;
+    // 确保输入框可见（防止异常导致 DOM 状态不一致）
+    const inputArea = document.querySelector('.input-area');
+    if (inputArea) {
+      inputArea.style.display = '';
+    }
   }
 }
 
@@ -615,10 +592,8 @@ async function loadSession(sessionId) {
       content: m.content,
       createdAt: new Date(m.created_at * 1000).toISOString(),
     }));
-    chatState.activeWardHtml = undefined;
     elements.chatTitle.textContent = session.title || '历史会话';
     renderMessages();
-    renderWardIframe();
     renderSessions();
   } catch (err) {
     console.error('加载会话失败:', err);
@@ -633,12 +608,10 @@ function newChat() {
   chatState.sessionId = undefined;
   chatState.conversationId = undefined;
   chatState.messages = [];
-  chatState.activeWardHtml = undefined;
   elements.chatTitle.textContent = '新会话';
   elements.welcome.style.display = 'block';
   elements.messageList.innerHTML = '';
   elements.messageList.appendChild(elements.welcome);
-  renderWardIframe();
   renderSessions();
 }
 
@@ -648,12 +621,10 @@ function newChat() {
 function clearChat() {
   if (chatState.isStreaming) return;
   chatState.messages = [];
-  chatState.activeWardHtml = undefined;
   elements.chatTitle.textContent = '新会话';
   elements.welcome.style.display = 'block';
   elements.messageList.innerHTML = '';
   elements.messageList.appendChild(elements.welcome);
-  renderWardIframe();
 }
 
 /**
@@ -670,14 +641,6 @@ function autoResizeTextarea() {
  */
 function toggleSidebar() {
   elements.sidebar.classList.toggle('open');
-}
-
-/**
- * 关闭可视化面板。
- */
-function closeVizPanel() {
-  elements.vizPanel.classList.add('hidden');
-  elements.vizPanel.classList.remove('open');
 }
 
 // ── 事件绑定 ──
@@ -697,7 +660,6 @@ function bindEvents() {
   elements.newChatBtn.addEventListener('click', newChat);
   elements.clearChatBtn.addEventListener('click', clearChat);
   elements.menuToggle.addEventListener('click', toggleSidebar);
-  elements.closeVizBtn.addEventListener('click', closeVizPanel);
 
   if (elements.presetCards) {
     elements.presetCards.addEventListener('click', (e) => {
@@ -729,11 +691,80 @@ function bindEvents() {
 
 // ── 初始化 ──
 
+/**
+ * 确保输入区域始终可见（防御性修复）。
+ */
+function ensureInputArea() {
+  const inputArea = document.querySelector('.input-area');
+  if (inputArea) {
+    inputArea.style.display = '';
+    inputArea.style.visibility = 'visible';
+  }
+  const textarea = document.getElementById('message-input');
+  if (textarea) {
+    textarea.style.display = '';
+    textarea.style.visibility = 'visible';
+  }
+  const sendBtn = document.getElementById('send-btn');
+  if (sendBtn) {
+    sendBtn.style.display = '';
+    sendBtn.style.visibility = 'visible';
+  }
+}
+
+/**
+ * 诊断输入框状态并修复。
+ */
+function diagnoseAndFixInput() {
+  const inputArea = document.querySelector('.input-area');
+  const textarea = document.getElementById('message-input');
+  const sendBtn = document.getElementById('send-btn');
+  const messageList = document.getElementById('message-list');
+
+  console.log('[诊断] input-area:', inputArea ? '存在' : '不存在');
+  console.log('[诊断] message-input:', textarea ? '存在' : '不存在');
+  console.log('[诊断] send-btn:', sendBtn ? '存在' : '不存在');
+  console.log('[诊断] message-list:', messageList ? '存在' : '不存在');
+
+  if (inputArea) {
+    const style = getComputedStyle(inputArea);
+    console.log('[诊断] input-area display:', style.display);
+    console.log('[诊断] input-area visibility:', style.visibility);
+    console.log('[诊断] input-area height:', style.height);
+    console.log('[诊断] input-area offsetHeight:', inputArea.offsetHeight);
+    console.log('[诊断] input-area parent:', inputArea.parentElement?.className);
+  }
+
+  if (messageList) {
+    console.log('[诊断] message-list offsetHeight:', messageList.offsetHeight);
+    console.log('[诊断] message-list scrollHeight:', messageList.scrollHeight);
+  }
+
+  // 强制修复
+  if (inputArea) {
+    inputArea.style.display = '';
+    inputArea.style.visibility = 'visible';
+  }
+  if (textarea) {
+    textarea.style.display = '';
+    textarea.style.visibility = 'visible';
+  }
+  if (sendBtn) {
+    sendBtn.style.display = '';
+    sendBtn.style.visibility = 'visible';
+  }
+}
+
 async function init() {
   bindEvents();
   autoResizeTextarea();
+  ensureInputArea();
   await refreshHistory();
+  diagnoseAndFixInput();
   console.log('Dota Helper 聊天前端已初始化');
 }
 
 init();
+
+// 定期检查输入区域是否可见（每 2 秒）
+setInterval(ensureInputArea, 2000);

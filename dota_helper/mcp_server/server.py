@@ -85,7 +85,7 @@ if __name__ == "__main__":
     async def _main() -> None:
         await startup()
         try:
-            await mcp.run_stdio()
+            await mcp.run_stdio_async()
         finally:
             await shutdown()
 

@@ -154,6 +154,11 @@ class DotaHelperReActAgent:
         # 确定会话 ID
         if not session_id:
             session_id = await self._session_manager.create_session()
+        else:
+            session = await self._session_manager.get_session(session_id)
+            if session is None:
+                # 前端传了不存在的 session_id，自动创建
+                session_id = await self._session_manager.create_session()
 
         # 构建推理上下文
         session = await self._session_manager.get_session(session_id)

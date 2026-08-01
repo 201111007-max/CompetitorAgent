@@ -17,7 +17,7 @@ class MockLLMClient:
     async def chat(
         self,
         messages: list,
-        model: str = "gpt-4o-mini",
+        model: str = "deepseek-v4-flash",
         temperature: float = 0.3,
         **kwargs,
     ) -> str:

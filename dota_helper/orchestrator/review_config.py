@@ -79,7 +79,7 @@ class ReviewConfig:
     """
     # 基础配置
     api_base_url: str = "https://api.openai.com/v1"
-    model: str = "gpt-4o-mini"
+    model: str = "deepseek-v4-flash"
     temperature: float = 0.3
     max_tokens: int = 4000
 
