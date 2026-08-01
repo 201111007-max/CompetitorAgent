@@ -14,6 +14,11 @@ python-dotenv>=1.0       # .env 环境变量加载
 numpy>=1.24              # 数值计算（MCP 工具）
 pandas>=2.0              # 数据处理（MCP 工具）
 
+# ── RAG 知识库依赖（可选） ──
+# chromadb>=0.5.0          # 向量数据库（语义检索）
+# sentence-transformers>=2.2.0  # Embedding 模型（语义检索）
+# 以上依赖为可选，缺失时自动回退到 TF-IDF 检索
+
 # ── Web 服务依赖 ──
 fastapi>=0.110.0         # FastAPI Web 框架
 uvicorn[standard]>=0.29.0 # ASGI 服务器（含高性能依赖）

@@ -11,6 +11,9 @@
 import uuid
 from typing import Any, AsyncGenerator, Dict, Optional
 
+from dota_helper.agent.plugin import PluginRegistry
+from dota_helper.agent.rag_engine import RagEngine
+from dota_helper.agent.rag_plugin import RagPlugin
 from dota_helper.agent.react_loop import ReActLoop, ReActContext
 from dota_helper.agent.response_parser import ResponseParser
 from dota_helper.agent.session_manager import SessionManager
@@ -49,6 +52,9 @@ class DotaHelperReActAgent:
         session_manager: SessionManager,
         config: Optional[ReviewConfig] = None,
         enable_mcp: bool = True,
+        enable_rag: bool = True,
+        rag_engine: Optional[RagEngine] = None,
+        plugin_registry: Optional[PluginRegistry] = None,
     ) -> None:
         """初始化 ReAct Agent
 
@@ -58,16 +64,35 @@ class DotaHelperReActAgent:
             session_manager: 会话持久化管理器
             config: 可选的复盘配置（默认使用 ReviewConfig()）
             enable_mcp: 是否启用 MCP 连接（默认 True）
+            enable_rag: 是否启用 RAG 知识注入（默认 True）
+            rag_engine: 自定义 RagEngine 实例（默认自动创建）
+            plugin_registry: 自定义 PluginRegistry 实例（默认自动创建）
         """
         self._llm_client = llm_client
         self._tool_dispatcher = tool_dispatcher
         self._session_manager = session_manager
         self._config = config or ReviewConfig()
         self._enable_mcp = enable_mcp
+        self._enable_rag = enable_rag
 
         # 初始化子组件
         self._parser = ResponseParser()
         self._prompt_builder = ReactSystemPrompt()
+
+        # 初始化插件注册表
+        self._plugin_registry = plugin_registry or PluginRegistry()
+
+        # 初始化 RAG 引擎并注册 RagPlugin
+        self._rag_engine = rag_engine
+        if enable_rag:
+            if self._rag_engine is None:
+                self._rag_engine = RagEngine()
+            self._rag_plugin = RagPlugin(engine=self._rag_engine)
+            self._plugin_registry.register(self._rag_plugin)
+            logger.info("RAG 插件已注册到 Agent")
+        else:
+            self._rag_engine = None
+            self._rag_plugin = None
 
         # 构建推理循环控制器
         self._loop = ReActLoop(
@@ -75,16 +100,18 @@ class DotaHelperReActAgent:
             tool_dispatcher=self._tool_dispatcher,
             parser=self._parser,
             prompt_builder=self._prompt_builder,
+            plugin_registry=self._plugin_registry,
             max_iterations=self._config.max_tokens // 500,  # 启发式：约 15 次迭代
             max_tokens=self._config.max_tokens * 10,  # Agent 可用 Token 为配置的 10 倍
         )
 
         self._closed = False
         logger.info(
-            "ReAct Agent 初始化: model=%s, max_tokens=%d, enable_mcp=%s",
+            "ReAct Agent 初始化: model=%s, max_tokens=%d, enable_mcp=%s, enable_rag=%s",
             self._config.model,
             self._config.max_tokens,
             enable_mcp,
+            enable_rag,
         )
 
     async def __aenter__(self) -> "DotaHelperReActAgent":
@@ -223,6 +250,8 @@ class DotaHelperReActAgent:
         cls,
         config: Optional[ReviewConfig] = None,
         enable_mcp: bool = True,
+        enable_rag: bool = True,
+        rag_engine: Optional[RagEngine] = None,
     ) -> "DotaHelperReActAgent":
         """工厂方法：一步初始化 Agent + MCP Client + SessionManager
 
@@ -231,6 +260,8 @@ class DotaHelperReActAgent:
             enable_mcp: 是否启用 MCP 工具连接（默认 True）
                 - True: 创建 MCPClient，连接 MCP Server 获取 53 工具
                 - False: 创建 NoOpMCPClient，降级为无工具模式
+            enable_rag: 是否启用 RAG 知识注入（默认 True）
+            rag_engine: 自定义 RagEngine 实例（默认自动创建）
 
         Returns:
             DotaHelperReActAgent: 已初始化的 Agent 实例
@@ -269,11 +300,13 @@ class DotaHelperReActAgent:
             session_manager=session_manager,
             config=config,
             enable_mcp=enable_mcp,
+            enable_rag=enable_rag,
+            rag_engine=rag_engine,
         )
 
         logger.info(
-            "ReAct Agent 工厂创建完成: enable_mcp=%s, mcp_type=%s",
-            enable_mcp,
+            "ReAct Agent 工厂创建完成: enable_mcp=%s, enable_rag=%s, mcp_type=%s",
+            enable_mcp, enable_rag,
             "MCPClient" if enable_mcp else "NoOpMCPClient",
         )
         return agent
