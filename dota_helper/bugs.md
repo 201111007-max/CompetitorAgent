@@ -42,9 +42,9 @@ context.messages = [
 
 ---
 
-### 3. 凭据/密钥管理分散
+### 3. 凭据/密钥管理分散 ✅ 已修复
 
-**位置**: 散落于 `llm/client.py`、`mcp_server/server.py`、`mcp_server/tools/search_tools.py`、`observability/langfuse_adapter.py`
+**位置**: `secret_vault.py`（新增） + `llm/client.py`、`mcp_server/server.py`、`mcp_server/helpers/opendota.py`、`mcp_server/tools/search_tools.py`、`observability/langfuse_adapter.py`、`facade/entrypoint.py`
 
 **问题**: API Key 通过 `os.getenv()` 分散在 4 个文件中读取，无统一凭据池、无加密存储、无密钥轮换机制。
 
@@ -56,6 +56,18 @@ context.messages = [
 | `observability/langfuse_adapter.py:34-35` | `os.getenv("LANGFUSE_PUBLIC_KEY")` / `os.getenv("LANGFUSE_SECRET_KEY")` |
 
 **影响**: 密钥泄露无防护，无最小权限限制，Agent 拿到 LLM API Key 后可任意使用。
+
+**修复**: 新增统一凭据池 `SecretVault`（`dota_helper/secret_vault.py`，仅依赖标准库，被下层模块导入无循环依赖）：
+- **单点读取**：优先级「内存覆盖 > 环境变量 > 默认值」，消除 4 处分散 `os.getenv()`；`get_first()` 集中兼容旧别名链（`OPENAI_API_KEY` > `DEEPSEEK_API_KEY` > `LLM_API_KEY`）
+- **必需校验** `require()`：缺失/空显式抛 `CredentialError`（替代静默返回 `""`/`None` 掩盖配置错误）
+- **最小权限审计** `get_access_log()`：每次读取记录 `name/owner/timestamp`，可回溯谁在何时读取了什么
+- **轮换** `set()`/`rotate()`/`unset()`：进程内注入/轮换/恢复环境变量，无需改多处配置
+- **加密落盘（可选）** `save_file()`/`load_file()`：Fernet 对称加密（`cryptography`，惰性导入），密钥来自参数或 `DOTA_SECRETS_KEY` 环境变量，文件不落明文
+- **遮蔽**：`__repr__` 不包含任何凭据值，防日志泄露
+
+接入点：`llm/client.py`、`facade/entrypoint.py`（`_has_llm_key`）经 `vault.get_first(...)`；`mcp_server/server.py`、`mcp_server/helpers/opendota.py` 经 `vault.get("OPENDOTA_API_KEY")`；`search_tools.py` 经 `vault.get("SERPAPI_API_KEY")`；`langfuse_adapter.py` 经 `vault.get("LANGFUSE_*")`。
+
+**测试**: `tests/unit/test_secret_vault.py`（32 个用例，覆盖读取优先级/别名链/必需校验/审计/轮换/加密落盘/遮蔽/LLM 客户端与入口集成）；全量回归 608 passed，新增 0 失败。
 
 ---
 

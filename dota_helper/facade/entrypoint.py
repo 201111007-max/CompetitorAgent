@@ -6,11 +6,11 @@
 - 默认集成四层记忆系统与后台审查器
 - 外部调用方保持 `from dota_helper import create_default_api`
 """
-import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 from dota_helper.facade.api import PostMatchReviewAPI
+from dota_helper.secret_vault import vault
 from dota_helper.interfaces.data_source import IMatchDataSource
 from dota_helper.interfaces.llm import ILLMClient
 from dota_helper.interfaces.memory import IFourLayerMemory
@@ -71,13 +71,14 @@ class MatchFetcherAdapter:
 def _has_llm_key() -> bool:
     """检查是否配置了 LLM API 密钥
 
+    通过 SecretVault 统一解析（bugs.md P0 #3），
+    与 llm/client.py 使用同一套候选链。
+
     Returns:
         bool: 是否可调用 LLM
     """
     return bool(
-        os.getenv("OPENAI_API_KEY")
-        or os.getenv("DEEPSEEK_API_KEY")
-        or os.getenv("LLM_API_KEY")
+        vault.get_first(("OPENAI_API_KEY", "DEEPSEEK_API_KEY", "LLM_API_KEY"), owner="facade.entrypoint")
     )
 
 

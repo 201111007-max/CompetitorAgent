@@ -8,6 +8,7 @@ from typing import Any, Optional
 
 from dota_helper.observability.logger import get_logger
 from dota_helper.observability.noop_tracer import NoOpTracer
+from dota_helper.secret_vault import vault
 
 logger = get_logger("observability.langfuse_adapter")
 
@@ -31,8 +32,8 @@ def create_tracer() -> Any:
         logger.info("Langfuse SDK 不可用，使用 NoOpTracer 降级")
         return NoOpTracer()
 
-    public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
-    secret_key = os.getenv("LANGFUSE_SECRET_KEY")
+    public_key = vault.get("LANGFUSE_PUBLIC_KEY", owner="langfuse_adapter")
+    secret_key = vault.get("LANGFUSE_SECRET_KEY", owner="langfuse_adapter")
     host = os.getenv("LANGFUSE_HOST", "http://localhost:3001")
 
     if not public_key or not secret_key:

@@ -24,6 +24,8 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
+from dota_helper.secret_vault import vault
+
 logger = logging.getLogger(__name__)
 
 
@@ -91,14 +93,14 @@ class OpenDotaClient:
             timeout: Per-request timeout in seconds.
             max_retries: Maximum number of retry attempts.
             rate_limit_delay: Minimum seconds between consecutive requests.
-            api_key: OpenDota API key. Falls back to the
-                ``OPENDOTA_API_KEY`` environment variable.
+        api_key: OpenDota API key. Falls back to the
+            ``OPENDOTA_API_KEY`` environment variable (via SecretVault).
         """
         self._base_url = base_url
         self._timeout = timeout
         self._max_retries = max_retries
         self._rate_limit_delay = rate_limit_delay
-        self._api_key: Optional[str] = api_key or os.getenv("OPENDOTA_API_KEY")
+        self._api_key: Optional[str] = api_key or vault.get("OPENDOTA_API_KEY", owner="opendota")
 
         # Lazy-initialised httpx client (created on first use)
         self._client: Optional[httpx.AsyncClient] = None

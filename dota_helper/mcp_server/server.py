@@ -10,6 +10,8 @@ from typing import Optional
 from mcp.server.fastmcp import FastMCP
 from dotenv import load_dotenv
 
+from dota_helper.secret_vault import vault
+
 # 创建 FastMCP 实例
 mcp = FastMCP("Dota2 Helper Agent")
 
@@ -31,7 +33,7 @@ def _ensure_opendota_client() -> AsyncOpenDotaClient:
     """
     global _opendota_client
     if _opendota_client is None:
-        api_key = os.getenv("OPENDOTA_API_KEY", "").strip() or None
+        api_key = vault.get("OPENDOTA_API_KEY", owner="mcp_server.server") or None
         _opendota_client = AsyncOpenDotaClient(api_key=api_key)
         AsyncOpenDotaClient.set_instance(_opendota_client)
     return _opendota_client
