@@ -1,7 +1,7 @@
-"""Dota Helper Web 入口
+"""垂直领域 Agent Web 入口
 
-同时暴露赛后复盘端点（PostMatchReviewAPI）与 ReAct Agent Chat 端点。
-Chat 后端由 DotaHelperReActAgent 驱动，通过 MCP 工具分发器调用 53 个分析工具。
+同时暴露自主分析端点（PostMatchReviewAPI）与 ReAct Agent Chat 端点。
+Chat 后端由 DotaHelperReActAgent 驱动，通过 MCP 工具分发器调用领域工具集。
 """
 import asyncio
 import json
@@ -137,8 +137,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 app = FastAPI(
-    title="Dota Helper",
-    description="Dota 2 赛后复盘与 ReAct Agent Chat",
+    title="Domain Agent",
+    description="垂直领域 Agent：自主分析 + ReAct Chat + MCP 工具集",
     lifespan=lifespan,
 )
 
