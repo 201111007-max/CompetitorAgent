@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from dota_helper.agent.error_classifier import ErrorCategory, ErrorClassifier
+from dota_helper.agent.injection_guard import OutputGuard, PromptInjectionDetector
 from dota_helper.agent.plugin import PluginRegistry
 from dota_helper.agent.response_parser import ResponseParser, ReActStep, StepType
 from dota_helper.agent.tool_dispatcher import ToolDispatcher
@@ -161,6 +162,8 @@ class ReActLoop:
         error_classifier: Optional[ErrorClassifier] = None,
         plugin_registry: Optional[PluginRegistry] = None,
         tool_registry: Optional[ToolRegistry] = None,
+        injection_detector: Optional[PromptInjectionDetector] = None,
+        output_guard: Optional[OutputGuard] = None,
         max_iterations: int = 15,
         max_tokens: int = 40000,
         diminishing_threshold: int = 500,
@@ -174,6 +177,12 @@ class ReActLoop:
         self._error_classifier = error_classifier or ErrorClassifier()
         self._plugin_registry = plugin_registry or PluginRegistry()
         self._tool_registry = tool_registry or ToolRegistry()
+        self._injection_detector = injection_detector
+        self._output_guard = output_guard
+        if self._injection_detector is not None:
+            logger.info("提示注入防御已启用（输入净化 + Observation 封装）")
+        else:
+            logger.info("提示注入防御未启用")
         self._max_iterations = max_iterations
         self._max_tokens = max_tokens
         self._diminishing_threshold = diminishing_threshold
@@ -220,13 +229,18 @@ class ReActLoop:
         tool_descriptions = self._tool_dispatcher.get_tool_descriptions()
         system_prompt = self._prompt_builder.build(tool_descriptions=tool_descriptions)
 
+        # 净化用户输入（提示注入第一层防御）
+        sanitized_message = initial_message
+        if self._injection_detector is not None:
+            sanitized_message = self._injection_detector.sanitize_user_input(initial_message)
+
         # 初始化消息列表（优先从 checkpoint 恢复）
         if not context.messages:
             restored = context.load_checkpoint()
             if not restored:
                 context.messages = [
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": initial_message},
+                    {"role": "user", "content": sanitized_message},
                 ]
 
         # yield session 事件
@@ -277,6 +291,20 @@ class ReActLoop:
 
                 # ── 插件：after_llm_call ──
                 llm_output = await self._plugin_registry.dispatch_after_llm_call(llm_output)
+
+                # ── 输出校验（提示注入第三层防御 + 敏感信息脱敏） ──
+                if self._output_guard is not None:
+                    check_result = self._output_guard.check(llm_output)
+                    llm_output = check_result.cleaned
+                    if check_result.is_empty:
+                        # 空/占位符输出：重试一次，仍为空则降级为 Thought
+                        logger.warning(
+                            "LLM 输出为空或占位符，重试一次: iteration=%d",
+                            context.iteration,
+                        )
+                        llm_output = await self._call_llm_with_retry(context)
+                        check_result = self._output_guard.check(llm_output)
+                        llm_output = check_result.cleaned
 
                 # 解析 LLM 输出
                 step = self._parser.parse(llm_output)
@@ -414,6 +442,9 @@ class ReActLoop:
                     context.messages.append(
                         {"role": "assistant", "content": llm_output}
                     )
+                    # 工具结果封装为 <observation> 数据块（防 Observation 间接注入）
+                    if self._injection_detector is not None:
+                        observation = self._injection_detector.wrap_tool_result(observation)
                     context.messages.append(
                         {"role": "user", "content": f"Observation: {observation}"}
                     )
