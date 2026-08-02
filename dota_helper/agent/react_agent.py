@@ -11,6 +11,7 @@
 import uuid
 from typing import Any, AsyncGenerator, Dict, Optional
 
+from dota_helper.agent.injection_guard import OutputGuard, PromptInjectionDetector
 from dota_helper.agent.plugin import PluginRegistry
 from dota_helper.agent.rag_engine import RagEngine
 from dota_helper.agent.rag_plugin import RagPlugin
@@ -55,6 +56,7 @@ class DotaHelperReActAgent:
         enable_rag: bool = True,
         rag_engine: Optional[RagEngine] = None,
         plugin_registry: Optional[PluginRegistry] = None,
+        enable_injection_guard: bool = True,
     ) -> None:
         """初始化 ReAct Agent
 
@@ -67,6 +69,7 @@ class DotaHelperReActAgent:
             enable_rag: 是否启用 RAG 知识注入（默认 True）
             rag_engine: 自定义 RagEngine 实例（默认自动创建）
             plugin_registry: 自定义 PluginRegistry 实例（默认自动创建）
+            enable_injection_guard: 是否启用提示注入防御（默认 True）
         """
         self._llm_client = llm_client
         self._tool_dispatcher = tool_dispatcher
@@ -74,6 +77,7 @@ class DotaHelperReActAgent:
         self._config = config or ReviewConfig()
         self._enable_mcp = enable_mcp
         self._enable_rag = enable_rag
+        self._enable_injection_guard = enable_injection_guard
 
         # 初始化子组件
         self._parser = ResponseParser()
@@ -87,7 +91,10 @@ class DotaHelperReActAgent:
         if enable_rag:
             if self._rag_engine is None:
                 self._rag_engine = RagEngine()
-            self._rag_plugin = RagPlugin(engine=self._rag_engine)
+            self._rag_plugin = RagPlugin(
+                engine=self._rag_engine,
+                injection_detector=PromptInjectionDetector() if enable_injection_guard else None,
+            )
             self._plugin_registry.register(self._rag_plugin)
             logger.info("RAG 插件已注册到 Agent")
         else:
@@ -95,12 +102,17 @@ class DotaHelperReActAgent:
             self._rag_plugin = None
 
         # 构建推理循环控制器
+        injection_detector = PromptInjectionDetector() if enable_injection_guard else None
+        output_guard = OutputGuard() if enable_injection_guard else None
+
         self._loop = ReActLoop(
             llm_client=self._llm_client,
             tool_dispatcher=self._tool_dispatcher,
             parser=self._parser,
             prompt_builder=self._prompt_builder,
             plugin_registry=self._plugin_registry,
+            injection_detector=injection_detector,
+            output_guard=output_guard,
             max_iterations=self._config.max_tokens // 500,  # 启发式：约 15 次迭代
             max_tokens=self._config.max_tokens * 10,  # Agent 可用 Token 为配置的 10 倍
         )
@@ -252,6 +264,7 @@ class DotaHelperReActAgent:
         enable_mcp: bool = True,
         enable_rag: bool = True,
         rag_engine: Optional[RagEngine] = None,
+        enable_injection_guard: bool = True,
     ) -> "DotaHelperReActAgent":
         """工厂方法：一步初始化 Agent + MCP Client + SessionManager
 
@@ -262,6 +275,7 @@ class DotaHelperReActAgent:
                 - False: 创建 NoOpMCPClient，降级为无工具模式
             enable_rag: 是否启用 RAG 知识注入（默认 True）
             rag_engine: 自定义 RagEngine 实例（默认自动创建）
+            enable_injection_guard: 是否启用提示注入防御（默认 True）
 
         Returns:
             DotaHelperReActAgent: 已初始化的 Agent 实例
@@ -302,6 +316,7 @@ class DotaHelperReActAgent:
             enable_mcp=enable_mcp,
             enable_rag=enable_rag,
             rag_engine=rag_engine,
+            enable_injection_guard=enable_injection_guard,
         )
 
         logger.info(

@@ -9,6 +9,7 @@
 - MessageBus: Agent 间消息总线
 - RagEngine: Embedding + chromadb 语义检索引擎
 - RagPlugin: LLM 调用前自动注入 RAG 知识的插件
+- PromptInjectionDetector / OutputGuard: 提示注入纵深防御
 """
 from dota_helper.agent.plugin import Plugin, PluginRegistry
 from dota_helper.agent.react_agent import DotaHelperReActAgent
@@ -17,6 +18,12 @@ from dota_helper.agent.tool_registry import ToolRegistry
 from dota_helper.agent.message_bus import MessageBus, EventType, Message
 from dota_helper.agent.rag_engine import RagEngine
 from dota_helper.agent.rag_plugin import RagPlugin
+from dota_helper.agent.injection_guard import (
+    InjectionCategory,
+    OutputGuard,
+    OutputCheckResult,
+    PromptInjectionDetector,
+)
 
 __all__ = [
     "DotaHelperReActAgent",
@@ -29,4 +36,8 @@ __all__ = [
     "Message",
     "RagEngine",
     "RagPlugin",
+    "InjectionCategory",
+    "OutputGuard",
+    "OutputCheckResult",
+    "PromptInjectionDetector",
 ]

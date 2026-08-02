@@ -11,6 +11,7 @@
 """
 from typing import Any, Dict, List, Optional
 
+from dota_helper.agent.injection_guard import PromptInjectionDetector
 from dota_helper.agent.plugin import Plugin
 from dota_helper.agent.rag_engine import RagEngine
 from dota_helper.observability.logger import get_logger
@@ -38,11 +39,13 @@ class RagPlugin(Plugin):
         engine: RagEngine,
         threshold: float = _DEFAULT_THRESHOLD,
         top_k: int = _DEFAULT_TOP_K,
+        injection_detector: Optional[PromptInjectionDetector] = None,
     ) -> None:
         super().__init__()
         self._engine = engine
         self._threshold = threshold
         self._top_k = top_k
+        self._injection_detector = injection_detector
 
         # 去重缓存
         self._last_query: str = ""
@@ -101,6 +104,12 @@ class RagPlugin(Plugin):
         context = self._engine.format_context(results)
         if not context:
             return messages
+
+        # 封装为 <knowledge> 数据块（防知识库文档被污染的间接注入）
+        if self._injection_detector is not None:
+            context = self._injection_detector.wrap_tool_result(context).replace(
+                "<observation>", "<knowledge>"
+            ).replace("</observation>", "</knowledge>")
 
         # 去重：同一内容不重复注入
         if context == self._last_injected:
