@@ -24,19 +24,21 @@ context.messages = [
 
 ---
 
-### 2. 工具护栏/参数校验缺失
+### 2. 工具护栏/参数校验缺失 ✅ 已修复
 
-**位置**: `agent/tool_dispatcher.py:110`
+**位置**: `agent/tool_guard.py`（新增） + `agent/tool_dispatcher.py`
 
 **问题**: `validate_tool()` 仅检查工具名是否在集合中，参数 `args: Dict[str, Any]` 原样透传给 MCP Server，无任何类型、范围、长度校验。
 
-```python
-# tool_dispatcher.py:110 — 唯一的"校验"
-def validate_tool(self, tool_name: str) -> bool:
-    return tool_name in self._tool_name_set
-```
+**修复**: 在 `ToolDispatcher.dispatch()` 单一出口插入四层护栏（设计文档 `docs/superpowers/plans/post-match-review-agent/TOOL_GUARDRAIL_DESIGN.md`）：
+- **参数校验** `ToolArgumentValidator`：基于 inputSchema 的轻量 JSON Schema 子集校验（type/required/minimum/maximum/maxLength/enum/items/maxItems/pattern）+ 归一化（`"123"`→`123`，拒绝 `True`）+ 全局硬约束表（ID 64 位、数量 ≤100、字符串 ≤200、`sites` 禁 URL）
+- **敏感守卫** `SensitiveOperationGuard`：`request_match_parse(s)`/`inject_*_html` 默认 CONFIRM（确认回调放行，会话内记住），`search_dota_history` 默认 BLOCK
+- **速率限制** `ToolRateLimiter`：令牌桶按工具+会话双层，超频拒绝；`tool_rate_limit=False` 可整体关闭
+- **审计** `AuditLog`：所有调用（含被拒）记录 `timestamp/tool/args/decision/reason/session_id`
 
-**影响**: 恶意参数（如 SQL 注入、路径遍历）可绕过校验直接调用 53 个 MCP 工具。
+异常（`ToolArgumentError`/`ConfirmationRequired`/`RateLimitExceeded`/`ToolBlockedError`）由 `react_loop` 转为 Observation，`error_classifier` 分类为 DEGRADABLE。开关：`DotaHelperReActAgent.create(enable_tool_guard=True/False, tool_rate_limit=True/False)`。
+
+**测试**: `tests/unit/test_tool_guard.py`（41 个用例，覆盖 Schema 校验/归一化/硬约束/敏感守卫/限速/审计/本地工具/ReAct 端到端）；全量回归 526 passed。
 
 ---
 

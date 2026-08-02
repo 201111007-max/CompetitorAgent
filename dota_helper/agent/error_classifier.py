@@ -9,6 +9,12 @@
 from enum import Enum
 from typing import Optional
 
+from dota_helper.agent.tool_guard import (
+    ConfirmationRequired,
+    RateLimitExceeded,
+    ToolArgumentError,
+    ToolBlockedError,
+)
 from dota_helper.mcp_client.types import MCPConnectionError
 from dota_helper.observability.logger import get_logger
 
@@ -82,6 +88,36 @@ class ErrorClassifier:
         """
         error_str = str(error).lower()
         error_type = type(error).__name__
+
+        # ── 工具护栏错误（参数不合法 / 需确认 / 阻断 / 限速） ──
+        if isinstance(error, ToolArgumentError):
+            return ClassifiedError(
+                category=ErrorCategory.DEGRADABLE,
+                message=f"工具调用参数错误{' (' + context + ')' if context else ''}: {error}",
+                retryable=False,
+                detail=str(error),
+            )
+        if isinstance(error, ConfirmationRequired):
+            return ClassifiedError(
+                category=ErrorCategory.DEGRADABLE,
+                message=f"工具 {error.tool_name} 需要确认后调用",
+                retryable=False,
+                detail=str(error),
+            )
+        if isinstance(error, ToolBlockedError):
+            return ClassifiedError(
+                category=ErrorCategory.DEGRADABLE,
+                message=f"工具 {error.tool_name} 已被策略阻断: {error.reason}",
+                retryable=False,
+                detail=str(error),
+            )
+        if isinstance(error, RateLimitExceeded):
+            return ClassifiedError(
+                category=ErrorCategory.DEGRADABLE,
+                message=f"工具 {error.tool_name} 调用过于频繁，请稍后再试",
+                retryable=False,
+                detail=str(error),
+            )
 
         # ── MCP 连接错误 ──
         if isinstance(error, MCPConnectionError):

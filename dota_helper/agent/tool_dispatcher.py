@@ -17,6 +17,16 @@ import asyncio
 from typing import Any, Dict, List, Optional, Union
 
 from dota_helper.agent.circuit_breaker import CircuitBreakerRegistry
+from dota_helper.agent.tool_guard import (
+    AuditLog,
+    ConfirmationRequired,
+    RateLimitExceeded,
+    SensitiveOperationGuard,
+    ToolArgumentError,
+    ToolArgumentValidator,
+    ToolBlockedError,
+    ToolRateLimiter,
+)
 from dota_helper.agent.tool_registry import ToolRegistry
 from dota_helper.mcp_client.client import MCPClient, NoOpMCPClient
 from dota_helper.mcp_client.types import ToolInfo, MCPConnectionError
@@ -37,6 +47,11 @@ class ToolDispatcher:
 
     Args:
         mcp_client: MCPClient 或 NoOpMCPClient 实例
+        enable_tool_guard: 是否启用工具护栏（参数校验/敏感守卫/限速/审计，默认 True）
+        tool_rate_limit: 是否启用速率限制（可独立关闭，默认 True）
+        guard_config: 护栏自定义配置（可选），支持:
+            - policies: Dict[str, str] 覆盖敏感操作默认策略
+            - rate_limits: Dict[str, float] 覆盖默认限速配置
     """
 
     def __init__(
@@ -44,6 +59,9 @@ class ToolDispatcher:
         mcp_client: Optional[Union[MCPClient, NoOpMCPClient]] = None,
         circuit_breaker_registry: Optional[CircuitBreakerRegistry] = None,
         tool_registry: Optional[ToolRegistry] = None,
+        enable_tool_guard: bool = True,
+        tool_rate_limit: bool = True,
+        guard_config: Optional[Dict[str, Any]] = None,
     ) -> None:
         """初始化工具分发器
 
@@ -51,6 +69,9 @@ class ToolDispatcher:
             mcp_client: MCP Client 实例（MCPClient 或降级模式 NoOpMCPClient）
             circuit_breaker_registry: 熔断器注册表（可选，默认创建新实例）
             tool_registry: 本地工具注册表（可选）
+            enable_tool_guard: 是否启用工具护栏（默认 True）
+            tool_rate_limit: 是否启用速率限制（默认 True，仅护栏开启时生效）
+            guard_config: 护栏自定义配置（可选）
         """
         self._mcp_client: Optional[Union[MCPClient, NoOpMCPClient]] = mcp_client
         self._available_tools: List[Dict[str, Any]] = []
@@ -58,14 +79,29 @@ class ToolDispatcher:
         self._circuit_breaker = circuit_breaker_registry or CircuitBreakerRegistry()
         self._tool_registry = tool_registry or ToolRegistry()
 
+        # 工具护栏四层拦截
+        self._enable_tool_guard = enable_tool_guard
+        guard_config = guard_config or {}
+        self._audit_log = AuditLog() if enable_tool_guard else None
+        self._validator = ToolArgumentValidator() if enable_tool_guard else None
+        self._sensitive_guard = SensitiveOperationGuard(
+            policies=guard_config.get("policies"),
+            audit_log=self._audit_log,
+        ) if enable_tool_guard else None
+        self._rate_limiter = ToolRateLimiter(
+            enabled=tool_rate_limit,
+            config=guard_config.get("rate_limits"),
+        ) if enable_tool_guard else None
+
         # 如果 MCP Client 已连接且有工具缓存，自动加载
         if mcp_client is not None and hasattr(mcp_client, "tools") and mcp_client.tools:
             self._load_tools_from_cache(mcp_client.tools)
 
         logger.info(
-            "工具分发器初始化: mcp_client=%s, tools=%d",
+            "工具分发器初始化: mcp_client=%s, tools=%d, tool_guard=%s",
             "connected" if (mcp_client and mcp_client.is_connected) else "none",
             len(self._available_tools),
+            "enabled" if enable_tool_guard else "disabled",
         )
 
     async def connect(self) -> None:
@@ -109,21 +145,56 @@ class ToolDispatcher:
         self,
         tool_name: str,
         args: Dict[str, Any],
+        session_id: str = "",
     ) -> str:
-        """分发工具调用到 MCP Server（含熔断检查和自动重试）
+        """分发工具调用到 MCP Server（含工具护栏、熔断检查和自动重试）
+
+        护栏流程：工具名校验 → Schema 参数校验 → 敏感操作守卫 → 速率限制
+        → 熔断检查 → 重试调用。
 
         Args:
             tool_name: 工具名称（如 'get_match_details'）
             args: 工具参数字典
+            session_id: 会话 ID（用于敏感确认与限速的会话隔离）
 
         Returns:
             str: 工具执行结果文本
 
         Raises:
+            ToolArgumentError: 参数校验失败
+            ConfirmationRequired: 敏感操作需要用户确认
+            ToolBlockedError: 敏感操作被策略阻断
+            RateLimitExceeded: 工具调用频率超限
             ValueError: 工具名不在可用列表中
             MCPConnectionError: MCP 连接错误（重试耗尽后抛出）
             RuntimeError: MCP Client 未连接
         """
+        # ── 工具护栏：参数校验 → 敏感守卫 → 限速 ──
+        if self._enable_tool_guard:
+            schema = self._resolve_schema(tool_name)
+            result = self._validator.validate(tool_name, args, schema)
+            if not result.valid:
+                self._audit_log.record(
+                    tool_name, args, "rejected", "; ".join(result.errors), session_id,
+                )
+                raise ToolArgumentError(result.errors)
+            args = result.normalized_args
+
+            decision, reason = self._sensitive_guard.check(tool_name, args, session_id)
+            if decision == SensitiveOperationGuard.CONFIRM:
+                raise ConfirmationRequired(tool_name, args, reason)
+            if decision == SensitiveOperationGuard.BLOCK:
+                raise ToolBlockedError(tool_name, reason)
+
+            allowed, wait = self._rate_limiter.allow(tool_name, session_id)
+            if not allowed:
+                self._audit_log.record(
+                    tool_name, args, "rate_limited", f"需等待 {wait:.0f}s", session_id,
+                )
+                raise RateLimitExceeded(tool_name, wait)
+
+            self._audit_log.record(tool_name, args, "allowed", "", session_id)
+
         # 优先检查本地工具
         if self._tool_registry.has_tool(tool_name):
             logger.info("分发本地工具调用: tool=%s, args=%s", tool_name, args)
@@ -240,6 +311,52 @@ class ToolDispatcher:
             bool: 工具是否可用
         """
         return tool_name in self._tool_name_set or self._tool_registry.has_tool(tool_name)
+
+    def confirm_tool(self, tool_name: str, session_id: str = "") -> None:
+        """标记工具在某会话内已确认（由上层确认回调调用）
+
+        Args:
+            tool_name: 工具名称
+            session_id: 会话 ID
+        """
+        if self._sensitive_guard is not None:
+            self._sensitive_guard.confirm(tool_name, session_id)
+            logger.info("工具已确认放行: tool=%s, session=%s", tool_name, session_id)
+
+    @property
+    def audit_log(self) -> Optional[AuditLog]:
+        """工具调用审计日志（护栏启用时可用）"""
+        return self._audit_log
+
+    @property
+    def tool_guard_enabled(self) -> bool:
+        """工具护栏是否启用"""
+        return self._enable_tool_guard
+
+    def _resolve_schema(self, tool_name: str) -> Dict[str, Any]:
+        """解析工具参数 schema（本地 ToolSchema 或 MCP inputSchema）
+
+        返回 JSON Schema 风格 dict：{type, properties, required}。
+        本地工具优先，其次查 MCP 工具列表，未找到返回空 schema。
+
+        Args:
+            tool_name: 工具名称
+
+        Returns:
+            Dict[str, Any]: 工具参数 schema
+        """
+        local = self._tool_registry.get_tool(tool_name)
+        if local is not None:
+            return {
+                "type": "object",
+                "properties": dict(local.schema.properties),
+                "required": list(local.schema.required),
+            }
+        for tool in self._available_tools:
+            if tool.get("name") == tool_name:
+                schema = tool.get("schema") or {}
+                return schema if isinstance(schema, dict) else {}
+        return {}
 
     @property
     def tool_count(self) -> int:
