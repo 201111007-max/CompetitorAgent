@@ -8,6 +8,7 @@ from openai import AsyncOpenAI
 
 from dota_helper.observability import get_tracer, get_metrics_collector
 from dota_helper.observability.logger import get_logger
+from dota_helper.secret_vault import vault
 
 logger = get_logger("llm.client")
 
@@ -26,18 +27,17 @@ class LLMClient:
         """初始化 LLM 客户端
 
         Args:
-            api_key: OpenAI API Key，默认从环境变量 OPENAI_API_KEY 读取
+            api_key: OpenAI API Key，默认由 SecretVault 统一解析
+                （候选顺序 OPENAI_API_KEY > DEEPSEEK_API_KEY > LLM_API_KEY）
             base_url: OpenAI Base URL，默认从环境变量 OPENAI_BASE_URL 读取
             default_model: 默认模型名称
             max_retries: 网络失败时的最大重试次数
             timeout: 请求超时时间（秒）
         """
-        # 支持多种环境变量名（优先级：参数 > OPENAI_API_KEY > DEEPSEEK_API_KEY > LLM_API_KEY）
+        # 密钥解析统一收敛到 SecretVault（bugs.md P0 #3），消除模块内多环境变量散落
         self._api_key = (
             api_key
-            or os.getenv("OPENAI_API_KEY")
-            or os.getenv("DEEPSEEK_API_KEY")
-            or os.getenv("LLM_API_KEY")
+            or vault.get_first(("OPENAI_API_KEY", "DEEPSEEK_API_KEY", "LLM_API_KEY"), owner="llm.client")
             or ""
         )
         # 支持多种 base_url 配置
@@ -52,7 +52,7 @@ class LLMClient:
         self._timeout = timeout
 
         if not self._api_key:
-            logger.warning("OPENAI_API_KEY 未设置，LLM 调用将失败")
+            logger.warning("LLM API 密钥未配置（OPENAI_API_KEY/DEEPSEEK_API_KEY/LLM_API_KEY），LLM 调用将失败")
 
         self._client: Optional[AsyncOpenAI] = None
         logger.info(

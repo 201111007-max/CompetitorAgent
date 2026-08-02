@@ -14,6 +14,13 @@
 
 from dota_helper.facade.api import PostMatchReviewAPI
 from dota_helper.facade.entrypoint import create_default_api
+from dota_helper.secret_vault import CredentialError, SecretVault, vault
 
 __version__ = "0.1.0"
-__all__ = ["PostMatchReviewAPI", "create_default_api"]
+__all__ = [
+    "PostMatchReviewAPI",
+    "create_default_api",
+    "SecretVault",
+    "CredentialError",
+    "vault",
+]

@@ -6,12 +6,12 @@ extraction, using httpx.AsyncClient instead of requests.
 
 import json
 import logging
-import os
 from typing import Any, Dict, List, Optional
 
 import httpx
 
 from dota_helper.mcp_server.server import mcp
+from dota_helper.secret_vault import vault
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ async def search_dota_history(
     """
     logger.info("search_dota_history called with: query=%s, num_results=%s, include_liquipedia=%s, sites=%s, fetch_fulltext=%s, fulltext_max_chars=%s", query, num_results, include_liquipedia, sites, fetch_fulltext, fulltext_max_chars)
 
-    api_key = os.getenv("SERPAPI_API_KEY", "").strip()
+    api_key = vault.get("SERPAPI_API_KEY", owner="search_tools") or ""
     if not api_key:
         return "❌ 未配置 SERPAPI_API_KEY，无法使用搜索工具"
 
