@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "dota_helper"
 version = "0.1.0"
-description = "Dota 2 赛后复盘 Agent 模块"
+description = "垂直领域 Agent 框架（示例领域：Dota 2 赛后复盘）"
 requires-python = ">=3.9"
 dependencies = [
     "openai>=1.0",

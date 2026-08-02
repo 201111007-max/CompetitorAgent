@@ -1,8 +1,22 @@
-# dota_helper
+# dota_helper — 垂直领域 Agent 框架（以 Dota 2 复盘为落地示例）
 
-> Dota 2 智能助手 — 提供赛后复盘、交互式 Chat Agent 和 MCP 工具集三类能力。
+> 一个**领域可插拔**的通用 Agent 框架，已在一个真实垂直领域（Dota 2 赛后复盘）完成落地验证。
+> 框架层与领域层严格解耦：接入新领域只需替换数据源、分析器与知识库。
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/downloads/)
+
+## 项目定位
+
+本项目的价值不在"Dota 2"本身，而在于沉淀了一套可复用的**自主执行 Agent 架构**：
+
+- **双循环编排**：战略循环制定分析策略（先规划），战术循环按策略逐轮迭代分析（后执行）
+- **可控执行**：迭代预算控制 + Stop Hook 可验证终止 + 断点续跑
+- **领域解耦**：接口 + 策略模式，LLM 驱动优先、规则驱动自动降级
+- **自我进化**：四层记忆系统 + 技能自动沉淀，越用越强
+- **能力开放**：53 个工具封装为标准 MCP Server，供任意 MCP Client 复用
+
+Dota 2 复盘是这套框架的第一个落地领域（示例），换知识库/换数据源即可迁移到
+企业知识问答、数据分析、行业助手等任何垂直场景。
 
 ## 安装
 
@@ -33,13 +47,13 @@ DEEPSEEK_API_KEY=your_deepseek_api_key
 # 可选：OpenAI API Key 作为备选
 OPENAI_API_KEY=your_openai_api_key
 
-# 可选：OpenDota API Key，提高请求限制
+# 可选：领域数据源（示例为 OpenDota）API Key，提高请求限制
 OPENDOTA_API_KEY=your_opendota_api_key
 ```
 
 未配置 LLM Key 时，系统会自动降级为规则分析模式，仍可运行。
 
-## 功能一：赛后复盘
+## 能力一：自主分析 Agent（示例：赛后复盘）
 
 ### Python API
 
@@ -50,7 +64,7 @@ from dota_helper import create_default_api
 async def main():
     api = create_default_api()
 
-    # 执行完整复盘
+    # 执行完整复盘（示例领域任务）
     report = await api.review(match_id="8909780728")
     print(f"总体评分: {report.overall_score:.1f}/10")
     print(f"置信度: {report.overall_confidence:.1%}")
@@ -77,9 +91,9 @@ python -m dota_helper.web_app
 
 Web 端会实时展示 ReAct 推理链和可视化面板。
 
-## 功能二：ReAct Chat Agent
+## 能力二：ReAct Chat Agent
 
-Web 服务同时暴露一个交互式 Chat Agent，支持自然语言查询 Dota 2 数据。
+Web 服务同时暴露一个交互式 Chat Agent，支持自然语言查询领域数据。
 
 启动 Web 服务后即可使用：
 
@@ -95,9 +109,9 @@ python -m dota_helper.web_app
 
 前端会展示完整的 thought → action → observation → final 推理链，右侧可视化面板会根据查询内容渲染眼位热力图等结果。
 
-## 功能三：MCP 工具集
+## 能力三：MCP 工具集（领域能力对外开放）
 
-`dota_helper` 包含一个 MCP Server，注册 50+ 个 Dota 2 工具，可被任意 MCP Client 调用。
+`dota_helper` 包含一个 MCP Server，注册 50+ 个领域工具，可被任意 MCP Client 调用。
 
 ### 启动 Server
 
@@ -114,7 +128,7 @@ from dota_helper.mcp_server.server import create_server
 server = create_server()
 ```
 
-### 工具分类
+### 工具分类（示例领域：Dota 2）
 
 | 分类 | 说明 |
 |------|------|
@@ -129,25 +143,25 @@ server = create_server()
 
 ## 更多 API 用法
 
-### 查看复盘历史
+### 查看分析历史
 
 ```python
-# 列出所有复盘记录
+# 列出所有分析记录
 history = api.list_history()
 for item in history:
     print(item["match_id"], item["created_at"])
 
-# 获取指定比赛的报告
+# 获取指定任务的分析报告
 report = api.get_report(match_id="8909780728")
 
-# 查看复盘状态
+# 查看分析状态
 status = api.get_status(match_id="8909780728")
 
-# 中断正在运行的复盘
+# 中断正在运行的分析
 result = await api.interrupt(match_id="8909780728")
 ```
 
-### 自定义分析技能
+### 自定义分析技能（自我进化入口）
 
 ```python
 api.register_analysis_skill(
