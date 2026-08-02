@@ -28,6 +28,13 @@ from dota_helper.agent.injection_guard import OutputGuard, PromptInjectionDetect
 from dota_helper.agent.plugin import PluginRegistry
 from dota_helper.agent.response_parser import ResponseParser, ReActStep, StepType
 from dota_helper.agent.tool_dispatcher import ToolDispatcher
+from dota_helper.agent.tool_guard import (
+    ConfirmationRequired,
+    RateLimitExceeded,
+    ToolArgumentError,
+    ToolBlockedError,
+    ToolConfirmationProvider,
+)
 from dota_helper.agent.tool_registry import ToolRegistry
 from dota_helper.agent.prompts.react_system import ReactSystemPrompt
 from dota_helper.domain_types.enums import BudgetDecision
@@ -164,6 +171,7 @@ class ReActLoop:
         tool_registry: Optional[ToolRegistry] = None,
         injection_detector: Optional[PromptInjectionDetector] = None,
         output_guard: Optional[OutputGuard] = None,
+        confirmation_provider: Optional[ToolConfirmationProvider] = None,
         max_iterations: int = 15,
         max_tokens: int = 40000,
         diminishing_threshold: int = 500,
@@ -179,10 +187,13 @@ class ReActLoop:
         self._tool_registry = tool_registry or ToolRegistry()
         self._injection_detector = injection_detector
         self._output_guard = output_guard
+        self._confirmation_provider = confirmation_provider
         if self._injection_detector is not None:
             logger.info("提示注入防御已启用（输入净化 + Observation 封装）")
         else:
             logger.info("提示注入防御未启用")
+        if self._confirmation_provider is not None:
+            logger.info("工具确认回调已注入")
         self._max_iterations = max_iterations
         self._max_tokens = max_tokens
         self._diminishing_threshold = diminishing_threshold
@@ -380,11 +391,52 @@ class ReActLoop:
                         observation = await self._tool_dispatcher.dispatch(
                             tool_name=step.tool_name,
                             args=step.tool_args,
+                            session_id=context.session_id,
                         )
                         # ── 插件：after_action ──
                         observation = await self._plugin_registry.dispatch_after_action(
                             step.tool_name, step.tool_args, observation
                         )
+                    except ConfirmationRequired as confirm_error:
+                        # 敏感操作确认：回调确认后重试，否则拒绝
+                        confirmed = False
+                        if self._confirmation_provider is not None:
+                            try:
+                                confirmed = await self._confirmation_provider.confirm(
+                                    confirm_error.tool_name, confirm_error.tool_args
+                                )
+                            except Exception as provider_error:
+                                logger.warning(
+                                    "工具确认回调异常: tool=%s, error=%s",
+                                    confirm_error.tool_name, provider_error,
+                                )
+                                confirmed = False
+                        if confirmed:
+                            logger.info(
+                                "工具已确认放行: tool=%s", confirm_error.tool_name,
+                            )
+                            self._tool_dispatcher.confirm_tool(
+                                confirm_error.tool_name, context.session_id
+                            )
+                            observation = await self._tool_dispatcher.dispatch(
+                                tool_name=confirm_error.tool_name,
+                                args=confirm_error.tool_args,
+                                session_id=context.session_id,
+                            )
+                            observation = await self._plugin_registry.dispatch_after_action(
+                                confirm_error.tool_name, confirm_error.tool_args, observation
+                            )
+                        else:
+                            observation = (
+                                f"⚠️ 工具 {confirm_error.tool_name} 需要确认后调用，"
+                                f"已取消（{confirm_error.reason}）"
+                            )
+                    except ToolArgumentError as arg_error:
+                        observation = f"⚠️ 工具 {step.tool_name} 参数不合法: {arg_error}"
+                    except RateLimitExceeded as rate_error:
+                        observation = f"⚠️ 工具 {rate_error.tool_name} 调用过于频繁，请稍后再试"
+                    except ToolBlockedError as block_error:
+                        observation = f"⚠️ 工具 {block_error.tool_name} 已被禁用: {block_error}"
                     except Exception as tool_error:
                         # ── 插件：on_error ──
                         await self._plugin_registry.dispatch_on_error(

@@ -19,6 +19,7 @@ from dota_helper.agent.react_loop import ReActLoop, ReActContext
 from dota_helper.agent.response_parser import ResponseParser
 from dota_helper.agent.session_manager import SessionManager
 from dota_helper.agent.tool_dispatcher import ToolDispatcher
+from dota_helper.agent.tool_guard import ToolConfirmationProvider
 from dota_helper.agent.prompts.react_system import ReactSystemPrompt
 from dota_helper.interfaces.llm import ILLMClient
 from dota_helper.llm.client import LLMClient
@@ -57,6 +58,9 @@ class DotaHelperReActAgent:
         rag_engine: Optional[RagEngine] = None,
         plugin_registry: Optional[PluginRegistry] = None,
         enable_injection_guard: bool = True,
+        enable_tool_guard: bool = True,
+        tool_rate_limit: bool = True,
+        confirmation_provider: Optional[ToolConfirmationProvider] = None,
     ) -> None:
         """初始化 ReAct Agent
 
@@ -70,6 +74,10 @@ class DotaHelperReActAgent:
             rag_engine: 自定义 RagEngine 实例（默认自动创建）
             plugin_registry: 自定义 PluginRegistry 实例（默认自动创建）
             enable_injection_guard: 是否启用提示注入防御（默认 True）
+            enable_tool_guard: 是否启用工具护栏（默认 True；仅作用于注入的
+                ToolDispatcher 在构造时开启的情况）
+            tool_rate_limit: 是否启用速率限制（默认 True）
+            confirmation_provider: 敏感操作确认回调（可选）
         """
         self._llm_client = llm_client
         self._tool_dispatcher = tool_dispatcher
@@ -78,6 +86,8 @@ class DotaHelperReActAgent:
         self._enable_mcp = enable_mcp
         self._enable_rag = enable_rag
         self._enable_injection_guard = enable_injection_guard
+        self._enable_tool_guard = enable_tool_guard
+        self._tool_rate_limit = tool_rate_limit
 
         # 初始化子组件
         self._parser = ResponseParser()
@@ -113,17 +123,21 @@ class DotaHelperReActAgent:
             plugin_registry=self._plugin_registry,
             injection_detector=injection_detector,
             output_guard=output_guard,
+            confirmation_provider=confirmation_provider,
             max_iterations=self._config.max_tokens // 500,  # 启发式：约 15 次迭代
             max_tokens=self._config.max_tokens * 10,  # Agent 可用 Token 为配置的 10 倍
         )
 
         self._closed = False
         logger.info(
-            "ReAct Agent 初始化: model=%s, max_tokens=%d, enable_mcp=%s, enable_rag=%s",
+            "ReAct Agent 初始化: model=%s, max_tokens=%d, enable_mcp=%s, enable_rag=%s, "
+            "tool_guard=%s, tool_rate_limit=%s",
             self._config.model,
             self._config.max_tokens,
             enable_mcp,
             enable_rag,
+            enable_tool_guard,
+            tool_rate_limit,
         )
 
     async def __aenter__(self) -> "DotaHelperReActAgent":
@@ -265,6 +279,9 @@ class DotaHelperReActAgent:
         enable_rag: bool = True,
         rag_engine: Optional[RagEngine] = None,
         enable_injection_guard: bool = True,
+        enable_tool_guard: bool = True,
+        tool_rate_limit: bool = True,
+        confirmation_provider: Optional[ToolConfirmationProvider] = None,
     ) -> "DotaHelperReActAgent":
         """工厂方法：一步初始化 Agent + MCP Client + SessionManager
 
@@ -276,6 +293,12 @@ class DotaHelperReActAgent:
             enable_rag: 是否启用 RAG 知识注入（默认 True）
             rag_engine: 自定义 RagEngine 实例（默认自动创建）
             enable_injection_guard: 是否启用提示注入防御（默认 True）
+            enable_tool_guard: 是否启用工具护栏（默认 True）
+                - True: 参数校验/敏感守卫/限速/审计全部生效
+                - False: 全部关闭（本地调试可关）
+            tool_rate_limit: 是否启用速率限制（默认 True）
+                - False: 仅关闭限速层，参数校验/敏感守卫/审计不受影响
+            confirmation_provider: 敏感操作确认回调（可选）
 
         Returns:
             DotaHelperReActAgent: 已初始化的 Agent 实例
@@ -297,8 +320,12 @@ class DotaHelperReActAgent:
             mcp_client = NoOpMCPClient(reason="enable_mcp=False")
             logger.info("MCP Client 降级模式: enable_mcp=False")
 
-        # 创建工具分发器（注入 MCP Client）
-        tool_dispatcher = ToolDispatcher(mcp_client=mcp_client)
+        # 创建工具分发器（注入 MCP Client + 工具护栏配置）
+        tool_dispatcher = ToolDispatcher(
+            mcp_client=mcp_client,
+            enable_tool_guard=enable_tool_guard,
+            tool_rate_limit=tool_rate_limit,
+        )
 
         # 初始化会话管理器
         data_dir = None
@@ -317,11 +344,16 @@ class DotaHelperReActAgent:
             enable_rag=enable_rag,
             rag_engine=rag_engine,
             enable_injection_guard=enable_injection_guard,
+            enable_tool_guard=enable_tool_guard,
+            tool_rate_limit=tool_rate_limit,
+            confirmation_provider=confirmation_provider,
         )
 
         logger.info(
-            "ReAct Agent 工厂创建完成: enable_mcp=%s, enable_rag=%s, mcp_type=%s",
+            "ReAct Agent 工厂创建完成: enable_mcp=%s, enable_rag=%s, tool_guard=%s, "
+            "tool_rate_limit=%s, mcp_type=%s",
             enable_mcp, enable_rag,
+            enable_tool_guard, tool_rate_limit,
             "MCPClient" if enable_mcp else "NoOpMCPClient",
         )
         return agent
