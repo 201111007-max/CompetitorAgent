@@ -1,0 +1,40 @@
+[
+  {
+    "task": "cursor pro plan pricing",
+    "prediction": {
+      "pricing_pro": "$20",
+      "pricing_team": "$40"
+    },
+    "ground_truth": {
+      "pricing_pro": "$20/month",
+      "pricing_team": "$40/month"
+    }
+  },
+  {
+    "task": "claude code model support",
+    "prediction": {
+      "feature_model": "claude-4-sonnet"
+    },
+    "ground_truth": {
+      "feature_model": "claude-4-sonnet"
+    }
+  },
+  {
+    "task": "codex top products",
+    "prediction": {
+      "feature_products": "cli and ide extension"
+    },
+    "ground_truth": {
+      "feature_products": "cli and ide extension"
+    }
+  },
+  {
+    "task": "cursor price per user",
+    "prediction": {
+      "pricing_pro": "$20/月"
+    },
+    "ground_truth": {
+      "pricing_pro": "$20 per month"
+    }
+  }
+]

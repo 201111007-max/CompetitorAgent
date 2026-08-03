@@ -1,0 +1,30 @@
+[
+  {
+    "task": "cursor pricing page",
+    "chosen_sources": ["official_pricing", "spa_extractor"],
+    "best_source": "official_pricing",
+    "total_cost": 0.02,
+    "outcome_complete": true
+  },
+  {
+    "task": "claude code changelog",
+    "chosen_sources": ["official_docs"],
+    "best_source": "official_docs",
+    "total_cost": 0.01,
+    "outcome_complete": true
+  },
+  {
+    "task": "codex pricing (SPA site)",
+    "chosen_sources": ["official_home", "spa_extractor"],
+    "best_source": "spa_extractor",
+    "total_cost": 0.05,
+    "outcome_complete": true
+  },
+  {
+    "task": "perplexity performance",
+    "chosen_sources": ["official_docs", "alternative_benchmark"],
+    "best_source": "alternative_benchmark",
+    "total_cost": 0.04,
+    "outcome_complete": false
+  }
+]

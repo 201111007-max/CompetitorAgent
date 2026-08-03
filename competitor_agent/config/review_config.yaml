@@ -1,0 +1,73 @@
+# 竞品分析 Agent 配置文件
+# 参考 doc/configuration.md 各字段含义与默认值。
+
+# ===== 基础配置 =====
+api_base_url: "https://api.openai.com/v1"
+model: "deepseek-v4-flash"
+temperature: 0.1
+max_tokens: 2048
+
+# ===== 预算（BudgetController）=====
+budget:
+  max_iterations: 10          # 战术循环最大迭代轮数
+  max_parallel_subagents: 4   # 并行子代理上限
+  cost_limit_usd: 1.0         # 单次分析 LLM 成本上限（美元）
+  token_high_water_mark: 120000  # 上下文 token 高水位，触发压缩
+  token_compression_target: 80000 # 压缩后目标 token
+
+# ===== 终止阈值 =====
+termination:
+  core_priority_threshold: 8  # 核心缺口优先级判定线
+  core_confidence: 0.8        # 核心缺口关闭所需置信度
+
+# ===== 维度清单与预算分配 =====
+dimensions:
+  enabled: [feature, pricing, performance, ecosystem, sentiment, roadmap]
+  default_budget:
+    feature: 3
+    pricing: 2
+    performance: 3
+    ecosystem: 2
+    sentiment: 2
+    roadmap: 1
+  analysis_order: [pricing, feature, performance, ecosystem, sentiment, roadmap]
+
+# ===== 数据源 =====
+collector:
+  cache_ttl_seconds: 86400
+  max_retries: 2
+  timeout_seconds: 20
+  rate_limit_per_second: 2   # 每源限速（ToolGuard）
+  use_playwright: false      # M1 关；M2 接入后按需开
+  user_agent: "competitor-agent/0.1"
+
+# ===== 停止验证 =====
+stop_verifier:
+  required_dimensions:
+    - "pricing"
+    - "feature"
+  min_confidence: 0.6
+  min_evidence_ratio: 0.7
+
+# ===== 记忆 =====
+memory:
+  enabled: true
+  data_dir: "~/.competitor_agent"   # 记忆/凭据库根目录
+  session_ttl_days: 30
+  skills_max_per_competitor: 50
+  evolution_window: 30              # L4 成功率统计窗口（天）
+
+# ===== 报告 =====
+report:
+  include_confidence: true
+  include_evidence_urls: true
+  output_dir: "reports/competitor"
+
+# ===== 可观测性 =====
+observability:
+  log_level: "INFO"
+  tracing: true
+  metrics: true
+  langfuse_enabled: false
+  langfuse_public_key_env: "LANGFUSE_PUBLIC_KEY"
+  langfuse_secret_key_env: "LANGFUSE_SECRET_KEY"

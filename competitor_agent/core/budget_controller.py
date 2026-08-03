@@ -1,0 +1,109 @@
+"""BudgetController — 四条件终止决策
+
+对照架构文档 5.3：
+1) 所有缺口关闭
+2) 迭代预算耗尽
+3) 成本上限（美元）
+4) 核心信息满足度（priority>=8 的缺口 confidence>=0.8）
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from competitor_agent.domain_types.enums import GapStatus
+from competitor_agent.domain_types.info_gap import CORE_PRIORITY, InfoGap
+from competitor_agent.interfaces.context import BudgetState, StopDecision
+from competitor_agent.interfaces.verifier import IStopVerifier
+
+
+@dataclass
+class StopReason:
+    """终止原因枚举常量"""
+    ALL_GAPS_CLOSED = "all_gaps_closed"
+    ITERATION_BUDGET_EXHAUSTED = "iteration_budget_exhausted"
+    COST_LIMIT_REACHED = "cost_limit_reached"
+    CORE_SATISFACTION_REACHED = "core_satisfaction_reached"
+    NO_GAPS = "no_gaps"
+
+
+@dataclass
+class BudgetController:
+    """四条件终止控制器"""
+
+    max_iterations: int = 10
+    cost_limit: float = 1.0
+    core_priority_threshold: int = CORE_PRIORITY
+    core_confidence: float = 0.8
+    iteration_count: int = field(default=0, init=False)
+    total_cost: float = field(default=0.0, init=False)
+    verifier: IStopVerifier | None = None
+
+    def record_iteration(self, cost: float = 0.0) -> None:
+        """记录一次迭代消耗"""
+        self.iteration_count += 1
+        self.total_cost += cost
+
+    def should_stop(self, gaps: list[InfoGap]) -> StopDecision:
+        """按四条件判断是否终止。
+
+        外部验证器（Hook）在条件判定之后运行，作为最终仲裁：
+        - 四条件都不停但 Hook 判定可停 → 停
+        - 四条件判定停但 Hook 否决 → 不停
+        """
+        if not gaps:
+            return StopDecision(should_stop=True, reason=StopReason.NO_GAPS)
+
+        # 1) 所有缺口关闭
+        if all(g.status in (GapStatus.CLOSED, GapStatus.CONFIRMED) for g in gaps):
+            decision = StopDecision(should_stop=True, reason=StopReason.ALL_GAPS_CLOSED)
+        # 2) 迭代预算耗尽
+        elif self.iteration_count >= self.max_iterations:
+            decision = StopDecision(
+                should_stop=True,
+                reason=StopReason.ITERATION_BUDGET_EXHAUSTED,
+                details=f"iterations={self.iteration_count}/{self.max_iterations}",
+            )
+        # 3) 成本上限
+        elif self.total_cost >= self.cost_limit:
+            decision = StopDecision(
+                should_stop=True,
+                reason=StopReason.COST_LIMIT_REACHED,
+                details=f"cost=${self.total_cost:.4f}",
+            )
+        # 4) 核心信息满足度
+        elif self._core_satisfied(gaps):
+            core_gaps = [g for g in gaps if g.priority >= self.core_priority_threshold]
+            decision = StopDecision(
+                should_stop=True,
+                reason=StopReason.CORE_SATISFACTION_REACHED,
+                details=f"core={len(core_gaps)} gaps satisfied",
+            )
+        else:
+            decision = StopDecision(should_stop=False)
+
+        # 5) 外部验证器（Hook）作为最终仲裁
+        if self.verifier is not None:
+            return self.verifier.verify(
+                gaps,
+                BudgetState(
+                    iterations_used=self.iteration_count,
+                    total_cost=self.total_cost,
+                    max_iterations=self.max_iterations,
+                    cost_limit=self.cost_limit,
+                ),
+            )
+
+        return decision
+
+    def _core_satisfied(self, gaps: list[InfoGap]) -> bool:
+        core_gaps = [g for g in gaps if g.priority >= self.core_priority_threshold]
+        return bool(core_gaps) and all(g.confidence >= self.core_confidence for g in core_gaps)
+
+    def to_budget_state(self) -> BudgetState:
+        """导出预算状态快照"""
+        return BudgetState(
+            iterations_used=self.iteration_count,
+            total_cost=self.total_cost,
+            max_iterations=self.max_iterations,
+            cost_limit=self.cost_limit,
+        )
