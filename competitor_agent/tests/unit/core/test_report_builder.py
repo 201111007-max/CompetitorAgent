@@ -1,0 +1,80 @@
+"""core/report_builder.py + markdown_renderer.py 单测"""
+from competitor_agent.core.report_builder import ReportBuilder
+from competitor_agent.domain_types import (
+    Competitor,
+    DimensionResult,
+    GapStatus,
+    InfoGap,
+    ResultStatus,
+    SourceEvidence,
+)
+
+
+def _result(dimension, confidence=0.8, status=ResultStatus.COMPLETE, summary="结论", evidence=None):
+    return DimensionResult(
+        dimension=dimension,
+        summary=summary,
+        details={"key": "val"},
+        confidence=confidence,
+        evidence=evidence or [SourceEvidence(source_name="docs", url="https://x.com", content_hash="h")],
+        status=status,
+    )
+
+
+class TestReportBuilder:
+    def test_build_basic(self):
+        b = ReportBuilder()
+        comp = Competitor(name="cursor")
+        results = [_result("pricing", 0.8), _result("feature", 0.9)]
+        pending = []
+
+        report = b.build(comp, results, pending, "success")
+        assert report.competitor.name == "cursor"
+        assert len(report.dimension_results) == 2
+        assert report.markdown_report  # Markdown 已生成
+
+    def test_aggregate_weighted_confidence(self):
+        b = ReportBuilder()
+        comp = Competitor(name="cursor")
+        # pricing=0.8(w0.25), feature=0.9(w0.25)
+        results = [_result("pricing", 0.8), _result("feature", 0.9)]
+        report = b.build(comp, results, [], "success")
+        assert 0.8 < report.overall_confidence < 0.9
+
+    def test_build_no_results(self):
+        b = ReportBuilder()
+        report = b.build(Competitor(name="x"), [], [], "partial")
+        assert report.overall_confidence == 0.0
+        assert report.markdown_report
+
+
+class TestMarkdownRenderer:
+    def test_render_contains_sections(self):
+        b = ReportBuilder()
+        comp = Competitor(name="cursor")
+        results = [_result("pricing", 0.85, summary="Pro $20/mo")]
+        pending = [InfoGap(field="roadmap", priority=4, confidence=0.1, status=GapStatus.OPEN)]
+        report = b.build(comp, results, pending, "success")
+        md = report.markdown_report
+
+        assert "# cursor 竞品分析报告" in md
+        assert "## 维度结论" in md
+        assert "## 未关闭缺口" in md
+        assert "Pro $20/mo" in md
+        assert "roadmap" in md
+
+    def test_render_with_gaps(self):
+        b = ReportBuilder()
+        report = b.build(
+            Competitor(name="x"),
+            [_result("pricing", 0.6, status=ResultStatus.PARTIAL)],
+            [InfoGap(field="sentiment", priority=5, status=GapStatus.OPEN)],
+            "partial",
+        )
+        assert "sentiment" in report.markdown_report
+        assert "partial" in report.markdown_report
+
+    def test_render_no_pending(self):
+        b = ReportBuilder()
+        report = b.build(Competitor(name="x"), [_result("pricing", 0.8)], [], "success")
+        assert "全部缺口已关闭" in report.markdown_report

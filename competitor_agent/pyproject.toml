@@ -1,0 +1,123 @@
+[build-system]
+requires = ["setuptools>=64.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "competitor_agent"
+version = "0.1.0"
+description = "AI coding agent 竞品分析 Agent（采集→分析→报告 骨架闭环）"
+requires-python = ">=3.9"
+dependencies = [
+    "openai>=1.0",
+    "httpx>=0.23.0",
+    "pyyaml>=6.0",
+    "beautifulsoup4>=4.12",
+    "lxml>=5.0",
+    "python-dotenv>=1.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["competitor_agent*"]
+where = [".."]
+namespaces = false
+
+[project.optional-dependencies]
+mcp = [
+    "mcp>=1.0",
+    "python-dotenv>=1.0",
+]
+rag = [
+    "chromadb>=0.4.0",
+    "sentence-transformers>=2.2.0",
+]
+crawler = [
+    "beautifulsoup4>=4.12",
+    "lxml>=5.0",
+]
+spa = [
+    "playwright>=1.40.0",
+]
+web = [
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.29.0",
+]
+eval = [
+    "numpy>=1.24",
+    "pandas>=2.0",
+]
+all = [
+    "mcp>=1.0",
+    "python-dotenv>=1.0",
+    "chromadb>=0.4.0",
+    "sentence-transformers>=2.2.0",
+    "beautifulsoup4>=4.12",
+    "lxml>=5.0",
+    "playwright>=1.40.0",
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.29.0",
+    "numpy>=1.24",
+    "pandas>=2.0",
+]
+test = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23.0",
+    "respx>=0.23.0",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23.0",
+    "respx>=0.23.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0",
+    "pytest-cov>=4.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".."]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--strict-markers",
+    "--tb=short",
+]
+markers = [
+    "unit: Unit tests",
+    "integration: Integration tests",
+    "evaluation: Ground-truth evaluation",
+]
+
+[tool.coverage.run]
+source = ["competitor_agent"]
+omit = [
+    "*/tests/*",
+    "*/test_*.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py39"
+
+[tool.mypy]
+python_version = "3.10"
+check_untyped_defs = true
+disallow_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+exclude = ".*tests.*"
+follow_imports = "skip"
+
+[[tool.mypy.overrides]]
+module = ["yaml", "openai", "httpx", "bs4", "numpy.*", "numpy", "playwright.*", "playwright"]
+follow_imports = "skip"
+ignore_missing_imports = true

@@ -1,0 +1,111 @@
+"""AccuracyEval — 字段准确率 / F1 / 幻觉率评测（3.3）
+
+对标注用例算预测（prediction）vs 真值（ground_truth）的指标：
+- field_accuracy = 字段级 exact-match 命中 / 字段总数
+- f1 = 字段级平均 token-F1（precision/recall 调和）
+- hallucination_rate = 预测字段缺乏真值支持的比例（比例幻觉）
+
+prediction / ground_truth 均为 {field: value}。
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any
+
+
+@dataclass
+class EvalCase:
+    """单条评测用例"""
+    task: str
+    prediction: dict[str, Any]
+    ground_truth: dict[str, Any]
+
+
+@dataclass
+class AccuracyMetrics:
+    field_accuracy: float = 0.0
+    hallucination_rate: float = 0.0
+    f1: float = 0.0
+    per_field: dict[str, dict[str, float]] = field(default_factory=dict)
+
+
+def _normalize(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, (list, set, tuple)):
+        return " ".join(_normalize(v) for v in value)
+    return " ".join(str(value).strip().lower().split())
+
+
+def _tokens(text: str) -> set[str]:
+    return set(text.split())
+
+
+def _f1(pred: str, truth: str) -> float:
+    p = _tokens(pred)
+    t = _tokens(truth)
+    if p == t == set():
+        return 1.0
+    if not p or not t:
+        return 0.0
+    inter = p & t
+    precision = len(inter) / len(p)
+    recall = len(inter) / len(t)
+    if precision + recall == 0:
+        return 0.0
+    return 2 * precision * recall / (precision + recall)
+
+
+class AccuracyEvaluator:
+    """计算字段准确率 / F1 / 幻觉率（prediction vs ground_truth）"""
+
+    def evaluate(self, cases: list[EvalCase]) -> AccuracyMetrics:
+        field_scores: list[float] = []
+        f1s: list[float] = []
+        per_field: dict[str, dict[str, float]] = {}
+        total_pred = 0
+        supported = 0
+
+        for case in cases:
+            for field_name, truth in case.ground_truth.items():
+                pred = case.prediction.get(field_name, "")
+                np_ = _normalize(pred)
+                nt = _normalize(truth)
+                is_match = np_ == nt
+                field_scores.append(1.0 if is_match else 0.0)
+                f1s.append(_f1(np_, nt))
+
+                # 字段级 flag 聚合
+                pf = per_field.setdefault(field_name, {"total": 0.0, "hits": 0.0, "f1": 0.0})
+                pf["total"] += 1
+                pf["hits"] += 1.0 if is_match else 0.0
+                pf["f1"] += _f1(np_, nt)
+
+                # 幻觉：预测了"真值里 token 完全没有"的字段
+                if pred:
+                    total_pred += 1
+                    if np_ and set(np_.split()) & _tokens(nt):
+                        supported += 1
+
+        if not field_scores:
+            return AccuracyMetrics()
+
+        # 幻觉率 = 预测字段中无任何真值 token 支撑的比例
+        halluc = (total_pred - supported) / total_pred if total_pred else 0.0
+
+        per_field_summary = {
+            k: {"accuracy": round(v["hits"] / v["total"], 4), "f1": round(v["f1"] / v["total"], 4)}
+            for k, v in per_field.items()
+        }
+
+        return AccuracyMetrics(
+            field_accuracy=round(sum(field_scores) / len(field_scores), 4),
+            hallucination_rate=round(halluc, 4),
+            f1=round(sum(f1s) / len(f1s), 4),
+            per_field=per_field_summary,
+        )
+
+
+__all__ = ["AccuracyEvaluator", "AccuracyMetrics", "EvalCase"]
