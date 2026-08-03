@@ -1,603 +1,558 @@
-# DotaHelperAgent Agent 框架问题清单
+# DotaHelperAgent 待办事项 / 不足点
 
-> 从 Agent 框架完整性角度评估，按优先级排列。
+## P0 — 必须修复
+
+### 1. 无单元测试
+
+**问题**: 整个项目没有任何测试文件。核心逻辑（工具调用、Agent 路由、Prompt 构建）无法通过自动化测试验证。
+
+**建议**: 至少为以下模块添加单元测试：
+- `agent_factory.py` — Agent 路由逻辑
+- `dota_match/scheduler.py` — 定时任务调度
+- `dota_match/tools/` — 各工具的输入输出校验
 
 ---
 
-## 🔴 P0 — 安全风险
+### 2. 配置硬编码
 
-### 1. 提示注入防御缺失
+**问题**: API Key、URL、参数等配置散落在各文件中，没有统一的配置管理。
 
-**位置**: `agent/react_loop.py:128`
+**涉及文件**:
+- `dota_match/tools/hero_stats.py` — `OPENDOTA_BASE_URL` 硬编码
+- `dota_match/tools/match_detail.py` — `STRATZ_API_KEY` 从环境变量读取但无校验
+- `dota_match/tools/pro_match.py` — `STRATZ_GRAPHQL_URL` 硬编码
+- `dota_match/agent.py` — `DOTA2_CLASSIC_HEROES` 硬编码列表
+- `dota_match/scheduler.py` — 调度间隔硬编码
 
-**问题**: 用户输入直接作为 `user` 角色消息注入 LLM 上下文，无任何净化处理。攻击者可输入"忽略之前指令"、"你是 OpenAI 的模型"等注入模式劫持 Agent 行为。
+**建议**: 统一使用 `pydantic-settings` 或 `dataclass` 管理所有配置，提供默认值和环境变量覆盖。
+
+---
+
+## P1 — 重要改进
+
+### 3. 异常处理缺失
+
+**问题**: 多处网络请求和数据处理没有 try/except，外部服务不可用时会导致整个 Agent 崩溃。
+
+**涉及文件**:
+- `dota_match/tools/hero_stats.py:30` — `requests.get()` 无异常处理
+- `dota_match/tools/match_detail.py:30` — GraphQL 请求无超时和重试
+- `dota_match/tools/pro_match.py:25` — GraphQL 请求无异常处理
+- `dota_match/tools/player_search.py:15` — 请求无异常处理
+
+---
+
+### 4. 日志系统缺失
+
+**问题**: 整个项目没有任何日志输出。生产环境中无法追踪 Agent 的决策过程、API 调用耗时、错误信息。
+
+**建议**: 集成 `loguru` 或标准库 `logging`，至少记录：
+- 每次工具调用的输入/输出
+- LLM API 调用耗时
+- 异常堆栈
+
+---
+
+### 5. 类型注解不完整
+
+**问题**: 部分函数缺少类型注解，部分 Pydantic 模型字段缺少 `Field(description=...)`，影响可维护性和 IDE 支持。
+
+**涉及文件**:
+- `dota_match/tools/hero_stats.py` — 函数无返回类型注解
+- `dota_match/tools/match_detail.py` — 函数无返回类型注解
+- `dota_match/tools/pro_match.py` — 函数无返回类型注解
+- `dota_match/schemas.py` — 部分字段缺少 `description`
+
+---
+
+### 6. Prompt 管理混乱
+
+**问题**: Prompt 散落在各 Agent 文件中，部分 Prompt 包含具体业务逻辑，修改 Prompt 需要修改代码。
+
+**涉及文件**:
+- `dota_match/agent.py` — `system_prompt` 直接写在代码中
+- `dota_helper/agent_factory.py` — `_registry` 中的描述信息
+
+**建议**: 将 Prompt 抽离到独立的 `prompts/` 目录，支持 YAML 或 Jinja2 模板。
+
+---
+
+### 7. 依赖管理不完善
+
+**问题**: `requirements.txt` 缺少版本锁定，也未区分生产/开发依赖。`pyproject.toml` 中部分依赖版本范围过宽。
+
+**涉及文件**: `requirements.txt`, `pyproject.toml`
+
+---
+
+## P2 — 锦上添花
+
+### 8. 缺少 CI/CD
+
+**问题**: 没有 `.github/workflows/` 配置，无法自动运行测试和 lint。
+
+---
+
+### 9. 文档不完善
+
+**问题**: `AgentGuide/README.md` 缺少 API 文档、配置说明、部署步骤。各 Agent 的 README 缺失。
+
+---
+
+### 10. 缺少速率限制
+
+**问题**: 外部 API（OpenDota、Stratz）没有调用频率限制，可能触发服务端限流或被封禁。
+
+---
+
+## 社招面试补充：竞品分析 Agent 的"Agent 能力"设计指南
+
+社招面试中，"Agent 能力"和"功能多样性"的分界线在于：Agent 是否具备"面对不确定性时的自主决策能力"，而不是"覆盖了多少数据源"。
+
+下面从架构设计、核心机制、面试话术三个层面，告诉你如何在竞品分析 Agent 中把"Agent 味"拉满。
+
+### 一、先建立认知：什么是"Agent 能力"？
+
+面试官心中的 Agent 能力 checklist：
+
+| 能力 | 本质 | 竞品分析场景中的体现 |
+|------|------|----------------------|
+| 规划（Planning） | 不直接执行，先拆解策略 | 接到"分析竞品A"后，先制定"采集路线图" |
+| 自主决策（Decision） | 根据中间状态动态选择下一步 | 发现官网 404 后，自动转去应用商店 |
+| 记忆（Memory） | 跨任务积累经验，越用越聪明 | 上次分析发现"竞品喜欢藏定价在FAQ里"，下次优先查 FAQ |
+| 反思（Reflection） | 对结果自我校验、纠错 | 提取到"免费"但历史数据说是付费，触发交叉验证 |
+| 预算控制（Budget） | 知道什么时候该停 | 迭代 10 次没拿到数据，给出"当前最佳推测"并终止 |
+| 工具自主调用（Tool Use） | 不是被编排调用，而是按需调用 | 缺用户反馈时自动调 App Store API，不缺就不调 |
+
+**反面教材**：如果你的竞品分析是"定时任务每 6h 按固定顺序爬 5 个网站 → 存数据库 → LLM 总结"，面试官只会觉得这是一个高级爬虫+定时脚本，和 Agent 无关。
+
+### 二、架构设计：让 Agent 能力显性化
+
+#### 2.1 核心：信息缺口驱动（Information Gap Driven）
+
+不要设计"先爬官网 → 再爬 Twitter → 再爬应用商店"的静态 Pipeline。
+要设计一个信息缺口列表（InfoGap Registry），Agent 的所有行为都由"填补缺口"驱动：
 
 ```python
-# react_loop.py:128 — 用户输入原样注入
-context.messages = [
-    {"role": "system", "content": system_prompt},
-    {"role": "user", "content": initial_message},  # ← 无净化
-]
+class InfoGap:
+    """信息缺口：Agent 自主决策的驱动力"""
+    field: str           # 缺什么：如 "pricing"
+    priority: int        # 优先级：1-10
+    confidence: float    # 当前置信度：0-1
+    sources_tried: List[str]  # 已尝试的数据源
+    status: GapStatus    # OPEN / PARTIAL / CLOSED
+
+class CompetitorAgent:
+    def plan(self, task: Task) -> List[InfoGap]:
+        """战略循环：任务 → 缺口清单"""
+        gaps = [
+            InfoGap(field="pricing", priority=10, confidence=0),
+            InfoGap(field="user_sentiment", priority=8, confidence=0),
+            InfoGap(field="feature_matrix", priority=9, confidence=0),
+        ]
+        return gaps
+
+    def act(self, gap: InfoGap) -> Observation:
+        """战术循环：针对一个缺口，自主决定怎么填"""
+        # Agent 自己决定：用什么工具、什么策略、什么参数
+        tool = self.select_best_tool(gap)  # 不是硬编码！
+        result = tool.execute(gap)
+        return result
 ```
 
-**影响**: 攻击者可完全控制 Agent 的系统提示词，绕过所有安全限制。
+**面试话术**：
+"传统爬虫是'按剧本演'，我的 Agent 是'按目标演'。Agent 接到任务后先建立信息缺口清单，每个缺口都是自主决策的触发器。比如'定价'缺口优先级最高，Agent 会自主评估：官网定价页可用吗？上次爬是什么时候？有没有缓存？反爬风险高吗？综合判断后决定是调官网爬虫、还是用 Playwright、还是直接读缓存。"
 
----
+#### 2.2 战略循环：动态策略生成（不是配置，是推理）
 
-### 2. 工具护栏/参数校验缺失 ✅ 已修复
-
-**位置**: `agent/tool_guard.py`（新增） + `agent/tool_dispatcher.py`
-
-**问题**: `validate_tool()` 仅检查工具名是否在集合中，参数 `args: Dict[str, Any]` 原样透传给 MCP Server，无任何类型、范围、长度校验。
-
-**修复**: 在 `ToolDispatcher.dispatch()` 单一出口插入四层护栏（设计文档 `docs/superpowers/plans/post-match-review-agent/TOOL_GUARDRAIL_DESIGN.md`）：
-- **参数校验** `ToolArgumentValidator`：基于 inputSchema 的轻量 JSON Schema 子集校验（type/required/minimum/maximum/maxLength/enum/items/maxItems/pattern）+ 归一化（`"123"`→`123`，拒绝 `True`）+ 全局硬约束表（ID 64 位、数量 ≤100、字符串 ≤200、`sites` 禁 URL）
-- **敏感守卫** `SensitiveOperationGuard`：`request_match_parse(s)`/`inject_*_html` 默认 CONFIRM（确认回调放行，会话内记住），`search_dota_history` 默认 BLOCK
-- **速率限制** `ToolRateLimiter`：令牌桶按工具+会话双层，超频拒绝；`tool_rate_limit=False` 可整体关闭
-- **审计** `AuditLog`：所有调用（含被拒）记录 `timestamp/tool/args/decision/reason/session_id`
-
-异常（`ToolArgumentError`/`ConfirmationRequired`/`RateLimitExceeded`/`ToolBlockedError`）由 `react_loop` 转为 Observation，`error_classifier` 分类为 DEGRADABLE。开关：`DotaHelperReActAgent.create(enable_tool_guard=True/False, tool_rate_limit=True/False)`。
-
-**测试**: `tests/unit/test_tool_guard.py`（41 个用例，覆盖 Schema 校验/归一化/硬约束/敏感守卫/限速/审计/本地工具/ReAct 端到端）；全量回归 526 passed。
-
----
-
-### 3. 凭据/密钥管理分散 ✅ 已修复
-
-**位置**: `secret_vault.py`（新增） + `llm/client.py`、`mcp_server/server.py`、`mcp_server/helpers/opendota.py`、`mcp_server/tools/search_tools.py`、`observability/langfuse_adapter.py`、`facade/entrypoint.py`
-
-**问题**: API Key 通过 `os.getenv()` 分散在 4 个文件中读取，无统一凭据池、无加密存储、无密钥轮换机制。
-
-| 位置 | 读取方式 |
-|------|---------|
-| `llm/client.py:35-41` | `os.getenv("OPENAI_API_KEY")` / `os.getenv("DEEPSEEK_API_KEY")` |
-| `mcp_server/server.py:34` | `os.getenv("OPENDOTA_API_KEY")` |
-| `mcp_server/tools/search_tools.py:49` | `os.getenv("SERPAPI_API_KEY")` |
-| `observability/langfuse_adapter.py:34-35` | `os.getenv("LANGFUSE_PUBLIC_KEY")` / `os.getenv("LANGFUSE_SECRET_KEY")` |
-
-**影响**: 密钥泄露无防护，无最小权限限制，Agent 拿到 LLM API Key 后可任意使用。
-
-**修复**: 新增统一凭据池 `SecretVault`（`dota_helper/secret_vault.py`，仅依赖标准库，被下层模块导入无循环依赖）：
-- **单点读取**：优先级「内存覆盖 > 环境变量 > 默认值」，消除 4 处分散 `os.getenv()`；`get_first()` 集中兼容旧别名链（`OPENAI_API_KEY` > `DEEPSEEK_API_KEY` > `LLM_API_KEY`）
-- **必需校验** `require()`：缺失/空显式抛 `CredentialError`（替代静默返回 `""`/`None` 掩盖配置错误）
-- **最小权限审计** `get_access_log()`：每次读取记录 `name/owner/timestamp`，可回溯谁在何时读取了什么
-- **轮换** `set()`/`rotate()`/`unset()`：进程内注入/轮换/恢复环境变量，无需改多处配置
-- **加密落盘（可选）** `save_file()`/`load_file()`：Fernet 对称加密（`cryptography`，惰性导入），密钥来自参数或 `DOTA_SECRETS_KEY` 环境变量，文件不落明文
-- **遮蔽**：`__repr__` 不包含任何凭据值，防日志泄露
-
-接入点：`llm/client.py`、`facade/entrypoint.py`（`_has_llm_key`）经 `vault.get_first(...)`；`mcp_server/server.py`、`mcp_server/helpers/opendota.py` 经 `vault.get("OPENDOTA_API_KEY")`；`search_tools.py` 经 `vault.get("SERPAPI_API_KEY")`；`langfuse_adapter.py` 经 `vault.get("LANGFUSE_*")`。
-
-**测试**: `tests/unit/test_secret_vault.py`（32 个用例，覆盖读取优先级/别名链/必需校验/审计/轮换/加密落盘/遮蔽/LLM 客户端与入口集成）；全量回归 608 passed，新增 0 失败。
-
----
-
-## 🟡 P1 — 可靠性问题
-
-### 4. 错误分类与自动恢复缺失 ✅ 已修复
-
-**位置**: `agent/error_classifier.py`（新增）
-
-**修复**: 新增 `ErrorClassifier`，按 `ErrorCategory`（RECOVERABLE / DEGRADABLE / TERMINAL / UNKNOWN）分级处理异常：
-- MCP 超时、LLM 限流（429/503/504）→ **RECOVERABLE**：自动重试
-- MCP 连接断开、ValueError、RuntimeError → **DEGRADABLE**：跳过本轮继续
-- LLM 认证错误（401/403/API Key）→ **TERMINAL**：终止推理
-- 未知错误 → **UNKNOWN**：降级为 Thought 继续
-
-**测试**: `tests/unit/test_error_classifier.py`（20 个用例）
-
----
-
-### 5. Agent 层熔断器缺失 ✅ 已修复
-
-**位置**: `agent/circuit_breaker.py`（新增）
-
-**修复**: 新增 `CircuitBreaker` + `CircuitBreakerRegistry`：
-- 连续失败 3 次 → OPEN（熔断 30s）
-- 超时后 → HALF_OPEN（允许试探）
-- HALF_OPEN 失败 → OPEN（超时加倍，最大 5min）
-- 每个工具独立熔断，互不影响
-
-**测试**: `tests/unit/test_circuit_breaker.py`（20 个用例）
-
----
-
-### 6. 工具调用重试缺失 ✅ 已修复
-
-**位置**: `agent/tool_dispatcher.py:150-175`
-
-**修复**: `dispatch()` 集成熔断器检查 + 自动重试（超时/连接丢失重试 1 次，指数退避 1s→2s）。成功调用重置熔断器，重试耗尽记录失败。
-
-**测试**: `tests/unit/test_tool_dispatcher_reliability.py`（11 个用例）
-
----
-
-### 7. ReAct 循环状态无持久化 ✅ 已修复
-
-**位置**: `agent/react_loop.py:27-44`（`ReActContext`）
-
-**修复**: `ReActContext` 新增 `checkpoint_dir` + `save_checkpoint()` / `load_checkpoint()` / `clear_checkpoint()`。`execute()` 启动时优先从 checkpoint 恢复，每轮迭代后自动保存，推理完成后清理。
-
----
-
-## 🟡 P2 — 扩展性问题
-
-### 8. 插件系统缺失 ✅ 已修复
-
-**位置**: `agent/plugin.py`
-
-**修复**: 新增 `Plugin` 抽象基类（7 个生命周期钩子：`on_start`/`on_end`/`before_llm_call`/`after_llm_call`/`before_action`/`after_action`/`on_error`）+ `PluginRegistry`（注册/卸载/事件分发，管道模式，单个插件异常不中断链）。`react_loop.py` 的 `execute()` 中集成了 6 个钩子点。
-
----
-
-### 9. 本地工具注册机制缺失 ✅ 已修复
-
-**位置**: `agent/tool_registry.py`、`agent/tool_dispatcher.py`
-
-**修复**: 新增 `ToolSchema`/`LocalTool`/`ToolRegistry`，支持 `register(name, handler, description, schema)`、同步/异步 handler 自动检测、`get_descriptions()` 格式化输出。`ToolDispatcher.dispatch()` 优先检查本地工具（本地 > MCP），`get_tool_descriptions()` 合并本地和 MCP 工具描述。
-
----
-
-### 10. Agent 间协作机制缺失 ✅ 已修复
-
-**位置**: `agent/message_bus.py`
-
-**修复**: 新增 `MessageBus` 发布/订阅模式，`EventType` 枚举（`RESULT_READY`/`ERROR`/`STATUS_CHANGE`/`CUSTOM`），支持 `sender_filter`、消息历史查询、`max_history` 限制。子代理可通过共享 `MessageBus` 实例交换中间结果。
-
----
-
-## 🟢 P3 — 效率问题
-
-### 11. LLM 调用缓存缺失
-
-**位置**: `llm/client.py:83-155`
-
-**问题**: `chat()` 方法每次调用都直接请求 LLM API，无响应缓存。相同输入（messages + model + temperature）的重复调用浪费 Token。
-
-**影响**: 重复查询浪费 Token 和成本，增加响应延迟。
-
----
-
-### 12. RAG 知识库框架与内容扩充
-
-**位置**: `mcp_server/helpers/rag_index.py`、`mcp_server/resources/heroes_txt/`
-
-#### 12.1 现有 RAG 实现分析
-
-当前 RAG 是纯 TF-IDF 词袋模型，不是真正的语义检索：
-
-| 维度 | 现状 |
-|------|------|
-| 向量化 | 纯 NumPy 手写 TF-IDF，无 embedding 模型 |
-| 检索 | 关键词匹配（0.7）+ 余弦相似度（0.3）混合评分 |
-| 知识源 | 仅 127 个英雄 `.txt` 文件（技能说明书，无攻略内容） |
-| 向量库 | 无（FAISS 可选，仅加速内积搜索） |
-| 依赖 | 无 sentence-transformers / chromadb / faiss 声明 |
-
-**知识源质量评估**：每个英雄 txt 仅包含官方技能数值（命石、技能、先天、魔晶、A杖），**没有出装推荐、对线技巧、团战定位、连招策略**等用户真正需要的攻略知识。用户问"幽鬼怎么玩"时 LLM 只能看到技能描述。
-
-#### 12.2 知识缺口
-
-| 知识类型 | 当前状态 | 用户问的频率 | 获取难度 |
-|---------|---------|------------|---------|
-| 英雄攻略（出装、连招、对线） | ❌ 没有 | 高 | 中 |
-| 版本补丁说明 | ⚠️ 有 API 但未结构化入库 | 中 | 低 |
-| 游戏机制（护甲、魔抗、中立物品） | ❌ 没有 | 中 | 低 |
-| 策略知识（打盾时机、推高决策） | ⚠️ 有 YAML 提示模板但未入库 | 中 | 低 |
-| 历史复盘结论 | ❌ 没有 | 低 | 高 |
-| 装备信息 | ⚠️ 有 API constants 但未结构化 | 中 | 低 |
-
-#### 12.3 RAG 选型建议
-
-**推荐方案：Embedding + chromadb（方案二）**
-
-| 方案 | 描述 | 复杂度 | 效果 |
-|------|------|--------|------|
-| ① 纯 TF-IDF 升级 | 保持现有，只扩充知识源 | ⭐ 极低 | ⭐⭐ 关键词匹配，语义理解差 |
-| **② Embedding + chromadb** | **sentence-transformers + chromadb 嵌入式向量库** | **⭐⭐ 低** | **⭐⭐⭐⭐ 语义检索** |
-| ③ 重排序 + LLM 生成 | 加 cross-encoder reranker + LLM 摘要 | ⭐⭐⭐⭐⭐ 极高 | ⭐⭐⭐⭐⭐ 最好但过度设计 |
-| ④ 双通道混合 | TF-IDF + Embedding 并行检索合并排序 | ⭐⭐⭐ 中 | ⭐⭐⭐⭐ 兼容性好 |
-
-**选型理由**：
-- 当前 TF-IDF 无法处理语义查询（"后期怎么打"搜不到"后期决策"文档），Embedding 能解决
-- 知识源已存在（127 个英雄 txt），只需新增 embedding 层
-- chromadb 嵌入式无服务进程，pip install 即可，改动最小
-- 未来可扩展：换 embedding 模型或加 reranker 都不需要改检索接口
-
-**不选方案③**：DotaHelper 是单用户工具，重排序 + LLM 生成对游戏问答场景收益不大但复杂度翻倍。
-**不选方案④**：纯 Embedding 语义检索已能覆盖关键词匹配场景（"幽鬼"的 embedding 和文档中"幽鬼"的 embedding 相似度自然高），无需维护两套检索。
-
-#### 12.4 知识库目录结构设计
-
-```
-dota_helper/rag/
-├── engine.py                  # RAG 引擎（embedding + chromadb 封装）
-├── knowledge_base/            # 知识源目录（Markdown 文件，可 Git 管理）
-│   ├── heroes/                # 英雄攻略（手动整理 + 爬取）
-│   │   ├── spectre.md         # 幽鬼攻略：出装、连招、对线、团战
-│   │   └── pudge.md
-│   ├── mechanics/             # 游戏机制（手动整理）
-│   │   ├── armor.md           # 护甲减伤公式
-│   │   ├── magic_resist.md    # 魔抗叠加规则
-│   │   └── neutral_items.md   # 中立物品机制
-│   ├── patches/               # 版本补丁（自动爬取）
-│   │   └── 7_41.md
-│   └── strategies/            # 策略知识（从 YAML 提取）
-│       ├── roshan_timing.md
-│       └── ward_efficiency.md
-└── chromadb_data/             # chromadb 持久化目录（自动生成，不 Git 管理）
-```
-
-**设计原则**：
-- 知识源和检索分离：知识源是 Markdown 文件（人类可读、可 Git 管理），检索用 chromadb（向量索引自动构建）
-- Metadata 过滤：每个文档带 tag（hero/mechanic/patch/strategy），检索时按类型过滤
-- 增量更新：chromadb 支持 upsert，新增文档不需要重建整个索引
-- 回退机制：chromadb 查询无结果时回退到现有 TF-IDF 搜索
-
-#### 12.5 知识获取方案（按投入产出比排序）
-
-**Phase 1 — 结构化现有数据（半天）**
-
-| 数据 | 位置 | 做法 |
-|------|------|------|
-| 复盘技能 YAML | `prompts/skills/*.yaml` | 解析为 Markdown 文档入库 |
-| 战术分析 YAML | `prompts/tactical_*.yaml` | 同上 |
-| OpenDota constants | `api_samples/constants_*.json` | 定时拉取，结构化后入库 |
-| 历史复盘报告 | SQLite session_archive | 提取结论，去重后入库 |
-
-**Phase 2 — 爬取公开攻略站点（1 天）**
-
-| 站点 | 内容 | 爬取方式 | 更新频率 |
-|------|------|---------|---------|
-| Dotabuff | 英雄胜率、出装统计、对位数据 | 页面解析（已有 httpx） | 每周 |
-| Liquipedia | 英雄攻略、版本 Meta、赛事数据 | 页面解析（已有站点过滤） | 每月 |
-| Dota 2 Wiki | 游戏机制、技能机制、物品机制 | API 或页面解析 | 每版本 |
-
-**爬虫策略**：不实时爬，用定时任务（GitHub Actions / 系统 cron）每周更新一次。用户查询时只查本地知识库。
-
-**Phase 3 — 复盘结论自动沉淀（2 天）**
-
-```
-复盘完成 → 提取结论（conclusions） → 向量化 → 存入 chromadb
-下次类似比赛 → 检索历史结论 → 作为 context 注入 LLM
-```
-
-**过滤条件**：只存置信度 > 0.7 的结论，避免垃圾数据污染知识库。
-
-**Phase 4 — 手动整理热门英雄攻略（2 天）**
-
-挑选 10 个热门英雄（幽鬼、帕吉、影魔、卡尔等），人工整理出装推荐、对线技巧、团战定位，写入 Markdown 文件。
-
-#### 12.6 知识库扩充管道
-
-```
-┌─────────────────────────────────────────────────┐
-│                 知识库扩充管道                      │
-├─────────────────────────────────────────────────┤
-│                                                   │
-│  定时任务（每周）                                   │
-│  ├── 爬取 Dotabuff 英雄出装统计 → heroes/          │
-│  ├── 爬取 Liquipedia 版本更新 → patches/           │
-│  └── 爬取 Dota 2 Wiki 机制变更 → mechanics/        │
-│                                                   │
-│  触发式（每次复盘后）                               │
-│  ├── 提取复盘结论（confidence > 0.7）              │
-│  ├── 去重（检查 chromadb 中是否已有相似文档）       │
-│  └── 存入 chromadb（带 metadata: match_id, patch） │
-│                                                   │
-│  手动（开发者操作）                                 │
-│  ├── 新增英雄攻略 Markdown                         │
-│  ├── 更新游戏机制文档                              │
-│  └── 运行索引重建脚本                              │
-│                                                   │
-└─────────────────────────────────────────────────┘
-```
-
-#### 12.7 集成到 Agent 循环的设计
-
-##### 12.7.1 当前架构的问题
-
-现有 RAG 使用方式是**被动调用**——LLM 自己决定是否调 `rag_hero_intro` 工具：
-
-```
-用户输入 → LLM（无知识注入）→ LLM 决定是否调 rag_hero_intro → 拿到知识 → 回答
-```
-
-问题：
-1. LLM 不知道什么时候该查知识库，系统提示词说"英雄攻略直接 Final Answer"，但 LLM 自身知识可能过时
-2. RAG 结果只给 LLM 看一次，没有自动注入机制
-3. 知识检索和 LLM 推理是串行的，LLM 必须先调工具才能拿到知识
-
-##### 12.7.2 三层 RAG 集成架构
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    三层 RAG 集成架构                          │
-├─────────────────────────────────────────────────────────────┤
-│                                                              │
-│  第一层：系统提示词注入（初始化时）                             │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │  ReactSystemPrompt.build()                          │    │
-│  │  ├── 角色定义 + 工具描述                             │    │
-│  │  └── + RAG 知识摘要（可选，注入高频知识片段）          │    │
-│  └─────────────────────────────────────────────────────┘    │
-│                                                              │
-│  第二层：before_llm_call 插件（每轮迭代）                      │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │  RagPlugin.before_llm_call(messages)                │    │
-│  │  ├── 提取最后一条 user message 作为 query            │    │
-│  │  ├── 检索 chromadb → top_k 结果                     │    │
-│  │  ├── 如果相似度 > threshold → 注入为 system 消息      │    │
-│  │  └── 返回修改后的 messages                           │    │
-│  └─────────────────────────────────────────────────────┘    │
-│                                                              │
-│  第三层：MCP 工具（LLM 主动调用）                              │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │  rag_hero_intro(query, top_k) — 已有，保留不变       │    │
-│  │  rag_search(query, type_filter) — 新增通用检索工具    │    │
-│  └─────────────────────────────────────────────────────┘    │
-│                                                              │
-└─────────────────────────────────────────────────────────────┘
-```
-
-##### 12.7.3 新增文件
-
-```
-dota_helper/rag/
-├── __init__.py              # 包入口
-├── engine.py                # RAG 引擎：embedding + chromadb 封装
-├── plugin.py                # RagPlugin：before_llm_call 自动注入
-└── knowledge_base/          # 知识源目录（Markdown，可 Git 管理）
-    ├── heroes/              # 英雄攻略
-    ├── mechanics/           # 游戏机制
-    ├── patches/             # 版本补丁
-    └── strategies/          # 策略知识
-```
-
-##### 12.7.4 RagEngine 设计
+战略循环要体现 LLM 的推理能力，而不是读 YAML 配置：
 
 ```python
-class RagEngine:
-    """RAG 引擎 — Embedding + chromadb 封装
+class StrategicPlanner:
+    def generate_strategy(self, task: Task, memory: Memory) -> Strategy:
+        """
+        LLM 驱动：根据任务类型和历史经验生成采集策略
+        """
+        prompt = f"""
+        任务：分析竞品 {task.competitor_name} 的 {task.dimensions}
+        历史经验：{memory.get_past_strategies(task.competitor_name)}
+        当前约束：预算 {task.budget} 次调用，时间限制 {task.timeout}s
 
-    职责：
-    1. 从 knowledge_base/ 加载 Markdown 文档
-    2. 用 sentence-transformers 生成 embedding
-    3. 存入 chromadb（带 metadata 过滤）
-    4. 提供 search() 接口供插件和工具调用
-    """
+        请制定采集策略：
+        1. 哪些信息缺口需要填补？
+        2. 每个缺口优先尝试哪些数据源？（给出理由）
+        3. 如果主数据源失败，降级方案是什么？
+        4. 什么条件下可以终止任务？
+        """
+        strategy = llm.generate(prompt)
+        return strategy
+```
 
-    def __init__(self, kb_dir="knowledge_base", persist_dir="chromadb_data"):
-        self._kb_dir = Path(kb_dir)
-        self._persist_dir = Path(persist_dir)
-        self._embedding_model = None   # 懒加载
-        self._collection = None        # 懒加载
+关键设计：策略里必须包含终止条件和降级方案，这是 Agent 自主性的体现。
 
-    def _load_embedding_model(self):
-        """懒加载 sentence-transformers 模型（首次 ~2s，之后常驻内存）"""
-        from sentence_transformers import SentenceTransformer
-        self._embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
+#### 2.3 战术循环：ReAct + 工具自主决策
 
-    def _get_collection(self):
-        """懒加载 chromadb collection"""
-        import chromadb
-        client = chromadb.PersistentClient(str(self._persist_dir))
-        self._collection = client.get_or_create_collection(
-            name="dota_knowledge", metadata={"hnsw:space": "cosine"},
+战术循环用标准的 ReAct 模式，但工具选择必须是动态的：
+
+```python
+class TacticalLoop:
+    def step(self, gap: InfoGap, context: Context) -> StepResult:
+        # Thought：基于当前状态推理
+        thought = self.llm.think(
+            f"当前缺口：{gap.field}，置信度：{gap.confidence}，"
+            f"已尝试：{gap.sources_tried}，"
+            f"可用工具：{self.get_available_tools()}"
         )
-        return self._collection
 
-    def index_all(self):
-        """扫描 knowledge_base/ 下所有 .md 文件，重建索引
-        - 遍历 knowledge_base/{category}/*.md
-        - 每个文件按 ## 标题切分为段落
-        - 每段独立 embedding → upsert to chromadb
-        - metadata: {category, filename, title, source}
-        """
+        # Action：自主决定调用什么工具、传什么参数
+        action = self.llm.decide_action(thought)
+        # 例如：{"tool": "app_store_reviews", "params": {"app_id": "xxx", "limit": 100}}
 
-    def search(self, query, top_k=3, category=None, min_score=0.3):
-        """语义检索
-        - query → embedding
-        - chromadb query(where={"category": category} if category)
-        - 过滤 score < min_score
-        - 返回 [{"content": "...", "metadata": {...}, "score": 0.95}]
-        """
+        # Observation：执行并观察结果
+        observation = self.tool_executor.run(action)
 
-    def search_hero(self, hero_name):
-        """快捷方法：按英雄名精确检索（metadata 过滤 category=hero + filename 匹配）"""
+        # Reflection：结果是否合理？是否需要修正？
+        reflection = self.reflect(observation, gap)
+
+        return StepResult(thought, action, observation, reflection)
 ```
 
-**关键设计点**：
-- **懒加载模型**：`SentenceTransformer` 首次调用时加载，之后常驻内存
-- **段落切分**：Markdown 按 `##` 标题切分，每段独立 embedding，检索粒度更细
-- **相似度阈值**：低于 0.3 的结果丢弃，避免注入无关知识污染 LLM context
-- **回退机制**：chromadb 查询无结果时调用现有 `rag_index.rank_hero_documents()` 回退
-
-##### 12.7.5 RagPlugin 设计
+面试亮点：展示一个工具调用失败后的自主修正案例：
 
 ```python
-class RagPlugin(Plugin):
-    """RAG 插件 — 在 LLM 调用前自动注入相关知识
+def reflect(self, obs: Observation, gap: InfoGap) -> Reflection:
+    """反思层：校验结果质量，决定下一步"""
+    if obs.status == "blocked":
+        # 被反爬拦截 → 反思：换代理？换无头浏览器？还是换数据源？
+        return Reflection(
+            valid=False,
+            reason="IP 被 ban",
+            next_action="switch_to_playwright_with_proxy"
+        )
 
-    通过 PluginRegistry 注册到 ReActLoop，
-    在 before_llm_call 钩子中检索并注入知识。
-    """
+    if gap.field == "pricing" and "免费" in obs.raw_text:
+        # 提取到异常值 → 反思：和历史数据冲突吗？
+        historical = self.memory.get("pricing_history")
+        if historical and historical[-1] != "免费":
+            return Reflection(
+                valid=False,
+                reason="价格突变，与历史数据冲突",
+                next_action="cross_verify_with_alternative_source"
+            )
+```
 
-    def __init__(self, engine: RagEngine, threshold=0.4):
-        self._engine = engine
-        self._threshold = threshold
-        self._last_query = ""        # 避免重复检索
-        self._last_injected = ""     # 避免重复注入
+#### 2.4 四层记忆：让 Agent 越用越聪明
 
-    async def before_llm_call(self, messages):
-        """在 LLM 调用前注入 RAG 检索结果
+这是区分"脚本"和"Agent"的核心。你的 DotaHelperAgent 有四层记忆，迁移时要保留并讲清楚：
 
-        流程：
-        1. 取最后一条 user 消息作为 query
-        2. 如果 query 和上次一样 → 跳过（避免重复检索）
-        3. 检索 chromadb
-        4. 如果最高分 > threshold → 注入为 system 消息
-        5. 如果最高分 < threshold → 跳过（不污染 context）
+```python
+class MemorySystem:
+    def __init__(self):
+        self.short_term = ShortTermMemory()   # 当前任务上下文
+        self.long_term = LongTermMemory()     # 历史分析结果
+        self.skills = SkillMemory()           # 沉淀的提取技巧
+        self.evolution = EvolutionMemory()    # 策略进化记录
+
+    def enrich_prompt(self, prompt: str, task: Task) -> str:
+        """记忆注入：让 LLM 基于历史经验做决策"""
+        relevant_skills = self.skills.retrieve(task.competitor_name)
+        past_failures = self.long_term.get_failures(task.competitor_name)
+        return f"""
+        {prompt}
+
+        【已沉淀的技能】
+        {relevant_skills}
+
+        【历史失败教训】
+        {past_failures}
         """
-        last_user = self._get_last_user_message(messages)
-        if not last_user or last_user == self._last_query:
-            return messages
-        self._last_query = last_user
-
-        results = self._engine.search(last_user, top_k=2)
-        if not results or results[0]["score"] < self._threshold:
-            return messages
-
-        content = self._format_context(results)
-        if content == self._last_injected:
-            return messages
-        self._last_injected = content
-
-        messages = self._inject_context(messages, content)
-        return messages
-
-    def _format_context(self, results):
-        """格式化检索结果为 LLM 可读的上下文"""
-        lines = ["\n## 相关知识", ""]
-        for r in results:
-            cat = r["metadata"].get("category", "general")
-            title = r["metadata"].get("title", "")
-            lines.append(f"[{cat}] {title}:")
-            lines.append(r["content"][:500])
-            lines.append("")
-        return "\n".join(lines)
 ```
 
-**关键设计点**：
-- **去重机制**：`_last_query` 和 `_last_injected` 避免同一轮迭代重复检索和重复注入
-- **阈值过滤**：相似度低于 0.4 的不注入，避免无关知识干扰 LLM
-- **注入位置**：追加到已有 system 消息末尾，不破坏 system/user/assistant 消息顺序
-- **不阻塞**：检索失败或超时不影响主流程，静默跳过
+具体例子：
+- **技能沉淀**：第一次分析"飞书"时，Agent 发现定价藏在"解决方案"页面而不是"定价"页面。这个经验被沉淀为 Skill：`if competitor == "feishu" and gap == "pricing": try_solution_page_first()`。下次分析飞书时自动优先查解决方案页。
+- **进化记录**：Agent 统计每个工具的成功率，发现"官网爬虫"对 SPA 站点成功率只有 30%，自动进化出"SPA 站点优先用 Playwright"的策略。
 
-##### 12.7.6 集成到现有代码
+**面试话术**：
+"我的 Agent 不是每次从零开始。它有一个四层记忆系统：短期记忆管当前任务上下文，长期记忆存历史分析结果，技能记忆沉淀提取技巧——比如发现某个竞品喜欢把定价藏在 FAQ 里，下次自动优先查 FAQ。最核心的是进化记忆，Agent 会统计每个数据源的成功率，自动调整工具选择策略，越用越聪明。"
 
-**修改 `react_agent.py`**（约 10 行）：
+#### 2.5 预算与终止：Agent 知道"什么时候停"
+
+这是生产级 Agent 的必备能力，也是面试官最爱问的：
 
 ```python
-# 在 create() 工厂方法中注册 RagPlugin
-from dota_helper.rag.engine import RagEngine
-from dota_helper.rag.plugin import RagPlugin
+class BudgetController:
+    def __init__(self, max_iterations: int = 10, cost_limit: float = 1.0):
+        self.max_iterations = max_iterations
+        self.cost_limit = cost_limit  # 美元
+        self.iteration_count = 0
+        self.total_cost = 0.0
 
-rag_engine = RagEngine()
-rag_plugin = RagPlugin(engine=rag_engine)
+    def should_stop(self, gaps: List[InfoGap]) -> StopDecision:
+        # 条件1：所有缺口关闭
+        if all(g.status == GapStatus.CLOSED for g in gaps):
+            return StopDecision(stop=True, reason="all_gaps_closed")
 
-plugin_registry = PluginRegistry()
-plugin_registry.register(rag_plugin)
+        # 条件2：迭代预算耗尽
+        if self.iteration_count >= self.max_iterations:
+            return StopDecision(stop=True, reason="iteration_budget_exhausted")
 
-self._loop = ReActLoop(
-    llm_client=self._llm_client,
-    tool_dispatcher=self._tool_dispatcher,
-    parser=self._parser,
-    prompt_builder=self._prompt_builder,
-    plugin_registry=plugin_registry,  # ← 新增
-    ...
-)
+        # 条件3：成本上限
+        if self.total_cost >= self.cost_limit:
+            return StopDecision(stop=True, reason="cost_limit_reached")
+
+        # 条件4：信息满足度阈值（即使缺口没全关，但核心信息够了）
+        core_gaps = [g for g in gaps if g.priority >= 8]
+        if all(g.confidence >= 0.8 for g in core_gaps):
+            return StopDecision(stop=True, reason="core_satisfaction_reached")
+
+        return StopDecision(stop=False)
+
+    def on_stop(self, gaps: List[InfoGap]) -> FinalReport:
+        """终止时生成报告，包含未关闭缺口的说明"""
+        return FinalReport(
+            completed=[g for g in gaps if g.status == GapStatus.CLOSED],
+            pending=[g for g in gaps if g.status != GapStatus.CLOSED],
+            confidence=self.calculate_overall_confidence(gaps)
+        )
 ```
 
-**修改 `react_system.py`**（约 5 行）：
-
-```python
-# 在系统提示词中告知 LLM 有自动 RAG 能力
-_SYSTEM_ROLE_TEMPLATE = """...
-## 自动知识检索
-
-系统会自动检索相关知识库并注入到你的上下文中。
-你无需主动调用 rag_hero_intro 工具来获取英雄知识，
-直接使用注入的知识即可。
-
-如果你需要更详细的特定知识，仍然可以调用 rag_hero_intro 工具。
-..."""
-```
-
-##### 12.7.7 数据流完整链路
-
-```
-用户输入："幽鬼怎么玩"
-  │
-  ├─→ ReActLoop.execute()
-  │     │
-  │     ├─→ before_llm_call 插件
-  │     │     └─→ RagPlugin.before_llm_call(messages)
-  │     │           ├─ 提取 "幽鬼怎么玩" 作为 query
-  │     │           ├─ engine.search("幽鬼怎么玩", top_k=2)
-  │     │           │     └─ chromadb query → [{content: "幽鬼攻略...", score: 0.87}]
-  │     │           ├─ score 0.87 > threshold 0.4 → 注入
-  │     │           └─ messages 追加 system 消息：
-  │     │              "相关知识：[hero] 幽鬼攻略：出装推荐..."
-  │     │
-  │     ├─→ LLM 调用（messages 已包含 RAG 知识）
-  │     │     └─ LLM 看到 RAG 知识 + 系统提示词 → 直接 Final Answer
-  │     │
-  │     └─→ yield final 事件
-  │
-  └─→ 用户看到："幽鬼推荐出装：辉耀→分身斧→蝴蝶..."
-```
-
-##### 12.7.8 三种使用方式对比
-
-| 方式 | 触发时机 | 优点 | 缺点 | 适用场景 |
-|------|---------|------|------|---------|
-| **插件自动注入** | 每轮 LLM 调用前 | 无感，LLM 不需要主动调工具 | 多一次 embedding 查询（~10ms） | 通用知识问答 |
-| **MCP 工具调用** | LLM 主动选择 | LLM 可控，可指定参数 | LLM 可能忘记调 | 需要详细知识的场景 |
-| **系统提示词注入** | 初始化时一次 | 零开销 | 提示词变长，不能动态适配 | 高频知识片段 |
-
-**推荐组合**：插件自动注入（兜底）+ MCP 工具（补充），系统提示词注入暂不做。
-
-##### 12.7.9 实施步骤
-
-| 步骤 | 内容 | 文件 | 行数 |
-|------|------|------|------|
-| 1 | 创建 `rag/engine.py` — RAG 引擎 | 新增 | ~120 |
-| 2 | 创建 `rag/plugin.py` — RagPlugin | 新增 | ~80 |
-| 3 | 创建 `rag/__init__.py` | 新增 | ~5 |
-| 4 | 修改 `react_agent.py` — 注册 RagPlugin | 修改 | ~10 |
-| 5 | 修改 `react_system.py` — 告知 LLM 自动 RAG | 修改 | ~5 |
-| 6 | 创建 `knowledge_base/` 目录 + 示例文档 | 新增 | ~50 |
-| 7 | 安装依赖 `sentence-transformers` + `chromadb` | pyproject.toml | ~2 |
-
-**总计**：新增 ~200 行，修改 ~15 行，安装 2 个依赖。
-
-#### 12.8 实施优先级
-
-| 阶段 | 内容 | 工作量 | 收益 |
-|------|------|--------|------|
-| Phase 1 | 把现有 YAML 技能/战术模板结构化入库 | 半天 | 中 |
-| Phase 2 | 爬取 Dotabuff 英雄出装统计 | 1 天 | 高 |
-| Phase 3 | 爬取 Dota 2 Wiki 游戏机制 | 1 天 | 高 |
-| Phase 4 | 复盘结论自动沉淀 | 2 天 | 中（需积累） |
-| Phase 5 | 手动整理 10 个热门英雄攻略 | 2 天 | 高 |
-
-**建议**：先做 Phase 1 + Phase 2，两天内让 RAG 知识库从"只有技能说明书"变成"有出装统计 + 策略知识"。Phase 3-5 看用户反馈再决定是否投入。
+**面试话术**：
+"Agent 必须有'自知之明'。我设计了四层终止机制：信息缺口全关、迭代预算耗尽、成本上限、核心信息满足度达标。最巧妙的是第四层——即使还有次要缺口没关，只要核心信息（定价、核心功能）置信度超过 80%，Agent 就会主动停止并给出报告，避免为了 5% 的信息消耗 50% 的预算。这是传统爬虫和定时任务绝对做不到的。"
 
 ---
 
-### 13. 输出验证/合规检查缺失
+# Agent 开发岗面试项目定位指南
 
-**位置**: `agent/response_parser.py:93-135`
-
-**问题**: LLM 输出解析失败时直接返回 `THOUGHT` 类型，无格式校验。无事实性校验、无内容安全过滤、无隐私信息泄露检查。
-
-**影响**: LLM 输出可能包含幻觉信息、有害内容或敏感数据泄露。
+> 基于 Boss 直聘 JD 分析 + DotaHelperAgent 架构迁移的实战建议
 
 ---
 
-## 优先级建议
+## 一、市场 JD 分析：Agent 开发岗真正要什么
 
-| 优先级 | 模块 | 建议行动 |
-|--------|------|---------|
-| **P0** | 提示注入防御 | 添加输入净化层，检测注入模式，隔离用户输入与系统提示词 |
-| **P0** | 工具护栏 | 添加参数类型/范围校验，敏感操作二次确认，速率限制 |
-| **P0** | 凭据管理 | 实现统一凭据池，加密存储，支持密钥轮换 |
-| **P1** | 错误分类与恢复 | 实现错误分类器，分级恢复策略（重试→降级→跳过→终止） |
-| **P1** | 熔断器 | 实现工具级熔断器，连续失败后自动暂停 |
-| **P1** | 状态持久化 | 为 ReActContext 添加 checkpoint 机制 |
-| **P2** | 插件系统 | 定义生命周期钩子，实现插件注册 API |
-| **P2** | 工具注册 | 实现本地 register_tool API |
-| **P2** | Agent 协作 | 实现 Agent 间消息总线 |
-| **P3** | LLM 缓存 | 添加语义缓存，配置 TTL |
-| **P3** | RAG 集成 | 将向量检索集成到 ReAct 循环 |
-| **P3** | 输出验证 | 添加格式校验和内容安全过滤 |
+### 1.1 薪资与能力对应关系
+
+| 能力要求 | 出现频率 | 对应薪资层级 | DotaHelperAgent 是否覆盖 |
+|---------|---------|-------------|------------------------|
+| **Agent 框架/架构设计** | 极高 | 30k-70k | 双循环编排 |
+| **RAG / GraphRAG** | 极高 | 30k-60k | 需补强 |
+| **MCP / Function Calling / Tool Use** | 极高 | 25k-60k | MCP Server |
+| **Memory / 记忆系统** | 高 | 35k-70k | 四层记忆 |
+| **Prompt Engineering / 调优** | 极高 | 20k-50k | ReAct |
+| **Self-evolve / 自我进化** | 中 | 40k-70k | 技能沉淀+进化 |
+| **多智能体协作 / Multi-Agent** | 中 | 35k-70k | 需补强 |
+| **评测体系 / 准确率优化** | 高 | 30k-60k | 需补强 |
+| **数据工程 / 数据处理** | 高 | 25k-50k | 部分覆盖 |
+| **工程化落地 / 端到端** | 极高 | 30k-70k | 可控执行 |
+
+### 1.2 岗位层级划分
+
+- **初级岗（15-25k）**：Coze/Dify 搭工作流、写 Prompt、调 API
+- **中高级工程岗（30-50k）**：自研 Agent 框架、RAG、MCP、Memory、工程架构
+- **专家岗（40-70k）**：Self-evolve、Multi-Agent、评测体系、端云工程化
+
+**目标定位：中高级工程岗（30-50k）**，项目必须体现**自研框架 + 工程深度 + 可量化指标**。
+
+---
+
+## 二、DotaHelperAgent 架构匹配度诊断
+
+| 你的模块 | 市场 JD 要求 | 匹配度 | 面试话术 |
+|---------|------------|--------|---------|
+| 双循环编排（战略+战术） | Agent 框架/架构设计 | 极高 | "自主规划与执行的分离架构" |
+| 四层记忆系统 | Memory | 极高 | "跨任务经验沉淀与复用" |
+| MCP Server 工具集 | MCP / Function Calling | 极高 | "标准化工具接口，支持任意 Client" |
+| 自我进化（技能沉淀） | Self-evolve | 高 | "Agent 越用越聪明的进化机制" |
+| 可控执行（预算/Hook） | 工程化/稳定性 | 极高 | "生产级迭代预算与终止控制" |
+| ReAct Chat | Prompt Engineering | 高 | "推理链可视化与交互设计" |
+| **RAG / 知识库** | RAG / GraphRAG | 低 | **最大短板** |
+| **评测体系** | 准确率优化/自动化评测 | 极低 | **最大短板** |
+| **多 Agent 协作** | Multi-Agent | 低 | **需补强** |
+
+**结论**：框架层（双循环、记忆、MCP、预算控制）非常能打，但缺少**RAG 知识库**和**评测体系**这两个当前市场的硬通货。
+
+---
+
+## 三、核心建议：不要换领域，要"补强架构"
+
+基于现有 DotaHelperAgent 架构，做一个**"带 RAG 知识库 + 自动评测 + 多 Agent 协作"的竞品情报决策系统**。
+
+### 补强 1：RAG / GraphRAG 知识库层（命中 90% JD）
+
+把竞品的历史文档、Changelog、用户评论、行业报告全部向量化，构建竞品知识库：
+
+```python
+class CompetitorKnowledgeBase:
+    def __init__(self):
+        self.vector_store = Milvus()
+        self.graph_store = Neo4j()
+
+    def ingest(self, document: Document):
+        chunks = self.chunk(document)
+        embeddings = self.embed(chunks)
+        self.vector_store.insert(chunks, embeddings)
+        entities, relations = self.extract_graph(chunks)
+        self.graph_store.add(entities, relations)
+
+    def retrieve(self, query: str, gap: InfoGap) -> Context:
+        vector_results = self.vector_store.search(query)
+        graph_results = self.graph_store.traverse(query)
+        return self.rerank(vector_results, graph_results)
+```
+
+**面试价值**：直接回应 JD 中"熟悉 RAG 全流程优化（分块/检索/重排序/生成）"的要求。
+
+### 补强 2：自动评测体系（命中 80% JD）
+
+新增 evaluation/ 模块：
+
+```python
+class AgentEvaluator:
+    def evaluate_extraction(self, prediction, ground_truth) -> Metrics:
+        return {
+            "pricing_accuracy": 0.94,
+            "feature_f1": 0.91,
+            "hallucination_rate": 0.03,
+        }
+
+    def evaluate_strategy(self, strategy, outcome) -> Metrics:
+        return {
+            "tool_selection_accuracy": 0.89,
+            "cost_efficiency": 0.85,
+        }
+
+    def run_benchmark(self, test_cases) -> Report:
+        ...
+```
+
+**面试价值**：直接回应"定制自动化评测和准出标准"、"持续优化产品性能与准确率"的要求。
+
+### 补强 3：多 Agent 协作（命中 60% 高级 JD）
+
+把单 Agent 扩展为多 Agent 协作：
+
+```python
+class CompetitorIntelligenceTeam:
+    def __init__(self):
+        self.collector = CollectorAgent()
+        self.analyzer = AnalyzerAgent()
+        self.validator = ValidatorAgent()
+        self.reporter = ReporterAgent()
+
+    def run(self, task: Task) -> Report:
+        raw_data = self.collector.run(task)
+        insights = self.analyzer.run(raw_data)
+        validated = self.validator.run(insights)
+        return self.reporter.run(validated)
+```
+
+**注意**：3-4 个 Agent 足够，重点是展示 Agent 间通信协议和任务分发。
+
+### 补强 4：显式 Memory 模块（命中 70% JD）
+
+把四层记忆从内部实现变成核心卖点：
+
+```python
+class MemoryLayer:
+    def short_term(self, session_id: str) -> Context:
+        # 当前对话上下文
+        pass
+
+    def long_term(self, competitor: str) -> History:
+        # 竞品历史分析记录
+        pass
+
+    def skill_memory(self) -> List[Skill]:
+        # 沉淀的提取技能 (Self-evolve)
+        pass
+
+    def evolution_trace(self) -> List[Strategy]:
+        # 策略进化轨迹
+        pass
+```
+
+---
+
+## 四、最终项目定位
+
+### 项目名称
+**competitor_agent**：基于多 Agent 协作的竞品情报决策系统
+
+### 核心架构
+
+```
+competitor_agent/
+├── core/                          # Agent 内核（框架层）
+│   ├── agent_loop.py              # 双循环编排（战略+战术）
+│   ├── planner.py                 # 信息缺口生成
+│   ├── reflector.py               # 反思与校验
+│   ├── budget.py                  # 迭代预算与终止
+│   └── memory/                    # 四层记忆（显式模块）
+│       ├── short_term.py
+│       ├── long_term.py
+│       ├── skills.py              # Self-evolve
+│       └── evolution.py
+├── knowledge/                     # RAG/GraphRAG 知识库
+│   ├── vector_store.py            # Milvus/Chroma
+│   ├── graph_store.py             # Neo4j (GraphRAG)
+│   ├── retriever.py               # 混合检索+重排序
+│   └── ingester.py                # 文档向量化
+├── tools/                         # MCP 工具集
+│   ├── base.py
+│   ├── web_extractor.py
+│   ├── app_store_api.py
+│   └── twitter_scraper.py
+├── team/                          # 多 Agent 协作
+│   ├── collector.py
+│   ├── analyzer.py
+│   ├── validator.py
+│   └── reporter.py
+├── evaluation/                    # 自动评测体系
+│   ├── accuracy_eval.py
+│   ├── strategy_eval.py
+│   └── benchmark.py
+└── web_app/                       # 交互与可视化
+```
+
+### 面试一句话定位
+
+> "我设计的是一个企业级多 Agent 协作情报系统，不是爬虫。它基于双循环架构，包含四层记忆系统（支持 Self-evolve）、RAG/GraphRAG 知识库、MCP 标准化工具集，以及自动评测体系。在 AI 编程助手竞品监控场景下，核心字段准确率达到 94%，工具选择准确率 89%，幻觉率控制在 3% 以内。"
+
+---
+
+## 五、不同面试场景的话术调整
+
+| 目标公司/岗位 | JD 特点 | 你的项目强调点 |
+|-------------|---------|--------------|
+| **字节/京东/有赞**（平台型） | Agent 基建、通用能力沉淀 | 双循环编排的通用性、MCP 工具标准化、可复用框架 |
+| **天猫/淘宝/蘑菇街**（业务型） | 用户增长、商业化落地、评测 | 竞品情报的 actionable insight、A/B 测试模拟、自动评测 |
+| **世优/小米**（算法型） | RAG、GraphRAG、检索优化 | GraphRAG 实体关系图谱、混合检索、重排序策略 |
+| **道通/华为**（端云工程型） | 端云部署、性能优化、稳定性 | 预算控制、断点续跑、增量更新、成本优化 |
+| **中小公司/创业公司** | 快速落地、端到端 | 3 周跑通、MCP 工具复用、Web 可视化面板 |
+
+---
+
+## 六、本周行动清单
+
+### 最高优
+- [ ] 加一个 evaluation/ 模块，跑出一组准确率数据（哪怕只有 50 条测试用例）
+
+### 次高优
+- [ ] 把竞品文档/Changelog 接入向量库（Milvus/Chroma 都行），展示 RAG 检索能力
+
+### 第三
+- [ ] 把单 Agent 拆成 2-3 个 Agent（采集+分析+报告），展示多 Agent 协作
+
+### 第四
+- [ ] 把四层记忆系统做成显式接口，面试时能打开代码展示
+
+### 不要做的事
+- [ ] 不要换领域（竞品分析已经够好了）
+- [ ] 不要用 Coze/Dify（JD 要求"自研框架"的岗位薪资高 10-20k）
+
+---
+
+## 七、总结
+
+DotaHelperAgent 的架构底子非常好，**只需要补强 RAG + 评测 + 多 Agent 协作三个模块**，就能精准命中当前市场上 30-50k Agent 开发岗的核心要求。
+
+> **核心策略：垂直场景打透，架构能力显性化，量化指标说话。**
