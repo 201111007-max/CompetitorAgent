@@ -56,7 +56,7 @@ class SpaExtractor:
         if self._render_page is not None:
             return True
         try:
-            import playwright  # noqa: F401
+            import playwright  # type: ignore[import]  # noqa: F401
 
             return True
         except ImportError:  # pragma: no cover - 取决于运行环境是否装 playwright
@@ -95,7 +95,7 @@ class SpaExtractor:
 
     def _render_with_playwright(self, url: str) -> str:  # pragma: no cover - 需真实浏览器
         try:
-            from playwright.sync_api import sync_playwright
+            from playwright.sync_api import sync_playwright  # type: ignore[import]
         except ImportError as exc:
             raise DataSourceUnavailableError(
                 "Playwright 未安装，无法渲染 SPA 页面。请 `pip install -e .[spa]` 后执行 `playwright install`。"
@@ -107,7 +107,7 @@ class SpaExtractor:
                 page = browser.new_page()
                 page.goto(url, wait_until=self._wait_until, timeout=self._timeout * 1000)
                 page.wait_for_timeout(self._wait_ms)
-                return page.content()
+                return page.content()  # type: ignore[no-any-return]
             finally:
                 browser.close()
 

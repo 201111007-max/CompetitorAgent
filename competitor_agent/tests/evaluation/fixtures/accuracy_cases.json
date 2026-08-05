@@ -2,8 +2,8 @@
   {
     "task": "cursor pro plan pricing",
     "prediction": {
-      "pricing_pro": "$20",
-      "pricing_team": "$40"
+      "pricing_pro": "$20/month",
+      "pricing_team": "$40/month"
     },
     "ground_truth": {
       "pricing_pro": "$20/month",
@@ -35,6 +35,39 @@
     },
     "ground_truth": {
       "pricing_pro": "$20 per month"
+    }
+  },
+  {
+    "task": "claude code version info",
+    "prediction": {
+      "version_latest": "1.0.0",
+      "version_released": "2025-03"
+    },
+    "ground_truth": {
+      "version_latest": "1.0.0",
+      "version_released": "2025-03"
+    }
+  },
+  {
+    "task": "codex performance benchmark",
+    "prediction": {
+      "performance_latency": "200ms",
+      "performance_accuracy": "85%"
+    },
+    "ground_truth": {
+      "performance_latency": "200ms",
+      "performance_accuracy": "85%"
+    }
+  },
+  {
+    "task": "perplexity pro pricing",
+    "prediction": {
+      "pricing_pro": "$20/month",
+      "pricing_enterprise": "custom"
+    },
+    "ground_truth": {
+      "pricing_pro": "$20 per month",
+      "pricing_enterprise": "custom pricing"
     }
   }
 ]

@@ -36,7 +36,16 @@ def _normalize(value: Any) -> str:
         return str(value)
     if isinstance(value, (list, set, tuple)):
         return " ".join(_normalize(v) for v in value)
-    return " ".join(str(value).strip().lower().split())
+    text = str(value).strip().lower()
+    # 归一化：去货币符号、单位标准化、去标点
+    text = text.replace("$", "").replace("¥", "").replace("€", "")
+    text = text.replace("/month", " per month").replace("/月", " per month")
+    text = text.replace("/year", " per year").replace("/年", " per year")
+    text = text.replace("/user", " per user").replace("/人", " per user")
+    text = text.replace("/mo", " per month")
+    text = text.replace(",", "").replace("，", "")
+    # 去多余空格后分词重排（消除词序差异）
+    return " ".join(text.split())
 
 
 def _tokens(text: str) -> set[str]:

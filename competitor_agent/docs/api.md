@@ -1,6 +1,6 @@
 # API 参考（api.md）
 
-> `CompetitorAnalysisAPI` 及核心对外接口的方法签名与示例。M4 定稿，当前为契约草案。
+> `CompetitorAnalysisAPI` 及核心对外接口的方法签名与示例。
 > 外部调用方只能通过 Facade，禁止直连内部编排器。
 
 ---
@@ -13,85 +13,130 @@ class CompetitorAnalysisAPI:
 
     def __init__(
         self,
-        planner: IStrategicPlanner,
-        executor: ITacticalExecutor,
-        reporter: IReportBuilder,
-        memory: IFourLayerMemory,
-        controller: BudgetController,
-        tracer: Optional[Tracer] = None,
+        llm: LLMClient | None = None,
+        use_llm: bool = False,
+        max_iterations: int = 10,
+        cost_limit: float = 1.0,
+        event_sink: Callable[[ProgressEvent], None] | None = None,
+        extractor: WebExtractor | None = None,
+        memory: IFourLayerMemory | None = None,
     ): ...
-
-    @classmethod
-    def from_defaults(cls, config: Optional[Config] = None) -> "CompetitorAnalysisAPI":
-        """装配默认实现（对标 create_default_api）"""
-
-    def analyze(
-        self,
-        task: str,
-        dimensions: Optional[List[DimensionType]] = None,
-        session_id: Optional[str] = None,
-    ) -> CompetitorReport:
-        """执行一次竞品分析（同步）。
-        参数：
-            task: 自然语言任务，如 "分析 Claude Code" / "对比 Cursor 和 Windsurf"
-            dimensions: 限定维度子集（默认按 config.dimensions.enabled）
-            session_id: 复用已有会话（断点续跑）
-        返回：CompetitorReport（含 markdown_report）
-        """
-
-    async def analyze_stream(
-        self,
-        task: str,
-        dimensions: Optional[List[DimensionType]] = None,
-    ) -> AsyncIterator[ProgressEvent]:
-        """流式分析：逐条产出 SSE ProgressEvent（供 Web 前端）"""
-
-    def cancel(self, session_id: str) -> None:
-        """请求取消运行中的会话"""
-
-    def resume(self, session_id: str) -> CompetitorReport:
-        """从 checkpoint 恢复未完成会话"""
-
-    def get_history(self, competitor: Optional[str] = None) -> List[CompetitorReport]:
-        """查询历史分析报告（记忆 L1）"""
-
-    def status(self, session_id: str) -> SessionStatus:
-        """查询会话状态：running/complete/cancelled/failed"""
 ```
+
+### 参数说明
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `llm` | `LLMClient \| None` | `None` | LLM 客户端（可选，缺失时走规则降级） |
+| `use_llm` | `bool` | `False` | 是否启用 LLM 分析 |
+| `max_iterations` | `int` | `10` | 最大迭代次数 |
+| `cost_limit` | `float` | `1.0` | 成本上限（美元） |
+| `event_sink` | `Callable` | `None` | 进度事件回调 |
+| `extractor` | `WebExtractor` | `None` | 自定义采集器 |
+| `memory` | `IFourLayerMemory` | `None` | 四层记忆（可选） |
+
+### 方法
+
+#### `analyze(task: str) -> CompetitorReport`
+
+执行一次竞品分析（同步）。返回含 Markdown 报告的 `CompetitorReport`。
+
+```python
+api = CompetitorAnalysisAPI(use_llm=False)
+report = api.analyze("Cursor")
+print(report.markdown_report)
+```
+
+#### `analyze_react(task: str) -> str`
+
+ReAct 模式：LLM 驱动工具调用（需 LLM Key）。
+
+#### `analyze_team(task: str) -> CompetitorReport`
+
+多 Agent 流水线模式：Collector→Analyzer→Validator→Reporter 协作产出草稿报告。
+
+#### `async analyze_stream(task: str, session_id: str | None = None) -> AsyncIterator[ProgressEvent]`
+
+流式分析：逐条 yield ProgressEvent（供 Web SSE 消费）。
+
+```python
+async for event in api.analyze_stream("Cursor"):
+    print(f"[{event.event}] {event.message}")
+```
+
+#### `cancel(session_id: str) -> None`
+
+请求取消运行中的分析会话。
+
+#### `resume(session_id: str) -> CompetitorReport`
+
+从 checkpoint 恢复未完成的分析会话。
+
+```python
+api.cancel("sess_abc123")
+report = api.resume("sess_abc123")
+```
+
+#### `get_history(competitor: str | None = None) -> list[CompetitorReport]`
+
+查询历史分析报告。`competitor` 可选，留空返回全部。
 
 ---
 
 ## 2. 事件契约（ProgressEvent，SSE 流）
 
 ```python
+@dataclass
 class ProgressEvent:
-    event_type: EventType   # plan / collect / analyze / validate / report / done / error
-    session_id: str
-    data: Dict[str, Any]    # 如 {"gap": "pricing", "status": "ok"}
-    ts: str
+    event: str       # phase_start / phase_complete / progress / report / error / cancelled / session_started
+    phase: str | None
+    progress: float  # 0.0-1.0
+    message: str
+    payload: dict
 ```
 
-| event_type | 触发点 | data 关键字段 |
-|------------|--------|--------------|
-| `plan` | 战略循环完成 | gaps 数量、预算 |
-| `collect` | 每次采集 | source、status、obs 摘要 |
-| `analyze` | 每次分析 | dimension、confidence |
-| `validate` | 校验 | pass/fail、issues |
-| `report` | 报告生成 | markdown 摘要 |
-| `done` | 完成 | terminal_state、耗时 |
-| `error` | 异常 | error_type、message |
+| event | 触发点 | message 示例 |
+|-------|--------|-------------|
+| `session_started` | 会话启动 | "会话 sess_abc 已启动" |
+| `phase_start` | 阶段开始 | "规划: 分析 Cursor" |
+| `phase_complete` | 阶段完成 | "识别竞品 cursor，3 个缺口" |
+| `report` | 报告生成 | "报告生成完成，终态=success" |
+| `error` | 异常 | "分析异常: ..." |
+| `cancelled` | 用户取消 | "分析已被用户取消" |
+
+SSE 格式：`data: {"event": "phase_start", ...}\n\n`
 
 ---
 
-## 3. CLI 接口
+## 3. 数据模型
+
+### CompetitorReport
 
 ```python
-# competitor_agent/cli.py
-analyze   <task> [--out PATH] [--dimensions ...] [--session ID]
-history   [--competitor NAME]
-cancel    <session_id>
-resume    <session_id>
-config    set-key <name> / list / rotate <name>
+@dataclass
+class CompetitorReport:
+    competitor: Competitor
+    dimension_results: list[DimensionResult]
+    overall_score: float
+    overall_confidence: float
+    gaps_pending: list[InfoGap]
+    markdown_report: str
+    terminal_state: str
+    created_at: str
+```
+
+### DimensionResult
+
+```python
+@dataclass
+class DimensionResult:
+    dimension: str          # pricing / feature / performance / ecosystem / sentiment / roadmap
+    summary: str
+    details: dict
+    confidence: float       # 0.0-1.0
+    evidence: list[SourceEvidence]
+    timestamp: str
+    status: ResultStatus    # complete / partial / unavailable
 ```
 
 ---
@@ -100,11 +145,9 @@ config    set-key <name> / list / rotate <name>
 
 | 异常 | 场景 | 建议处理 |
 |------|------|---------|
-| `TaskNotSupportedError` | 无法识别目标竞品 | 提示用户澄清 |
-| `SessionNotFoundError` | resume 不存在的会话 | 校验 session_id |
 | `CredentialError` | 缺必需凭据 | 提示 config set-key |
-| `BudgetExhaustedError` | 成本/迭代超限 | 报告含 reason，可 resume |
 | `LLMUnavailableError` | LLM 不可用 | 自动降级，不影响接口返回 |
+| `ValueError` | resume 不存在的会话 | 校验 session_id |
 
 ---
 

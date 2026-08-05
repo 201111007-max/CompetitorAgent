@@ -49,13 +49,26 @@ class FakePlanner:
 
 
 class FakeMemory:
-    def archive_session(self, session: AnalysisSession) -> None: ...
-    def save_note(self, competitor: str, note: str) -> None: ...
-    def retrieve_notes(self, competitor: str) -> list: ...
-    def record_skill(self, skill: Skill) -> None: ...
-    def retrieve_skills(self, competitor: str) -> list: ...
-    def record_outcome(self, source: str, success: bool) -> None: ...
-    def source_success_rates(self) -> dict: ...
+    def archive_session(self, session: AnalysisSession) -> None:
+        return None
+
+    def save_note(self, competitor: str, note: str) -> None:
+        return None
+
+    def retrieve_notes(self, competitor: str) -> list:
+        return []
+
+    def record_skill(self, skill: Skill) -> None:
+        return None
+
+    def retrieve_skills(self, competitor: str) -> list:
+        return []
+
+    def record_outcome(self, source: str, success: bool) -> None:
+        return None
+
+    def source_success_rates(self) -> dict:
+        return {}
 
 
 class FakeVerifier:

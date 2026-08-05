@@ -26,5 +26,26 @@
     "best_source": "alternative_benchmark",
     "total_cost": 0.04,
     "outcome_complete": false
+  },
+  {
+    "task": "cursor version changelog",
+    "chosen_sources": ["official_docs", "github_releases"],
+    "best_source": "github_releases",
+    "total_cost": 0.03,
+    "outcome_complete": true
+  },
+  {
+    "task": "claude code pricing (SPA site)",
+    "chosen_sources": ["official_home", "spa_extractor"],
+    "best_source": "spa_extractor",
+    "total_cost": 0.06,
+    "outcome_complete": true
+  },
+  {
+    "task": "codex enterprise features",
+    "chosen_sources": ["official_docs", "official_pricing"],
+    "best_source": "official_docs",
+    "total_cost": 0.02,
+    "outcome_complete": true
   }
 ]

@@ -112,8 +112,8 @@ CI 用 `--cov --cov-fail-under=80` 门禁。
 | 用例 | 断言 |
 |------|------|
 | 参数越界 | ToolArgumentError |
-| 敏感操作 | ConfirmationRequired |
-| 速率超限 | RateLimitExceeded |
+| 敏感操作 | ConfirmationRequiredError |
+| 速率超限 | RateLimitExceededError |
 
 ### 4.4 InjectionGuard
 

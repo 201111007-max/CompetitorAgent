@@ -38,13 +38,15 @@ class LLMClient:
             raise LLMUnavailableError("openai SDK 未安装") from exc
 
         client = OpenAI()
-        response = client.chat.completions.create(model=self._model, messages=messages)
+        response = client.chat.completions.create(model=self._model, messages=messages)  # type: ignore[arg-type]
         return response.choices[0].message.content or ""
 
     def complete_json(self, messages: list[dict[str, str]]) -> dict[str, Any]:
         """要求模型输出 JSON，解析失败抛 LLMUnavailableError"""
         text = self.complete(messages)
         try:
-            return json.loads(text)
-        except json.JSONDecodeError as exc:
+            result = json.loads(text)
+            assert isinstance(result, dict)
+            return result
+        except (json.JSONDecodeError, AssertionError) as exc:
             raise LLMUnavailableError(f"LLM 返回非 JSON: {exc}") from exc
