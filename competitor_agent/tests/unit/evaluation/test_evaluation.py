@@ -87,7 +87,7 @@ class TestBenchmark:
     def test_runs_against_real_fixtures(self):
         b = Benchmark()
         report = b.run()
-        assert report.n_cases == 8  # 4 accuracy + 4 strategy
+        assert report.n_cases == 14  # 8 accuracy + 6 strategy
         assert report.loaded_fixtures == [ACCURACY_FIXTURE, STRATEGY_FIXTURE]
         assert 0.0 < report.accuracy.field_accuracy <= 1.0
         assert 0.0 < report.strategy.tool_selection_accuracy <= 1.0

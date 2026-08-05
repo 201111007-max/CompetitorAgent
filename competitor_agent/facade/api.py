@@ -3,10 +3,17 @@
 组装：StrategicLoop（规划）→ 逐缺口 TacticalLoop（采集+分析）
      → BudgetController（终止）→ ReportBuilder（汇总）
 M1 默认 LLM 关闭（use_llm=False），无 Key 也能产出报告（规则降级）。
+
+M4 新增：
+- analyze_stream(): 流式分析（SSE 事件推送）
+- cancel() / resume(): 中断与断点续跑
+- get_history(): 历史查询
 """
 from __future__ import annotations
 
 import logging
+import uuid
+from collections.abc import AsyncIterator
 from typing import Callable
 
 from competitor_agent.agent.react_agent import ReactAgent
@@ -17,6 +24,14 @@ from competitor_agent.collector.source_selector import SourceSelector
 from competitor_agent.collector.web_extractor import WebExtractor
 from competitor_agent.core.budget import IterationBudget
 from competitor_agent.core.budget_controller import BudgetController, StopReason
+from competitor_agent.core.checkpoint import (
+    checkpoint_to_report,
+    delete_checkpoint,
+    is_cancelled,
+    load_checkpoint,
+    save_checkpoint,
+    set_cancel,
+)
 from competitor_agent.core.report_builder import ReportBuilder
 from competitor_agent.core.stop_verifier import StopVerifier
 from competitor_agent.core.strategic_loop import StrategicPlanner
@@ -25,9 +40,10 @@ from competitor_agent.domain_types.enums import TerminalState
 from competitor_agent.domain_types.events import ProgressEvent
 from competitor_agent.domain_types.report import CompetitorReport, DimensionResult
 from competitor_agent.domain_types.strategy import CompetitorStrategy
-from competitor_agent.interfaces.context import Skill
+from competitor_agent.interfaces.context import AnalysisSession, Skill
 from competitor_agent.interfaces.memory import IFourLayerMemory
 from competitor_agent.llm.client import LLMClient
+from competitor_agent.team.orchestrator import TeamOrchestrator
 
 logger = logging.getLogger("competitor_agent.facade.api")
 
@@ -78,9 +94,13 @@ class CompetitorAnalysisAPI:
             max_iterations=self._budget.max_iterations,
             cost_limit=self._budget.cost_limit,
         )
+        session_id = f"sess_{uuid.uuid4().hex[:8]}"
 
         for gap in strategy.gaps:
             if self._budget.should_stop(strategy.gaps).should_stop:
+                break
+            if is_cancelled(session_id):
+                logger.info("会话 %s 被取消，停止分析", session_id)
                 break
             self._emit(
                 ProgressEvent(
@@ -103,6 +123,20 @@ class CompetitorAnalysisAPI:
                 self._record_memory_success(strategy, gap)
             self._budget.record_iteration(cost=0.01)
 
+            # 每完成一个缺口保存 checkpoint
+            save_checkpoint(
+                session_id=session_id,
+                task=task,
+                competitor_name=strategy.competitor.name,
+                gaps=strategy.gaps,
+                dimension_results=results,
+                iterations_used=iteration_budget.used_iterations,
+                max_iterations=self._budget.max_iterations,
+                cost_used=iteration_budget.used_cost,
+                cost_limit=self._budget.cost_limit,
+                sources_tried=[s for g in strategy.gaps for s in g.sources_tried],
+            )
+
         stop = self._budget.should_stop(strategy.gaps)
         pending = [g for g in strategy.gaps if not g.is_closed]
         terminal = self._terminal_state(stop.reason, strategy)
@@ -113,6 +147,8 @@ class CompetitorAnalysisAPI:
             gaps_pending=pending,
             terminal_state=terminal.value,
         )
+        # 分析完成后清理 checkpoint
+        delete_checkpoint(session_id)
         self._emit(
             ProgressEvent(
                 event="report",
@@ -137,6 +173,133 @@ class CompetitorAnalysisAPI:
         agent = ReactAgent(llm=self._llm or LLMClient(), dispatcher=dispatcher)
         loop = ReactLoop(agent, event_sink=self._event_sink)
         return loop.run(task)
+
+    def analyze_team(self, task: str) -> CompetitorReport:
+        """多 Agent 流水线模式：Collector→Analyzer→Validator→Reporter 协作产出草稿报告"""
+        self._emit(
+            ProgressEvent(event="phase_start", phase="team_orchestrator", message=f"多 Agent 分析: {task}")
+        )
+        orch = TeamOrchestrator(
+            extractor=self._extractor,
+            llm=self._llm,
+            use_llm=self._use_llm,
+            memory=self._memory,
+        )
+        report = orch.run(task)
+        self._emit(
+            ProgressEvent(
+                event="report",
+                phase="team_orchestrator",
+                progress=1.0,
+                message=f"多 Agent 报告生成完成，{len(report.dimension_results)} 个维度",
+            )
+        )
+        return report
+
+    # ── M4: 流式分析 ──────────────────────────────────────────────────
+
+    async def analyze_stream(self, task: str, session_id: str | None = None) -> AsyncIterator[ProgressEvent]:
+        """流式分析：逐条 yield ProgressEvent（供 Web SSE 消费）"""
+        sid = session_id or f"sess_{uuid.uuid4().hex[:8]}"
+
+        def _sink(event: ProgressEvent) -> None:
+            self._emit(event)
+
+        api = CompetitorAnalysisAPI(
+            llm=self._llm,
+            use_llm=self._use_llm,
+            max_iterations=self._budget.max_iterations,
+            cost_limit=self._budget.cost_limit,
+            event_sink=_sink,
+            extractor=self._extractor,
+            memory=self._memory,
+        )
+
+        yield ProgressEvent(
+            event="session_started",
+            phase="init",
+            message=f"会话 {sid} 已启动",
+            payload={"session_id": sid},
+        )
+
+        import asyncio
+        loop = asyncio.get_running_loop()
+        report = await loop.run_in_executor(None, api.analyze, task)
+
+        yield ProgressEvent(
+            event="report",
+            phase="report",
+            progress=1.0,
+            message=f"报告生成完成，{len(report.dimension_results)} 个维度",
+            payload={
+                "competitor": report.competitor.name,
+                "terminal_state": report.terminal_state,
+                "overall_confidence": report.overall_confidence,
+            },
+        )
+
+        # 归档会话
+        if self._memory is not None:
+            self._memory.archive_session(
+                AnalysisSession(
+                    task=task,
+                    competitor_name=report.competitor.name,
+                    session_id=sid,
+                    raw={
+                        "terminal_state": report.terminal_state,
+                        "dimension_count": len(report.dimension_results),
+                    },
+                )
+            )
+
+    # ── M4: 中断与断点续跑 ───────────────────────────────────────────
+
+    def cancel(self, session_id: str) -> None:
+        """请求取消运行中的分析会话"""
+        set_cancel(session_id)
+        logger.info("已请求取消会话: %s", session_id)
+
+    def resume(self, session_id: str) -> CompetitorReport:
+        """从 checkpoint 恢复未完成的分析会话"""
+        cp = load_checkpoint(session_id)
+        if cp is None:
+            raise ValueError(f"会话 {session_id} 无 checkpoint，无法恢复")
+        logger.info("从 checkpoint 恢复会话: %s (%d gaps)", session_id, len(cp.gaps))
+        report = checkpoint_to_report(cp)
+        delete_checkpoint(session_id)
+        return report
+
+    # ── M4: 历史查询 ──────────────────────────────────────────────────
+
+    def get_history(self, competitor: str | None = None) -> list[CompetitorReport]:
+        """查询历史分析报告
+
+        Args:
+            competitor: 竞品名称（可选，留空返回全部）
+        Returns:
+            历史报告列表
+        """
+        if self._memory is None:
+            return []
+
+        if competitor:
+            sessions = self._memory._sessions.retrieve(competitor)  # type: ignore[attr-defined]
+        else:
+            sessions = self._memory.recent_sessions()  # type: ignore[attr-defined]
+
+        reports: list[CompetitorReport] = []
+        for s in sessions:
+            raw = s.raw if hasattr(s, "raw") else {}
+            from competitor_agent.domain_types.competitor import Competitor
+            reports.append(
+                CompetitorReport(
+                    competitor=Competitor(name=s.competitor_name),
+                    markdown_report=str(raw.get("markdown_report", "")),
+                    terminal_state=str(raw.get("terminal_state", "")),
+                    created_at=s.created_at,
+                )
+            )
+        return reports
 
     def _terminal_state(self, reason: str, strategy: CompetitorStrategy) -> TerminalState:
         if reason in (StopReason.ALL_GAPS_CLOSED, StopReason.CORE_SATISFACTION_REACHED, StopReason.NO_GAPS):

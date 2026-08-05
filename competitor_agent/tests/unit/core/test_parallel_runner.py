@@ -21,13 +21,18 @@ from competitor_agent.interfaces.context import SourceContext
 class SlowExtractor:
     """模拟耗时抓取，用于验证并行加速"""
 
+    source_name = "web_extractor"
+
     def __init__(self, delay: float = 0.1) -> None:
         self._delay = delay
 
+    def is_available(self) -> bool:
+        return True
+
     def fetch(self, gap: InfoGap, context: SourceContext) -> Observation:
         time.sleep(self._delay)
-        ev = SourceEvidence(source_name="web_extractor", url=str(context.kwargs.get("url")), trust_level=0.9)
-        return Observation(gap_field=gap.field, source="web_extractor", raw_text=f"{gap.field} 详细内容", evidence=ev)
+        ev = SourceEvidence(source_name=self.source_name, url=str(context.kwargs.get("url")), trust_level=0.9)
+        return Observation(gap_field=gap.field, source=self.source_name, raw_text=f"{gap.field} 详细内容", evidence=ev)
 
 
 def _strategy(fields=("pricing", "feature", "performance")):

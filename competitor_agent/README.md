@@ -12,11 +12,51 @@
 cd competitor_agent
 pip install -e ".[dev]"
 
-# 配置凭据（可选，缺失时自动降级规则分析）
-python -m competitor_agent.cli config set-key LLM_API_KEY
-
 # 运行测试
 pytest
+```
+
+## 启动方式
+
+### CLI
+```bash
+python -m competitor_agent.cli analyze "Cursor"
+python -m competitor_agent.cli history --competitor cursor
+```
+
+### Web（SSE 可视化）
+```bash
+pip install -e ".[web]"
+python -m competitor_agent.web_app --port 8000
+# 打开 http://localhost:8000
+```
+
+### MCP Server
+```bash
+pip install -e ".[mcp]"
+python -m competitor_agent.mcp_server.server --transport stdio
+# 或 SSE 模式
+python -m competitor_agent.mcp_server.server --transport sse --port 8001
+```
+
+### 编程调用
+```python
+from competitor_agent import CompetitorAnalysisAPI
+
+api = CompetitorAnalysisAPI(use_llm=False)
+report = api.analyze("Cursor")
+print(report.markdown_report)
+
+# 流式分析（Web SSE）
+async for event in api.analyze_stream("Cursor"):
+    print(event.message)
+
+# 历史查询
+history = api.get_history("cursor")
+
+# 断点续跑
+api.cancel("sess_abc123")
+report = api.resume("sess_abc123")
 ```
 
 ## 目录结构
@@ -26,7 +66,7 @@ competitor_agent/
 ├── config/review_config.yaml   # 预算/维度/终止阈值配置
 ├── domain_types/               # 领域数据模型（InfoGap/Observation/CompetitorStrategy...）
 ├── interfaces/                 # Protocol 契约层
-├── core/                       # 框架内核（双循环/预算/停止验证/报告）
+├── core/                       # 框架内核（双循环/预算/停止验证/报告/checkpoint）
 ├── agent/                      # ReAct 交互层 + 护栏 + prompts
 ├── collector/                  # 数据源（web/github/pricing/benchmark/review）
 ├── analyzers/                  # 维度分析器（LLM 驱动，规则降级）
@@ -34,7 +74,8 @@ competitor_agent/
 ├── memory/                     # 四层记忆
 ├── team/                       # 多 Agent 协作
 ├── evaluation/                 # 评测体系
-├── mcp_server/                 # MCP Server 对外开放采集工具
+├── mcp_server/                 # MCP Server（对外暴露采集/分析工具）
+├── web_app.py                  # FastAPI + SSE 可视化
 ├── facade/api.py               # 外部唯一入口 CompetitorAnalysisAPI
 ├── secret_vault.py             # 凭据池（数据目录 ~/.competitor_agent/）
 └── tests/                      # unit / integration / evaluation
@@ -49,7 +90,7 @@ competitor_agent/
 ## 里程碑状态
 
 - [x] M0 环境与项目骨架
-- [ ] M1 骨架闭环（采集→分析→报告）
-- [ ] M2 记忆与自进化
-- [ ] M3 多 Agent 协作 + 评测体系
-- [ ] M4 工程化（Web/MCP/CI/断点）
+- [x] M1 骨架闭环（采集→分析→报告）
+- [x] M2 记忆与自进化
+- [x] M3 多 Agent 协作 + 评测体系
+- [x] M4 工程化（Web/MCP/CI/断点）

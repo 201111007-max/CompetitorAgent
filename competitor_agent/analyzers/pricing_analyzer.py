@@ -33,7 +33,7 @@ class PricingAnalyzer(BaseCompetitorAnalyzer):
         ]
 
     def _parse_result(self, text: str) -> dict[str, Any]:
-        return json.loads(text)
+        return json.loads(text)  # type: ignore[no-any-return]
 
     def _rule_extract(self, observation: Observation) -> dict[str, Any]:
         plans = []

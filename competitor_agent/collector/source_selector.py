@@ -9,6 +9,7 @@ from dataclasses import dataclass
 
 from competitor_agent.domain_types.competitor import Competitor
 from competitor_agent.domain_types.info_gap import InfoGap
+from competitor_agent.interfaces.context import SourceContext
 
 # 官方链接 key（competitor.official_links）→ 维度映射
 _DIMENSION_LINK_KEY: dict[str, list[str]] = {
@@ -96,6 +97,17 @@ class SourceSelector:
 
     def has_next(self, gap: InfoGap, competitor: Competitor, index: int) -> bool:
         return index < len(self.candidates(gap, competitor))
+
+    def select(self, gap: InfoGap, competitor: Competitor) -> SourceContext:
+        """选择最佳候选源并返回采集上下文"""
+        cands = self.candidates(gap, competitor)
+        if not cands:
+            return SourceContext(competitor_name=competitor.name)
+        best = cands[0]
+        return SourceContext(
+            competitor_name=competitor.name,
+            kwargs={"url": best.url, "source_name": best.source_name},
+        )
 
     def record_cache(self, source_name: str, url: str) -> None:
         self._cache[source_name] = url
