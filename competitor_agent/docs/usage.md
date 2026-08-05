@@ -37,7 +37,32 @@ python -m competitor_agent.cli analyze "Cursor" --out reports/
 
 # 查看历史
 python -m competitor_agent.cli history --competitor cursor
+
+# 单发（脚本化，一次性执行后退出）
+python -m competitor_agent.cli -z "分析 Cursor"
+
+# 恢复会话（-c 对齐 hermes --continue）
+python -m competitor_agent.cli -c sess_abc123
+
+# 运行评测基准
+python -m competitor_agent.cli benchmark
+
+# 交互模式（无子命令时进入 REPL，支持斜杠命令）
+python -m competitor_agent.cli
 ```
+
+交互模式斜杠命令：
+
+| 命令 | 别名 | 说明 |
+|------|------|------|
+| `/analyze <任务>` | `/a` | 单竞品/对比分析 |
+| `/compare A 和 B` | `/c` | 两个竞品对比 |
+| `/history [--competitor X]` | `/h` | 查询历史 |
+| `/resume [session_id]` | `/r` | 恢复会话（缺省取最近 checkpoint） |
+| `/benchmark` | `/b` | 运行评测基准 |
+| `/help [命令]` | `/?` | 帮助 |
+
+命令识别采用"前缀判定 + 注册表查表"（不写命令名 regex），`/Users/foo` 类路径不会被误判为命令。
 
 ### 2.2 Web（SSE 可视化）
 
@@ -91,6 +116,7 @@ MCP 工具清单：
 
 ```python
 from competitor_agent import CompetitorAnalysisAPI
+from competitor_agent.interfaces.context import ChatMessage
 
 # 基础分析
 api = CompetitorAnalysisAPI(use_llm=False)
@@ -103,6 +129,22 @@ async for event in api.analyze_stream("Cursor"):
 
 # 多 Agent 流水线
 report = api.analyze_team("Cursor")
+
+# 对比分析
+from competitor_agent import CompetitorAnalysisAPI
+
+api = CompetitorAnalysisAPI(use_llm=False)
+
+# 对比（可传两个竞品，或一个"对比 A 和 B"任务）
+result = api.compare("Cursor", "Windsurf")
+print(result.markdown_report)
+
+# 多轮追问（conversation_history 支持，第二轮相对指代可从历史承接竞品）
+report1 = api.analyze("Cursor")
+report2 = api.analyze("那定价呢", conversation_history=[
+    ChatMessage(role="user", content="Cursor"),
+    ChatMessage(role="assistant", content=report1.markdown_report),
+])
 
 # 历史查询
 history = api.get_history("cursor")
@@ -118,13 +160,14 @@ report = api.resume("sess_abc123")
 
 | 操作 | 命令/接口 |
 |------|----------|
-| 分析 | `analyze(competitor)` |
+| 分析 | `analyze(task)` / CLI `analyze` |
+| 对比 | `compare(a, b)` / CLI `analyze "对比 A 和 B"` / `/compare` |
+| 多轮追问 | `analyze(task, conversation_history=[...])` |
 | 流式分析 | `analyze_stream(task)` |
 | 取消 | `cancel(session_id)` |
-| 恢复 | `resume(session_id)` |
-| 历史 | `get_history(competitor)` |
-| 凭据 | `config set-key / list / rotate` |
-| 评测 | `pytest tests/evaluation` |
+| 恢复 | `resume(session_id)` / `continue_analysis(session_id)` / CLI `-c` |
+| 历史 | `get_history(competitor)` / CLI `history` / `/history` |
+| 评测 | `pytest tests/evaluation` / CLI `benchmark` |
 | MCP | `mcp_server.server --transport sse` |
 
 ---

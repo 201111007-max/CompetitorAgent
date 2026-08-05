@@ -46,6 +46,41 @@ def canonicalize(name: str) -> str:
     return name.strip().lower().replace(" ", "-")
 
 
+# 对比任务连接词（M5.4：对比拆分）
+_COMPARE_CONNECTORS = (" 和 ", " 与 ", " vs ", " vs. ", " and ", "、")
+# 对比任务触发词
+_COMPARE_MARKERS = ("对比分析", "对比", "比较", "compare", "vs")
+
+
+def split_compare_text(task: str) -> list[str] | None:
+    """尝试把 '对比 A 和 B' 拆成两个竞品文本；非对比任务返回 None。"""
+    lowered = task.lower()
+    if not any(m in lowered for m in _COMPARE_MARKERS):
+        return None
+    # 去掉对比前缀，得到 ' A 和 B' 剩余部分（若无前缀则保留原文，如 "Cursor vs Windsurf"）
+    rest = task
+    stripped = task.lstrip()
+    for marker in _COMPARE_MARKERS:
+        if stripped.lower().startswith(marker):
+            rest = stripped[len(marker):]
+            break
+    for connector in _COMPARE_CONNECTORS:
+        if connector in rest:
+            parts = [p.strip() for p in rest.split(connector)]
+            parts = [p for p in parts if p]
+            if len(parts) >= 2:
+                return parts[:2]
+    return None
+
+
+def resolve_competitors(task: str) -> list[Competitor]:
+    """解析任务中的竞品（对比任务返回 2 个，普通任务返回 1 个）"""
+    parts = split_compare_text(task)
+    if parts:
+        return [resolve_competitor(p) for p in parts]
+    return [resolve_competitor(task)]
+
+
 def resolve_competitor(name: str) -> Competitor:
     """把用户输入解析为 Competitor（优先命中注册表）。
 

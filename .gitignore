@@ -108,3 +108,7 @@ dota_helper/docs/
 # ==================== Post Match Review Reports ====================
 # 复盘报告输出目录 - 包含生成的 Markdown 报告，不上传到 git
 dota_helper/reports/
+
+# ==================== Competitor Agent Reports ====================
+# 竞品分析报告输出目录 - CLI/CI 生成的 Markdown/CSV 产物，不上传到 git
+competitor_agent/reports/

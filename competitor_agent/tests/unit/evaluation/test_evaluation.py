@@ -87,7 +87,7 @@ class TestBenchmark:
     def test_runs_against_real_fixtures(self):
         b = Benchmark()
         report = b.run()
-        assert report.n_cases == 14  # 8 accuracy + 6 strategy
+        assert report.n_cases == 27  # 17 accuracy + 10 strategy
         assert report.loaded_fixtures == [ACCURACY_FIXTURE, STRATEGY_FIXTURE]
         assert 0.0 < report.accuracy.field_accuracy <= 1.0
         assert 0.0 < report.strategy.tool_selection_accuracy <= 1.0
@@ -96,3 +96,17 @@ class TestBenchmark:
         b = Benchmark(fixtures_dir=tmp_path)
         report = b.run()
         assert report.n_cases == 0
+
+    def test_hallucination_instances_are_listed(self):
+        b = Benchmark()
+        report = b.run()
+        assert isinstance(report.accuracy.hallucination_instances, list)
+        for inst in report.accuracy.hallucination_instances:
+            assert "case_id" in inst
+            assert "prediction" in inst
+
+    def test_trace_completeness_and_confusion_matrix(self):
+        b = Benchmark()
+        report = b.run()
+        assert 0.0 <= report.trace_completeness <= 1.0
+        assert isinstance(report.confusion_matrix, dict)

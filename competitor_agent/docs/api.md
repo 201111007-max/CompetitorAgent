@@ -37,14 +37,20 @@ class CompetitorAnalysisAPI:
 
 ### 方法
 
-#### `analyze(task: str) -> CompetitorReport`
+#### `analyze(task: str, conversation_history: list[ChatMessage] | None = None) -> CompetitorReport`
 
 执行一次竞品分析（同步）。返回含 Markdown 报告的 `CompetitorReport`。
+任务文本入站先做浅清洗（粘贴包装/终端泄漏/代理字符/@file: 引用展开）。
+传入 `conversation_history` 支持多轮追问：相对指代（如"那定价呢"）可从历史承接上一轮竞品。
 
 ```python
 api = CompetitorAnalysisAPI(use_llm=False)
 report = api.analyze("Cursor")
 print(report.markdown_report)
+
+# 多轮追问：第二轮无竞品时从历史承接 Cursor
+history = [ChatMessage(role="user", content="分析 Cursor"), ChatMessage(role="assistant", content=report.markdown_report)]
+report2 = api.analyze("那定价呢", conversation_history=history)
 ```
 
 #### `analyze_react(task: str) -> str`
@@ -80,6 +86,29 @@ report = api.resume("sess_abc123")
 #### `get_history(competitor: str | None = None) -> list[CompetitorReport]`
 
 查询历史分析报告。`competitor` 可选，留空返回全部。
+
+#### `compare(a: str, b: str | None = None) -> ComparisonReport`
+
+竞品对比：传入两个竞品名（或一个"对比 A 和 B"任务）→ 对比报告。
+内部复用任务解析的对比拆分，逐个 `analyze` 后拼装 `ComparisonReport`（含 Markdown 对比表）。
+
+```python
+result = api.compare("Cursor", "Windsurf")
+print(result.markdown_report)
+```
+
+#### `continue_analysis(session_id: str) -> CompetitorReport`
+
+恢复未完成的会话（对齐 CLI `-c/--continue` 语义；复用 `resume`）。
+
+```python
+report = api.continue_analysis("sess_abc123")
+```
+
+#### `_disambiguate_with_history(task, conversation_history)`（辅助）
+
+结合会话历史消歧：当前任务解析出的竞品为 unknown（相对指代）时，
+从历史消息提取最近竞品拼入任务文本。
 
 ---
 

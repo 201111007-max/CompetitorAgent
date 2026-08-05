@@ -23,7 +23,7 @@ from typing import Any
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
 from competitor_agent import CompetitorAnalysisAPI
 from competitor_agent.domain_types.events import ProgressEvent
@@ -264,18 +264,22 @@ async def analyze(
     request: Request,
     task: str = Query(..., description="分析任务，如'分析 Cursor'"),
     session_id: str = Query(default="", description="会话 ID（可选）"),
-) -> AsyncIterator[str]:
+) -> StreamingResponse:
     """SSE 流式分析"""
     sid = session_id or f"sess_{uuid.uuid4().hex[:8]}"
     _sessions[sid] = {"task": task, "cancelled": False}
 
-    async for event in _event_generator(sid, task):
-        if await request.is_disconnected():
-            _sessions[sid]["cancelled"] = True
-            break
-        yield event
+    async def _stream() -> AsyncIterator[str]:
+        try:
+            async for event in _event_generator(sid, task):
+                if await request.is_disconnected():
+                    _sessions[sid]["cancelled"] = True
+                    break
+                yield event
+        finally:
+            _sessions.pop(sid, None)
 
-    _sessions.pop(sid, None)
+    return StreamingResponse(_stream(), media_type="text/event-stream")
 
 
 @app.post("/api/cancel/{session_id}")
