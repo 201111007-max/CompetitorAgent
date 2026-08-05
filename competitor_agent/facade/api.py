@@ -32,15 +32,21 @@ from competitor_agent.core.checkpoint import (
     save_checkpoint,
     set_cancel,
 )
+from competitor_agent.core.input_sanitizer import sanitize_task
 from competitor_agent.core.report_builder import ReportBuilder
 from competitor_agent.core.stop_verifier import StopVerifier
 from competitor_agent.core.strategic_loop import StrategicPlanner
 from competitor_agent.core.tactical_loop import TacticalLoop
+from competitor_agent.core.task_parser import parse_task
 from competitor_agent.domain_types.enums import TerminalState
 from competitor_agent.domain_types.events import ProgressEvent
-from competitor_agent.domain_types.report import CompetitorReport, DimensionResult
+from competitor_agent.domain_types.report import (
+    ComparisonReport,
+    CompetitorReport,
+    DimensionResult,
+)
 from competitor_agent.domain_types.strategy import CompetitorStrategy
-from competitor_agent.interfaces.context import AnalysisSession, Skill
+from competitor_agent.interfaces.context import AnalysisSession, ChatMessage, Skill
 from competitor_agent.interfaces.memory import IFourLayerMemory
 from competitor_agent.llm.client import LLMClient
 from competitor_agent.team.orchestrator import TeamOrchestrator
@@ -76,8 +82,20 @@ class CompetitorAnalysisAPI:
         self._budget = BudgetController(max_iterations=max_iterations, cost_limit=cost_limit)
         self._verifier = StopVerifier()
 
-    def analyze(self, task: str) -> CompetitorReport:
-        """单竞品分析：输入任务文本 → CompetitorReport"""
+    def analyze(
+        self,
+        task: str,
+        conversation_history: list[ChatMessage] | None = None,
+    ) -> CompetitorReport:
+        """单竞品分析：输入任务文本 → CompetitorReport
+
+        Args:
+            task: 用户任务文本（入站先做浅清洗 sanitize_task）
+            conversation_history: 上一轮对话历史（ChatMessage 列表），
+                传入则把前序上下文摘要并入任务解析，支持多轮追问。
+        """
+        task = sanitize_task(task)
+        task = self._disambiguate_with_history(task, conversation_history)
         self._emit(ProgressEvent(event="phase_start", phase="strategic", message=f"规划: {task}"))
 
         strategy = self._planner.plan(task, memory=self._memory)
@@ -300,6 +318,94 @@ class CompetitorAnalysisAPI:
                 )
             )
         return reports
+
+    # ── M5: 会话历史 / 对比 / 继续分析 ────────────────────────────────
+
+    def _disambiguate_with_history(
+        self,
+        task: str,
+        conversation_history: list[ChatMessage] | None,
+    ) -> str:
+        """结合会话历史消歧：上一轮已分析的竞品可作为本轮上下文。
+
+        若任务解析出的竞品是 unknown（相对指代如"再对比下 Windsurf"），
+        尝试从历史消息中提取最近竞品，拼成可解析的任务文本。
+        """
+        if not conversation_history:
+            return task
+        parsed = parse_task(task)
+        if parsed.primary_competitor != "unknown":
+            return task
+        last_competitor = self._last_competitor_from_history(conversation_history)
+        if last_competitor:
+            return f"{task}（承接上文：{last_competitor}）"
+        return task
+
+    @staticmethod
+    def _last_competitor_from_history(history: list[ChatMessage]) -> str:
+        """从历史消息中提取最近提到的竞品规范名"""
+        from competitor_agent.core.competitor_registry import COMPETITOR_REGISTRY
+
+        for message in reversed(history):
+            content = (message.content or "").lower()
+            for canon, competitor in COMPETITOR_REGISTRY.items():
+                if canon in content or any(a in content for a in competitor.aliases):
+                    return competitor.name
+        return ""
+
+    def compare(self, a: str, b: str | None = None) -> ComparisonReport:
+        """竞品对比：两个竞品（或一个"对比 A 和 B"任务）→ 对比报告
+
+        内部复用 parse_task 的对比拆分；逐个 analyze 后拼装 ComparisonReport。
+        """
+        if b is None:
+            parsed = parse_task(a)
+            if len(parsed.competitors) >= 2:
+                a_name, b_name = parsed.competitors[0], parsed.competitors[1]
+            else:
+                a_name = parsed.primary_competitor
+                b_name = ""
+        else:
+            a_name = parse_task(a).primary_competitor
+            b_name = parse_task(b).primary_competitor
+
+        if not b_name:
+            raise ValueError("对比需要两个竞品（或用 /compare A 和 B）")
+
+        report_a = self.analyze(a_name)
+        report_b = self.analyze(b_name)
+        markdown = self._build_comparison_markdown(report_a, report_b)
+        return ComparisonReport(
+            competitors=[report_a.competitor, report_b.competitor],
+            reports=[report_a, report_b],
+            markdown_report=markdown,
+        )
+
+    def _build_comparison_markdown(
+        self,
+        a: CompetitorReport,
+        b: CompetitorReport,
+    ) -> str:
+        """拼装对比 Markdown（维度 × 竞品表格 + 摘要）"""
+        name_a = a.competitor.name
+        name_b = b.competitor.name
+        lines = [f"# {name_a} vs {name_b} 对比报告", ""]
+        lines.append("| 维度 | 置信度 A | 置信度 B |")
+        lines.append("|------|:--------:|:--------:|")
+        dims_a = {r.dimension: r for r in a.dimension_results}
+        dims_b = {r.dimension: r for r in b.dimension_results}
+        all_dims = list(dict.fromkeys([*dims_a.keys(), *dims_b.keys()]))
+        for dim in all_dims:
+            conf_a = f"{dims_a[dim].confidence:.2f}" if dim in dims_a else "-"
+            conf_b = f"{dims_b[dim].confidence:.2f}" if dim in dims_b else "-"
+            lines.append(f"| {dim} | {conf_a} | {conf_b} |")
+        lines.append("")
+        lines.append(f"总置信度：{a.overall_confidence:.2f} vs {b.overall_confidence:.2f}")
+        return "\n".join(lines)
+
+    def continue_analysis(self, session_id: str) -> CompetitorReport:
+        """恢复未完成的会话（对齐 hermes -c/--continue 语义）"""
+        return self.resume(session_id)
 
     def _terminal_state(self, reason: str, strategy: CompetitorStrategy) -> TerminalState:
         if reason in (StopReason.ALL_GAPS_CLOSED, StopReason.CORE_SATISFACTION_REACHED, StopReason.NO_GAPS):

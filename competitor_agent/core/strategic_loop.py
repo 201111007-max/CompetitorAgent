@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 
 from competitor_agent.core.competitor_registry import resolve_competitor
+from competitor_agent.core.task_parser import parse_task
 from competitor_agent.domain_types.competitor import Competitor
 from competitor_agent.domain_types.enums import DimensionType, GapStatus
 from competitor_agent.domain_types.info_gap import InfoGap
@@ -59,11 +60,12 @@ class StrategicPlanner:
         }
 
     def plan(self, task: str, memory: IFourLayerMemory | None = None) -> CompetitorStrategy:
-        """解析任务 → 竞品 + 缺口清单 + 预算"""
-        competitor = resolve_competitor(task)
-        gaps = self._build_gaps(task)
+        """解析任务 → 竞品 + 缺口清单 + 预算（内部先 parse_task，保持签名向后兼容）"""
+        parsed = parse_task(task)
+        competitor = self._resolve_with_sources(parsed)
+        gaps = self._build_gaps(task, parsed.dimensions)
         self._apply_memory_boost(gaps, competitor, memory)
-        budget = self._allocate_budget()
+        budget = self._allocate_budget(parsed.dimensions)
         return CompetitorStrategy(
             competitor=competitor,
             gaps=gaps,
@@ -73,11 +75,27 @@ class StrategicPlanner:
             terminal_thresholds={"confidence": 0.8},
         )
 
-    def _build_gaps(self, task: str) -> list[InfoGap]:
-        """按维度生成缺口清单，结合任务关键词提权"""
+    def _resolve_with_sources(self, parsed: object) -> Competitor:
+        """解析竞品 + 注入自定义数据源（custom_sources → official_links，供 SourceSelector 使用）"""
+        competitor = resolve_competitor(str(getattr(parsed, "primary_competitor", "")))
+        custom = getattr(parsed, "custom_sources", {}) or {}
+        if not custom:
+            return competitor
+        links = dict(competitor.official_links)
+        links.update({k: v for k, v in custom.items() if v})
+        return Competitor(
+            name=competitor.name,
+            aliases=competitor.aliases,
+            category=competitor.category,
+            official_links=links,
+        )
+
+    def _build_gaps(self, task: str, dimensions: list[str] | None = None) -> list[InfoGap]:
+        """按维度生成缺口清单，结合任务关键词提权；dimensions 非空则只生成白名单内缺口"""
         lowered = task.lower()
+        enabled = self._enabled if dimensions is None else [d for d in self._enabled if d in dimensions]
         gaps: list[InfoGap] = []
-        for dim in self._enabled:
+        for dim in enabled:
             priority = DIMENSION_PRIORITY[dim]
             for keyword_dim, keywords in _FOCUS_KEYWORDS.items():
                 if keyword_dim == dim and any(k in lowered for k in keywords):
@@ -106,5 +124,7 @@ class StrategicPlanner:
                     gap.confidence = min(gap.confidence + 0.2, 0.8)
                     break
 
-    def _allocate_budget(self) -> dict[str, int]:
+    def _allocate_budget(self, dimensions: list[str] | None = None) -> dict[str, int]:
+        if dimensions is not None:
+            return {dim: self._budget.get(dim, 1) for dim in dimensions if dim in self._enabled}
         return {dim: self._budget.get(dim, 1) for dim in self._enabled}

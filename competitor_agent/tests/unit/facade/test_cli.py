@@ -1,0 +1,249 @@
+"""cli.py 单测（M5.1）：解析器 + 子命令 + handlers
+"""
+from competitor_agent.cli import (
+    _repl,
+    _run_analyze,
+    _run_benchmark,
+    _run_compare_repl,
+    _run_help,
+    _run_history,
+    _run_resume,
+    build_parser,
+)
+from competitor_agent.domain_types.competitor import Competitor
+from competitor_agent.domain_types.report import ComparisonReport
+
+
+class StubReport:
+    def __init__(self, name: str = "cursor") -> None:
+        self.competitor = Competitor(name=name)
+        self.dimension_results = []
+        self.overall_confidence = 0.5
+        self.gaps_pending = []
+        self.markdown_report = f"# {name} 竞品分析报告"
+        self.terminal_state = "success"
+        self.created_at = "2026-01-01T00:00:00+00:00"
+
+
+class StubAPI:
+    def analyze(self, task, conversation_history=None):
+        return StubReport()
+
+    def compare(self, a, b=None):
+        return ComparisonReport(
+            competitors=[Competitor(name=a), Competitor(name=b or "b")],
+            reports=[StubReport(a), StubReport(b or "b")],
+            markdown_report=f"# {a} vs {b or 'b'} 对比报告",
+        )
+
+    def get_history(self, competitor=None):
+        return [StubReport(competitor or "cursor")]
+
+    def continue_analysis(self, session_id):
+        return StubReport()
+
+
+class TestBuildParser:
+    def test_analyze_subcommand(self):
+        parser = build_parser()
+        args = parser.parse_args(["analyze", "Cursor", "--out", "reports/"])
+        assert args.command == "analyze"
+        assert args.out_dir == "reports/"
+        assert args.task == ["Cursor"]
+
+    def test_history_subcommand(self):
+        parser = build_parser()
+        args = parser.parse_args(["history", "--competitor", "cursor"])
+        assert args.command == "history"
+        assert args.competitor == "cursor"
+
+    def test_benchmark_subcommand(self):
+        parser = build_parser()
+        args = parser.parse_args(["benchmark"])
+        assert args.command == "benchmark"
+
+    def test_oneshot_flag(self):
+        parser = build_parser()
+        args = parser.parse_args(["-z", "分析 Cursor"])
+        assert args.oneshot == "分析 Cursor"
+
+    def test_continue_flag(self):
+        parser = build_parser()
+        args = parser.parse_args(["-c", "sess_abc"])
+        assert args.resume_id == "sess_abc"
+
+
+class TestGeneralHandlers:
+    def test_run_help_lists_commands(self, capsys):
+        _run_help("")
+        captured = capsys.readouterr()
+        assert "/analyze" in captured.out
+        assert "/compare" in captured.out
+        assert "/history" in captured.out
+        assert "/resume" in captured.out
+        assert "/benchmark" in captured.out
+        assert "/help" in captured.out
+
+    def test_run_help_specific_command(self, capsys):
+        _run_help("compare")
+        captured = capsys.readouterr()
+        assert "/compare" in captured.out
+
+    def test_run_help_unknown(self, capsys):
+        _run_help("wat")
+        captured = capsys.readouterr()
+        assert "未知命令" in captured.out
+
+    def test_run_benchmark_output(self, capsys):
+        _run_benchmark("")
+        captured = capsys.readouterr()
+        assert "n_cases=" in captured.out
+
+
+class TestRunAnalyze:
+    def test_analyze_single_prints_report(self, capsys):
+        _run_analyze(StubAPI(), "Cursor")
+        captured = capsys.readouterr()
+        assert "竞品分析报告" in captured.out
+
+    def test_analyze_compare_task(self, capsys):
+        _run_analyze(StubAPI(), "对比 Cursor 和 Windsurf")
+        captured = capsys.readouterr()
+        assert "对比报告" in captured.out
+
+    def test_analyze_empty_args_shows_usage(self, capsys):
+        _run_analyze(StubAPI(), "")
+        captured = capsys.readouterr()
+        assert "用法" in captured.out
+
+    def test_analyze_writes_out_file(self, tmp_path, capsys):
+        _run_analyze(StubAPI(), "Cursor", out_dir=str(tmp_path))
+        files = list(tmp_path.glob("*.md"))
+        assert files
+        assert "竞品分析报告" in files[0].read_text(encoding="utf-8")
+
+
+class TestRunHistory:
+    def test_history_lists(self, capsys):
+        _run_history(StubAPI(), "--competitor cursor")
+        captured = capsys.readouterr()
+        assert "cursor" in captured.out
+
+    def test_history_empty(self, capsys):
+        class NoHistoryAPI(StubAPI):
+            def get_history(self, competitor=None):
+                return []
+
+        _run_history(NoHistoryAPI(), "")
+        captured = capsys.readouterr()
+        assert "无历史记录" in captured.out
+
+
+class TestRunResume:
+    def test_resume_with_session(self, capsys):
+        _run_resume(StubAPI(), "sess_abc")
+        captured = capsys.readouterr()
+        assert "竞品分析报告" in captured.out
+
+    def test_resume_no_checkpoints(self, capsys, monkeypatch):
+        monkeypatch.setattr(
+            "competitor_agent.core.checkpoint.list_checkpoints", list
+        )
+        _run_resume(StubAPI(), "")
+        captured = capsys.readouterr()
+        assert "无可用 checkpoint" in captured.out
+
+
+class TestMain:
+    def _patch_api(self, monkeypatch, api=None):
+        monkeypatch.setattr("competitor_agent.cli._make_api", lambda: api or StubAPI())
+
+    def test_main_oneshot(self, monkeypatch, capsys):
+        self._patch_api(monkeypatch)
+        from competitor_agent.cli import main
+
+        assert main(["-z", "Cursor"]) == 0
+        captured = capsys.readouterr()
+        assert "竞品分析报告" in captured.out
+
+    def test_main_continue(self, monkeypatch, capsys):
+        self._patch_api(monkeypatch)
+        from competitor_agent.cli import main
+
+        assert main(["-c", "sess_abc"]) == 0
+        captured = capsys.readouterr()
+        assert "竞品分析报告" in captured.out
+
+    def test_main_analyze_subcommand(self, monkeypatch, capsys):
+        self._patch_api(monkeypatch)
+        from competitor_agent.cli import main
+
+        assert main(["analyze", "Cursor"]) == 0
+        captured = capsys.readouterr()
+        assert "竞品分析报告" in captured.out
+
+    def test_main_history_subcommand(self, monkeypatch, capsys):
+        self._patch_api(monkeypatch)
+        from competitor_agent.cli import main
+
+        assert main(["history", "--competitor", "cursor"]) == 0
+        captured = capsys.readouterr()
+        assert "cursor" in captured.out
+
+    def test_main_benchmark_subcommand(self, monkeypatch, capsys):
+        monkeypatch.setattr(
+            "competitor_agent.cli._run_benchmark", lambda a: None
+        )
+        from competitor_agent.cli import main
+
+        assert main(["benchmark"]) == 0
+
+
+class TestCompareRepl:
+    def test_compare_two(self, capsys):
+        _run_compare_repl(StubAPI(), "Cursor Windsurf")
+        captured = capsys.readouterr()
+        assert "对比报告" in captured.out
+
+    def test_compare_with_he(self, capsys):
+        _run_compare_repl(StubAPI(), "Cursor 和 Windsurf")
+        captured = capsys.readouterr()
+        assert "对比报告" in captured.out
+
+    def test_compare_insufficient_args(self, capsys):
+        _run_compare_repl(StubAPI(), "Cursor")
+        captured = capsys.readouterr()
+        assert "用法" in captured.out
+
+    def test_compare_empty(self, capsys):
+        _run_compare_repl(StubAPI(), "")
+        captured = capsys.readouterr()
+        assert "用法" in captured.out
+
+
+class TestRepl:
+    def test_repl_exits_on_eof(self, monkeypatch, capsys):
+        monkeypatch.setattr("builtins.input", lambda prompt="": (_ for _ in ()).throw(EOFError()))
+        try:
+            _repl(StubAPI())
+        except SystemExit as exc:
+            assert exc.code == 0
+        captured = capsys.readouterr()
+        assert "交互模式" in captured.out
+
+    def test_repl_exit_command(self, monkeypatch, capsys):
+        monkeypatch.setattr("builtins.input", lambda prompt="": "exit")
+        try:
+            _repl(StubAPI())
+        except SystemExit as exc:
+            assert exc.code == 0
+
+    def test_repl_handles_plain_text(self, monkeypatch, capsys):
+        inputs = iter(["Cursor", "exit"])
+        monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
+        try:
+            _repl(StubAPI())
+        except SystemExit:
+            pass
+        captured = capsys.readouterr()
+        assert "竞品分析报告" in captured.out

@@ -21,6 +21,9 @@ class StrategyCase:
     total_cost: float = 0.0
     outcome_complete: bool = True  # 结论是否完整（价值）
     depth: int = 0  # 实际降级深度（尝试了几个源）
+    case_id: str = ""
+    tags: list[str] = field(default_factory=list)
+    trace: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass

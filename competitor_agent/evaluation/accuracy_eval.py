@@ -19,6 +19,12 @@ class EvalCase:
     task: str
     prediction: dict[str, Any]
     ground_truth: dict[str, Any]
+    case_id: str = ""
+    competitor: str = ""
+    dimension: str = ""
+    tags: list[str] = field(default_factory=list)
+    sources: list[dict[str, str]] = field(default_factory=list)
+    trace: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -27,6 +33,7 @@ class AccuracyMetrics:
     hallucination_rate: float = 0.0
     f1: float = 0.0
     per_field: dict[str, dict[str, float]] = field(default_factory=dict)
+    hallucination_instances: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _normalize(value: Any) -> str:
@@ -43,6 +50,7 @@ def _normalize(value: Any) -> str:
     text = text.replace("/year", " per year").replace("/年", " per year")
     text = text.replace("/user", " per user").replace("/人", " per user")
     text = text.replace("/mo", " per month")
+    text = text.replace("/hour", " per hour").replace("/h", " per hour")
     text = text.replace(",", "").replace("，", "")
     # 去多余空格后分词重排（消除词序差异）
     return " ".join(text.split())
@@ -76,6 +84,7 @@ class AccuracyEvaluator:
         per_field: dict[str, dict[str, float]] = {}
         total_pred = 0
         supported = 0
+        hallucination_instances: list[dict[str, Any]] = []
 
         for case in cases:
             for field_name, truth in case.ground_truth.items():
@@ -97,6 +106,16 @@ class AccuracyEvaluator:
                     total_pred += 1
                     if np_ and set(np_.split()) & _tokens(nt):
                         supported += 1
+                    else:
+                        hallucination_instances.append(
+                            {
+                                "case_id": case.case_id,
+                                "task": case.task,
+                                "field": field_name,
+                                "prediction": pred,
+                                "ground_truth": truth,
+                            }
+                        )
 
         if not field_scores:
             return AccuracyMetrics()
@@ -114,6 +133,7 @@ class AccuracyEvaluator:
             hallucination_rate=round(halluc, 4),
             f1=round(sum(f1s) / len(f1s), 4),
             per_field=per_field_summary,
+            hallucination_instances=hallucination_instances,
         )
 
 

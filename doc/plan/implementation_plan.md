@@ -33,6 +33,7 @@ M0 准备 ─► M1 骨架（跑通采集→分析→报告）──► M2 记�
 | M2 | 记忆 + RAG 自进化 | M1（骨架可用） | ✅ 已完成 |
 | M3 | 多 Agent 协作 + 评测体系 | M1、M2 | ✅ 已完成 |
 | M4 | Web/MCP/CI/断点工程化 | M1、M2、M3 | ✅ 已完成 |
+| M5 | 用户输入解析与交互层 | M1（解析入口可用） | ✅ 已完成 |
 
 ---
 
@@ -180,6 +181,26 @@ Collector→Analyzer→Validator→Reporter 协作；评测体系能量化字段
 - **共享预算防递减**：ParallelRunner 多缺口共享 IterationBudget 时，0 token delta 会触发"边际递减"提前停；测试用 `min_continuations=999` 禁用该逻辑。
 - **SourceSelector SPA 兜底会改变候选集**：测试竞品须配齐 home/pricing/docs 链接，否则非 pricing 缺口零候选、直接 BLOCKED。
 
+### 3.7 Benchmark 组合参考（业界通用评测基准）
+
+> 业界没有"唯一通用" benchmark。SWE-bench（含 Verified/Pro）曾是事实标准，但 OpenAI 2025 年审计后公开质疑其信号质量（测试缺陷 ~27.6%、训练污染），不再作为唯一依据。共识是**按能力域组合评测**，并注意 harness 差异可造成 10-20 个百分点分差，"分数必须配版本号（benchmark + subset + harness）"。
+
+| 能力域 | Benchmark | 说明 | 本项目的对应 |
+|--------|-----------|------|--------------|
+| 通用 Agent 能力 | AgentBench（清华，8 环境，ICLR 2024） | 综合评测基准 | Strategic/Tactical 双循环规划 |
+| 代码 / 仓库修复 | SWE-bench Pro / Verified | 真实 GitHub issue → patch 通过测试；Pro 更长上下文/跨文件 | —（非代码 Agent，参考） |
+| CLI / 终端操作 | Terminal-Bench 2.0（Stanford + Laude） | 文件系统/进程/基础设施自动化，独立治理 | — |
+| Web 操作 | WebArena / BrowserGym | 真实 Web 环境任务 | 官网/文档采集（SPA 渲染） |
+| 工具编排 / MCP | MCP-Atlas（Scale Labs, 2026） | 1000 任务 / 36 真实 MCP server / 220 工具，claim 级打分 | `mcp_server/` 对外暴露的采集/分析工具 |
+| 通用助手 | GAIA | 多工具、规划、错误恢复 | — |
+
+**评测分层**（对应本项目已有的三层）：
+1. **Component Eval**：单模块正确性 → `tests/unit/`（分析器/采集器/预算）
+2. **Trajectory Eval**：执行路径合理性 → `evaluation/strategy_eval.py`（工具选择准确率）
+3. **End-to-End Eval**：最终任务完成度 → `evaluation/accuracy_eval.py`（字段准确率/幻觉率）
+
+**最小 eval 集建议**：20 条起（10 正常 + 5 边界 + 3 工具失败 + 2 安全/拒绝），写进简历前扩到 50+ 并加回归；每次运行必须保存 trace（工具调用/参数/成本/耗时），否则无法归因失败。
+
 ---
 
 ## 6. M4 — 工程化（3-4 天）✅ 已完成
@@ -259,6 +280,42 @@ Web SSE 可视化、MCP Server 对外开放、CI、断点续跑/中断/历史。
 
 ---
 
+## 6.5 M5 — 用户输入解析与交互层（2-3 天）✅ 已完成
+
+> 参考 hermes-agent 的输入处理逻辑（命令注册表 / 浅清洗 / 会话历史），补齐 competitor_agent 输入管线。
+> 详细设计见 `doc/plan/input_parsing_design.md`。
+
+### 目标
+补齐 CLI 入口（usage.md 已承诺但 `cli.py` 不存在），引入斜杠命令注册表、入站浅清洗、
+增强任务语义解析（对比/维度限定/自定义源），并支持交互式多轮会话。
+
+### 步骤清单
+
+| # | 任务 | 交付物 | 验证方式 | 状态 |
+|---|------|--------|---------|------|
+| 5.1 | CLI 入口补齐 | `competitor_agent/cli.py`（argparse `analyze/history/benchmark` 子命令 + `-z/--oneshot` + `-c/--continue` + 交互 REPL） | `python -m competitor_agent.cli analyze "Claude Code"` 输出报告 | ☑ |
+| 5.2 | 命令注册表 | `core/command_registry.py`（CommandDef + `_looks_like_slash_command` + `resolve_command` + `command_dispatch`） | 单测：前缀判定 / 别名解析 / 文件路径排除 | ☑ |
+| 5.3 | 入站浅清洗 | `core/input_sanitizer.py`（strip_paste_wrappers / strip_terminal_leaks / expand_references / sanitize_surrogates） | 单测：粘贴包装剥离、`@file:` 展开、代理字符清理各一例 | ☑ |
+| 5.4 | 任务语义解析增强 | `core/task_parser.py` + 增强 `competitor_registry.resolve_competitor` / `strategic_loop._build_gaps`（对比拆分、维度白名单、自定义源） | 单测：`parse_task("对比 Cursor 和 Windsurf")` → 2 竞品；`parse_task("只分析 Cursor 定价")` → dimensions=["pricing"] | ☑ |
+| 5.5 | 会话历史与恢复 | `facade/api.py` 增 `conversation_history` 参数 + `compare()` + `continue_analysis()` | 集成测试：带历史二次分析命中记忆；`compare(A,B)` 产出对比报告 | ☑ |
+| 5.6 | 测试补全 | `tests/unit/core/test_command_registry.py` + `test_input_sanitizer.py` + `test_task_parser.py` + `tests/unit/facade/test_api_history.py` | `pytest` 全绿 + ruff + mypy 通过 | ☑ |
+| 5.7 | 文档收口 | usage.md CLI 章节与实现对齐、api.md 补 `compare/continue_analysis` | 按文档可用 | ☑ |
+
+### 里程碑出口条件
+- `python -m competitor_agent.cli analyze "Claude Code"` 可运行（当前 usage.md 承诺但 CLI 缺失）。
+- 交互模式支持 `/history`、`/compare` 斜杠命令；非交互支持 `-z` oneshot。
+- `parse_task` 规则版在无 LLM 时正确处理对比/维度限定/自定义源。
+- 带 `conversation_history` 的二次分析能引用上一轮上下文。
+
+### M5 验证结果（实测）
+- `pytest` **308 passed**（含 M5 新增 87 项：command_registry 16 / input_sanitizer 17 / task_parser 18 / api_history 7 / cli 29）
+- 覆盖率：`command_registry` **100%**、`task_parser` **99%**、`input_sanitizer` **87%**、`cli` **94%**、`facade/api` **80%**
+- `ruff check` All checks passed；`mypy` M5 新增 5 个源文件无错误
+- CLI 实测：`analyze "Cursor" --out reports/`（写出 cursor.md，exit 0）、`-z "只分析 Cursor 定价"`（仅 pricing 缺口）、`analyze "对比 Cursor 和 Windsurf"`（对比报告）、`benchmark`（27 cases）、`history --competitor cursor`
+- 注：mypy 全量在本地 Python 3.13 下报 2 处 `unused-ignore`（`facade/api.py:304/306`，M4 遗留 `get_history`），CI 目标 3.10-3.12 不受影响
+
+---
+
 ## 7. 文档清单（全部完成 ✅）
 
 > 架构文档已给出"设计蓝图"，以下文档已在落地过程中同步补齐。
@@ -274,6 +331,7 @@ Web SSE 可视化、MCP Server 对外开放、CI、断点续跑/中断/历史。
 | **配置说明** | `competitor_agent/docs/configuration.md` | review_config.yaml 每个字段含义与默认值 | ✅ |
 | **迁移对照表** | `doc/plan/migration_map.md` | dota_helper → competitor_agent 模块映射 | ✅ |
 | **评测用例标注规范** | `competitor_agent/docs/evaluation_guide.md` | ground truth 标注格式、用例新增、指标口径 | ✅ |
+| **输入解析设计文档** | `doc/plan/input_parsing_design.md` | 对照 hermes-agent 的输入管线设计（CLI/命令注册表/浅清洗/任务解析/会话） | ✅ |
 
 ### 7.2 验收/交付阶段
 
@@ -323,6 +381,7 @@ dev:
 第 2 周：M2
 第 3 周：M3
 第 4 周：M4 + 文档收口 + 演示准备
+第 5 周：M5 输入解析与交互层（CLI/命令/清洗/会话）+ 验收
 ```
 
 每周五用对应里程碑"出口条件"自检一次；不达标则下周一优先补齐该缺口再前进。

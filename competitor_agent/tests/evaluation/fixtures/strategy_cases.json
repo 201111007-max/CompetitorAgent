@@ -1,51 +1,135 @@
 [
   {
+    "case_id": "cursor_pricing_page_2026",
     "task": "cursor pricing page",
+    "tags": ["normal"],
+    "trace": [
+      {"tool": "web_extractor", "params": {"url": "https://cursor.com/pricing"}, "status": "ok", "cost": 0.012, "duration_ms": 410}
+    ],
     "chosen_sources": ["official_pricing", "spa_extractor"],
     "best_source": "official_pricing",
     "total_cost": 0.02,
-    "outcome_complete": true
+    "outcome_complete": true,
+    "depth": 1
   },
   {
+    "case_id": "claude_changelog_2026",
     "task": "claude code changelog",
+    "tags": ["normal"],
+    "trace": [
+      {"tool": "web_extractor", "params": {"url": "https://docs.anthropic.com/claude-code/changelog"}, "status": "ok", "cost": 0.008, "duration_ms": 330}
+    ],
     "chosen_sources": ["official_docs"],
     "best_source": "official_docs",
     "total_cost": 0.01,
-    "outcome_complete": true
+    "outcome_complete": true,
+    "depth": 1
   },
   {
+    "case_id": "codex_spa_2026",
     "task": "codex pricing (SPA site)",
+    "tags": ["normal", "spa"],
+    "trace": [
+      {"tool": "spa_extractor", "params": {"url": "https://openai.com/codex"}, "status": "ok", "cost": 0.03, "duration_ms": 900}
+    ],
     "chosen_sources": ["official_home", "spa_extractor"],
     "best_source": "spa_extractor",
     "total_cost": 0.05,
-    "outcome_complete": true
+    "outcome_complete": true,
+    "depth": 2
   },
   {
+    "case_id": "perplexity_perf_2026",
     "task": "perplexity performance",
+    "tags": ["normal"],
+    "trace": [
+      {"tool": "web_extractor", "params": {"url": "https://perplexity.ai/benchmark"}, "status": "ok", "cost": 0.02, "duration_ms": 480}
+    ],
     "chosen_sources": ["official_docs", "alternative_benchmark"],
     "best_source": "alternative_benchmark",
     "total_cost": 0.04,
-    "outcome_complete": false
+    "outcome_complete": false,
+    "depth": 2
   },
   {
+    "case_id": "cursor_version_2026",
     "task": "cursor version changelog",
+    "tags": ["normal"],
+    "trace": [
+      {"tool": "web_extractor", "params": {"url": "https://cursor.com/changelog"}, "status": "ok", "cost": 0.01, "duration_ms": 460}
+    ],
     "chosen_sources": ["official_docs", "github_releases"],
     "best_source": "github_releases",
     "total_cost": 0.03,
-    "outcome_complete": true
+    "outcome_complete": true,
+    "depth": 2
   },
   {
+    "case_id": "claude_spa_2026",
     "task": "claude code pricing (SPA site)",
+    "tags": ["normal", "spa"],
+    "trace": [
+      {"tool": "spa_extractor", "params": {"url": "https://www.anthropic.com/claude-code"}, "status": "ok", "cost": 0.04, "duration_ms": 1100}
+    ],
     "chosen_sources": ["official_home", "spa_extractor"],
     "best_source": "spa_extractor",
     "total_cost": 0.06,
-    "outcome_complete": true
+    "outcome_complete": true,
+    "depth": 2
   },
   {
+    "case_id": "codex_enterprise_2026",
     "task": "codex enterprise features",
+    "tags": ["normal"],
+    "trace": [
+      {"tool": "web_extractor", "params": {"url": "https://openai.com/codex/enterprise"}, "status": "ok", "cost": 0.01, "duration_ms": 400}
+    ],
     "chosen_sources": ["official_docs", "official_pricing"],
     "best_source": "official_docs",
     "total_cost": 0.02,
-    "outcome_complete": true
+    "outcome_complete": true,
+    "depth": 1
+  },
+  {
+    "case_id": "cursor_404_fallback_2026",
+    "task": "cursor pricing page 404 fallback",
+    "tags": ["tool_failure", "degradation"],
+    "trace": [
+      {"tool": "web_extractor", "params": {"url": "https://cursor.com/pricing"}, "status": "fail_404", "cost": 0.005, "duration_ms": 200},
+      {"tool": "web_extractor", "params": {"url": "https://cursor.com/pricing-v2"}, "status": "ok", "cost": 0.012, "duration_ms": 430}
+    ],
+    "chosen_sources": ["official_pricing", "official_pricing_v2"],
+    "best_source": "official_pricing_v2",
+    "total_cost": 0.03,
+    "outcome_complete": true,
+    "depth": 2
+  },
+  {
+    "case_id": "claude_antibot_2026",
+    "task": "claude docs anti-bot fallback",
+    "tags": ["tool_failure", "degradation"],
+    "trace": [
+      {"tool": "web_extractor", "params": {"url": "https://docs.anthropic.com/claude-code"}, "status": "fail_antibot", "cost": 0.005, "duration_ms": 260},
+      {"tool": "spa_extractor", "params": {"url": "https://docs.anthropic.com/claude-code"}, "status": "ok", "cost": 0.035, "duration_ms": 1050}
+    ],
+    "chosen_sources": ["official_docs", "spa_extractor"],
+    "best_source": "spa_extractor",
+    "total_cost": 0.06,
+    "outcome_complete": true,
+    "depth": 2
+  },
+  {
+    "case_id": "deepseek_fallback_2026",
+    "task": "deepseek home down fallback",
+    "tags": ["tool_failure", "degradation"],
+    "trace": [
+      {"tool": "web_extractor", "params": {"url": "https://www.deepseek.com"}, "status": "fail_5xx", "cost": 0.005, "duration_ms": 300},
+      {"tool": "web_extractor", "params": {"url": "https://platform.deepseek.com/pricing"}, "status": "ok", "cost": 0.012, "duration_ms": 450}
+    ],
+    "chosen_sources": ["official_home", "official_docs"],
+    "best_source": "official_docs",
+    "total_cost": 0.04,
+    "outcome_complete": true,
+    "depth": 2
   }
 ]
