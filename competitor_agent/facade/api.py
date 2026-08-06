@@ -3,6 +3,7 @@
 组装：StrategicLoop（规划）→ 逐缺口 TacticalLoop（采集+分析）
      → BudgetController（终止）→ ReportBuilder（汇总）
 M1 默认 LLM 关闭（use_llm=False），无 Key 也能产出报告（规则降级）。
+M6 默认 LLM 开启（use_llm=True），主路径用 LLM 理解用户输入；无 Key 时自动降级规则。
 
 M4 新增：
 - analyze_stream(): 流式分析（SSE 事件推送）
@@ -60,7 +61,7 @@ class CompetitorAnalysisAPI:
     def __init__(
         self,
         llm: LLMClient | None = None,
-        use_llm: bool = False,
+        use_llm: bool = True,
         max_iterations: int = 10,
         cost_limit: float = 1.0,
         event_sink: Callable[[ProgressEvent], None] | None = None,
@@ -72,7 +73,7 @@ class CompetitorAnalysisAPI:
         self._event_sink = event_sink
         self._memory = memory
 
-        self._planner = StrategicPlanner()
+        self._planner = StrategicPlanner(llm=llm, use_llm=use_llm)
         self._selector = SourceSelector()
         if memory is not None:
             self._selector.set_success_rates(memory.source_success_rates())
@@ -333,7 +334,7 @@ class CompetitorAnalysisAPI:
         """
         if not conversation_history:
             return task
-        parsed = parse_task(task)
+        parsed = parse_task(task, llm=self._llm, use_llm=self._use_llm)
         if parsed.primary_competitor != "unknown":
             return task
         last_competitor = self._last_competitor_from_history(conversation_history)
@@ -359,15 +360,15 @@ class CompetitorAnalysisAPI:
         内部复用 parse_task 的对比拆分；逐个 analyze 后拼装 ComparisonReport。
         """
         if b is None:
-            parsed = parse_task(a)
+            parsed = parse_task(a, llm=self._llm, use_llm=self._use_llm)
             if len(parsed.competitors) >= 2:
                 a_name, b_name = parsed.competitors[0], parsed.competitors[1]
             else:
                 a_name = parsed.primary_competitor
                 b_name = ""
         else:
-            a_name = parse_task(a).primary_competitor
-            b_name = parse_task(b).primary_competitor
+            a_name = parse_task(a, llm=self._llm, use_llm=self._use_llm).primary_competitor
+            b_name = parse_task(b, llm=self._llm, use_llm=self._use_llm).primary_competitor
 
         if not b_name:
             raise ValueError("对比需要两个竞品（或用 /compare A 和 B）")

@@ -29,6 +29,7 @@ from competitor_agent import CompetitorAnalysisAPI
 from competitor_agent.domain_types.events import ProgressEvent
 from competitor_agent.domain_types.report import CompetitorReport
 from competitor_agent.interfaces.context import AnalysisSession
+from competitor_agent.llm.client import LLMClient
 from competitor_agent.memory.four_layer_memory import FourLayerMemory
 from competitor_agent.secret_vault import get_data_dir
 
@@ -54,7 +55,8 @@ async def _event_generator(
 ) -> AsyncIterator[str]:
     """SSE 事件生成器：逐条 yield ProgressEvent"""
     CompetitorAnalysisAPI(
-        use_llm=False,
+        llm=LLMClient(),
+        use_llm=True,
         memory=_get_memory(),
         event_sink=lambda e: None,  # 事件通过 yield 推送，不依赖 callback
     )
@@ -71,7 +73,8 @@ async def _event_generator(
             pass
 
     api_with_sink = CompetitorAnalysisAPI(
-        use_llm=False,
+        llm=LLMClient(),
+        use_llm=True,
         memory=_get_memory(),
         event_sink=_on_event,
     )
