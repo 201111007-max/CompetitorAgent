@@ -22,12 +22,13 @@ from competitor_agent.core.input_sanitizer import sanitize_task
 from competitor_agent.core.task_parser import parse_task
 from competitor_agent.domain_types.report import CompetitorReport
 from competitor_agent.facade.api import CompetitorAnalysisAPI
+from competitor_agent.llm.client import LLMClient
 
 PROMPT = "competitor> "
 
 
 def _make_api() -> CompetitorAnalysisAPI:
-    return CompetitorAnalysisAPI(use_llm=False)
+    return CompetitorAnalysisAPI(llm=LLMClient(), use_llm=True)
 
 
 def _print_report(report: CompetitorReport) -> None:
@@ -42,7 +43,7 @@ def _run_analyze(api: CompetitorAnalysisAPI, args: str, out_dir: str | None = No
     if not args:
         print("用法: analyze <竞品或任务>")
         return
-    parsed = parse_task(args)
+    parsed = parse_task(args, llm=LLMClient(), use_llm=True)
     if parsed.is_compare and len(parsed.competitors) >= 2:
         report = api.compare(parsed.competitors[0], parsed.competitors[1])
         markdown = report.markdown_report

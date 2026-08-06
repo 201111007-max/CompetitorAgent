@@ -20,6 +20,7 @@ from competitor_agent.domain_types.info_gap import InfoGap
 from competitor_agent.domain_types.strategy import CompetitorStrategy
 from competitor_agent.interfaces.context import Skill
 from competitor_agent.interfaces.memory import IFourLayerMemory
+from competitor_agent.llm.client import LLMClient
 
 logger = logging.getLogger("competitor_agent.core.strategic_loop")
 
@@ -48,6 +49,8 @@ class StrategicPlanner:
         self,
         enabled_dimensions: list[str] | None = None,
         default_budget: dict[str, int] | None = None,
+        llm: LLMClient | None = None,
+        use_llm: bool = True,
     ) -> None:
         self._enabled = enabled_dimensions or list(DIMENSION_PRIORITY.keys())
         self._budget = default_budget or {
@@ -58,10 +61,12 @@ class StrategicPlanner:
             "sentiment": 2,
             "roadmap": 1,
         }
+        self._llm = llm
+        self._use_llm = use_llm
 
     def plan(self, task: str, memory: IFourLayerMemory | None = None) -> CompetitorStrategy:
         """解析任务 → 竞品 + 缺口清单 + 预算（内部先 parse_task，保持签名向后兼容）"""
-        parsed = parse_task(task)
+        parsed = parse_task(task, llm=self._llm, use_llm=self._use_llm)
         competitor = self._resolve_with_sources(parsed)
         gaps = self._build_gaps(task, parsed.dimensions)
         self._apply_memory_boost(gaps, competitor, memory)

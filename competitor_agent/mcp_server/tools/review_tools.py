@@ -10,8 +10,9 @@ def analyze_competitor(task: str) -> str:
     """综合分析一个竞品（采集→分析→报告全流程）"""
     try:
         from competitor_agent.facade.api import CompetitorAnalysisAPI
+        from competitor_agent.llm.client import LLMClient
 
-        api = CompetitorAnalysisAPI(use_llm=False)
+        api = CompetitorAnalysisAPI(llm=LLMClient(), use_llm=True)
         report = api.analyze(task)
         return report.markdown_report or "⚠ 报告为空"
     except Exception as e:  # noqa: BLE001
