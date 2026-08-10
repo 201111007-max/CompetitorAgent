@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from competitor_agent.collector.source_selector import SourceSelector
 from competitor_agent.domain_types.enums import ObservationStatus
@@ -31,10 +32,12 @@ class CollectorAgent(BaseAgent):
         selector: SourceSelector,
         extractor: ICompetitorDataSource,
         memory: IFourLayerMemory | None = None,
+        ingester: Any | None = None,
     ) -> None:
         super().__init__("collector", bus, memory)
         self._selector = selector
         self._extractor = extractor
+        self._ingester = ingester
 
     def run(self, ctx: AgentContext) -> AgentResult:
         """决策入口：采集缺口数据，产出 Observation 列表。"""
@@ -71,9 +74,26 @@ class CollectorAgent(BaseAgent):
                 gap.record_source_try(candidate.source_name)
                 if obs.status in (ObservationStatus.OK, ObservationStatus.DEGRADED):
                     observations.append(obs)
+                    self._ingest_observation(obs, strategy.competitor.name, gap.field)
                     break  # 该缺口已有可分析内容，停止降级
         self._bus.publish(T_COLLECTED, {"competitor": strategy.competitor.name, "observations": observations})
         return observations
+
+    def _ingest_observation(
+        self, observation: Observation, competitor: str, dimension: str
+    ) -> None:
+        """采集到有效文本后摄入知识库（RAG 灌库链路）"""
+        if self._ingester is None or not observation.raw_text.strip():
+            return
+        try:
+            self._ingester.ingest(
+                competitor=competitor,
+                dimension=dimension,
+                text=observation.raw_text,
+                source_url=observation.evidence.url if observation.evidence else "",
+            )
+        except Exception:  # noqa: BLE001 — 摄入失败不影响主流程
+            logger.warning("知识库摄入失败: %s/%s", competitor, dimension)
 
     def process(self, strategy: CompetitorStrategy) -> list[Observation]:
         """总线驱动入口（供 Orchestrator 调用）"""

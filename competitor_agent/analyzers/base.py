@@ -66,9 +66,26 @@ class BaseCompetitorAnalyzer:
     ) -> DimensionResult:
         assert self._llm is not None
         messages = self._build_prompt(observation, gap)
+        if context.rag_context:
+            messages = self._inject_rag_context(messages, context.rag_context)
         text = self._llm.complete(messages)
         parsed = self._parse_result(text)
         return self._make_result(observation, gap, parsed, confidence=parsed.get("confidence", 0.7))
+
+    def _inject_rag_context(
+        self, messages: list[dict[str, str]], rag_context: str
+    ) -> list[dict[str, str]]:
+        """把 RAG 检索到的背景知识片段注入最后一条 user 消息（作为外部事实依据）"""
+        if not messages:
+            return messages
+        last = messages[-1]
+        if last["role"] != "user":
+            messages = messages + [{"role": "user", "content": ""}]
+            last = messages[-1]
+        last["content"] = (
+            f"{last['content']}\n\n[知识库参考片段（外部事实依据，可引用其来源）]\n{rag_context}"
+        )
+        return messages
 
     def _analyze_with_rules(
         self,

@@ -9,6 +9,8 @@
 """
 from __future__ import annotations
 
+from typing import Any
+
 from competitor_agent.analyzers.base import BaseCompetitorAnalyzer
 from competitor_agent.collector.source_selector import SourceCandidate, SourceSelector
 from competitor_agent.collector.spa_extractor import SpaExtractor
@@ -37,6 +39,8 @@ class TacticalLoop:
         analyzer: BaseCompetitorAnalyzer,
         budget: IterationBudget,
         extractors: dict[str, ICompetitorDataSource] | None = None,
+        ingester: Any | None = None,
+        retriever: Any | None = None,
     ) -> None:
         self._selector = selector
         self._extractor = extractor
@@ -50,6 +54,9 @@ class TacticalLoop:
                 "spa_extractor": SpaExtractor(),
             }
         )
+        # RAG 知识库（可选）：采集后摄入 + 分析前检索注入
+        self._ingester = ingester
+        self._retriever = retriever
 
     def execute(self, gap: InfoGap, strategy: CompetitorStrategy) -> DimensionResult | None:
         """执行单缺口闭环。返回维度结论（失败返回 None）。"""
@@ -70,12 +77,29 @@ class TacticalLoop:
                 continue
 
             gap.record_source_try(candidate.source_name)
+            self._ingest_observation(observation, strategy.competitor.name, gap.field)
             result = self._analyze(observation, gap, context)
             self._update_gap(gap, observation, result)
             return result
 
         gap.status = GapStatus.BLOCKED
         return None
+
+    def _ingest_observation(
+        self, observation: Observation, competitor: str, dimension: str
+    ) -> None:
+        """采集到有效文本后摄入知识库（RAG 灌库链路）"""
+        if self._ingester is None or not observation.raw_text.strip():
+            return
+        try:
+            self._ingester.ingest(
+                competitor=competitor,
+                dimension=dimension,
+                text=observation.raw_text,
+                source_url=observation.evidence.url if observation.evidence else "",
+            )
+        except Exception:  # noqa: BLE001 — 摄入失败不影响主流程
+            logger.warning("知识库摄入失败: %s/%s", competitor, dimension)
 
     def _collect(
         self, candidate: SourceCandidate, gap: InfoGap, context: SourceContext
@@ -97,8 +121,31 @@ class TacticalLoop:
             AnalysisContext(
                 competitor_name=context.competitor_name,
                 dimension=self._analyzer.dimension,
+                rag_context=self._retrieve_rag(context.competitor_name, gap.field),
             ),
         )
+
+    def _retrieve_rag(self, competitor: str, dimension: str) -> str:
+        """检索知识库相关片段，拼成可注入的文本（含来源）"""
+        if self._retriever is None:
+            return ""
+        try:
+            chunks = self._retriever.retrieve(
+                query=dimension,
+                competitor=competitor,
+                dimension=dimension,
+                top_k=5,
+            )
+        except Exception:  # noqa: BLE001 — 检索失败不影响主流程
+            logger.warning("知识库检索失败: %s/%s", competitor, dimension)
+            return ""
+        if not chunks:
+            return ""
+        lines = []
+        for c in chunks:
+            src = f"（来源: {c.source_url}）" if c.source_url else ""
+            lines.append(f"- [{c.competitor}/{c.dimension}]{src} {c.text[:300]}")
+        return "\n".join(lines)
 
     def _update_gap(
         self, gap: InfoGap, observation: Observation, result: DimensionResult

@@ -83,6 +83,15 @@ class CompetitorAnalysisAPI:
         self._budget = BudgetController(max_iterations=max_iterations, cost_limit=cost_limit)
         self._verifier = StopVerifier()
 
+        # RAG 知识库：采集后摄入 + 分析前检索注入（外部事实依据，降低幻觉）
+        from competitor_agent.knowledge_base.competitor_store import CompetitorStore
+        from competitor_agent.knowledge_base.ingester import Ingester
+        from competitor_agent.knowledge_base.retriever import Retriever
+
+        self._store = CompetitorStore()
+        self._ingester = Ingester(store=self._store)
+        self._retriever = Retriever(store=self._store)
+
     def analyze(
         self,
         task: str,
@@ -139,6 +148,8 @@ class CompetitorAnalysisAPI:
                 extractor=self._extractor,
                 analyzer=analyzer,
                 budget=iteration_budget,
+                ingester=self._ingester,
+                retriever=self._retriever,
             )
             result = loop.execute(gap, strategy)
             if result is not None:
@@ -212,6 +223,8 @@ class CompetitorAnalysisAPI:
             use_llm=self._use_llm,
             memory=self._memory,
             max_retries=max_retries,
+            ingester=self._ingester,
+            retriever=self._retriever,
         )
         report = orch.run(task)
         # 记忆闭环：分析成功后沉淀技能 + 记录数据源成功率（与单 Agent 路径对齐）

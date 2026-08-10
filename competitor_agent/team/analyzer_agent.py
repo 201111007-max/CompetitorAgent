@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from competitor_agent.analyzers.registry import AnalyzerRegistry
 from competitor_agent.domain_types.info_gap import InfoGap
@@ -27,9 +28,11 @@ class AnalyzerAgent(BaseAgent):
         bus: MessageBus,
         registry: AnalyzerRegistry,
         memory: IFourLayerMemory | None = None,
+        retriever: Any | None = None,
     ) -> None:
         super().__init__("analyzer", bus, memory)
         self._registry = registry
+        self._retriever = retriever
 
     def run(self, ctx: AgentContext) -> AgentResult:
         """决策入口：分析观测，产出维度结论。"""
@@ -59,8 +62,34 @@ class AnalyzerAgent(BaseAgent):
             result = analyzer.analyze(
                 obs,
                 InfoGap(field=obs.gap_field),
-                AnalysisContext(competitor_name=competitor_name, dimension=analyzer.dimension),
+                AnalysisContext(
+                    competitor_name=competitor_name,
+                    dimension=analyzer.dimension,
+                    rag_context=self._retrieve_rag(competitor_name, obs.gap_field),
+                ),
             )
             results.append(result)
         self._bus.publish(T_ANALYZED, {"competitor": competitor_name, "results": results})
         return results
+
+    def _retrieve_rag(self, competitor: str, dimension: str) -> str:
+        """检索知识库相关片段，拼成可注入的文本（含来源）"""
+        if self._retriever is None:
+            return ""
+        try:
+            chunks = self._retriever.retrieve(
+                query=dimension,
+                competitor=competitor,
+                dimension=dimension,
+                top_k=5,
+            )
+        except Exception:  # noqa: BLE001 — 检索失败不影响主流程
+            logger.warning("知识库检索失败: %s/%s", competitor, dimension)
+            return ""
+        if not chunks:
+            return ""
+        lines = []
+        for c in chunks:
+            src = f"（来源: {c.source_url}）" if c.source_url else ""
+            lines.append(f"- [{c.competitor}/{c.dimension}]{src} {c.text[:300]}")
+        return "\n".join(lines)
