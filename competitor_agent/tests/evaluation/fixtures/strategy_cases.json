@@ -1,135 +1,101 @@
 [
   {
-    "case_id": "cursor_pricing_page_2026",
-    "task": "cursor pricing page",
+    "case_id": "cursor_pricing_hit_2026",
+    "competitor": "cursor",
+    "dimension": "pricing",
+    "task": "只分析 cursor 的定价",
     "tags": ["normal"],
-    "trace": [
-      {"tool": "web_extractor", "params": {"url": "https://cursor.com/pricing"}, "status": "ok", "cost": 0.012, "duration_ms": 410}
-    ],
-    "chosen_sources": ["official_pricing", "spa_extractor"],
-    "best_source": "official_pricing",
-    "total_cost": 0.02,
-    "outcome_complete": true,
-    "depth": 1
+    "mode": "single",
+    "page": "Pro $20/month",
+    "fail_urls": [],
+    "best_url": "https://www.cursor.com/pricing"
   },
   {
-    "case_id": "claude_changelog_2026",
-    "task": "claude code changelog",
+    "case_id": "claude_pricing_hit_2026",
+    "competitor": "claude-code",
+    "dimension": "pricing",
+    "task": "只分析 claude-code 的定价",
     "tags": ["normal"],
-    "trace": [
-      {"tool": "web_extractor", "params": {"url": "https://docs.anthropic.com/claude-code/changelog"}, "status": "ok", "cost": 0.008, "duration_ms": 330}
-    ],
-    "chosen_sources": ["official_docs"],
-    "best_source": "official_docs",
-    "total_cost": 0.01,
-    "outcome_complete": true,
-    "depth": 1
+    "mode": "single",
+    "page": "Pro $30/month",
+    "fail_urls": [],
+    "best_url": "https://www.anthropic.com/pricing"
   },
   {
-    "case_id": "codex_spa_2026",
-    "task": "codex pricing (SPA site)",
-    "tags": ["normal", "spa"],
-    "trace": [
-      {"tool": "spa_extractor", "params": {"url": "https://openai.com/codex"}, "status": "ok", "cost": 0.03, "duration_ms": 900}
-    ],
-    "chosen_sources": ["official_home", "spa_extractor"],
-    "best_source": "spa_extractor",
-    "total_cost": 0.05,
-    "outcome_complete": true,
-    "depth": 2
-  },
-  {
-    "case_id": "perplexity_perf_2026",
-    "task": "perplexity performance",
+    "case_id": "copilot_feature_hit_2026",
+    "competitor": "copilot",
+    "dimension": "feature",
+    "task": "只看 copilot 的功能",
     "tags": ["normal"],
-    "trace": [
-      {"tool": "web_extractor", "params": {"url": "https://perplexity.ai/benchmark"}, "status": "ok", "cost": 0.02, "duration_ms": 480}
-    ],
-    "chosen_sources": ["official_docs", "alternative_benchmark"],
-    "best_source": "alternative_benchmark",
-    "total_cost": 0.04,
-    "outcome_complete": false,
-    "depth": 2
+    "mode": "single",
+    "page": "Supports agent mode.",
+    "fail_urls": [],
+    "best_url": "https://docs.github.com/en/copilot"
   },
   {
-    "case_id": "cursor_version_2026",
-    "task": "cursor version changelog",
+    "case_id": "cursor_feature_hit_2026",
+    "competitor": "cursor",
+    "dimension": "feature",
+    "task": "只看 cursor 的功能",
     "tags": ["normal"],
-    "trace": [
-      {"tool": "web_extractor", "params": {"url": "https://cursor.com/changelog"}, "status": "ok", "cost": 0.01, "duration_ms": 460}
-    ],
-    "chosen_sources": ["official_docs", "github_releases"],
-    "best_source": "github_releases",
-    "total_cost": 0.03,
-    "outcome_complete": true,
-    "depth": 2
+    "mode": "single",
+    "page": "Supports agent mode.",
+    "fail_urls": [],
+    "best_url": "https://docs.cursor.com"
   },
   {
-    "case_id": "claude_spa_2026",
-    "task": "claude code pricing (SPA site)",
-    "tags": ["normal", "spa"],
-    "trace": [
-      {"tool": "spa_extractor", "params": {"url": "https://www.anthropic.com/claude-code"}, "status": "ok", "cost": 0.04, "duration_ms": 1100}
-    ],
-    "chosen_sources": ["official_home", "spa_extractor"],
-    "best_source": "spa_extractor",
-    "total_cost": 0.06,
-    "outcome_complete": true,
-    "depth": 2
-  },
-  {
-    "case_id": "codex_enterprise_2026",
-    "task": "codex enterprise features",
+    "case_id": "codex_home_hit_2026",
+    "competitor": "codex",
+    "dimension": "feature",
+    "task": "只看 codex 的功能",
     "tags": ["normal"],
-    "trace": [
-      {"tool": "web_extractor", "params": {"url": "https://openai.com/codex/enterprise"}, "status": "ok", "cost": 0.01, "duration_ms": 400}
-    ],
-    "chosen_sources": ["official_docs", "official_pricing"],
-    "best_source": "official_docs",
-    "total_cost": 0.02,
-    "outcome_complete": true,
-    "depth": 1
+    "mode": "single",
+    "page": "Supports agent mode.",
+    "fail_urls": [],
+    "best_url": "https://openai.com/index/introducing-codex/"
   },
   {
-    "case_id": "cursor_404_fallback_2026",
-    "task": "cursor pricing page 404 fallback",
+    "case_id": "cursor_pricing_degraded_2026",
+    "competitor": "cursor",
+    "dimension": "pricing",
+    "task": "只分析 cursor 的定价",
     "tags": ["tool_failure", "degradation"],
-    "trace": [
-      {"tool": "web_extractor", "params": {"url": "https://cursor.com/pricing"}, "status": "fail_404", "cost": 0.005, "duration_ms": 200},
-      {"tool": "web_extractor", "params": {"url": "https://cursor.com/pricing-v2"}, "status": "ok", "cost": 0.012, "duration_ms": 430}
-    ],
-    "chosen_sources": ["official_pricing", "official_pricing_v2"],
-    "best_source": "official_pricing_v2",
-    "total_cost": 0.03,
-    "outcome_complete": true,
-    "depth": 2
+    "mode": "single",
+    "page": "Pro $20/month",
+    "fail_urls": ["https://www.cursor.com/pricing"],
+    "best_url": "https://www.cursor.com"
   },
   {
-    "case_id": "claude_antibot_2026",
-    "task": "claude docs anti-bot fallback",
+    "case_id": "claude_docs_degraded_2026",
+    "competitor": "claude-code",
+    "dimension": "feature",
+    "task": "只看 claude-code 的功能",
     "tags": ["tool_failure", "degradation"],
-    "trace": [
-      {"tool": "web_extractor", "params": {"url": "https://docs.anthropic.com/claude-code"}, "status": "fail_antibot", "cost": 0.005, "duration_ms": 260},
-      {"tool": "spa_extractor", "params": {"url": "https://docs.anthropic.com/claude-code"}, "status": "ok", "cost": 0.035, "duration_ms": 1050}
-    ],
-    "chosen_sources": ["official_docs", "spa_extractor"],
-    "best_source": "spa_extractor",
-    "total_cost": 0.06,
-    "outcome_complete": true,
-    "depth": 2
+    "mode": "single",
+    "page": "Supports agent mode.",
+    "fail_urls": ["https://docs.anthropic.com/en/docs/claude-code"],
+    "best_url": "https://www.anthropic.com/claude-code"
   },
   {
-    "case_id": "deepseek_fallback_2026",
-    "task": "deepseek home down fallback",
+    "case_id": "copilot_pricing_degraded_2026",
+    "competitor": "copilot",
+    "dimension": "pricing",
+    "task": "只看 copilot 的定价",
     "tags": ["tool_failure", "degradation"],
-    "trace": [
-      {"tool": "web_extractor", "params": {"url": "https://www.deepseek.com"}, "status": "fail_5xx", "cost": 0.005, "duration_ms": 300},
-      {"tool": "web_extractor", "params": {"url": "https://platform.deepseek.com/pricing"}, "status": "ok", "cost": 0.012, "duration_ms": 450}
-    ],
-    "chosen_sources": ["official_home", "official_docs"],
-    "best_source": "official_docs",
-    "total_cost": 0.04,
-    "outcome_complete": true,
-    "depth": 2
+    "mode": "single",
+    "page": "Pro $20/month",
+    "fail_urls": ["https://github.com/pricing"],
+    "best_url": "https://github.com/features/copilot"
+  },
+  {
+    "case_id": "cursor_rumor_miss_2026",
+    "competitor": "cursor",
+    "dimension": "pricing",
+    "task": "只分析 cursor 的定价",
+    "tags": ["normal"],
+    "mode": "single",
+    "page": "Pro $20/month",
+    "fail_urls": [],
+    "best_url": "https://example.com/rumor-pricing"
   }
 ]
