@@ -12,13 +12,14 @@ from competitor_agent.domain_types.competitor import Competitor
 from competitor_agent.domain_types.info_gap import InfoGap
 from competitor_agent.domain_types.report import CompetitorReport, DimensionResult
 from competitor_agent.interfaces.memory import IFourLayerMemory
+from competitor_agent.team.base_agent import AgentContext, AgentResult, AgentStatus, BaseAgent
 from competitor_agent.team.message_bus import T_DRAFT, MessageBus
 from competitor_agent.team.validator_agent import ValidationResult
 
 logger = logging.getLogger("competitor_agent.team.reporter_agent")
 
 
-class ReporterAgent:
+class ReporterAgent(BaseAgent):
     """汇总 Agent：校验后结论 → 草稿报告"""
 
     def __init__(
@@ -27,9 +28,29 @@ class ReporterAgent:
         builder: ReportBuilder | None = None,
         memory: IFourLayerMemory | None = None,
     ) -> None:
-        self._bus = bus
+        super().__init__("reporter", bus, memory)
         self._builder = builder or ReportBuilder()
-        self._memory = memory
+
+    def run(self, ctx: AgentContext) -> AgentResult:
+        """决策入口：汇总校验后结论，产出草稿报告。"""
+        results = ctx.extra.get("results", [])
+        validation = ctx.extra.get("validation")
+        if validation is None:
+            return AgentResult(
+                status=AgentStatus.DEGRADED,
+                payload=None,
+                reason="缺少校验结果，无法汇总报告",
+            )
+        try:
+            report = self.draft(
+                competitor=ctx.strategy.competitor,
+                results=results,
+                validation=validation,
+                gaps_pending=[g for g in ctx.strategy.gaps if not g.is_closed],
+            )
+        except Exception as exc:  # noqa: BLE001 — 汇总失败统一走重试/降级
+            return self._retry(ctx, exc)
+        return AgentResult(status=AgentStatus.SUCCESS, payload=report)
 
     def draft(
         self,
