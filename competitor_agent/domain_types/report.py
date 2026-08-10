@@ -39,6 +39,13 @@ class CompetitorReport:
 
 
 @dataclass
+class CancelledResult(CompetitorReport):
+    """分析被取消时返回的部分结果（已完成缺口 + 取消状态，而非静默丢弃）"""
+
+    cancelled: bool = True
+
+
+@dataclass
 class ComparisonReport:
     """多竞品对比报告"""
 

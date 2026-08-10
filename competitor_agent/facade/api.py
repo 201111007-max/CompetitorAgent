@@ -42,6 +42,7 @@ from competitor_agent.core.task_parser import parse_task
 from competitor_agent.domain_types.enums import TerminalState
 from competitor_agent.domain_types.events import ProgressEvent
 from competitor_agent.domain_types.report import (
+    CancelledResult,
     ComparisonReport,
     CompetitorReport,
     DimensionResult,
@@ -97,6 +98,7 @@ class CompetitorAnalysisAPI:
         task: str,
         conversation_history: list[ChatMessage] | None = None,
         mode: str = "team",
+        session_id: str | None = None,
     ) -> CompetitorReport:
         """单竞品分析：输入任务文本 → CompetitorReport
 
@@ -105,11 +107,14 @@ class CompetitorAnalysisAPI:
             conversation_history: 上一轮对话历史（ChatMessage 列表），
                 传入则把前序上下文摘要并入任务解析，支持多轮追问。
             mode: 执行模式，team=多 Agent 流水线（默认），single=单 Agent 串行。
+            session_id: 外部会话 ID（如 Web 端 sid）。传入时复用，使内部取消标志
+                与外部一致（解决 Web 取消断链）；留空则自动生成。
         """
         task = sanitize_task(task)
         task = self._disambiguate_with_history(task, conversation_history)
+        sid = session_id or f"sess_{uuid.uuid4().hex[:8]}"
         if mode == "team":
-            return self.analyze_team(task)
+            return self.analyze_team(task, session_id=sid)
         self._emit(ProgressEvent(event="phase_start", phase="strategic", message=f"规划: {task}"))
 
         strategy = self._planner.plan(task, memory=self._memory)
@@ -126,13 +131,12 @@ class CompetitorAnalysisAPI:
             max_iterations=self._budget.max_iterations,
             cost_limit=self._budget.cost_limit,
         )
-        session_id = f"sess_{uuid.uuid4().hex[:8]}"
 
         for gap in strategy.gaps:
             if self._budget.should_stop(strategy.gaps).should_stop:
                 break
-            if is_cancelled(session_id):
-                logger.info("会话 %s 被取消，停止分析", session_id)
+            if is_cancelled(sid):
+                logger.info("会话 %s 被取消，停止分析", sid)
                 break
             self._emit(
                 ProgressEvent(
@@ -150,6 +154,7 @@ class CompetitorAnalysisAPI:
                 budget=iteration_budget,
                 ingester=self._ingester,
                 retriever=self._retriever,
+                session_id=sid,
             )
             result = loop.execute(gap, strategy)
             if result is not None:
@@ -159,7 +164,7 @@ class CompetitorAnalysisAPI:
 
             # 每完成一个缺口保存 checkpoint
             save_checkpoint(
-                session_id=session_id,
+                session_id=sid,
                 task=task,
                 competitor_name=strategy.competitor.name,
                 gaps=strategy.gaps,
@@ -181,8 +186,29 @@ class CompetitorAnalysisAPI:
             gaps_pending=pending,
             terminal_state=terminal.value,
         )
-        # 分析完成后清理 checkpoint
-        delete_checkpoint(session_id)
+        if is_cancelled(sid):
+            # 取消完成：保留 checkpoint 供 /resume 续跑，返回带部分结果的取消报告
+            logger.info("会话 %s 取消后返回部分结果（%d 个维度）", sid, len(results))
+            self._emit(
+                ProgressEvent(
+                    event="cancelled",
+                    phase="report",
+                    message=f"分析已取消，返回 {len(results)} 个已完成维度",
+                )
+            )
+            return CancelledResult(
+                competitor=report.competitor,
+                dimension_results=report.dimension_results,
+                overall_score=report.overall_score,
+                overall_confidence=report.overall_confidence,
+                gaps_pending=report.gaps_pending,
+                markdown_report=report.markdown_report,
+                terminal_state="cancelled",
+                created_at=report.created_at,
+                cancelled=True,
+            )
+        # 分析正常完成：清理 checkpoint
+        delete_checkpoint(sid)
         self._emit(
             ProgressEvent(
                 event="report",
@@ -208,7 +234,12 @@ class CompetitorAnalysisAPI:
         loop = ReactLoop(agent, event_sink=self._event_sink)
         return loop.run(task)
 
-    def analyze_team(self, task: str, max_retries: int = 1) -> CompetitorReport:
+    def analyze_team(
+        self,
+        task: str,
+        session_id: str | None = None,
+        max_retries: int = 1,
+    ) -> CompetitorReport:
         """多 Agent 流水线模式：Collector→Analyzer→Validator→Reporter 协作产出草稿报告
 
         事件驱动 + 状态决策：各 Agent 基于 AgentResult 状态（SUCCESS/RETRY/DEGRADED/FAILED）
@@ -225,6 +256,7 @@ class CompetitorAnalysisAPI:
             max_retries=max_retries,
             ingester=self._ingester,
             retriever=self._retriever,
+            session_id=session_id,
         )
         report = orch.run(task)
         # 记忆闭环：分析成功后沉淀技能 + 记录数据源成功率（与单 Agent 路径对齐）
@@ -237,6 +269,19 @@ class CompetitorAnalysisAPI:
                 message=f"多 Agent 报告生成完成，{len(report.dimension_results)} 个维度",
             )
         )
+        if session_id and is_cancelled(session_id):
+            logger.info("会话 %s 取消后返回部分结果（%d 个维度）", session_id, len(report.dimension_results))
+            return CancelledResult(
+                competitor=report.competitor,
+                dimension_results=report.dimension_results,
+                overall_score=report.overall_score,
+                overall_confidence=report.overall_confidence,
+                gaps_pending=report.gaps_pending,
+                markdown_report=report.markdown_report,
+                terminal_state="cancelled",
+                created_at=report.created_at,
+                cancelled=True,
+            )
         return report
 
     def _record_team_memory_success(self, report: CompetitorReport) -> None:
@@ -282,7 +327,7 @@ class CompetitorAnalysisAPI:
 
         import asyncio
         loop = asyncio.get_running_loop()
-        report = await loop.run_in_executor(None, api.analyze, task)
+        report = await loop.run_in_executor(None, api.analyze, task, None, "team", sid)
 
         yield ProgressEvent(
             event="report",

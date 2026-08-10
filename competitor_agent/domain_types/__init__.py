@@ -12,10 +12,16 @@ from competitor_agent.domain_types.enums import (
 from competitor_agent.domain_types.events import ProgressEvent
 from competitor_agent.domain_types.info_gap import InfoGap
 from competitor_agent.domain_types.observation import Observation, SourceEvidence
-from competitor_agent.domain_types.report import ComparisonReport, CompetitorReport, DimensionResult
+from competitor_agent.domain_types.report import (
+    CancelledResult,
+    ComparisonReport,
+    CompetitorReport,
+    DimensionResult,
+)
 from competitor_agent.domain_types.strategy import CompetitorStrategy, DimensionBudget
 
 __all__ = [
+    "CancelledResult",
     "ComparisonReport",
     "Competitor",
     "CompetitorProfile",

@@ -10,6 +10,7 @@ import logging
 from typing import Any
 
 from competitor_agent.collector.source_selector import SourceSelector
+from competitor_agent.core.checkpoint import is_cancelled
 from competitor_agent.domain_types.enums import ObservationStatus
 from competitor_agent.domain_types.observation import Observation
 from competitor_agent.domain_types.strategy import CompetitorStrategy
@@ -33,11 +34,13 @@ class CollectorAgent(BaseAgent):
         extractor: ICompetitorDataSource,
         memory: IFourLayerMemory | None = None,
         ingester: Any | None = None,
+        session_id: str | None = None,
     ) -> None:
         super().__init__("collector", bus, memory)
         self._selector = selector
         self._extractor = extractor
         self._ingester = ingester
+        self._session_id = session_id or ""
 
     def run(self, ctx: AgentContext) -> AgentResult:
         """决策入口：采集缺口数据，产出 Observation 列表。"""
@@ -57,6 +60,9 @@ class CollectorAgent(BaseAgent):
         """对每个缺口采集，返回观测列表（发布到总线）。"""
         observations: list[Observation] = []
         for gap in strategy.gaps:
+            if self._session_id and is_cancelled(self._session_id):
+                logger.info("会话 %s 已取消，停止采集 %s", self._session_id, gap.field)
+                break
             for candidate in self._selector.candidates(gap, strategy.competitor):
                 try:
                     obs = self._extractor.fetch(
