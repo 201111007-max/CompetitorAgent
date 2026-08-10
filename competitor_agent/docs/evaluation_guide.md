@@ -45,29 +45,42 @@
 
 `tests/evaluation/fixtures/*.json`
 
+accuracy case（真实执行版：只含 task + ground_truth + 确定性采集配置，prediction 由系统真实产出）：
+
 ```json
 {
-  "case_id": "cursor_pricing_2026",
+  "case_id": "cursor_pro_team_2026",
   "competitor": "cursor",
   "dimension": "pricing",
-  "expected": {
-    "price_monthly": 20,
-    "price_pro_monthly": 20,
-    "free_tier": true,
-    "currency": "USD"
-  },
-  "expected_tool": "pricing_source",
-  "sources": [
-    {"name": "official_pricing", "url": "https://cursor.com/pricing"},
-    {"name": "docs_pricing", "url": "https://cursor.com/docs"}
-  ],
-  "tags": ["pricing", "usd"]
+  "task": "只分析 cursor 的定价",
+  "tags": ["pricing", "normal"],
+  "mode": "single",
+  "page": "Pro $20/month\nTeam $40/month",
+  "ground_truth": {
+    "pro": "$20/month",
+    "team": "$40/month"
+  }
+}
+```
+
+strategy case（策略/降级：`best_url` 标任务应首选（或降级后应命中）的源 URL，`fail_urls` 模拟首候选源故障）：
+
+```json
+{
+  "case_id": "cursor_pricing_degraded_2026",
+  "competitor": "cursor",
+  "dimension": "pricing",
+  "task": "只分析 cursor 的定价",
+  "tags": ["tool_failure", "degradation"],
+  "page": "Pro $20/month",
+  "fail_urls": ["https://www.cursor.com/pricing"],
+  "best_url": "https://www.cursor.com"
 }
 ```
 
 **标注规范**：
 1. `case_id` 唯一，含竞品+维度+年月。
-2. 所有 `expected` 值必须来自标注时官网快照（存 `sources` 便于复核）。
+2. `ground_truth` 必须落在 `extract_prediction` 的可抽取命名空间（pricing→plan 名、feature→特征词、performance→基准名），值来自 `page` 固定内容。
 3. 每个 case 可跑多次平均，报告均值±方差。
 
 ---
@@ -86,7 +99,7 @@
 | 安全/拒绝 | 2+ | 无证据不臆断、冲突证据拦截 | 每月抽样 |
 | 工具失败(降级链) | 3+ | 404/反爬/5xx → 降级 | 随采集覆盖 |
 
-> 当前 27 条（17 accuracy + 10 strategy），满足设计文档 §5 的 ≥20 最小集。
+> 当前 26 条（17 accuracy + 9 strategy），真实执行版，满足设计文档 §5 的 ≥20 最小集。
 > 每个分数必须附带 harness 版本号（benchmark + subset + harness）。
 
 ---
@@ -100,8 +113,9 @@ pytest tests/evaluation -v
 # 单 case
 pytest tests/evaluation -k cursor_usage
 
-# 输出指标 CSV / 报告
-python -m competitor_agent.evaluation.benchmark --out reports/benchmark.csv
+# 输出指标 CSV / 报告（mock=确定性评测/CI；real=真实 LLM 评估本地质量）
+python -m competitor_agent.evaluation.benchmark --llm mock --out reports/benchmark.csv
+python -m competitor_agent.evaluation.benchmark --llm real --out reports/benchmark_real.csv
 ```
 
 ---

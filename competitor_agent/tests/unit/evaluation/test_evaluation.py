@@ -87,9 +87,9 @@ class TestBenchmark:
     def test_runs_against_real_fixtures(self):
         b = Benchmark()
         report = b.run()
-        assert report.n_cases == 27  # 17 accuracy + 10 strategy
+        assert report.n_cases == 26  # 17 accuracy + 9 strategy（真实执行版 fixture）
         assert report.loaded_fixtures == [ACCURACY_FIXTURE, STRATEGY_FIXTURE]
-        assert 0.0 < report.accuracy.field_accuracy <= 1.0
+        assert report.accuracy.field_accuracy > 0.9  # 真实输出经 mock 抽取后仍达门禁
         assert 0.0 < report.strategy.tool_selection_accuracy <= 1.0
 
     def test_missing_fixtures_returns_empty(self, tmp_path):

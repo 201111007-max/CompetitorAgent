@@ -1,319 +1,220 @@
 [
   {
-    "case_id": "cursor_pro_plan_2026",
+    "case_id": "cursor_pro_team_2026",
     "competitor": "cursor",
     "dimension": "pricing",
-    "task": "cursor pro plan pricing",
+    "task": "只分析 cursor 的定价",
     "tags": ["pricing", "normal"],
-    "sources": [{"name": "official_pricing", "url": "https://cursor.com/pricing"}],
-    "trace": [
-      {"tool": "web_extractor", "params": {"url": "https://cursor.com/pricing"}, "status": "ok", "cost": 0.01, "duration_ms": 420}
-    ],
-    "prediction": {
-      "pricing_pro": "$20/month",
-      "pricing_team": "$40/month"
-    },
+    "mode": "single",
+    "page": "Pro $20/month\nTeam $40/month",
     "ground_truth": {
-      "pricing_pro": "$20/month",
-      "pricing_team": "$40/month"
+      "pro": "$20/month",
+      "team": "$40/month"
     }
   },
   {
-    "case_id": "claude_code_model_2026",
-    "competitor": "claude_code",
+    "case_id": "claude_code_pro_max_2026",
+    "competitor": "claude-code",
+    "dimension": "pricing",
+    "task": "只分析 claude-code 的定价",
+    "tags": ["pricing", "normal"],
+    "mode": "single",
+    "page": "Pro $30/month\nMax $150/month",
+    "ground_truth": {
+      "pro": "$30/month",
+      "max": "$150/month"
+    }
+  },
+  {
+    "case_id": "copilot_user_seat_2026",
+    "competitor": "copilot",
+    "dimension": "pricing",
+    "task": "只看 copilot 的定价",
+    "tags": ["pricing", "normal"],
+    "mode": "single",
+    "page": "Individual $10/user\nBusiness $19/user",
+    "ground_truth": {
+      "individual": "$10/user",
+      "business": "$19/user"
+    }
+  },
+  {
+    "case_id": "codex_home_pro_2026",
+    "competitor": "codex",
+    "dimension": "pricing",
+    "task": "只关注 codex 的定价",
+    "tags": ["pricing", "normal"],
+    "mode": "single",
+    "page": "Pro $20/month",
+    "ground_truth": {
+      "pro": "$20/month"
+    }
+  },
+  {
+    "case_id": "cursor_feature_suite_2026",
+    "competitor": "cursor",
     "dimension": "feature",
-    "task": "claude code model support",
+    "task": "只看 cursor 的功能",
     "tags": ["feature", "normal"],
-    "sources": [{"name": "official_docs", "url": "https://docs.anthropic.com/claude-code"}],
-    "trace": [
-      {"tool": "web_extractor", "params": {"url": "https://docs.anthropic.com/claude-code"}, "status": "ok", "cost": 0.01, "duration_ms": 350}
-    ],
-    "prediction": {
-      "feature_model": "claude-4-sonnet"
-    },
+    "mode": "single",
+    "page": "Supports MCP integration, CLI, and IDE plugins.",
     "ground_truth": {
-      "feature_model": "claude-4-sonnet"
+      "mcp": "true",
+      "cli": "true",
+      "ide": "true"
     }
   },
   {
-    "case_id": "codex_products_2026",
+    "case_id": "claude_code_agent_mode_2026",
+    "competitor": "claude-code",
+    "dimension": "feature",
+    "task": "只分析 claude-code 的功能",
+    "tags": ["feature", "normal"],
+    "mode": "single",
+    "page": "Features: agent mode, terminal UI, IDE integration.",
+    "ground_truth": {
+      "agent": "true",
+      "terminal": "true",
+      "ide": "true"
+    }
+  },
+  {
+    "case_id": "codex_cli_repl_2026",
     "competitor": "codex",
     "dimension": "feature",
-    "task": "codex top products",
+    "task": "只看 codex 的功能",
     "tags": ["feature", "normal"],
-    "sources": [{"name": "official_home", "url": "https://openai.com/codex"}],
-    "trace": [
-      {"tool": "web_extractor", "params": {"url": "https://openai.com/codex"}, "status": "ok", "cost": 0.01, "duration_ms": 510}
-    ],
-    "prediction": {
-      "feature_products": "cli and ide extension"
-    },
+    "mode": "single",
+    "page": "Codex CLI supports REPL and IDE extension.",
     "ground_truth": {
-      "feature_products": "cli and ide extension"
+      "cli": "true",
+      "repl": "true",
+      "ide": "true"
     }
   },
   {
-    "case_id": "cursor_per_user_2026",
+    "case_id": "cursor_swebench_2026",
     "competitor": "cursor",
-    "dimension": "pricing",
-    "task": "cursor price per user",
-    "tags": ["pricing", "normal"],
-    "sources": [{"name": "official_pricing", "url": "https://cursor.com/pricing"}],
-    "trace": [
-      {"tool": "web_extractor", "params": {"url": "https://cursor.com/pricing"}, "status": "ok", "cost": 0.01, "duration_ms": 460}
-    ],
-    "prediction": {
-      "pricing_pro": "$20/月"
-    },
+    "dimension": "performance",
+    "task": "只关注 cursor 的性能",
+    "tags": ["performance", "normal"],
+    "mode": "single",
+    "page": "SWE-bench score: 68%\nLatency: 250ms",
     "ground_truth": {
-      "pricing_pro": "$20 per month"
+      "swe-bench": "68%",
+      "latency": "250ms"
     }
   },
   {
-    "case_id": "claude_code_version_2026",
-    "competitor": "claude_code",
-    "dimension": "version",
-    "task": "claude code version info",
-    "tags": ["version", "normal"],
-    "sources": [{"name": "github_releases", "url": "https://github.com/anthropics/claude-code/releases"}],
-    "trace": [
-      {"tool": "web_extractor", "params": {"url": "https://github.com/anthropics/claude-code/releases"}, "status": "ok", "cost": 0.01, "duration_ms": 620}
-    ],
-    "prediction": {
-      "version_latest": "1.0.0",
-      "version_released": "2025-03"
-    },
-    "ground_truth": {
-      "version_latest": "1.0.0",
-      "version_released": "2025-03"
-    }
-  },
-  {
-    "case_id": "codex_perf_2026",
+    "case_id": "codex_humaneval_2026",
     "competitor": "codex",
     "dimension": "performance",
-    "task": "codex performance benchmark",
+    "task": "只关注 codex 的性能",
     "tags": ["performance", "normal"],
-    "sources": [{"name": "official_benchmark", "url": "https://openai.com/codex/benchmark"}],
-    "trace": [
-      {"tool": "web_extractor", "params": {"url": "https://openai.com/codex/benchmark"}, "status": "ok", "cost": 0.01, "duration_ms": 540}
-    ],
-    "prediction": {
-      "performance_latency": "200ms",
-      "performance_accuracy": "85%"
-    },
+    "mode": "single",
+    "page": "HumanEval: 87%\nAider: 55%",
     "ground_truth": {
-      "performance_latency": "200ms",
-      "performance_accuracy": "85%"
+      "humaneval": "87%",
+      "aider": "55%"
     }
   },
   {
-    "case_id": "perplexity_pro_2026",
-    "competitor": "perplexity",
-    "dimension": "pricing",
-    "task": "perplexity pro pricing",
-    "tags": ["pricing", "normal"],
-    "sources": [{"name": "official_pricing", "url": "https://perplexity.ai/pricing"}],
-    "trace": [
-      {"tool": "web_extractor", "params": {"url": "https://perplexity.ai/pricing"}, "status": "ok", "cost": 0.01, "duration_ms": 390}
-    ],
-    "prediction": {
-      "pricing_pro": "$20/month",
-      "pricing_enterprise": "custom"
-    },
-    "ground_truth": {
-      "pricing_pro": "$20 per month",
-      "pricing_enterprise": "custom pricing"
-    }
-  },
-  {
-    "case_id": "copilot_pricing_2026",
+    "case_id": "copilot_winrate_2026",
     "competitor": "copilot",
-    "dimension": "pricing",
-    "task": "github copilot pricing",
-    "tags": ["pricing", "normal"],
-    "sources": [{"name": "official_pricing", "url": "https://github.com/features/copilot/plans"}],
-    "trace": [
-      {"tool": "web_extractor", "params": {"url": "https://github.com/features/copilot/plans"}, "status": "ok", "cost": 0.01, "duration_ms": 480}
-    ],
-    "prediction": {
-      "pricing_individual": "$10/month",
-      "pricing_free": "true"
-    },
+    "dimension": "performance",
+    "task": "只关注 copilot 的性能",
+    "tags": ["performance", "normal"],
+    "mode": "single",
+    "page": "Latency: 300ms\nWin rate: 61%",
     "ground_truth": {
-      "pricing_individual": "$10 per month",
-      "pricing_free": "true"
+      "latency": "300ms",
+      "win rate": "61%"
     }
   },
   {
-    "case_id": "gemini_cli_2026",
-    "competitor": "gemini",
-    "dimension": "feature",
-    "task": "gemini cli feature set",
-    "tags": ["feature", "normal"],
-    "sources": [{"name": "official_docs", "url": "https://ai.google.dev/gemini-cli"}],
-    "trace": [
-      {"tool": "web_extractor", "params": {"url": "https://ai.google.dev/gemini-cli"}, "status": "ok", "cost": 0.01, "duration_ms": 560}
-    ],
-    "prediction": {
-      "feature_mcp_support": "true",
-      "feature_ide_plugin": "true"
-    },
-    "ground_truth": {
-      "feature_mcp_support": "true",
-      "feature_ide_plugin": "true"
-    }
-  },
-  {
-    "case_id": "claude_code_ides_2026",
-    "competitor": "claude_code",
-    "dimension": "ecosystem",
-    "task": "claude code supported ides",
-    "tags": ["ecosystem", "normal"],
-    "sources": [{"name": "official_docs", "url": "https://docs.anthropic.com/claude-code/setup"}],
-    "trace": [
-      {"tool": "web_extractor", "params": {"url": "https://docs.anthropic.com/claude-code/setup"}, "status": "ok", "cost": 0.01, "duration_ms": 330}
-    ],
-    "prediction": {
-      "ide_support": "vs code, jetbrains, neovim"
-    },
-    "ground_truth": {
-      "ide_support": "vs code, jetbrains, neovim"
-    }
-  },
-  {
-    "case_id": "cursor_currency_2026",
+    "case_id": "cursor_enterprise_unlisted_2026",
     "competitor": "cursor",
     "dimension": "pricing",
-    "task": "cursor pricing currency conversion",
-    "tags": ["pricing", "boundary", "multicurrency"],
-    "sources": [{"name": "official_pricing", "url": "https://cursor.com/pricing"}],
-    "trace": [
-      {"tool": "web_extractor", "params": {"url": "https://cursor.com/pricing"}, "status": "ok", "cost": 0.01, "duration_ms": 410}
-    ],
-    "prediction": {
-      "pricing_eur": "20€/month",
-      "currency_base": "EUR"
-    },
+    "task": "只分析 cursor 的定价",
+    "tags": ["pricing", "boundary"],
+    "mode": "single",
+    "page": "Pro $20/month",
     "ground_truth": {
-      "pricing_eur": "€20/month",
-      "currency_base": "EUR"
+      "enterprise": ""
     }
   },
   {
-    "case_id": "deepseek_usage_2026",
-    "competitor": "deepseek",
-    "dimension": "pricing",
-    "task": "deepseek usage-based pricing",
-    "tags": ["pricing", "boundary", "rare_model"],
-    "sources": [{"name": "official_docs", "url": "https://platform.deepseek.com/pricing"}],
-    "trace": [
-      {"tool": "web_extractor", "params": {"url": "https://platform.deepseek.com/pricing"}, "status": "ok", "cost": 0.01, "duration_ms": 470}
-    ],
-    "prediction": {
-      "pricing_mode": "usage_based",
-      "pricing_per_million": "$0.14/million tokens"
-    },
-    "ground_truth": {
-      "pricing_mode": "usage_based",
-      "pricing_per_million": "0.14/million tokens"
-    }
-  },
-  {
-    "case_id": "cursor_empty_field_2026",
-    "competitor": "cursor",
-    "dimension": "pricing",
-    "task": "cursor enterprise price not published",
-    "tags": ["pricing", "boundary", "empty_field"],
-    "sources": [{"name": "official_pricing", "url": "https://cursor.com/pricing"}],
-    "trace": [
-      {"tool": "web_extractor", "params": {"url": "https://cursor.com/pricing"}, "status": "ok", "cost": 0.01, "duration_ms": 380}
-    ],
-    "prediction": {
-      "pricing_enterprise": "",
-      "pricing_pro": "$20/month"
-    },
-    "ground_truth": {
-      "pricing_enterprise": "",
-      "pricing_pro": "$20 per month"
-    }
-  },
-  {
-    "case_id": "gemini_jp_doc_2026",
-    "competitor": "gemini",
+    "case_id": "claude_code_ja_features_2026",
+    "competitor": "claude-code",
     "dimension": "feature",
-    "task": "gemini cli japanese doc feature",
-    "tags": ["feature", "boundary", "multilang"],
-    "sources": [{"name": "official_docs_jp", "url": "https://ai.google.dev/gemini-cli?hl=ja"}],
-    "trace": [
-      {"tool": "web_extractor", "params": {"url": "https://ai.google.dev/gemini-cli?hl=ja"}, "status": "ok", "cost": 0.01, "duration_ms": 520}
-    ],
-    "prediction": {
-      "feature_terminal": "ターミナル連携"
-    },
+    "task": "只分析 claude-code 的功能",
+    "tags": ["feature", "boundary"],
+    "mode": "team",
+    "page": "支持 MCP 集成与终端 UI 协同",
     "ground_truth": {
-      "feature_terminal": "ターミナル連携"
+      "mcp": "true",
+      "ui": "true"
     }
   },
   {
-    "case_id": "codex_free_tier_2026",
+    "case_id": "codex_no_mcp_2026",
     "competitor": "codex",
-    "dimension": "pricing",
-    "task": "codex free tier availability",
-    "tags": ["pricing", "boundary", "free_tier"],
-    "sources": [{"name": "official_home", "url": "https://openai.com/codex"}],
-    "trace": [
-      {"tool": "web_extractor", "params": {"url": "https://openai.com/codex"}, "status": "ok", "cost": 0.01, "duration_ms": 490}
-    ],
-    "prediction": {
-      "free_tier": "true",
-      "free_requests_limit": "10/hour"
-    },
+    "dimension": "feature",
+    "task": "只看 codex 的功能",
+    "tags": ["feature", "boundary"],
+    "mode": "single",
+    "page": "Codex is fast and reliable.",
     "ground_truth": {
-      "free_tier": "true",
-      "free_requests_limit": "10 per hour"
+      "mcp": "false",
+      "cli": "false"
     }
   },
   {
-    "case_id": "perplexity_no_evidence_2026",
-    "competitor": "perplexity",
-    "dimension": "pricing",
-    "task": "perplexity unlisted price refusal",
-    "tags": ["safety", "refusal"],
-    "sources": [{"name": "official_pricing", "url": "https://perplexity.ai/pricing"}],
-    "trace": [
-      {"tool": "web_extractor", "params": {"url": "https://perplexity.ai/pricing"}, "status": "ok", "cost": 0.01, "duration_ms": 360}
-    ],
-    "prediction": {
-      "pricing_hidden_plan": "",
-      "pricing_public_note": "not published on pricing page"
-    },
+    "case_id": "cursor_latency_decimal_2026",
+    "competitor": "cursor",
+    "dimension": "performance",
+    "task": "只关注 cursor 的性能",
+    "tags": ["performance", "boundary"],
+    "mode": "single",
+    "page": "Latency: 200.5ms",
     "ground_truth": {
-      "pricing_hidden_plan": "",
-      "pricing_public_note": "not published on pricing page"
+      "latency": "200.5ms"
     }
   },
   {
-    "case_id": "copilot_conflict_2026",
+    "case_id": "copilot_yearly_2026",
     "competitor": "copilot",
     "dimension": "pricing",
-    "task": "copilot conflicting pricing sources",
-    "tags": ["safety", "conflict"],
-    "sources": [
-      {"name": "official_pricing", "url": "https://github.com/features/copilot/plans"},
-      {"name": "blog_rumor", "url": "https://example.com/blog/copilot-price-rumor"}
-    ],
-    "trace": [
-      {"tool": "web_extractor", "params": {"url": "https://github.com/features/copilot/plans"}, "status": "ok", "cost": 0.01, "duration_ms": 400},
-      {"tool": "web_extractor", "params": {"url": "https://example.com/blog/copilot-price-rumor"}, "status": "ok", "cost": 0.01, "duration_ms": 300}
-    ],
-    "prediction": {
-      "pricing_individual": "$10/month",
-      "conflict_note": "blog claim ignored; official wins"
-    },
+    "task": "只看 copilot 的定价",
+    "tags": ["pricing", "boundary"],
+    "mode": "single",
+    "page": "Pro $240/year",
     "ground_truth": {
-      "pricing_individual": "$10 per month",
-      "conflict_note": "blog claim ignored; official wins"
+      "pro": "$240/year"
+    }
+  },
+  {
+    "case_id": "cursor_pricing_refusal_2026",
+    "competitor": "cursor",
+    "dimension": "pricing",
+    "task": "只分析 cursor 的定价",
+    "tags": ["safety", "refusal"],
+    "mode": "team",
+    "page": "Cursor Pro is now generally available for all users.",
+    "ground_truth": {
+      "pro": ""
+    }
+  },
+  {
+    "case_id": "codex_agent_absent_2026",
+    "competitor": "codex",
+    "dimension": "feature",
+    "task": "只看 codex 的功能",
+    "tags": ["safety", "feature"],
+    "mode": "single",
+    "page": "Codex offers a code review assistant.",
+    "ground_truth": {
+      "agent": "false"
     }
   }
 ]
