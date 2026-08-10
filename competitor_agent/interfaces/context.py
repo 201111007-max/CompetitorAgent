@@ -22,6 +22,7 @@ class AnalysisContext:
     competitor_name: str = ""
     dimension: DimensionType | None = None
     history: list[object] = field(default_factory=list)
+    rag_context: str = ""  # RAG 检索到的背景知识片段（含来源），注入分析器 prompt
 
 
 @dataclass

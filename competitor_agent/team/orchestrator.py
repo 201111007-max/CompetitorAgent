@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from competitor_agent.analyzers.registry import AnalyzerRegistry
 from competitor_agent.collector.source_selector import SourceSelector
@@ -41,11 +42,20 @@ class TeamOrchestrator:
         use_llm: bool = False,
         memory: IFourLayerMemory | None = None,
         max_retries: int = 1,
+        ingester: Any | None = None,
+        retriever: Any | None = None,
     ) -> None:
         self._bus = bus or MessageBus()
         self._planner = StrategicPlanner(llm=llm, use_llm=use_llm)
-        self._collector = CollectorAgent(self._bus, SourceSelector(), extractor, memory=memory)
-        self._analyzer = AnalyzerAgent(self._bus, AnalyzerRegistry(llm=llm, use_llm=use_llm), memory=memory)
+        self._collector = CollectorAgent(
+            self._bus, SourceSelector(), extractor, memory=memory, ingester=ingester
+        )
+        self._analyzer = AnalyzerAgent(
+            self._bus,
+            AnalyzerRegistry(llm=llm, use_llm=use_llm),
+            memory=memory,
+            retriever=retriever,
+        )
         self._validator = ValidatorAgent(self._bus, FactValidator(), memory=memory)
         self._reporter = ReporterAgent(self._bus, memory=memory)
         self._memory = memory

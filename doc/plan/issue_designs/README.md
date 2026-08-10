@@ -8,7 +8,7 @@
 | 文档 | 对应问题 | 优先级 | 状态 |
 |------|---------|--------|------|
 | `01_multi_agent_design.md` | 问题 1：多 Agent 名不副实，主流程不走它 | P0 | ✅ 已修复 |
-| `02_rag_integration_design.md` | 问题 2：RAG 完全未接线 | P0 | 待修复 |
+| `02_rag_integration_design.md` | 问题 2：RAG 完全未接线 | P0 | ✅ 已修复 |
 | `03_benchmark_design.md` | 问题 3：benchmark 静态 fixture 自证 | P0 | 待修复 |
 | `04_web_cancel_design.md` | 问题 4：Web 取消功能 session_id 断链 | P1 | 待修复 |
 | `05_config_loading_design.md` | 问题 5：配置 YAML 从未被加载 | P1 | 待修复 |
@@ -21,6 +21,8 @@
 | `12_code_quality_design.md` | 问题 12-14：重复代码 / 死代码 / 过度设计 | P3 | 待修复 |
 
 > **问题 1 修复说明**：多 Agent 已接入主流程。`CompetitorAnalysisAPI.analyze()` 新增 `mode` 参数（`single` / `team`，**默认 `team`**），`mode="team"` 时走事件驱动 + 状态决策的多 Agent 流水线（Collector→Analyzer→Validator→Reporter，支持 SUCCESS/RETRY/DEGRADED/FAILED 决策）。CLI 新增 `--mode` 选项。全量 312 个测试通过。
+
+> **问题 2 修复说明**：RAG 已接入主流程。`CompetitorAnalysisAPI.__init__` 组装 `CompetitorStore` + `Ingester` + `Retriever`；`TacticalLoop`（single 路径）与 `CollectorAgent`（team 路径）采集到有效文本后自动摄入知识库；`TacticalLoop._analyze` 与 `AnalyzerAgent.analyze` 分析前用 `Retriever` 检索相关片段，经 `AnalysisContext.rag_context` 注入分析器 LLM prompt（`BaseCompetitorAnalyzer._inject_rag_context`），作为外部事实依据降低幻觉。全量 316 个测试通过（含 4 个新增 RAG 集成测试）。
 
 ## 设计文档统一模板
 
