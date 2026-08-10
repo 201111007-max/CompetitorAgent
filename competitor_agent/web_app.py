@@ -26,8 +26,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
 from competitor_agent import CompetitorAnalysisAPI
+from competitor_agent.core.checkpoint import set_cancel
 from competitor_agent.domain_types.events import ProgressEvent
-from competitor_agent.domain_types.report import CompetitorReport
+from competitor_agent.domain_types.report import CancelledResult, CompetitorReport
 from competitor_agent.interfaces.context import AnalysisSession
 from competitor_agent.llm.client import LLMClient
 from competitor_agent.memory.four_layer_memory import FourLayerMemory
@@ -82,7 +83,7 @@ async def _event_generator(
     # 启动后台分析任务
     async def _run_analysis() -> CompetitorReport:
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, api_with_sink.analyze, task)
+        return await loop.run_in_executor(None, api_with_sink.analyze, task, None, "team", session_id)
 
     analysis_task = asyncio.create_task(_run_analysis())
 
@@ -109,11 +110,14 @@ async def _event_generator(
             # 检查取消标志
             if _sessions.get(session_id, {}).get("cancelled", False):
                 logger.info("会话 %s 被取消", session_id)
+                # 关键修复：内部取消标志与 web sid 打通，协作式取消真正中断运行中的分析
+                api_with_sink.cancel(session_id)
                 yield ProgressEvent(
                     event="cancelled",
                     phase="report",
-                    message="分析已被用户取消",
+                    message="分析已被用户取消，返回部分结果",
                 ).to_sse()
+                # 取消 asyncio 包装任务（避免 pending 警告）；运行中的线程由协作式取消自行尽快退出
                 analysis_task.cancel()
                 return
 
@@ -121,18 +125,29 @@ async def _event_generator(
 
         # 分析完成，获取报告
         report = analysis_task.result()
-        yield ProgressEvent(
-            event="report",
-            phase="report",
-            progress=1.0,
-            message=f"报告生成完成，{len(report.dimension_results)} 个维度",
-            payload={
-                "competitor": report.competitor.name,
-                "terminal_state": report.terminal_state,
-                "overall_confidence": report.overall_confidence,
-                "dimensions": [r.dimension for r in report.dimension_results],
-            },
-        ).to_sse()
+        if isinstance(report, CancelledResult):
+            yield ProgressEvent(
+                event="cancelled",
+                phase="report",
+                message=f"分析已取消，返回 {len(report.dimension_results)} 个已完成维度",
+                payload={
+                    "competitor": report.competitor.name,
+                    "terminal_state": "cancelled",
+                },
+            ).to_sse()
+        else:
+            yield ProgressEvent(
+                event="report",
+                phase="report",
+                progress=1.0,
+                message=f"报告生成完成，{len(report.dimension_results)} 个维度",
+                payload={
+                    "competitor": report.competitor.name,
+                    "terminal_state": report.terminal_state,
+                    "overall_confidence": report.overall_confidence,
+                    "dimensions": [r.dimension for r in report.dimension_results],
+                },
+            ).to_sse()
 
         # 归档会话
         _get_memory().archive_session(
@@ -277,6 +292,7 @@ async def analyze(
             async for event in _event_generator(sid, task):
                 if await request.is_disconnected():
                     _sessions[sid]["cancelled"] = True
+                    set_cancel(sid)  # 断连也触发协作式取消，停止后台分析
                     break
                 yield event
         finally:
@@ -291,6 +307,8 @@ async def cancel(session_id: str) -> JSONResponse:
     if session_id not in _sessions:
         raise HTTPException(status_code=404, detail=f"会话 {session_id} 不存在")
     _sessions[session_id]["cancelled"] = True
+    # 内部取消标志与 web sid 打通：运行中的 analyze 轮询感知后协作式终止
+    set_cancel(session_id)
     return JSONResponse({"status": "cancelled", "session_id": session_id})
 
 

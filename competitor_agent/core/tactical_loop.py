@@ -16,6 +16,7 @@ from competitor_agent.collector.source_selector import SourceCandidate, SourceSe
 from competitor_agent.collector.spa_extractor import SpaExtractor
 from competitor_agent.collector.web_extractor import WebExtractor
 from competitor_agent.core.budget import IterationBudget
+from competitor_agent.core.checkpoint import is_cancelled
 from competitor_agent.domain_types.enums import GapStatus, ObservationStatus
 from competitor_agent.domain_types.info_gap import CLOSED_CONFIDENCE, InfoGap
 from competitor_agent.domain_types.observation import Observation
@@ -41,11 +42,14 @@ class TacticalLoop:
         extractors: dict[str, ICompetitorDataSource] | None = None,
         ingester: Any | None = None,
         retriever: Any | None = None,
+        session_id: str | None = None,
     ) -> None:
         self._selector = selector
         self._extractor = extractor
         self._analyzer = analyzer
         self._budget = budget
+        # 会话 ID：非空时每轮迭代检查取消标志（协作式取消）
+        self._session_id = session_id
         # 按 source_name 分发的采集器注册表（SPA 兜底）；未注册的源回退到默认 extractor
         self._extractors: dict[str, ICompetitorDataSource] = dict(
             extractors
@@ -59,11 +63,14 @@ class TacticalLoop:
         self._retriever = retriever
 
     def execute(self, gap: InfoGap, strategy: CompetitorStrategy) -> DimensionResult | None:
-        """执行单缺口闭环。返回维度结论（失败返回 None）。"""
+        """执行单缺口闭环。返回维度结论（失败/被取消返回 None）。"""
         context = SourceContext(competitor_name=strategy.competitor.name)
         candidates = self._selector.candidates(gap, strategy.competitor)
 
         for index, candidate in enumerate(candidates):
+            if self._session_id and is_cancelled(self._session_id):
+                logger.info("会话 %s 已取消，停止缺口 %s", self._session_id, gap.field)
+                break
             if not self._budget.consume(delta_cost=0.01):
                 logger.warning("预算耗尽，缺口未闭环: %s", gap.field)
                 gap.status = GapStatus.BLOCKED

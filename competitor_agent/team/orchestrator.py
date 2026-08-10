@@ -16,8 +16,10 @@ from typing import Any
 
 from competitor_agent.analyzers.registry import AnalyzerRegistry
 from competitor_agent.collector.source_selector import SourceSelector
+from competitor_agent.core.checkpoint import is_cancelled
 from competitor_agent.core.strategic_loop import StrategicPlanner
 from competitor_agent.domain_types.report import CompetitorReport
+from competitor_agent.domain_types.strategy import CompetitorStrategy
 from competitor_agent.interfaces.collector import ICompetitorDataSource
 from competitor_agent.interfaces.memory import IFourLayerMemory
 from competitor_agent.llm.client import LLMClient
@@ -44,11 +46,12 @@ class TeamOrchestrator:
         max_retries: int = 1,
         ingester: Any | None = None,
         retriever: Any | None = None,
+        session_id: str | None = None,
     ) -> None:
         self._bus = bus or MessageBus()
         self._planner = StrategicPlanner(llm=llm, use_llm=use_llm)
         self._collector = CollectorAgent(
-            self._bus, SourceSelector(), extractor, memory=memory, ingester=ingester
+            self._bus, SourceSelector(), extractor, memory=memory, ingester=ingester, session_id=session_id
         )
         self._analyzer = AnalyzerAgent(
             self._bus,
@@ -60,6 +63,7 @@ class TeamOrchestrator:
         self._reporter = ReporterAgent(self._bus, memory=memory)
         self._memory = memory
         self._max_retries = max_retries
+        self._session_id = session_id or ""
 
     @property
     def bus(self) -> MessageBus:
@@ -68,14 +72,20 @@ class TeamOrchestrator:
     def run(self, task: str) -> CompetitorReport:
         """执行一条竞品分析任务，产出草稿报告（事件驱动 + 状态决策）。"""
         strategy = self._planner.plan(task, memory=self._memory)
+        if self._is_cancelled():
+            logger.info("会话 %s 已取消，提前终止多 Agent 流水线", self._session_id)
+            return self._partial_report(strategy, [], "分析已取消")
         ctx = AgentContext(
             task=task,
             strategy=strategy,
+            session_id=self._session_id,
             max_retries=self._max_retries,
         )
 
         # 1. Collector：采集观测
         collect = self._run_with_retry(self._collector, ctx)
+        if self._is_cancelled():
+            return self._partial_report(strategy, [], "分析已取消")
         if collect.status == AgentStatus.FAILED:
             return self._empty_report(strategy, "采集失败: " + collect.reason)
         observations = collect.payload or []
@@ -83,6 +93,8 @@ class TeamOrchestrator:
 
         # 2. Analyzer：分析维度结论
         analyze = self._run_with_retry(self._analyzer, ctx)
+        if self._is_cancelled():
+            return self._partial_report(strategy, [], "分析已取消")
         if analyze.status == AgentStatus.FAILED:
             return self._empty_report(strategy, "分析失败: " + analyze.reason)
         results = analyze.payload or []
@@ -90,6 +102,8 @@ class TeamOrchestrator:
 
         # 3. Validator：校验结论
         validate = self._run_with_retry(self._validator, ctx)
+        if self._is_cancelled():
+            return self._partial_report(strategy, results, "分析已取消")
         if validate.status == AgentStatus.FAILED:
             return self._empty_report(strategy, "校验失败: " + validate.reason)
         validation = validate.payload
@@ -97,9 +111,15 @@ class TeamOrchestrator:
 
         # 4. Reporter：汇总草稿报告
         report_result = self._run_with_retry(self._reporter, ctx)
+        if self._is_cancelled():
+            return self._partial_report(strategy, results, "分析已取消")
         if report_result.status == AgentStatus.FAILED or report_result.payload is None:
             return self._empty_report(strategy, "汇总失败: " + report_result.reason)
         return report_result.payload
+
+    def _is_cancelled(self) -> bool:
+        """会话被取消（协作式取消：流水线各阶段边界检查，而非静待线程结束）"""
+        return bool(self._session_id) and is_cancelled(self._session_id)
 
     def _run_with_retry(self, agent, ctx: AgentContext) -> AgentResult:
         """执行 Agent，遇 RETRY 按剩余次数重试。"""
@@ -116,6 +136,18 @@ class TeamOrchestrator:
         return self._reporter.draft(
             competitor=strategy.competitor,
             results=[],
+            validation=ValidationResult(passed=False, issues=[]),
+            gaps_pending=list(strategy.gaps),
+        )
+
+    def _partial_report(
+        self, strategy: CompetitorStrategy, results: list, reason: str
+    ) -> CompetitorReport:
+        """取消/中断时返回部分结果报告（不视为失败）。"""
+        logger.info("多 Agent 流水线中断: %s（保留 %d 个维度结果）", reason, len(results))
+        return self._reporter.draft(
+            competitor=strategy.competitor,
+            results=results,
             validation=ValidationResult(passed=False, issues=[]),
             gaps_pending=list(strategy.gaps),
         )
