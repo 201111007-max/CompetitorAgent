@@ -11,6 +11,7 @@ from competitor_agent.domain_types import (
 from competitor_agent.domain_types.report import DimensionResult
 from competitor_agent.interfaces.context import SourceContext
 from competitor_agent.team.analyzer_agent import AnalyzerAgent
+from competitor_agent.team.base_agent import AgentContext, AgentResult, AgentStatus
 from competitor_agent.team.collector_agent import CollectorAgent
 from competitor_agent.team.message_bus import T_COLLECTED, T_DRAFT, MessageBus
 from competitor_agent.team.orchestrator import TeamOrchestrator
@@ -138,3 +139,58 @@ class TestTeamOrchestrator:
         outcome = agent.validate("cursor", [r])
         assert outcome.passed
         assert len(bus.history("validated")) == 1
+
+
+class TestCollectorAgentDecision:
+    """CollectorAgent 的 AgentResult 状态决策"""
+
+    def test_success_status_with_observations(self):
+        bus = MessageBus()
+        agent = CollectorAgent(bus, SourceSelector(), FakeExtractor())
+        ctx = AgentContext(task="分析 cursor 定价", strategy=_cursor_strategy())
+        result = agent.run(ctx)
+        assert result.status == AgentStatus.SUCCESS
+        assert result.payload
+
+    def test_degraded_when_no_observations(self):
+        from competitor_agent.interfaces.exceptions import DataSourceUnavailableError
+
+        class FailingExtractor:
+            def fetch(self, gap, context):
+                raise DataSourceUnavailableError("all sources down")
+
+        bus = MessageBus()
+        agent = CollectorAgent(bus, SourceSelector(), FailingExtractor())
+        ctx = AgentContext(task="x", strategy=_cursor_strategy())
+        result = agent.run(ctx)
+        assert result.status == AgentStatus.DEGRADED
+
+
+class TestOrchestratorDecision:
+    """TeamOrchestrator 事件驱动 + 状态决策"""
+
+    def test_team_mode_via_api(self):
+        from competitor_agent.facade.api import CompetitorAnalysisAPI
+
+        api = CompetitorAnalysisAPI(extractor=FakeExtractor(), use_llm=False)
+        report = api.analyze("分析 cursor 的定价", mode="team")
+        assert report.competitor.name == "cursor"
+        assert report.dimension_results
+
+    def test_retry_on_transient_failure(self):
+        """采集首次失败、重试成功后应产出报告"""
+        calls = {"n": 0}
+
+        class FlakyExtractor:
+            def fetch(self, gap, context):
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    from competitor_agent.interfaces.exceptions import DataSourceUnavailableError
+
+                    raise DataSourceUnavailableError("temporary")
+                return FakeExtractor().fetch(gap, context)
+
+        orch = TeamOrchestrator(extractor=FlakyExtractor(), use_llm=False, max_retries=2)
+        report = orch.run("分析 cursor 的定价")
+        assert report.competitor.name == "cursor"
+        assert calls["n"] >= 2

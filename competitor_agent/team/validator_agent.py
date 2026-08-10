@@ -12,6 +12,8 @@ import logging
 from dataclasses import dataclass, field
 
 from competitor_agent.domain_types.report import DimensionResult
+from competitor_agent.interfaces.memory import IFourLayerMemory
+from competitor_agent.team.base_agent import AgentContext, AgentResult, AgentStatus, BaseAgent
 from competitor_agent.team.message_bus import T_VALIDATED, MessageBus
 
 logger = logging.getLogger("competitor_agent.team.validator_agent")
@@ -111,12 +113,33 @@ class FactValidator:
                 return
 
 
-class ValidatorAgent:
+class ValidatorAgent(BaseAgent):
     """校验 Agent：包装 FactValidator，发布校验结果"""
 
-    def __init__(self, bus: MessageBus, validator: FactValidator | None = None) -> None:
-        self._bus = bus
+    def __init__(
+        self,
+        bus: MessageBus,
+        validator: FactValidator | None = None,
+        memory: IFourLayerMemory | None = None,
+    ) -> None:
+        super().__init__("validator", bus, memory)
         self._validator = validator or FactValidator()
+
+    def run(self, ctx: AgentContext) -> AgentResult:
+        """决策入口：校验维度结论，产出 ValidationResult。"""
+        results = ctx.extra.get("results", [])
+        if not results:
+            return AgentResult(
+                status=AgentStatus.DEGRADED,
+                payload=None,
+                reason="无维度结论可校验",
+            )
+        outcome = self.validate(ctx.strategy.competitor.name, results)
+        return AgentResult(
+            status=AgentStatus.SUCCESS if outcome.passed else AgentStatus.DEGRADED,
+            payload=outcome,
+            reason="校验通过" if outcome.passed else f"{len(outcome.errors)} 项校验错误",
+        )
 
     def validate(
         self,

@@ -26,7 +26,7 @@ class StubReport:
 
 
 class StubAPI:
-    def analyze(self, task, conversation_history=None):
+    def analyze(self, task, conversation_history=None, mode="single"):
         return StubReport()
 
     def compare(self, a, b=None):

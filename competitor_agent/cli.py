@@ -37,7 +37,7 @@ def _print_report(report: CompetitorReport) -> None:
         print(f"\n[提示] {len(report.gaps_pending)} 个缺口未关闭，可用 /resume 继续。")
 
 
-def _run_analyze(api: CompetitorAnalysisAPI, args: str, out_dir: str | None = None) -> None:
+def _run_analyze(api: CompetitorAnalysisAPI, args: str, out_dir: str | None = None, mode: str = "team") -> None:
     """analyze 子命令 + /analyze 处理器"""
     args = sanitize_task(args.strip())
     if not args:
@@ -50,7 +50,7 @@ def _run_analyze(api: CompetitorAnalysisAPI, args: str, out_dir: str | None = No
         print(markdown)
         name = parsed.primary_competitor
     else:
-        rep = api.analyze(args)
+        rep = api.analyze(args, mode=mode)
         _print_report(rep)
         markdown = rep.markdown_report
         name = parsed.primary_competitor
@@ -175,6 +175,7 @@ def build_parser() -> argparse.ArgumentParser:
     analyze_p = sub.add_parser("analyze", help="单竞品/对比分析")
     analyze_p.add_argument("task", nargs="+", help="竞品名或分析任务")
     analyze_p.add_argument("--out", dest="out_dir", default=None, help="报告输出目录")
+    analyze_p.add_argument("--mode", default="team", choices=["single", "team"], help="执行模式: team=多 Agent 流水线(默认), single=单 Agent")
 
     history_p = sub.add_parser("history", help="查询历史分析记录")
     history_p.add_argument("--competitor", default=None, help="按竞品过滤")
@@ -197,7 +198,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "analyze":
         task = " ".join(args.task)
-        _run_analyze(api, task, out_dir=args.out_dir)
+        _run_analyze(api, task, out_dir=args.out_dir, mode=args.mode)
         return 0
     if args.command == "history":
         reports = api.get_history(args.competitor)

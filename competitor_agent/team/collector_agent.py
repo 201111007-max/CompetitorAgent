@@ -15,12 +15,14 @@ from competitor_agent.domain_types.strategy import CompetitorStrategy
 from competitor_agent.interfaces.collector import ICompetitorDataSource
 from competitor_agent.interfaces.context import SourceContext
 from competitor_agent.interfaces.exceptions import DataSourceUnavailableError
+from competitor_agent.interfaces.memory import IFourLayerMemory
+from competitor_agent.team.base_agent import AgentContext, AgentResult, AgentStatus, BaseAgent
 from competitor_agent.team.message_bus import T_COLLECTED, MessageBus
 
 logger = logging.getLogger("competitor_agent.team.collector_agent")
 
 
-class CollectorAgent:
+class CollectorAgent(BaseAgent):
     """采集 Agent：缺口 → 候选源降级 → Observation 列表"""
 
     def __init__(
@@ -28,10 +30,25 @@ class CollectorAgent:
         bus: MessageBus,
         selector: SourceSelector,
         extractor: ICompetitorDataSource,
+        memory: IFourLayerMemory | None = None,
     ) -> None:
-        self._bus = bus
+        super().__init__("collector", bus, memory)
         self._selector = selector
         self._extractor = extractor
+
+    def run(self, ctx: AgentContext) -> AgentResult:
+        """决策入口：采集缺口数据，产出 Observation 列表。"""
+        try:
+            observations = self.collect(ctx.strategy)
+        except DataSourceUnavailableError as exc:
+            return self._retry(ctx, exc)
+        if not observations:
+            return AgentResult(
+                status=AgentStatus.DEGRADED,
+                payload=[],
+                reason="所有候选源均不可用，无观测数据",
+            )
+        return AgentResult(status=AgentStatus.SUCCESS, payload=observations)
 
     def collect(self, strategy: CompetitorStrategy) -> list[Observation]:
         """对每个缺口采集，返回观测列表（发布到总线）。"""

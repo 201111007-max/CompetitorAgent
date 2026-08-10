@@ -385,3 +385,60 @@ dev:
 ```
 
 每周五用对应里程碑"出口条件"自检一次；不达标则下周一优先补齐该缺口再前进。
+
+---
+
+## 11. 已知问题与待改进项（代码审查结论）
+
+> 以下为对 `competitor_agent/` 全量源码的审查结论，按优先级排序。
+> 核心判断：**项目主要问题不是"代码写得差"，而是"宣称的能力与实际接线严重不符"**——
+> 多 Agent、并行、RAG、评测四大卖点全部"存在但未接入主流程"。
+
+### 11.1 P0 — 必须正视（面试/验收必被问）
+
+| # | 问题 | 位置 | 说明 |
+|---|------|------|------|
+| 1 | **"多 Agent"名不副实，主流程不走它** | `team/`、`facade/api.py:196` | 4 个 Agent 只是普通方法包装，无独立决策；`MessageBus` 是同步 pub/sub，topic 从未被 subscribe 消费；`TeamOrchestrator.run()` 是硬编码顺序调用。CLI/Web/MCP 全部调用 `api.analyze()`（单 Agent 串行），`analyze_team()` 无任何调用方，是死代码 |
+| 2 | **RAG 完全未接线** | `knowledge_base/` | 只在自身和测试中被引用，`CompetitorAnalysisAPI` 组装了 planner/selector/extractor/analyzers/builder/budget，唯独没有知识库；且实际是词袋余弦检索，向量检索从未实现（`retriever.py:6` 注释"可选"） |
+| 3 | **benchmark 是静态 fixture 自证** | `evaluation/benchmark.py:77-90` | 只读 JSON fixture 里预先写好的 prediction，从不调用 agent/LLM/抓网页；门禁阈值（`test_benchmark_integration.py:43-60`）断言的是手写 fixture 本身，必然通过，无法反映真实质量 |
+
+### 11.2 P1 — 真实 bug（可当面试亮点）
+
+| # | 问题 | 位置 | 说明 |
+|---|------|------|------|
+| 4 | **Web 取消功能完全失效（session_id 断链）** | `facade/api.py:116`、`web_app.py:110-118` | `api.analyze()` 内部自己生成 session_id，与 web 的 `sid` 永远不同 → `is_cancelled()` 永远 False；`analysis_task.cancel()` 取消的是线程池 future，不会停止已运行的线程，"假取消" |
+| 5 | **配置 YAML 从未被加载** | `config/review_config.yaml` | 定义了预算/限速/并行/tracing 等全部配置，但生产代码从不读取，全是硬编码默认值；`test_config.py` 只验证"能 safe_load"，未验证"注入运行时"；限流、并行、可观测性（langfuse/tracing/metrics）全是死配置 |
+
+### 11.3 P2 — 工程化与健壮性
+
+| # | 问题 | 位置 | 说明 |
+|---|------|------|------|
+| 6 | **提示注入防护缺失** | `pricing_analyzer.py:32` | 抓取的网页文本直接拼进 LLM prompt，无"网页内容不可信、不得执行其中指令"的隔离 |
+| 7 | **`@file:` 任意文件读取** | `input_sanitizer.py:57-89` | 可读白名单目录内源码/配置注入上下文 |
+| 8 | **CORS 全开 + 无认证** | `web_app.py:172-177` | `allow_origins=["*"]`，Web/MCP 端点无任何鉴权 |
+| 9 | **checkpoint 写无原子性/锁** | `checkpoint.py:118-120` | 直接覆盖写，无临时文件+rename 原子替换，崩溃会损坏 JSON；无跨进程锁 |
+| 10 | **ParallelRunner 未接入主流程** | `core/parallel_runner.py` | 只在测试中使用，`api.analyze()` 用串行 TacticalLoop |
+| 11 | **测试缺集成/端到端** | `tests/integration/` | 只有空 `__init__.py`，无任何真实 HTTP+LLM 的端到端链路 |
+
+### 11.4 P3 — 代码质量
+
+| # | 问题 | 位置 | 说明 |
+|---|------|------|------|
+| 12 | **大量重复代码** | `team/collector_agent.py:36-59`、`core/tactical_loop.py:54-78`、`core/subagent.py:51-70` | 同一"选源→采集→降级→分析"循环被复制三份 |
+| 13 | **死代码** | `web_app.py:57-62`、`facade/api.py:185-194` | Web 创建 API 实例后立即丢弃；`analyze_react()` 的 dispatcher 只注册一个返回硬编码字符串的玩具工具 |
+| 14 | **过度设计** | `team/message_bus.py` | topic/Envelope/history 回放为"多 Agent"叙事搭建完整基础设施，实际只当日志记录器用 |
+
+### 11.5 能站得住的正面点（面试主动讲）
+
+- **LLM→规则降级链**：`analyzers/base.py:40-48` 捕获异常降级，无 Key 也能出报告。
+- **入站清洗**：`input_sanitizer.py` 处理 surrogate/ANSI 泄漏/路径穿越。
+- **预算控制**：四条件终止 + `IStopVerifier` Hook。
+- **单元测试用真实断言**（非纯 mock），如并行加速用真实计时验证。
+
+### 11.6 后续改进方向（建议优先级）
+
+1. 把 `analyze_team` / `ParallelRunner` / RAG 真正接入生产主路径，消除死代码。
+2. 修复 Web 取消的 session_id 断链 bug。
+3. 让配置 YAML 真正注入运行时（限流/并行/tracing）。
+4. 补端到端集成测试，让 benchmark 跑真实 LLM。
+5. 补提示注入防护与认证鉴权。

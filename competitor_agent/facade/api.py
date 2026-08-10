@@ -87,6 +87,7 @@ class CompetitorAnalysisAPI:
         self,
         task: str,
         conversation_history: list[ChatMessage] | None = None,
+        mode: str = "team",
     ) -> CompetitorReport:
         """单竞品分析：输入任务文本 → CompetitorReport
 
@@ -94,9 +95,12 @@ class CompetitorAnalysisAPI:
             task: 用户任务文本（入站先做浅清洗 sanitize_task）
             conversation_history: 上一轮对话历史（ChatMessage 列表），
                 传入则把前序上下文摘要并入任务解析，支持多轮追问。
+            mode: 执行模式，team=多 Agent 流水线（默认），single=单 Agent 串行。
         """
         task = sanitize_task(task)
         task = self._disambiguate_with_history(task, conversation_history)
+        if mode == "team":
+            return self.analyze_team(task)
         self._emit(ProgressEvent(event="phase_start", phase="strategic", message=f"规划: {task}"))
 
         strategy = self._planner.plan(task, memory=self._memory)
@@ -193,18 +197,25 @@ class CompetitorAnalysisAPI:
         loop = ReactLoop(agent, event_sink=self._event_sink)
         return loop.run(task)
 
-    def analyze_team(self, task: str) -> CompetitorReport:
-        """多 Agent 流水线模式：Collector→Analyzer→Validator→Reporter 协作产出草稿报告"""
+    def analyze_team(self, task: str, max_retries: int = 1) -> CompetitorReport:
+        """多 Agent 流水线模式：Collector→Analyzer→Validator→Reporter 协作产出草稿报告
+
+        事件驱动 + 状态决策：各 Agent 基于 AgentResult 状态（SUCCESS/RETRY/DEGRADED/FAILED）
+        决定继续、重试或降级。
+        """
         self._emit(
-            ProgressEvent(event="phase_start", phase="team_orchestrator", message=f"多 Agent 分析: {task}")
+            ProgressEvent(event="phase_start", phase="strategic", message=f"规划: {task}")
         )
         orch = TeamOrchestrator(
             extractor=self._extractor,
             llm=self._llm,
             use_llm=self._use_llm,
             memory=self._memory,
+            max_retries=max_retries,
         )
         report = orch.run(task)
+        # 记忆闭环：分析成功后沉淀技能 + 记录数据源成功率（与单 Agent 路径对齐）
+        self._record_team_memory_success(report)
         self._emit(
             ProgressEvent(
                 event="report",
@@ -214,6 +225,21 @@ class CompetitorAnalysisAPI:
             )
         )
         return report
+
+    def _record_team_memory_success(self, report: CompetitorReport) -> None:
+        """多 Agent 路径的记忆沉淀：按报告维度结果记录技能与数据源成功率。"""
+        if self._memory is None:
+            return
+        competitor = report.competitor.name
+        for r in report.dimension_results:
+            if not r.evidence:
+                continue
+            source = r.evidence[0].source_name
+            if source:
+                self._memory.record_skill(
+                    Skill(competitor_name=competitor, gap_field=r.dimension, source_name=source, success=True)
+                )
+                self._memory.record_outcome(source, True)
 
     # ── M4: 流式分析 ──────────────────────────────────────────────────
 
