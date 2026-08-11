@@ -3,15 +3,14 @@
 断言关键字段存在且类型正确，保证骨架配置与 M1 实现的契约一致。
 M6 新增：验证 load_config() 将 YAML 加载为类型安全 AppConfig，并注入运行时。
 """
+
 from pathlib import Path
 
 import yaml
 
 from competitor_agent.config.loader import AppConfig, load_config
 
-_CONFIG_PATH = (
-    Path(__file__).parent.parent.parent / "config" / "review_config.yaml"
-)
+_CONFIG_PATH = Path(__file__).parent.parent.parent / "config" / "review_config.yaml"
 
 
 def test_config_file_exists() -> None:
@@ -61,6 +60,7 @@ def test_required_dimensions_in_stop_verifier() -> None:
 
 # ── M6：load_config() 加载为类型安全 AppConfig ──────────────────────────────
 
+
 def test_load_config_returns_appconfig() -> None:
     cfg = load_config()
     assert isinstance(cfg, AppConfig)
@@ -74,6 +74,8 @@ def test_load_config_returns_appconfig() -> None:
     assert cfg.collector.rate_limit_per_second == 2
     assert cfg.memory.enabled is True
     assert cfg.observability.log_level == "INFO"
+    assert cfg.execution.mode == "single"
+    assert cfg.execution.max_parallel_subagents == 4
 
 
 def test_load_config_missing_file_raises() -> None:
@@ -99,6 +101,22 @@ def test_load_config_env_override(monkeypatch) -> None:
         import os
 
         os.unlink(tmp)
+
+
+def test_load_config_parses_execution_section(tmp_path) -> None:
+    """execution section 解析：mode 与 max_parallel_subagents 进入 ExecutionConfig。"""
+    from competitor_agent.config.loader import ExecutionConfig
+
+    p = tmp_path / "cfg.yaml"
+    p.write_text(
+        "execution:\n  mode: parallel\n  max_parallel_subagents: 8\nbudget:\n  max_iterations: 3\n",
+        encoding="utf-8",
+    )
+    cfg = load_config(str(p))
+    assert isinstance(cfg.execution, ExecutionConfig)
+    assert cfg.execution.mode == "parallel"
+    assert cfg.execution.max_parallel_subagents == 8
+    assert cfg.budget.max_iterations == 3
 
 
 def test_api_uses_config_budget() -> None:

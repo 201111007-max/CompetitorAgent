@@ -87,6 +87,7 @@ markers = [
     "unit: Unit tests",
     "integration: Integration tests",
     "evaluation: Ground-truth evaluation",
+    "e2e: Full-chain end-to-end tests",
 ]
 
 [tool.coverage.run]

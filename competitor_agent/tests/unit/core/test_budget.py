@@ -1,4 +1,7 @@
 """core/budget.py + budget_controller.py 单测：四条件终止分支"""
+
+from concurrent.futures import ThreadPoolExecutor
+
 from competitor_agent.core.budget import IterationBudget
 from competitor_agent.core.budget_controller import BudgetController, StopReason
 from competitor_agent.domain_types import GapStatus, InfoGap
@@ -44,6 +47,15 @@ class TestIterationBudget:
         b.consume(delta_cost=0.2)
         used_i, max_i, used_c, max_c = b.snapshot()
         assert (used_i, max_i, used_c, max_c) == (1, 3, 0.2, 0.5)
+
+    def test_shared_budget_no_overconsume_under_parallel(self):
+        """并行缺口共享同一 IterationBudget：并发扣减不超发（原子性）。"""
+        budget = IterationBudget(max_iterations=5, cost_limit=10.0, min_continuations=999)
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            outcomes = list(pool.map(lambda i: budget.consume(delta_cost=0.01), range(20)))
+        assert outcomes.count(True) == 5  # 恰好消耗满配额
+        assert outcomes.count(False) == 15
+        assert budget.used_iterations == 5
 
     def test_diminishing_returns_false(self):
         b = IterationBudget(max_iterations=10, cost_limit=1.0, diminishing_threshold=500, min_continuations=3)
@@ -155,3 +167,11 @@ class TestBudgetControllerVerifierHook:
         assert captured["state"].iterations_used == 1
         assert captured["state"].total_cost == 0.3
         assert captured["state"].max_iterations == 10
+
+    def test_record_iteration_thread_safe(self):
+        """并行缺口共享 BudgetController：并发 record_iteration 计数/成本不丢失。"""
+        ctrl = BudgetController(max_iterations=100, cost_limit=100.0)
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            pool.map(lambda i: ctrl.record_iteration(cost=0.01), range(20))
+        assert ctrl.iteration_count == 20
+        assert abs(ctrl.total_cost - 0.2) < 1e-9

@@ -5,11 +5,13 @@
 - 每个文档片段带 competitor、dimension、text、chunk_id
 - 向量库（chromadb）可选：安装 `rag` 依赖后自动使用，否则降级纯文本词袋
 """
+
 from __future__ import annotations
 
 import logging
 import math
 import re
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +27,9 @@ class TextChunk:
 
     __slots__ = ("chunk_id", "competitor", "dimension", "source_url", "text")
 
-    def __init__(self, chunk_id: str, competitor: str, dimension: str, text: str, source_url: str = "") -> None:
+    def __init__(
+        self, chunk_id: str, competitor: str, dimension: str, text: str, source_url: str = ""
+    ) -> None:
         self.chunk_id = chunk_id
         self.competitor = competitor
         self.dimension = dimension
@@ -70,58 +74,67 @@ class CompetitorStore:
         self._store = JsonStore("knowledge_base", data_dir)
         self._chunks: list[TextChunk] = []
         self._idf: dict[str, float] = {}
+        # RLock：并行缺口共享同一知识库（采集摄入 + 分析检索并发）
+        self._lock = threading.RLock()
         self._load_chunks()
 
     # ---- 写入 ----
     def add(self, chunk: TextChunk) -> None:
-        self._chunks.append(chunk)
-        self._rebuild_index()
-        self._persist()
+        with self._lock:
+            self._chunks.append(chunk)
+            self._rebuild_index()
+            self._persist()
 
     def add_many(self, chunks: list[TextChunk]) -> None:
-        self._chunks.extend(chunks)
-        self._rebuild_index()
-        self._persist()
+        with self._lock:
+            self._chunks.extend(chunks)
+            self._rebuild_index()
+            self._persist()
 
     def clear(self) -> None:
-        self._chunks.clear()
-        self._idf.clear()
-        self._store.clear()
-        self._store.save()
+        with self._lock:
+            self._chunks.clear()
+            self._idf.clear()
+            self._store.clear()
+            self._store.save()
 
     # ---- 读取 ----
     def all_chunks(self) -> list[TextChunk]:
-        return list(self._chunks)
+        with self._lock:
+            return list(self._chunks)
 
     def by_competitor(self, competitor: str) -> list[TextChunk]:
-        return [c for c in self._chunks if c.competitor == competitor]
+        with self._lock:
+            return [c for c in self._chunks if c.competitor == competitor]
 
     def by_dimension(self, dimension: str) -> list[TextChunk]:
-        return [c for c in self._chunks if c.dimension == dimension]
+        with self._lock:
+            return [c for c in self._chunks if c.dimension == dimension]
 
     def search(self, query: str, top_k: int = 5) -> list[tuple[TextChunk, float]]:
         """词袋余弦检索（查询词命中率加权）"""
-        if not self._chunks:
-            return []
-        q_tokens = tokenize(query)
-        if not q_tokens:
-            return []
-        q_weights = _term_weights(q_tokens, self._idf)
-        scored: list[tuple[TextChunk, float]] = []
-        for chunk in self._chunks:
-            c_tokens = tokenize(chunk.text)
-            if not c_tokens:
-                continue
-            c_weights = _term_weights(c_tokens, self._idf)
-            score = _cosine(q_weights, c_weights)
-            # 维度命中加权：查询含维度词时同维度片段加分
-            for dim_token in tokenize(chunk.dimension):
-                if dim_token in q_tokens:
-                    score += 0.15
-            if score > 0:
-                scored.append((chunk, score))
-        scored.sort(key=lambda kv: kv[1], reverse=True)
-        return scored[:top_k]
+        with self._lock:
+            if not self._chunks:
+                return []
+            q_tokens = tokenize(query)
+            if not q_tokens:
+                return []
+            q_weights = _term_weights(q_tokens, self._idf)
+            scored: list[tuple[TextChunk, float]] = []
+            for chunk in self._chunks:
+                c_tokens = tokenize(chunk.text)
+                if not c_tokens:
+                    continue
+                c_weights = _term_weights(c_tokens, self._idf)
+                score = _cosine(q_weights, c_weights)
+                # 维度命中加权：查询含维度词时同维度片段加分
+                for dim_token in tokenize(chunk.dimension):
+                    if dim_token in q_tokens:
+                        score += 0.15
+                if score > 0:
+                    scored.append((chunk, score))
+            scored.sort(key=lambda kv: kv[1], reverse=True)
+            return scored[:top_k]
 
     # ---- 内部 ----
     def _load_chunks(self) -> None:

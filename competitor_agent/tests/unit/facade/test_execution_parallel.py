@@ -1,0 +1,116 @@
+"""facade/api.py 并行缺口执行（问题 10）集成测试
+
+execution.mode == parallel 时，单 Agent 路径（mode="single"）用 ThreadPoolExecutor
+并行执行独立缺口：
+- 结果按缺口原始顺序稳定合并
+- 共享预算原子扣减、不超发
+- 取消能提前终止（协作式取消贯通到并行子任务）
+"""
+
+from __future__ import annotations
+
+import threading
+import uuid
+
+from competitor_agent.config.loader import AppConfig, ExecutionConfig
+from competitor_agent.domain_types import (
+    InfoGap,
+    Observation,
+    SourceEvidence,
+)
+from competitor_agent.facade.api import CompetitorAnalysisAPI
+from competitor_agent.interfaces.context import SourceContext
+
+CURSOR_PRICING = "Pro $20/month\nTeams $40/month\nUltra $60/month"
+
+
+class FakeExtractor:
+    def fetch(self, gap: InfoGap, context: SourceContext) -> Observation:
+        url = str(context.kwargs.get("url"))
+        if "pricing" in url:
+            text = CURSOR_PRICING
+        elif "docs" in url or "cursor.com" in url:
+            text = "Cursor supports MCP integration, agent mode, and Codex-style reviews."
+        else:
+            text = "Cursor is an AI code editor."
+        ev = SourceEvidence(
+            source_name="web_extractor", url=url, content_hash=str(hash(url)), trust_level=0.9
+        )
+        return Observation(gap_field=gap.field, source="web_extractor", raw_text=text, evidence=ev)
+
+
+def _parallel_api(**kwargs) -> CompetitorAnalysisAPI:
+    cfg = AppConfig(execution=ExecutionConfig(mode="parallel", max_parallel_subagents=4))
+    kwargs.setdefault("extractor", FakeExtractor())
+    kwargs.setdefault("use_llm", False)
+    return CompetitorAnalysisAPI(config=cfg, **kwargs)
+
+
+class TestParallelExecution:
+    def test_parallel_merges_all_gaps_in_gap_order(self):
+        api = _parallel_api()
+        report = api.analyze("分析 Cursor", mode="single")
+        planner_gaps = api._planner.plan("分析 Cursor").gaps
+        report_fields = [r.dimension for r in report.dimension_results]
+        # 结果必须按策略缺口原始顺序出现的子序列（串行路径同语义）
+        idx = 0
+        for gap_field in [g.field for g in planner_gaps]:
+            if idx < len(report_fields) and report_fields[idx] == gap_field:
+                idx += 1
+        assert idx == len(report_fields)
+        assert report.overall_confidence > 0
+        assert report.markdown_report
+
+    def test_parallel_shared_budget_not_exceeded(self):
+        api = _parallel_api()
+        report = api.analyze("分析 Cursor", mode="single")
+        total_gaps = len(api._planner.plan("分析 Cursor").gaps)
+        # 每个缺口只贡献 1 次 record_iteration，且不超过缺口总数与预算上限
+        assert total_gaps <= api._budget.max_iterations
+        assert len(report.dimension_results) <= total_gaps
+        assert api._budget.iteration_count >= len(report.dimension_results)
+        assert api._budget.iteration_count <= total_gaps
+        assert api._budget.iteration_count <= api._budget.max_iterations
+
+    def test_parallel_same_results_as_serial(self):
+        cfg_serial = AppConfig(execution=ExecutionConfig(mode="single", max_parallel_subagents=4))
+        serial = CompetitorAnalysisAPI(extractor=FakeExtractor(), use_llm=False, config=cfg_serial)
+        parallel = _parallel_api()
+        r_serial = serial.analyze("分析 Cursor", mode="single")
+        r_parallel = parallel.analyze("分析 Cursor", mode="single")
+        assert [r.dimension for r in r_serial.dimension_results] == [
+            r.dimension for r in r_parallel.dimension_results
+        ]
+        assert r_parallel.terminal_state == r_serial.terminal_state
+
+    def test_parallel_cancel_returns_partial_result(self):
+        started = threading.Event()
+        release = threading.Event()
+
+        class BlockingExtractor(FakeExtractor):
+            def fetch(self, gap: InfoGap, context: SourceContext) -> Observation:
+                started.set()
+                release.wait(timeout=10)
+                return super().fetch(gap, context)
+
+        api = _parallel_api(extractor=BlockingExtractor())
+        sid = f"par_cancel_{uuid.uuid4().hex[:8]}"
+        holder: dict = {}
+
+        def _run() -> None:
+            try:
+                holder["report"] = api.analyze("分析 Cursor", mode="single", session_id=sid)
+            except Exception as exc:  # noqa: BLE001 - 测试断言收集
+                holder["error"] = exc
+
+        thread = threading.Thread(target=_run)
+        thread.start()
+        assert started.wait(timeout=10)
+        api.cancel(sid)
+        release.set()
+        thread.join(timeout=30)
+
+        assert "error" not in holder
+        report = holder["report"]
+        assert report.terminal_state == "cancelled"
+        assert getattr(report, "cancelled", False)
