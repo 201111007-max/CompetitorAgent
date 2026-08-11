@@ -5,6 +5,7 @@
 - 提供 consume() / refund() / 剩余资源查询
 - ThreadSafe（供并行子代理共享）
 """
+
 from __future__ import annotations
 
 import logging
@@ -61,7 +62,10 @@ class IterationBudget:
         if len(self._recent_deltas) < 2:
             return False
         recent = self._recent_deltas[-2:]
-        return all(d < self._diminishing_threshold for d in recent) and current_delta < self._diminishing_threshold
+        return (
+            all(d < self._diminishing_threshold for d in recent)
+            and current_delta < self._diminishing_threshold
+        )
 
     def refund(self) -> None:
         """退还一个迭代配额（采集失败无需耗时）"""
@@ -76,12 +80,15 @@ class IterationBudget:
 
     @property
     def used_iterations(self) -> int:
-        return self._used_iterations
+        with self._lock:
+            return self._used_iterations
 
     @property
     def used_cost(self) -> float:
-        return self._used_cost
+        with self._lock:
+            return self._used_cost
 
     @property
     def remaining_iterations(self) -> int:
-        return self._max_iterations - self._used_iterations
+        with self._lock:
+            return self._max_iterations - self._used_iterations

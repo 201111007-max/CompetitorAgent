@@ -10,11 +10,14 @@ M4 新增：
 - cancel() / resume(): 中断与断点续跑
 - get_history(): 历史查询
 """
+
 from __future__ import annotations
 
 import logging
+import threading
 import uuid
 from collections.abc import AsyncIterator
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable
 
 from competitor_agent.agent.react_agent import ReactAgent
@@ -42,6 +45,7 @@ from competitor_agent.core.tactical_loop import TacticalLoop
 from competitor_agent.core.task_parser import parse_task
 from competitor_agent.domain_types.enums import TerminalState
 from competitor_agent.domain_types.events import ProgressEvent
+from competitor_agent.domain_types.info_gap import InfoGap
 from competitor_agent.domain_types.report import (
     CancelledResult,
     ComparisonReport,
@@ -49,7 +53,13 @@ from competitor_agent.domain_types.report import (
     DimensionResult,
 )
 from competitor_agent.domain_types.strategy import CompetitorStrategy
-from competitor_agent.interfaces.context import AnalysisSession, ChatMessage, Skill
+from competitor_agent.interfaces.context import (
+    AnalysisSession,
+    ChatMessage,
+    Skill,
+    SourceContext,
+)
+from competitor_agent.interfaces.exceptions import DataSourceUnavailableError
 from competitor_agent.interfaces.memory import IFourLayerMemory
 from competitor_agent.llm.client import LLMClient
 from competitor_agent.team.orchestrator import TeamOrchestrator
@@ -139,49 +149,7 @@ class CompetitorAnalysisAPI:
             cost_limit=self._budget.cost_limit,
         )
 
-        for gap in strategy.gaps:
-            if self._budget.should_stop(strategy.gaps).should_stop:
-                break
-            if is_cancelled(sid):
-                logger.info("会话 %s 被取消，停止分析", sid)
-                break
-            self._emit(
-                ProgressEvent(
-                    event="phase_start",
-                    phase=f"tactical.{gap.field}",
-                    progress=0.3,
-                    message=f"采集并分析 {gap.field}",
-                )
-            )
-            analyzer = self._analyzers.get(gap.field)
-            loop = TacticalLoop(
-                selector=self._selector,
-                extractor=self._extractor,
-                analyzer=analyzer,
-                budget=iteration_budget,
-                ingester=self._ingester,
-                retriever=self._retriever,
-                session_id=sid,
-            )
-            result = loop.execute(gap, strategy)
-            if result is not None:
-                results.append(result)
-                self._record_memory_success(strategy, gap)
-            self._budget.record_iteration(cost=0.01)
-
-            # 每完成一个缺口保存 checkpoint
-            save_checkpoint(
-                session_id=sid,
-                task=task,
-                competitor_name=strategy.competitor.name,
-                gaps=strategy.gaps,
-                dimension_results=results,
-                iterations_used=iteration_budget.used_iterations,
-                max_iterations=self._budget.max_iterations,
-                cost_used=iteration_budget.used_cost,
-                cost_limit=self._budget.cost_limit,
-                sources_tried=[s for g in strategy.gaps for s in g.sources_tried],
-            )
+        results = self._run_gaps(strategy, iteration_budget, sid, task)
 
         stop = self._budget.should_stop(strategy.gaps)
         pending = [g for g in strategy.gaps if not g.is_closed]
@@ -226,20 +194,155 @@ class CompetitorAnalysisAPI:
         )
         return report
 
+    # ── 单 Agent 路径：缺口执行调度（串行 / 并行）───────────────────
+
+    def _run_gaps(
+        self,
+        strategy: CompetitorStrategy,
+        iteration_budget: IterationBudget,
+        sid: str,
+        task: str,
+    ) -> list[DimensionResult]:
+        """执行全部独立缺口：execution.mode == parallel 时并行，否则串行（与历史行为一致）。"""
+        if self._config.execution.mode != "parallel" or len(strategy.gaps) < 2:
+            return self._run_gaps_serial(strategy, iteration_budget, sid, task)
+        return self._run_gaps_parallel(strategy, iteration_budget, sid, task)
+
+    def _run_gaps_serial(
+        self,
+        strategy: CompetitorStrategy,
+        iteration_budget: IterationBudget,
+        sid: str,
+        task: str,
+    ) -> list[DimensionResult]:
+        results: list[DimensionResult] = []
+        completed_lock = threading.Lock()
+        for gap in strategy.gaps:
+            self._run_gap(strategy, gap, iteration_budget, results, completed_lock, sid, task)
+        return results
+
+    def _run_gaps_parallel(
+        self,
+        strategy: CompetitorStrategy,
+        iteration_budget: IterationBudget,
+        sid: str,
+        task: str,
+    ) -> list[DimensionResult]:
+        gaps = list(strategy.gaps)
+        workers = min(self._config.execution.max_parallel_subagents, len(gaps))
+        self._emit(
+            ProgressEvent(
+                event="phase_start",
+                phase="execution",
+                message=f"并行执行 {len(gaps)} 个缺口，max_workers={workers}",
+            )
+        )
+        completed: list[DimensionResult] = []
+        completed_lock = threading.Lock()
+
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="gap") as pool:
+            futures = {
+                pool.submit(
+                    self._run_gap, strategy, gap, iteration_budget, completed, completed_lock, sid, task
+                ): gap
+                for gap in gaps
+            }
+            for future in as_completed(futures):
+                gap = futures[future]
+                try:
+                    future.result()
+                except Exception:  # 单缺口异常不影响整体
+                    logger.exception("并行缺口 %s 执行失败", gap.field)
+
+        # 按缺口原始顺序稳定返回（与串行路径一致）
+        by_field = {r.dimension: r for r in completed}
+        return [by_field[g.field] for g in gaps if g.field in by_field]
+
+    def _run_gap(
+        self,
+        strategy: CompetitorStrategy,
+        gap: InfoGap,
+        iteration_budget: IterationBudget,
+        completed: list[DimensionResult],
+        completed_lock: threading.Lock,
+        sid: str,
+        task: str,
+    ) -> DimensionResult | None:
+        """执行单个缺口闭环：预算/取消检查 → TacticalLoop → 结果合并 + 记忆/预算/checkpoint。
+
+        串行与并行共用此实现；并行下多个缺口共享同一迭代预算与取消标志。
+        """
+        if self._budget.should_stop(strategy.gaps).should_stop:
+            return None
+        if is_cancelled(sid):
+            logger.info("会话 %s 被取消，停止分析", sid)
+            return None
+        self._emit(
+            ProgressEvent(
+                event="phase_start",
+                phase=f"tactical.{gap.field}",
+                progress=0.3,
+                message=f"采集并分析 {gap.field}",
+            )
+        )
+        analyzer = self._analyzers.get(gap.field)
+        loop = TacticalLoop(
+            selector=self._selector,
+            extractor=self._extractor,
+            analyzer=analyzer,
+            budget=iteration_budget,
+            ingester=self._ingester,
+            retriever=self._retriever,
+            session_id=sid,
+        )
+        result = loop.execute(gap, strategy)
+        # 每完成一个缺口保存 checkpoint（结果快照 + 共享预算用量）
+        with completed_lock:
+            if result is not None:
+                completed.append(result)
+            completion = list(completed)
+        if result is not None:
+            self._record_memory_success(strategy, gap)
+        self._budget.record_iteration(cost=0.01)
+        save_checkpoint(
+            session_id=sid,
+            task=task,
+            competitor_name=strategy.competitor.name,
+            gaps=strategy.gaps,
+            dimension_results=completion,
+            iterations_used=iteration_budget.used_iterations,
+            max_iterations=self._budget.max_iterations,
+            cost_used=iteration_budget.used_cost,
+            cost_limit=self._budget.cost_limit,
+            sources_tried=[s for g in strategy.gaps for s in g.sources_tried],
+        )
+        return result
+
     @property
     def memory(self) -> IFourLayerMemory | None:
         return self._memory
 
     def analyze_react(self, task: str) -> str:
-        """ReAct 模式：LLM 驱动工具调用（需 LLM Key）"""
+        """ReAct 模式：LLM 驱动工具调用（需 LLM Key）
+
+        web_extract 工具接入真实采集链路（复用 self._extractor），非占位实现。
+        """
         dispatcher = ToolDispatcher()
-        dispatcher.register(
-            "web_extract",
-            lambda url: f"web_extract(url={url}) 已请求",
-        )
+        dispatcher.register("web_extract", self._react_web_extract)
         agent = ReactAgent(llm=self._llm or LLMClient(), dispatcher=dispatcher)
         loop = ReactLoop(agent, event_sink=self._event_sink)
         return loop.run(task)
+
+    def _react_web_extract(self, url: str) -> str:
+        """ReAct 工具：真实抓取给定 URL 的页面文本（失败返回可读信息）。"""
+        try:
+            obs = self._extractor.fetch(
+                InfoGap(field="web"),
+                SourceContext(competitor_name="", query="web", kwargs={"url": url}),
+            )
+        except DataSourceUnavailableError as exc:
+            return f"抓取失败: {exc}"
+        return (obs.raw_text or "").strip()[:2000] or "（页面无文本内容）"
 
     def analyze_team(
         self,
@@ -252,9 +355,7 @@ class CompetitorAnalysisAPI:
         事件驱动 + 状态决策：各 Agent 基于 AgentResult 状态（SUCCESS/RETRY/DEGRADED/FAILED）
         决定继续、重试或降级。
         """
-        self._emit(
-            ProgressEvent(event="phase_start", phase="strategic", message=f"规划: {task}")
-        )
+        self._emit(ProgressEvent(event="phase_start", phase="strategic", message=f"规划: {task}"))
         orch = TeamOrchestrator(
             extractor=self._extractor,
             llm=self._llm,
@@ -333,6 +434,7 @@ class CompetitorAnalysisAPI:
         )
 
         import asyncio
+
         loop = asyncio.get_running_loop()
         report = await loop.run_in_executor(None, api.analyze, task, None, "team", sid)
 
@@ -401,6 +503,7 @@ class CompetitorAnalysisAPI:
         for s in sessions:
             raw = s.raw if hasattr(s, "raw") else {}
             from competitor_agent.domain_types.competitor import Competitor
+
             reports.append(
                 CompetitorReport(
                     competitor=Competitor(name=s.competitor_name),

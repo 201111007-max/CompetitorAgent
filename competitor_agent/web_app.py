@@ -11,6 +11,7 @@ SSE 端点：
     GET /api/history/{competitor}        → 某竞品历史
     POST /api/cancel/{session_id}        → 取消运行中会话
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -52,18 +53,12 @@ def _get_memory() -> FourLayerMemory:
 
 # ── SSE 辅助 ──────────────────────────────────────────────────────────────
 
+
 async def _event_generator(
     session_id: str,
     task: str,
 ) -> AsyncIterator[str]:
     """SSE 事件生成器：逐条 yield ProgressEvent"""
-    CompetitorAnalysisAPI(
-        llm=LLMClient(),
-        use_llm=True,
-        memory=_get_memory(),
-        event_sink=lambda e: None,  # 事件通过 yield 推送，不依赖 callback
-    )
-
     events_queue: asyncio.Queue[ProgressEvent] = asyncio.Queue()
 
     def _on_event(event: ProgressEvent) -> None:
@@ -179,6 +174,7 @@ async def _event_generator(
 
 # ── FastAPI 应用 ──────────────────────────────────────────────────────────
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("竞品分析 Web 服务启动")
@@ -206,7 +202,7 @@ def require_auth(
         return
     header = request.headers.get("Authorization", "")
     if header.startswith("Bearer "):
-        provided = header[len("Bearer "):]
+        provided = header[len("Bearer ") :]
     else:
         provided = token
     if provided != expected:
@@ -338,29 +334,33 @@ async def cancel(session_id: str, _: None = Depends(require_auth)) -> JSONRespon
 async def history(_: None = Depends(require_auth)) -> JSONResponse:
     """查询所有竞品的历史分析记录"""
     sessions = _get_memory().recent_sessions()
-    return JSONResponse([
-        {
-            "session_id": s.session_id,
-            "competitor": s.competitor_name,
-            "task": s.task,
-            "created_at": s.created_at,
-        }
-        for s in sessions
-    ])
+    return JSONResponse(
+        [
+            {
+                "session_id": s.session_id,
+                "competitor": s.competitor_name,
+                "task": s.task,
+                "created_at": s.created_at,
+            }
+            for s in sessions
+        ]
+    )
 
 
 @app.get("/api/history/{competitor}")
 async def history_by_competitor(competitor: str, _: None = Depends(require_auth)) -> JSONResponse:
     """查询指定竞品的历史分析记录"""
     sessions = _get_memory()._sessions.retrieve(competitor)
-    return JSONResponse([
-        {
-            "session_id": s.session_id,
-            "task": s.task,
-            "created_at": s.created_at,
-        }
-        for s in sessions
-    ])
+    return JSONResponse(
+        [
+            {
+                "session_id": s.session_id,
+                "task": s.task,
+                "created_at": s.created_at,
+            }
+            for s in sessions
+        ]
+    )
 
 
 @app.get("/api/status/{session_id}")
@@ -369,11 +369,13 @@ async def status(session_id: str, _: None = Depends(require_auth)) -> JSONRespon
     session = _sessions.get(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail=f"会话 {session_id} 不存在或已结束")
-    return JSONResponse({
-        "session_id": session_id,
-        "task": session.get("task", ""),
-        "cancelled": session.get("cancelled", False),
-    })
+    return JSONResponse(
+        {
+            "session_id": session_id,
+            "task": session.get("task", ""),
+            "cancelled": session.get("cancelled", False),
+        }
+    )
 
 
 def main() -> None:

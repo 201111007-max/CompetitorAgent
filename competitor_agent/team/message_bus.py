@@ -5,6 +5,7 @@
 - 记录消息日志（sequenced），便于审计/回放/历史
 - threading.Lock 保证并行子代理并发安全
 """
+
 from __future__ import annotations
 
 import itertools
@@ -15,11 +16,10 @@ from typing import Any, Callable
 TopicHandler = Callable[[Any], None]
 
 # 预定义 topics（多 Agent 流水线）
-T_STRATEGY = "strategy"      # CollectorAgent 输入：竞品策略
-T_COLLECTED = "collected"    # CollectorAgent → AnalyzerAgent：观测
-T_ANALYZED = "analyzed"      # AnalyzerAgent → ValidatorAgent：维度结论
-T_VALIDATED = "validated"    # ValidatorAgent → ReporterAgent：校验后的结论
-T_DRAFT = "draft"            # ReporterAgent 输出：草稿报告
+T_COLLECTED = "collected"  # CollectorAgent → AnalyzerAgent：观测
+T_ANALYZED = "analyzed"  # AnalyzerAgent → ValidatorAgent：维度结论
+T_VALIDATED = "validated"  # ValidatorAgent → ReporterAgent：校验后的结论
+T_DRAFT = "draft"  # ReporterAgent 输出：草稿报告
 
 
 class TopicError(KeyError):
@@ -29,6 +29,7 @@ class TopicError(KeyError):
 @dataclass
 class Envelope:
     """一条消息"""
+
     sequence: int
     topic: str
     payload: Any
@@ -37,6 +38,7 @@ class Envelope:
 @dataclass
 class MessageBus:
     """进程内发布/订阅总线"""
+
     handlers: dict[str, list[Callable[[Envelope], None]]] = field(default_factory=dict)
     _log: list[Envelope] = field(default_factory=list)
     _seq: itertools.count = field(default_factory=itertools.count)
@@ -62,19 +64,11 @@ class MessageBus:
             return list(self._log)
         return [env for env in self._log if env.topic == topic]
 
-    def subscribe_and_forward(self, from_topic: str, to_topic: str) -> None:
-        """把一个 topic 的消息转发到另一个 topic（可复用）。"""
-        def _forward(env: Envelope) -> None:
-            self.publish(to_topic, env.payload)
-
-        self.subscribe(from_topic, _forward)
-
 
 __all__ = [
     "T_ANALYZED",
     "T_COLLECTED",
     "T_DRAFT",
-    "T_STRATEGY",
     "T_VALIDATED",
     "Envelope",
     "MessageBus",

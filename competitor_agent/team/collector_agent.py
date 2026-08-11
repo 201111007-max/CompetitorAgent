@@ -4,6 +4,7 @@
 采集数据，产出 Observation 列表，发布到 T_COLLECTED。
 通过 ICompetitorDataSource 完成实际抓取（可注入 fake 测试）。
 """
+
 from __future__ import annotations
 
 import logging
@@ -11,11 +12,11 @@ from typing import Any
 
 from competitor_agent.collector.source_selector import SourceSelector
 from competitor_agent.core.checkpoint import is_cancelled
+from competitor_agent.core.gap_executor import fetch_candidate
 from competitor_agent.domain_types.enums import ObservationStatus
 from competitor_agent.domain_types.observation import Observation
 from competitor_agent.domain_types.strategy import CompetitorStrategy
 from competitor_agent.interfaces.collector import ICompetitorDataSource
-from competitor_agent.interfaces.context import SourceContext
 from competitor_agent.interfaces.exceptions import DataSourceUnavailableError
 from competitor_agent.interfaces.memory import IFourLayerMemory
 from competitor_agent.team.base_agent import AgentContext, AgentResult, AgentStatus, BaseAgent
@@ -65,14 +66,7 @@ class CollectorAgent(BaseAgent):
                 break
             for candidate in self._selector.candidates(gap, strategy.competitor):
                 try:
-                    obs = self._extractor.fetch(
-                        gap,
-                        SourceContext(
-                            competitor_name=strategy.competitor.name,
-                            query=gap.field,
-                            kwargs={"url": candidate.url},
-                        ),
-                    )
+                    obs = fetch_candidate(gap, candidate, strategy.competitor.name, self._extractor)
                 except DataSourceUnavailableError as exc:
                     gap.record_source_try(candidate.source_name)
                     logger.info("候选源失败 %s: %s", candidate.source_name, exc)
@@ -85,9 +79,7 @@ class CollectorAgent(BaseAgent):
         self._bus.publish(T_COLLECTED, {"competitor": strategy.competitor.name, "observations": observations})
         return observations
 
-    def _ingest_observation(
-        self, observation: Observation, competitor: str, dimension: str
-    ) -> None:
+    def _ingest_observation(self, observation: Observation, competitor: str, dimension: str) -> None:
         """采集到有效文本后摄入知识库（RAG 灌库链路）"""
         if self._ingester is None or not observation.raw_text.strip():
             return

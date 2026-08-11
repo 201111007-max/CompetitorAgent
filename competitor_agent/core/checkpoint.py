@@ -5,16 +5,25 @@
 
 数据目录：``~/.competitor_agent/checkpoints/``
 """
+
 from __future__ import annotations
 
 import json
 import logging
 import os
 import threading
+import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
+
+try:
+    import fcntl  # type: ignore[import-not-found]  # Unix
+
+    _HAS_FCNTL = True
+except ImportError:
+    _HAS_FCNTL = False
 
 from competitor_agent.domain_types.competitor import Competitor
 from competitor_agent.domain_types.enums import GapStatus
@@ -67,6 +76,110 @@ def _checkpoint_path(session_id: str) -> Path:
     return _CHECKPOINT_DIR / f"{session_id}.json"
 
 
+def _backup_path(path: Path) -> Path:
+    return path.with_suffix(".bak")
+
+
+def _tmp_path(path: Path) -> Path:
+    return path.with_name(f".{path.stem}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp")
+
+
+def _sweep_stale_tmp(path: Path) -> None:
+    for stale in path.parent.glob(f".{path.stem}.*.tmp"):
+        try:
+            stale.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _write_bytes_atomic(path: Path, data_bytes: bytes) -> None:
+    """临时文件 + fsync + os.replace 原子写入"""
+    tmp = _tmp_path(path)
+    try:
+        with open(tmp, "wb") as f:
+            f.write(data_bytes)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+        _sweep_stale_tmp(path)
+    finally:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _atomic_write(path: Path, data: dict[str, Any]) -> None:
+    """原子写入 checkpoint，并保留旧版本 .bak 备份"""
+    payload = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
+    if path.exists():
+        try:
+            with open(path, "rb") as pf:
+                old_bytes = pf.read()
+            _write_bytes_atomic(_backup_path(path), old_bytes)
+        except OSError:
+            pass
+    _write_bytes_atomic(path, payload)
+
+
+class CheckpointLock:
+    """跨进程文件锁：Unix 用 fcntl，Windows 用 msvcrt，阻塞式获取"""
+
+    def __init__(self, path: Path) -> None:
+        self._lock_path = path.with_suffix(path.suffix + ".lock")
+        self._fh = None
+
+    def __enter__(self) -> Self:
+        self._fh = self._lock_path.open("a+b")
+        self._fh.seek(0, os.SEEK_END)
+        if self._fh.tell() == 0:
+            self._fh.write(b"x")
+            self._fh.flush()
+        self._fh.seek(0)
+        if _HAS_FCNTL:
+            fcntl.flock(self._fh.fileno(), fcntl.LOCK_EX)
+        else:
+            import msvcrt
+
+            msvcrt.locking(self._fh.fileno(), msvcrt.LK_LOCK, 1)
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        if self._fh is None:
+            return
+        if _HAS_FCNTL:
+            fcntl.flock(self._fh.fileno(), fcntl.LOCK_UN)
+        else:
+            import msvcrt
+
+            try:
+                self._fh.seek(0)
+                msvcrt.locking(self._fh.fileno(), msvcrt.LK_UNLCK, 1)
+            except OSError:
+                pass
+        self._fh.close()
+        self._fh = None
+
+
+# 进程内锁：同一进程内按 session 串行化 checkpoint 写
+_session_locks: dict[str, threading.Lock] = {}
+_session_locks_guard = threading.Lock()
+
+
+def _session_lock(session_id: str) -> threading.Lock:
+    with _session_locks_guard:
+        lock = _session_locks.get(session_id)
+        if lock is None:
+            lock = threading.Lock()
+            _session_locks[session_id] = lock
+        return lock
+
+
+def _drop_session_lock(session_id: str) -> None:
+    with _session_locks_guard:
+        _session_locks.pop(session_id, None)
+
+
 def save_checkpoint(
     session_id: str,
     task: str,
@@ -116,44 +229,63 @@ def save_checkpoint(
         sources_tried=sources_tried,
     )
     path = _checkpoint_path(session_id)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(cp.to_dict(), f, ensure_ascii=False, indent=2)
+    with _session_lock(session_id), CheckpointLock(path):
+        _atomic_write(path, cp.to_dict())
     logger.info("Checkpoint 已保存: %s (%d gaps, %d results)", session_id, len(gaps), len(dimension_results))
     return cp
 
 
-def load_checkpoint(session_id: str) -> Checkpoint | None:
-    """加载 checkpoint"""
-    path = _checkpoint_path(session_id)
-    if not path.exists():
-        return None
+def _load_file(path: Path) -> Checkpoint | None:
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         return Checkpoint.from_dict(data)
-    except (json.JSONDecodeError, KeyError) as e:
-        logger.warning("Checkpoint 加载失败 %s: %s", session_id, e)
+    except (json.JSONDecodeError, KeyError, FileNotFoundError, OSError):
         return None
+
+
+def load_checkpoint(session_id: str) -> Checkpoint | None:
+    """加载 checkpoint；主文件损坏或缺失时回退到 .bak 备份"""
+    path = _checkpoint_path(session_id)
+    cp = _load_file(path)
+    if cp is not None:
+        return cp
+    bak = _backup_path(path)
+    if bak.exists():
+        logger.warning("Checkpoint 主文件损坏或缺失 %s，回退 .bak", session_id)
+        return _load_file(bak)
+    return None
 
 
 def delete_checkpoint(session_id: str) -> None:
     """删除 checkpoint（分析完成后清理）"""
     path = _checkpoint_path(session_id)
-    if path.exists():
-        path.unlink()
-        logger.info("Checkpoint 已删除: %s", session_id)
+    for target in (path, _backup_path(path), path.with_suffix(path.suffix + ".lock")):
+        try:
+            target.unlink(missing_ok=True)
+        except OSError:
+            pass
+    _sweep_stale_tmp(path)
+    _drop_session_lock(session_id)
+    logger.info("Checkpoint 已删除: %s", session_id)
 
 
 def list_checkpoints() -> list[Checkpoint]:
-    """列出所有 checkpoint"""
+    """列出所有 checkpoint（主文件损坏时回退 .bak）"""
     result: list[Checkpoint] = []
-    for path in sorted(_CHECKPOINT_DIR.glob("*.json"), key=os.path.getmtime, reverse=True):
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            result.append(Checkpoint.from_dict(data))
-        except (json.JSONDecodeError, KeyError):
+    paths = [
+        p
+        for p in sorted(_CHECKPOINT_DIR.glob("*.json"), key=os.path.getmtime, reverse=True)
+        if not p.name.startswith(".")
+    ]
+    for path in paths:
+        cp = _load_file(path)
+        if cp is not None:
+            result.append(cp)
             continue
+        bak = _backup_path(path)
+        if bak.exists() and (cp := _load_file(bak)) is not None:
+            result.append(cp)
     return result
 
 
@@ -218,6 +350,7 @@ def checkpoint_to_report(cp: Checkpoint) -> CompetitorReport:
 
 
 # ── 取消标志 ──────────────────────────────────────────────────────────────
+
 
 def set_cancel(session_id: str) -> None:
     """设置取消标志"""

@@ -3,6 +3,7 @@
 支持环境变量 COMPETITOR_AGENT_CONFIG 覆盖配置文件路径。
 配置值注入 CompetitorAnalysisAPI 及各组件（预算/终止/维度/采集/记忆/报告/可观测性）。
 """
+
 from __future__ import annotations
 
 import os
@@ -32,8 +33,18 @@ class TerminationConfig:
 
 
 @dataclass
+class ExecutionConfig:
+    """执行调度配置（并行缺口分析）"""
+
+    mode: str = "single"  # single 串行（默认，兼容）；parallel 并行执行独立缺口
+    max_parallel_subagents: int = 4  # 并行子代理上限
+
+
+@dataclass
 class DimensionsConfig:
-    enabled: list[str] = field(default_factory=lambda: ["feature", "pricing", "performance", "ecosystem", "sentiment", "roadmap"])
+    enabled: list[str] = field(
+        default_factory=lambda: ["feature", "pricing", "performance", "ecosystem", "sentiment", "roadmap"]
+    )
     default_budget: dict[str, int] = field(default_factory=dict)
     analysis_order: list[str] = field(default_factory=list)
 
@@ -107,6 +118,7 @@ class AppConfig:
     max_tokens: int = 2048
     budget: BudgetConfig = field(default_factory=BudgetConfig)
     termination: TerminationConfig = field(default_factory=TerminationConfig)
+    execution: ExecutionConfig = field(default_factory=ExecutionConfig)
     dimensions: DimensionsConfig = field(default_factory=DimensionsConfig)
     collector: CollectorConfig = field(default_factory=CollectorConfig)
     stop_verifier: StopVerifierConfig = field(default_factory=StopVerifierConfig)
@@ -145,6 +157,7 @@ def load_config(path: str | os.PathLike | None = None) -> AppConfig:
         max_tokens=raw.get("max_tokens", 2048),
         budget=_build_section(BudgetConfig, raw.get("budget")),
         termination=_build_section(TerminationConfig, raw.get("termination")),
+        execution=_build_section(ExecutionConfig, raw.get("execution")),
         dimensions=_build_section(DimensionsConfig, raw.get("dimensions")),
         collector=_build_section(CollectorConfig, raw.get("collector")),
         stop_verifier=_build_section(StopVerifierConfig, raw.get("stop_verifier")),
