@@ -21,12 +21,12 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
 from competitor_agent import CompetitorAnalysisAPI
-from competitor_agent.config.loader import load_config
+from competitor_agent.config.loader import AppConfig, load_config
 from competitor_agent.core.checkpoint import set_cancel
 from competitor_agent.domain_types.events import ProgressEvent
 from competitor_agent.domain_types.report import CancelledResult, CompetitorReport
@@ -40,6 +40,7 @@ logger = logging.getLogger("competitor_agent.web_app")
 # ── 全局状态 ──────────────────────────────────────────────────────────────
 _sessions: dict[str, dict[str, Any]] = {}  # session_id → {task, cancel_flag, ...}
 _memory: FourLayerMemory | None = None
+_config: AppConfig = load_config()
 
 
 def _get_memory() -> FourLayerMemory:
@@ -188,10 +189,28 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="Competitor Intelligence Agent", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_config.security.cors_origins,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def require_auth(
+    request: Request,
+    token: str = Query(default="", description="API Token（可选，也可用 Authorization: Bearer）"),
+) -> None:
+    """API Token 认证依赖：未配置 token 时放行（本地开发），配置后校验 Bearer 或 ?token=。"""
+    expected = _config.security.auth_token
+    if not expected:
+        return
+    header = request.headers.get("Authorization", "")
+    if header.startswith("Bearer "):
+        provided = header[len("Bearer "):]
+    else:
+        provided = token
+    if provided != expected:
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -282,6 +301,7 @@ function cancelAnalysis() {
 @app.get("/api/analyze")
 async def analyze(
     request: Request,
+    _: None = Depends(require_auth),
     task: str = Query(..., description="分析任务，如'分析 Cursor'"),
     session_id: str = Query(default="", description="会话 ID（可选）"),
 ) -> StreamingResponse:
@@ -304,7 +324,7 @@ async def analyze(
 
 
 @app.post("/api/cancel/{session_id}")
-async def cancel(session_id: str) -> JSONResponse:
+async def cancel(session_id: str, _: None = Depends(require_auth)) -> JSONResponse:
     """取消运行中的分析会话"""
     if session_id not in _sessions:
         raise HTTPException(status_code=404, detail=f"会话 {session_id} 不存在")
@@ -315,7 +335,7 @@ async def cancel(session_id: str) -> JSONResponse:
 
 
 @app.get("/api/history")
-async def history() -> JSONResponse:
+async def history(_: None = Depends(require_auth)) -> JSONResponse:
     """查询所有竞品的历史分析记录"""
     sessions = _get_memory().recent_sessions()
     return JSONResponse([
@@ -330,7 +350,7 @@ async def history() -> JSONResponse:
 
 
 @app.get("/api/history/{competitor}")
-async def history_by_competitor(competitor: str) -> JSONResponse:
+async def history_by_competitor(competitor: str, _: None = Depends(require_auth)) -> JSONResponse:
     """查询指定竞品的历史分析记录"""
     sessions = _get_memory()._sessions.retrieve(competitor)
     return JSONResponse([
@@ -344,7 +364,7 @@ async def history_by_competitor(competitor: str) -> JSONResponse:
 
 
 @app.get("/api/status/{session_id}")
-async def status(session_id: str) -> JSONResponse:
+async def status(session_id: str, _: None = Depends(require_auth)) -> JSONResponse:
     """查询会话状态"""
     session = _sessions.get(session_id)
     if session is None:

@@ -90,6 +90,14 @@ class LLMConfig:
 
 
 @dataclass
+class SecurityConfig:
+    """Web/MCP 安全配置（CORS 受信来源 + API Token 认证）"""
+
+    cors_origins: list[str] = field(default_factory=lambda: ["http://localhost:8000"])
+    auth_token: str = ""  # 从环境变量 COMPETITOR_AUTH_TOKEN 读取，不明文落码
+
+
+@dataclass
 class AppConfig:
     """应用级配置聚合（对应 review_config.yaml 各 section）"""
 
@@ -105,6 +113,7 @@ class AppConfig:
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     report: ReportConfig = field(default_factory=ReportConfig)
     observability: ObservabilityConfig = field(default_factory=ObservabilityConfig)
+    security: SecurityConfig = field(default_factory=SecurityConfig)
 
 
 def _build_section(cls, data: dict[str, Any] | None) -> Any:
@@ -142,4 +151,12 @@ def load_config(path: str | os.PathLike | None = None) -> AppConfig:
         memory=_build_section(MemoryConfig, raw.get("memory")),
         report=_build_section(ReportConfig, raw.get("report")),
         observability=_build_section(ObservabilityConfig, raw.get("observability")),
+        security=_build_security(raw.get("security")),
     )
+
+
+def _build_security(data: dict[str, Any] | None) -> SecurityConfig:
+    """构造安全配置：token 优先从环境变量 COMPETITOR_AUTH_TOKEN 读取，不明文落码。"""
+    cfg = _build_section(SecurityConfig, data)
+    cfg.auth_token = os.environ.get("COMPETITOR_AUTH_TOKEN", cfg.auth_token)
+    return cfg
