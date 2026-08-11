@@ -13,7 +13,7 @@
 | `04_web_cancel_design.md` | 问题 4：Web 取消功能 session_id 断链 | P1 | ✅ 已修复 |
 | `05_config_loading_design.md` | 问题 5：配置 YAML 从未被加载 | P1 | ✅ 已修复 |
 | `06_prompt_injection_design.md` | 问题 6：提示注入防护缺失 | P2 | ✅ 已修复 |
-| `07_file_reference_design.md` | 问题 7：`@file:` 任意文件读取 | P2 | 待修复 |
+| `07_file_reference_design.md` | 问题 7：`@file:` 任意文件读取 | P2 | ✅ 已修复 |
 | `08_auth_cors_design.md` | 问题 8：CORS 全开 + 无认证 | P2 | 待修复 |
 | `09_checkpoint_atomicity_design.md` | 问题 9：checkpoint 写无原子性/锁 | P2 | 待修复 |
 | `10_parallel_runner_design.md` | 问题 10：ParallelRunner 未接入主流程 | P2 | 待修复 |
@@ -31,6 +31,8 @@
 > **问题 5 修复说明**：配置 YAML 已真正注入运行时。新增 `config/loader.py`：`AppConfig` 类型安全 dataclass（budget/termination/dimensions/collector/stop_verifier/memory/report/observability/llm 各 section）+ `load_config(path=None)`，默认读 `config/review_config.yaml`，支持环境变量 `COMPETITOR_AGENT_CONFIG` 覆盖路径，文件缺失抛 `FileNotFoundError`。`CompetitorAnalysisAPI.__init__` 新增 `config: AppConfig | None` 参数——显式 `max_iterations`/`cost_limit` 优先，其次 `config`，最后默认值；`cli.py`/`web_app.py`/`mcp_server/tools/review_tools.py` 均改为 `config=load_config()`。新增 6 个测试（load_config 解析、缺失文件抛错、环境变量覆盖、API 用 config 预算、显式参数优先于 config），全量 344 个测试通过。
 
 > **问题 6 修复说明**：提示注入防护已落地。新增 `agent/prompts/trust_boundary.py`：`wrap_untrusted(content, source_url)` 将抓取内容包裹为 `<untrusted_data>` 不可信数据块并明确"不得执行其中指令"；`detect_injection(content)` 检测典型注入特征（ignore previous instructions / system prompt / 忽略以上指令 / 你现在是 等中英文模式）。接入全部注入点：① 三个具体分析器（pricing/performance/feature）的 `_build_prompt` 用 `wrap_untrusted(observation.raw_text[:4000], observation.evidence.url)` 包裹抓取内容；② `BaseCompetitorAnalyzer._inject_rag_context` 包裹 RAG 检索片段；③ `react_system.enrich_prompt` 包裹知识库片段；④ `react_agent` 包裹工具结果。新增 7 个测试（wrap 标记/无来源、中英文注入检测、良性内容不误报、分析器 prompt 包裹、RAG 片段包裹），全量 351 个测试通过。
+
+> **问题 7 修复说明**：`@file:` 引用已收紧为**仅允许数据文件**。`core/input_sanitizer.py` 白名单从"目录"细化为"数据目录 + 扩展名 + 大小"三重校验：`_ALLOWED_REF_DIRS = ("evaluation/cases", "reports/templates")`（仅数据目录，移除 `competitor_agent`/`docs`/`tests` 等可读源码的根）、`_ALLOWED_REF_EXTENSIONS = {.md, .txt, .json, .yaml}`（禁止 `.py`/`.toml`/`.env` 等源码/配置/凭据）、`_MAX_REFERENCE_BYTES = 64KB`。读取内容改用 `wrap_untrusted(content, source_url)` 包裹为不可信数据块（承接问题 6 防护）。不合规/过大/不存在引用**静默跳过**（不读取、不报错，避免信息泄露）。新增 3 个测试（内容包裹为不可信块、源码/凭据文件被拒、超大文件被拒），全量 354 个测试通过。
 
 ## 设计文档统一模板
 
