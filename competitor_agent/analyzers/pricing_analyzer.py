@@ -6,6 +6,7 @@ import re
 from typing import Any
 
 from competitor_agent.analyzers.base import BaseCompetitorAnalyzer
+from competitor_agent.agent.prompts.trust_boundary import wrap_untrusted
 from competitor_agent.domain_types.enums import DimensionType
 from competitor_agent.domain_types.info_gap import InfoGap
 from competitor_agent.domain_types.observation import Observation
@@ -29,7 +30,7 @@ class PricingAnalyzer(BaseCompetitorAnalyzer):
                     "\"confidence\": 0-1}"
                 ),
             },
-            {"role": "user", "content": observation.raw_text[:4000]},
+            {"role": "user", "content": wrap_untrusted(observation.raw_text[:4000], observation.evidence.url)},
         ]
 
     def _parse_result(self, text: str) -> dict[str, Any]:

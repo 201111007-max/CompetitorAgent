@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from competitor_agent.agent.prompts.trust_boundary import wrap_untrusted
 from competitor_agent.domain_types.enums import DimensionType, ResultStatus
 from competitor_agent.domain_types.info_gap import InfoGap
 from competitor_agent.domain_types.observation import Observation
@@ -83,7 +84,9 @@ class BaseCompetitorAnalyzer:
             messages = messages + [{"role": "user", "content": ""}]
             last = messages[-1]
         last["content"] = (
-            f"{last['content']}\n\n[知识库参考片段（外部事实依据，可引用其来源）]\n{rag_context}"
+            f"{last['content']}\n\n"
+            f"[知识库参考片段（外部事实依据，可引用其来源）]\n"
+            f"{wrap_untrusted(rag_context)}"
         )
         return messages
 
