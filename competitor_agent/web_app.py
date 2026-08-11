@@ -26,6 +26,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
 from competitor_agent import CompetitorAnalysisAPI
+from competitor_agent.config.loader import load_config
 from competitor_agent.core.checkpoint import set_cancel
 from competitor_agent.domain_types.events import ProgressEvent
 from competitor_agent.domain_types.report import CancelledResult, CompetitorReport
@@ -78,6 +79,7 @@ async def _event_generator(
         use_llm=True,
         memory=_get_memory(),
         event_sink=_on_event,
+        config=load_config(),
     )
 
     # 启动后台分析任务

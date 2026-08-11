@@ -11,7 +11,7 @@
 | `02_rag_integration_design.md` | 问题 2：RAG 完全未接线 | P0 | ✅ 已修复 |
 | `03_benchmark_design.md` | 问题 3：benchmark 静态 fixture 自证 | P0 | ✅ 已修复 |
 | `04_web_cancel_design.md` | 问题 4：Web 取消功能 session_id 断链 | P1 | ✅ 已修复 |
-| `05_config_loading_design.md` | 问题 5：配置 YAML 从未被加载 | P1 | 待修复 |
+| `05_config_loading_design.md` | 问题 5：配置 YAML 从未被加载 | P1 | ✅ 已修复 |
 | `06_prompt_injection_design.md` | 问题 6：提示注入防护缺失 | P2 | 待修复 |
 | `07_file_reference_design.md` | 问题 7：`@file:` 任意文件读取 | P2 | 待修复 |
 | `08_auth_cors_design.md` | 问题 8：CORS 全开 + 无认证 | P2 | 待修复 |
@@ -27,6 +27,8 @@
 > **问题 3 修复说明**：benchmark 改为**真实执行**。`Benchmark.run()` 对每个用例真实调用 `CompetitorAnalysisAPI.analyze()`（`mode` 按用例取 `single`/`team`）；字段预测由 `extract_prediction(report, dimension, ground_truth)` 按维度（pricing→`plans`、feature→`features`、performance→`benchmarks`）从真实报告抽取，与 `ground_truth` 同命名空间计算字段准确率/幻觉率/F1；策略指标由 `extract_strategy(report, best_url, fail_urls)` 从真实证据（`evidence.url`）反推选中源、降级成本与闭环。确定性：`BenchmarkExtractor`（固定网页内容 + 首候选源可模拟故障）+ `BenchmarkMockLLM`（按 system prompt 维度抽取规范化 JSON，CI 无 Key/无网络可复现），CLI `--llm mock|real` 切换真实 LLM。fixture 重写为"只含 task + ground_truth + 确定性采集配置"（17 accuracy + 9 strategy，覆盖 normal/boundary/safety/tool_failure，含 1 个诚实 miss 用例），门禁基于真实输出：字段准确率 ≥0.90、幻觉率 ≤0.05、工具选择准确率 ≥0.85、trace 完整率 100%。
 
 > **问题 4 修复说明**：Web 取消改为**真正中断**。① `analyze()` 新增可选 `session_id` 参数，外部传入时**复用**而非自生成（含 `analyze_team`/`analyze_stream`），内部 `is_cancelled(session_id)` 与 Web 的 `sid` 打通；② Web 端 `_event_generator`/`/api/cancel/{sid}`/断连均调用 `set_cancel(sid)`，取消同时设 `_sessions` 标志与内部取消标志；③ **协作式取消**：`TacticalLoop` 每轮迭代候选源前、`CollectorAgent.collect` 每个缺口前、`TeamOrchestrator` 各阶段边界检查 `is_cancelled`，取消即提前终止而非仅掐断 SSE（线程池 future 无法 `cancel()` 线程，依赖循环内主动检查）；④ 取消后返回 `CancelledResult`（已完成缺口部分结果 + `cancelled=True`，`terminal_state="cancelled"`），单 Agent 路径**保留 checkpoint 供 `/resume` 续跑**。测试：`analyze(session_id=...)` 取消标志一致性单测、慢速分析中 `cancel` 提前终止返回部分结果的集成测试、TacticalLoop 每轮取消/无 session 保持原行为单测、Web SSE 取消后收到 `cancelled` 事件并正常收尾的端到端测试。
+
+> **问题 5 修复说明**：配置 YAML 已真正注入运行时。新增 `config/loader.py`：`AppConfig` 类型安全 dataclass（budget/termination/dimensions/collector/stop_verifier/memory/report/observability/llm 各 section）+ `load_config(path=None)`，默认读 `config/review_config.yaml`，支持环境变量 `COMPETITOR_AGENT_CONFIG` 覆盖路径，文件缺失抛 `FileNotFoundError`。`CompetitorAnalysisAPI.__init__` 新增 `config: AppConfig | None` 参数——显式 `max_iterations`/`cost_limit` 优先，其次 `config`，最后默认值；`cli.py`/`web_app.py`/`mcp_server/tools/review_tools.py` 均改为 `config=load_config()`。新增 6 个测试（load_config 解析、缺失文件抛错、环境变量覆盖、API 用 config 预算、显式参数优先于 config），全量 344 个测试通过。
 
 ## 设计文档统一模板
 

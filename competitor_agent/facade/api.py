@@ -23,6 +23,7 @@ from competitor_agent.agent.tool_dispatcher import ToolDispatcher
 from competitor_agent.analyzers.registry import AnalyzerRegistry
 from competitor_agent.collector.source_selector import SourceSelector
 from competitor_agent.collector.web_extractor import WebExtractor
+from competitor_agent.config.loader import AppConfig, load_config
 from competitor_agent.core.budget import IterationBudget
 from competitor_agent.core.budget_controller import BudgetController, StopReason
 from competitor_agent.core.checkpoint import (
@@ -63,12 +64,18 @@ class CompetitorAnalysisAPI:
         self,
         llm: LLMClient | None = None,
         use_llm: bool = True,
-        max_iterations: int = 10,
-        cost_limit: float = 1.0,
+        max_iterations: int | None = None,
+        cost_limit: float | None = None,
         event_sink: Callable[[ProgressEvent], None] | None = None,
         extractor: WebExtractor | None = None,
         memory: IFourLayerMemory | None = None,
+        config: AppConfig | None = None,
     ) -> None:
+        # 配置注入：显式参数优先，其次 config，最后默认值
+        cfg = config or load_config()
+        max_iterations = max_iterations if max_iterations is not None else cfg.budget.max_iterations
+        cost_limit = cost_limit if cost_limit is not None else cfg.budget.cost_limit_usd
+        self._config = cfg
         self._llm = llm
         self._use_llm = use_llm
         self._event_sink = event_sink
