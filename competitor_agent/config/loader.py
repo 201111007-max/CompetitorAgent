@@ -1,0 +1,145 @@
+"""配置加载器 — 将 config/review_config.yaml 加载为类型安全的 AppConfig
+
+支持环境变量 COMPETITOR_AGENT_CONFIG 覆盖配置文件路径。
+配置值注入 CompetitorAnalysisAPI 及各组件（预算/终止/维度/采集/记忆/报告/可观测性）。
+"""
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+_DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent / "review_config.yaml"
+_CONFIG_ENV = "COMPETITOR_AGENT_CONFIG"
+
+
+@dataclass
+class BudgetConfig:
+    max_iterations: int = 10
+    max_parallel_subagents: int = 4
+    cost_limit_usd: float = 1.0
+    token_high_water_mark: int = 120000
+    token_compression_target: int = 80000
+
+
+@dataclass
+class TerminationConfig:
+    core_priority_threshold: int = 8
+    core_confidence: float = 0.8
+
+
+@dataclass
+class DimensionsConfig:
+    enabled: list[str] = field(default_factory=lambda: ["feature", "pricing", "performance", "ecosystem", "sentiment", "roadmap"])
+    default_budget: dict[str, int] = field(default_factory=dict)
+    analysis_order: list[str] = field(default_factory=list)
+
+
+@dataclass
+class CollectorConfig:
+    cache_ttl_seconds: int = 86400
+    max_retries: int = 2
+    timeout_seconds: int = 20
+    rate_limit_per_second: int = 2
+    use_playwright: bool = False
+    user_agent: str = "competitor-agent/0.1"
+
+
+@dataclass
+class StopVerifierConfig:
+    required_dimensions: list[str] = field(default_factory=lambda: ["pricing", "feature"])
+    min_confidence: float = 0.6
+    min_evidence_ratio: float = 0.7
+
+
+@dataclass
+class MemoryConfig:
+    enabled: bool = True
+    data_dir: str = "~/.competitor_agent"
+    session_ttl_days: int = 30
+    skills_max_per_competitor: int = 50
+    evolution_window: int = 30
+
+
+@dataclass
+class ReportConfig:
+    include_confidence: bool = True
+    include_evidence_urls: bool = True
+    output_dir: str = "reports/competitor"
+
+
+@dataclass
+class ObservabilityConfig:
+    log_level: str = "INFO"
+    tracing: bool = True
+    metrics: bool = True
+    langfuse_enabled: bool = False
+    langfuse_public_key_env: str = "LANGFUSE_PUBLIC_KEY"
+    langfuse_secret_key_env: str = "LANGFUSE_SECRET_KEY"
+
+
+@dataclass
+class LLMConfig:
+    api_base_url: str = "https://api.openai.com/v1"
+    model: str = "deepseek-v4-flash"
+    temperature: float = 0.1
+    max_tokens: int = 2048
+
+
+@dataclass
+class AppConfig:
+    """应用级配置聚合（对应 review_config.yaml 各 section）"""
+
+    api_base_url: str = "https://api.openai.com/v1"
+    model: str = "deepseek-v4-flash"
+    temperature: float = 0.1
+    max_tokens: int = 2048
+    budget: BudgetConfig = field(default_factory=BudgetConfig)
+    termination: TerminationConfig = field(default_factory=TerminationConfig)
+    dimensions: DimensionsConfig = field(default_factory=DimensionsConfig)
+    collector: CollectorConfig = field(default_factory=CollectorConfig)
+    stop_verifier: StopVerifierConfig = field(default_factory=StopVerifierConfig)
+    memory: MemoryConfig = field(default_factory=MemoryConfig)
+    report: ReportConfig = field(default_factory=ReportConfig)
+    observability: ObservabilityConfig = field(default_factory=ObservabilityConfig)
+
+
+def _build_section(cls, data: dict[str, Any] | None) -> Any:
+    """用 YAML section 字典构造 dataclass，缺失字段用默认值。"""
+    if not data:
+        return cls()
+    known = {f for f in cls.__dataclass_fields__}
+    return cls(**{k: v for k, v in data.items() if k in known})
+
+
+def load_config(path: str | os.PathLike | None = None) -> AppConfig:
+    """加载配置。
+
+    Args:
+        path: 配置文件路径。为 None 时优先读环境变量 COMPETITOR_AGENT_CONFIG，
+            否则用默认 config/review_config.yaml。
+    """
+    cfg_path = Path(path) if path else Path(os.environ.get(_CONFIG_ENV, _DEFAULT_CONFIG_PATH))
+    if not cfg_path.exists():
+        raise FileNotFoundError(f"配置文件不存在: {cfg_path}")
+
+    with open(cfg_path, "r", encoding="utf-8") as f:
+        raw = yaml.safe_load(f) or {}
+
+    return AppConfig(
+        api_base_url=raw.get("api_base_url", "https://api.openai.com/v1"),
+        model=raw.get("model", "deepseek-v4-flash"),
+        temperature=raw.get("temperature", 0.1),
+        max_tokens=raw.get("max_tokens", 2048),
+        budget=_build_section(BudgetConfig, raw.get("budget")),
+        termination=_build_section(TerminationConfig, raw.get("termination")),
+        dimensions=_build_section(DimensionsConfig, raw.get("dimensions")),
+        collector=_build_section(CollectorConfig, raw.get("collector")),
+        stop_verifier=_build_section(StopVerifierConfig, raw.get("stop_verifier")),
+        memory=_build_section(MemoryConfig, raw.get("memory")),
+        report=_build_section(ReportConfig, raw.get("report")),
+        observability=_build_section(ObservabilityConfig, raw.get("observability")),
+    )

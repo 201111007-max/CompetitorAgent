@@ -17,6 +17,7 @@ import argparse
 import sys
 from typing import NoReturn
 
+from competitor_agent.config.loader import load_config
 from competitor_agent.core.command_registry import command_dispatch
 from competitor_agent.core.input_sanitizer import sanitize_task
 from competitor_agent.core.task_parser import parse_task
@@ -28,7 +29,7 @@ PROMPT = "competitor> "
 
 
 def _make_api() -> CompetitorAnalysisAPI:
-    return CompetitorAnalysisAPI(llm=LLMClient(), use_llm=True)
+    return CompetitorAnalysisAPI(llm=LLMClient(), use_llm=True, config=load_config())
 
 
 def _print_report(report: CompetitorReport) -> None:
