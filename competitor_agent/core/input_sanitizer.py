@@ -14,9 +14,13 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-# @file: 引用允许的根目录（限制路径穿越，见风险 R25）
-_REFERENCE_ROOTS: tuple[str, ...] = ("reports", "docs", "tests", "competitor_agent")
-_MAX_REFERENCE_BYTES = 20000
+from competitor_agent.agent.prompts.trust_boundary import wrap_untrusted
+
+# @file: 引用允许的数据目录（仅数据文件，禁止源码/配置/凭据，见风险 R25）
+_ALLOWED_REF_DIRS: tuple[str, ...] = ("evaluation/cases", "reports/templates")
+# 仅允许数据类扩展名，禁止 .py/.toml/.env 等源码或配置
+_ALLOWED_REF_EXTENSIONS: frozenset[str] = frozenset({".md", ".txt", ".json", ".yaml"})
+_MAX_REFERENCE_BYTES = 64 * 1024  # 64KB
 
 
 def sanitize_surrogates(text: str) -> str:
@@ -55,11 +59,15 @@ def strip_terminal_leaks(text: str) -> str:
 
 
 def expand_references(text: str, base_dir: str | None = None) -> str:
-    """展开 @file:path 引用：将本地文件内容作为分析上下文嵌入。
+    """展开 @file:path 引用：将本地数据文件内容作为分析上下文嵌入。
 
-    路径以 base_dir 项目中白名单子目录为根，防止路径穿越（R25）；
-    文件过大或不存在的引用保留原文，不崩溃。
-    支持相对路径（相对 base_dir）与项目内绝对路径。
+    仅允许读取白名单数据目录（evaluation/cases、reports/templates）内的
+    数据类文件（.md/.txt/.json/.yaml），且大小不超过 64KB；源码/配置/凭据
+    一律拒绝。路径以 base_dir 为根，防止路径穿越（R25）。读取内容包裹为
+    不可信数据块（提示注入防护，见设计文档 06）。
+
+    不合规、过大或不存在的引用静默跳过（保留原文，不读取、不报错），
+    避免信息泄露。
     """
     if "@file:" not in text:
         return text
@@ -74,44 +82,33 @@ def expand_references(text: str, base_dir: str | None = None) -> str:
             if not path.is_absolute():
                 path = root / path
             path = path.resolve()
-            # 限定在白名单子目录内，防穿越
-            if not _within_allowed_roots(path, root):
+            # 限定在数据白名单目录内，防穿越
+            if not _within_allowed_dirs(path, root):
+                return match.group(0)
+            if path.suffix.lower() not in _ALLOWED_REF_EXTENSIONS:
                 return match.group(0)
             if not path.is_file():
                 return match.group(0)
             if path.stat().st_size > _MAX_REFERENCE_BYTES:
                 return match.group(0)
             content = path.read_text(encoding="utf-8", errors="replace")
-            return f"[文件 {raw}]\n{content}\n[/文件]"
+            return wrap_untrusted(content, source_url=str(path))
         except OSError:
             return match.group(0)
 
     return pattern.sub(_replace, text)
 
 
-def _within_allowed_roots(path: Path, root: Path) -> bool:
+def _within_allowed_dirs(path: Path, root: Path) -> bool:
     root_resolved = root.resolve()
-    for rel in _REFERENCE_ROOTS:
+    for rel in _ALLOWED_REF_DIRS:
         candidate = (root_resolved / rel).resolve()
         try:
             path.relative_to(candidate)
             return True
         except ValueError:
             continue
-    # 允许直接指向 root 下已存在文件（reports/ 等仍受限）
-    try:
-        path.relative_to(root_resolved)
-    except ValueError:
-        return False
-    return _file_under_whitelisted_rel(path, root_resolved)
-
-
-def _file_under_whitelisted_rel(path: Path, root: Path) -> bool:
-    try:
-        rel = path.relative_to(root).parts
-    except ValueError:
-        return False
-    return bool(rel) and rel[0] in _REFERENCE_ROOTS
+    return False
 
 
 def sanitize_task(task: str, base_dir: str | None = None) -> str:
