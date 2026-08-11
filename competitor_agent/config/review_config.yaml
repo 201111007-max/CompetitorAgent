@@ -71,3 +71,10 @@ observability:
   langfuse_enabled: false
   langfuse_public_key_env: "LANGFUSE_PUBLIC_KEY"
   langfuse_secret_key_env: "LANGFUSE_SECRET_KEY"
+
+# ===== 安全（Web/MCP）=====
+# auth_token 优先从环境变量 COMPETITOR_AUTH_TOKEN 读取，此处留空表示本地开发模式。
+security:
+  cors_origins:
+    - "http://localhost:8000"
+  auth_token: ""
