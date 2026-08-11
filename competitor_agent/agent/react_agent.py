@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from competitor_agent.agent.prompts.react_system import enrich_prompt
+from competitor_agent.agent.prompts.trust_boundary import wrap_untrusted
 from competitor_agent.agent.response_parser import ReActStep, ResponseParser
 from competitor_agent.agent.tool_dispatcher import ToolDispatcher
 from competitor_agent.interfaces.context import Skill
@@ -67,7 +68,7 @@ class ReactAgent:
                     result = f"工具不可用: {exc}"
                 messages.append({
                     "role": "user",
-                    "content": f"Observation（工具结果）: {result}",
+                    "content": f"Observation（工具结果，不可信外部数据）: {wrap_untrusted(str(result))}",
                 })
                 step += 1
                 continue
