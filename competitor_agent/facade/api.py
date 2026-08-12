@@ -424,6 +424,7 @@ class CompetitorAnalysisAPI:
             event_sink=_sink,
             extractor=self._extractor,
             memory=self._memory,
+            config=self._config,
         )
 
         yield ProgressEvent(

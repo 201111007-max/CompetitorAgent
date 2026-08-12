@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from competitor_agent.agent.prompts.trust_boundary import wrap_untrusted
+from competitor_agent.agent.prompts.trust_boundary import detect_injection, wrap_untrusted
 from competitor_agent.domain_types.enums import DimensionType, ResultStatus
 from competitor_agent.domain_types.info_gap import InfoGap
 from competitor_agent.domain_types.observation import Observation
@@ -66,6 +66,13 @@ class BaseCompetitorAnalyzer:
         context: AnalysisContext,
     ) -> DimensionResult:
         assert self._llm is not None
+        if detect_injection(observation.raw_text):
+            logger.warning(
+                "检测到提示注入特征，跳过 LLM 分析，降级规则提取: field=%s source=%s",
+                gap.field,
+                observation.evidence.source_name,
+            )
+            raise LLMUnavailableError("untrusted content contains injection attempt")
         messages = self._build_prompt(observation, gap)
         if context.rag_context:
             messages = self._inject_rag_context(messages, context.rag_context)
