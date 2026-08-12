@@ -420,6 +420,7 @@ class CompetitorAnalysisAPI:
         """流式分析：逐条 yield ProgressEvent（供 Web SSE 消费）"""
         sid = session_id or f"sess_{uuid.uuid4().hex[:8]}"
 
+
         yield ProgressEvent(
             event="session_started",
             phase="init",
