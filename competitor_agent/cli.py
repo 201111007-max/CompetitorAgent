@@ -20,8 +20,8 @@ from typing import NoReturn
 from competitor_agent.config.loader import load_config
 from competitor_agent.core.command_registry import command_dispatch
 from competitor_agent.core.input_sanitizer import sanitize_task
-from competitor_agent.core.task_parser import parse_task
-from competitor_agent.domain_types.report import CompetitorReport
+from competitor_agent.core.task_parser import ResolutionDecision, parse_task
+from competitor_agent.domain_types.report import ComparisonReport, CompetitorReport
 from competitor_agent.facade.api import CompetitorAnalysisAPI
 from competitor_agent.llm.client import LLMClient
 
@@ -29,7 +29,7 @@ PROMPT = "competitor> "
 
 
 def _make_api() -> CompetitorAnalysisAPI:
-    return CompetitorAnalysisAPI(llm=LLMClient(), use_llm=True, config=load_config())
+    return CompetitorAnalysisAPI(llm=LLMClient(model=load_config().model, base_url=load_config().api_base_url), use_llm=True, config=load_config())
 
 
 def _print_report(report: CompetitorReport) -> None:
@@ -38,23 +38,36 @@ def _print_report(report: CompetitorReport) -> None:
         print(f"\n[提示] {len(report.gaps_pending)} 个缺口未关闭，可用 /resume 继续。")
 
 
-def _run_analyze(api: CompetitorAnalysisAPI, args: str, out_dir: str | None = None, mode: str = "team") -> None:
+def _run_analyze(
+    api: CompetitorAnalysisAPI,
+    args: str,
+    out_dir: str | None = None,
+    mode: str = "team",
+    llm: LLMClient | None = None,
+    use_llm: bool = False,
+) -> None:
     """analyze 子命令 + /analyze 处理器"""
     args = sanitize_task(args.strip())
     if not args:
         print("用法: analyze <竞品或任务>")
         return
-    parsed = parse_task(args, llm=LLMClient(), use_llm=True)
-    if parsed.is_compare and len(parsed.competitors) >= 2:
-        report = api.compare(parsed.competitors[0], parsed.competitors[1])
+    parsed = parse_task(args, llm=llm, use_llm=use_llm)
+    markdown = ""
+    name = parsed.primary_competitor
+    if parsed.resolution == ResolutionDecision.DISCOVERY:
+        # 市场普查/发现：联网发现竞品 → 逐个分析 → 品类格局报告
+        report = api.discover(args)
         markdown = report.markdown_report
         print(markdown)
-        name = parsed.primary_competitor
+    elif parsed.is_compare and len(parsed.competitors) >= 2:
+        report = api.compare(*parsed.competitors)
+        markdown = report.markdown_report
+        print(markdown)
+        name = "compare"
     else:
         rep = api.analyze(args, mode=mode)
         _print_report(rep)
         markdown = rep.markdown_report
-        name = parsed.primary_competitor
     if out_dir:
         _save_markdown(markdown, name, out_dir)
 
@@ -123,11 +136,11 @@ def _run_help(args: str) -> None:
         print(f"  /{cmd.name:9s} {cmd.args_hint}")
 
 
-def _repl(api: CompetitorAnalysisAPI) -> NoReturn:
+def _repl(api: CompetitorAnalysisAPI, llm: LLMClient | None = None, use_llm: bool = False) -> NoReturn:
     """交互 REPL：斜杠命令路由 + 自由文本任务"""
     print("competitor_agent 交互模式（输入 /help 查看命令，Ctrl+C / Ctrl+D 退出）")
     handlers = {
-        "analyze": lambda a: _run_analyze(api, a),
+        "analyze": lambda a: _run_analyze(api, a, llm=llm, use_llm=use_llm),
         "compare": lambda a: _run_compare_repl(api, a),
         "history": lambda a: _run_history(api, a),
         "resume": lambda a: _run_resume(api, a),
@@ -147,7 +160,7 @@ def _repl(api: CompetitorAnalysisAPI) -> NoReturn:
         handled = command_dispatch(line, handlers)
         if handled:
             continue
-        _run_analyze(api, line)
+        _run_analyze(api, line, llm=llm, use_llm=use_llm)
 
 
 def _run_compare_repl(api: CompetitorAnalysisAPI, args: str) -> None:
@@ -189,17 +202,19 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     api = _make_api()
+    llm = LLMClient(model=load_config().model, base_url=load_config().api_base_url)
+    use_llm = True
 
     if args.resume_id:
         _run_resume(api, args.resume_id)
         return 0
     if args.oneshot:
-        _run_analyze(api, args.oneshot)
+        _run_analyze(api, args.oneshot, llm=llm, use_llm=use_llm)
         return 0
 
     if args.command == "analyze":
         task = " ".join(args.task)
-        _run_analyze(api, task, out_dir=args.out_dir, mode=args.mode)
+        _run_analyze(api, task, out_dir=args.out_dir, mode=args.mode, llm=llm, use_llm=use_llm)
         return 0
     if args.command == "history":
         reports = api.get_history(args.competitor)
@@ -214,7 +229,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     # 无子命令 → 交互 REPL
-    _repl(api)
+    _repl(api, llm=llm, use_llm=use_llm)
     return 0
 
 

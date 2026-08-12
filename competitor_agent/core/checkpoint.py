@@ -13,6 +13,7 @@ import logging
 import os
 import threading
 import uuid
+import weakref
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -161,8 +162,8 @@ class CheckpointLock:
         self._fh = None
 
 
-# 进程内锁：同一进程内按 session 串行化 checkpoint 写
-_session_locks: dict[str, threading.Lock] = {}
+# 进程内锁：同一进程内按 session 串行化 checkpoint 写（弱引用自动回收，防泄漏）
+_session_locks: weakref.WeakValueDictionary[str, threading.Lock] = weakref.WeakValueDictionary()
 _session_locks_guard = threading.Lock()
 
 

@@ -441,4 +441,143 @@ dev:
 2. 修复 Web 取消的 session_id 断链 bug。
 3. 让配置 YAML 真正注入运行时（限流/并行/tracing）。
 4. 补端到端集成测试，让 benchmark 跑真实 LLM。
-5. 补提示注入防护与认证鉴权。
+  5. 补提示注入防护与认证鉴权。
+
+---
+
+## 12. 面向 AI coding 工具的竞品分析能力缺口（产品级）
+
+> 以下为把项目视作「**面向 AI coding 工具的竞品分析 Agent**」（对标 Claude Code / Cursor / Windsurf / Copilot / Cline / Aider）时，
+> 在产品/能力层面的不足。与第 11 节（代码接线/工程审查）互补：第 11 节是"宣称能力没接进主流程"，
+> 本节是"即使接好，能力本身也不足以覆盖 AI coding 工具竞品分析"。
+> 优先级判定基于"对竞品报告可信度与差异化的影响"。
+
+### 12.1 P0 — 数据入口太窄 + 关键维度裸奔
+
+| # | 问题 | 位置 | 说明 |
+|---|------|------|------|
+| 1 | **数据源只认官网** | `collector/source_selector.py:15-96` | `candidates()` 仅用 `competitor.official_links`（pricing/home/docs/changelog）+ 同一 URL 的 SPA 兜底。对所有维度最终只抓官网页面。但 AI coding 工具最有价值的信号在官网之外：GitHub Releases、VS Code/JetBrains 插件市场评分与下载、SWE-bench/Aider polyglot/Terminal-Bench 榜单、社区（HN/Reddit/X/YouTube）、底层模型定价。MCP 已有 `github`/`benchmark`/`review` 工具，但 `SourceSelector` 从不会把缺口路由过去 |
+| 2 | **ecosystem / sentiment 无专属分析器** | `analyzers/`（仅 `feature`/`performance`/`pricing`/`fallback`） | `DIMENSION_PRIORITY` 有 6 维度（`core/strategic_loop.py:28`），但 `ecosystem`（MCP server/扩展/IDE 支持/agentic tool-use/集成）与 `sentiment`（社区口碑）无专属分析器 → 落到 `FallbackAnalyzer` 做通用 LLM 总结。对 AI coding 工具，这两点恰是关键差异化，却被最弱的处理 |
+
+### 12.2 P1 — 对比/性能/时效三类硬伤
+
+| # | 问题 | 位置 | 说明 |
+|---|------|------|------|
+| 3 | **对比仅支持两两** | `facade/api.py:637` `compare(self, a, b=None)` | 无 N 向品类矩阵（多工具同维度并排）、无"每维度最佳/品类格局"汇总视图 |
+| 4 | **性能数字靠 LLM 读网页** | `analyzers/performance_analyzer.py` | 测试可解析 "SWE-bench: 62%"（`tests/.../test_analyzers.py:75`），但**无直连榜单源**，完全依赖网页恰好提到该数字 → 对快速变动工具，数字易缺失/过时 |
+| 5 | **无新鲜度/陈旧度管理** | `core/checkpoint.py`、`memory/*` | `roadmap → ["docs","changelog","home"]`（`source_selector.py:21`）只是抓官方 changelog URL，无真正发布/版本追踪；无"结论已 N 天"检测、无自动重爬、无竞品时间线（四层记忆存 source 成功率而非时序） |
+
+### 12.3 P2 — 建模与交付偏弱
+
+| # | 问题 | 位置 | 说明 |
+|---|------|------|------|
+| 6 | **定价分层/用量建模弱** | `analyzers/pricing_analyzer.py` | AI coding 工具普遍 免费档/Pro/Business/Enterprise + 按量（请求/模型档位）混合；测试覆盖轻，易只抓标价、漏真实成本结构 |
+| 7 | **无趋势/时序** | `core/report_builder.py`、`markdown_renderer.py` | 报告为时间点快照，无竞品变化追踪（"Cursor 于 X 日加 background agents"） |
+| 8 | **输出仅 Markdown** | `core/report_builder.py` → `markdown_renderer.py` | 无结构化 JSON/矩阵导出、无定时跑、无"竞品异动"告警 |
+| 9 | **评测有盲区** | `evaluation/benchmark.py`、`tests/evaluation/fixtures/` | 真实执行 + 幻觉率指标是亮点，但 ground-truth fixture 偏通用；对"是否正确刻画 agentic 能力/生态/口碑"覆盖不足——而这恰是当前最弱的分析器（见 12.1 #2） |
+
+### 12.4 建议落地顺序（与第 11 节协同）
+
+1. **扩 SourceSelector 路由**（最高杠杆）：把 `github`/`benchmark`/`review` MCP 工具 + 新增 `changelog`/`marketplace`/`social` 源接进缺口→源映射；可复用第 11.6 #1 已指出但"未接线"的 RAG/team 基础设施承接多源结果。
+2. **补 `EcosystemAnalyzer` 与 `SentimentAnalyzer`**：别再走 fallback（对应 12.1 #2）。
+3. **N 向对比矩阵 + 品类格局视图**（对应 12.2 #3）。
+4. **新鲜度/陈旧度 + 定时重爬 + 竞品时间线**（对应 12.2 #5、12.3 #7）。
+5. **直连榜单源**拉性能数字，而非靠 LLM 读网页（对应 12.2 #4）。
+6. **结构化输出 + 定时/告警**（对应 12.3 #8）；并扩充评测 fixture 覆盖生态/口碑维度（对应 12.3 #9）。
+
+> 注：第 11 节的"RAG 未接线 / analyze_team 死代码 / ParallelRunner 未接入"若先修复，
+> 本节的"多源采集""N 向对比""生态分析"可直接建于其上，避免重复造轮子。
+
+---
+
+## 13. P0 — 自主发现竞品 + 多竞品并排对比（产品能力，用户已确认）
+
+> 触发：用户实测输入「帮我寻找现在市场上所有的ai coding agent并进行分析」→ 报告 0 维度。
+> 根因：`resolve_competitor`（`core/competitor_registry.py:84`）要求用户输入**具体竞品名**才能分析；
+> 匹配不到注册表时退化为 ASCII 提取，把整句话拼成假竞品 `ai-coding-agent`（无 `official_links`）
+> → `SourceSelector` 0 候选 → 6 缺口全 BLOCKED → 0 维度。且 `compare()`（`facade/api.py:637`，`compare(self, a, b=None)`）
+> 仅支持**两两**对比。用户明确诉求：Agent 应具备**自主搜索发现竞品**的能力，且支持**多个同时对比**（N 向）。
+
+### 目标
+1. **自主搜索发现竞品**：任务未含可识别竞品名（"所有 AI coding agent""市场上有谁""对比主流工具"）时，
+   Agent 能自主联网检索（Web 搜索 / MCP 搜索类工具）枚举候选竞品清单（名称 + 官网），再逐个分析，
+   而非把整句拼成假竞品导致 0 维度。
+2. **N 向并排对比**：一次传入多个竞品（≥2，不限 2 个），产出"品类格局矩阵"
+   （维度 × 竞品表 + 每维度最佳/最差/汇总视图），而非仅 A vs B。
+
+### 步骤清单（P0）
+
+| # | 任务 | 交付物 | 验证方式 |
+|---|------|--------|----------|
+| 13.1 | 竞品自主发现器 `core/competitor_discoverer.py` | 输入自由任务 → 联网检索候选竞品列表（名称+官网），返回 `list[Competitor]`；注册表命中优先，未知则搜索补全 | 单测：mock 搜索返回 N 个；"所有 AI coding agent" 不再产出 `ai-coding-agent` |
+| 13.2 | `resolve_competitor` / `resolve_competitors` 改造 | 无匹配且判定为"市场普查/发现"意图时改走发现器；保留单竞品精确解析 | 集成：模糊/普查任务产出真实候选而非假竞品 |
+| 13.3 | N 向对比 `facade/api.py: compare(self, *competitors)` 或 `compare(list)` | 支持 ≥2 竞品；`report_builder` / `markdown_renderer` 产出品类矩阵（维度 × 竞品表 + 每维度最佳） | 集成：`compare("Cursor","Claude Code","Copilot","Codex")` 出多维并排报告 |
+| 13.4 | Web 前端支持多竞品输入 | 输入框支持逗号/换行分隔多个竞品；「开始分析」走 N 向对比或逐个；普查类任务提示"将自动发现竞品" | 浏览器：输入多个竞品出对比视图；普查任务不再 0 维度 |
+| 13.5 | 发现场景数据源 | 发现器用搜索 / MCP（`web` / `github` / `review` 工具）而非仅 `official_links`；与第 12.1 #1 协同复用 `SourceSelector` 路由 | 发现链路可枚举候选并采集 |
+
+### 出口条件
+- "分析所有 AI coding agent"类任务不再 0 维度，能枚举并分析多个竞品。
+- 单次可对比 ≥3 竞品，报告含品类格局矩阵（每维度最佳/汇总）。
+
+### 依赖
+- 第 12.1 #1（扩 `SourceSelector` 路由）、第 11 节 RAG / team 若先修复更佳；
+  发现器依赖可用的搜索/MCP 源（LLM Key 配置后可由 LLM 辅助归纳候选，见第 2 项 DeepSeek 配置）。
+
+---
+
+## 14. P0 — 日志完善功能（可观测性补齐）
+
+> 触发：本次"0 维度"排查中，detached 服务器 stdout 被缓冲、分析过程日志不落地，定位极难；
+> 且全链路缺少结构化追踪（竞品识别 / 选源 / 采集状态 / 分析置信度 / 终止原因 / LLM 成本）。
+
+### 目标
+补齐端到端可观测性，使任意一次分析的全过程可回溯、"0 维度"类问题一眼可定位：
+1. **结构化日志**：统一格式（建议 JSON 或 `request_id` 行日志），覆盖一次分析的完整链路。
+2. **每分析独立日志文件**：按 `session_id` 落盘到 `~/.competitor_agent/logs/`，便于事后复盘。
+3. **关键节点埋点**：任务解析结果、竞品识别、每个缺口的选源 / 采集（url + HTTP 状态 + 字节数）/ 分析（模型 + token + 耗时 + 置信度）、终止原因、报告维度计数。
+4. **LLM 调用日志（脱敏）**：模型、`base_url`、输入/output token、耗时、成本（对接 `BudgetController`）；**不落 prompt 全文、不落密钥**。
+5. **实时刷新 / 不缓冲**：确保 detached / 重定向场景下日志即时 flush（修复本次"日志看不到"问题）。
+6. **Web 端点暴露**：`/api/logs/{session_id}` 或前端可查看当前 / 历史分析日志流。
+
+### 步骤清单（P0）
+
+| # | 任务 | 交付物 | 验证方式 |
+|---|------|--------|----------|
+| 14.1 | 统一 logger + handler（`observability/logger.py` 增强） | 结构化格式、`request_id` 注入、文件 + 控制台双出口、强制 flush | 单测：输出含字段；重定向下即时落盘 |
+| 14.2 | 会话级日志文件 | 每次 `analyze` 建 `logs/<session_id>.log`，分析结束归档 | 集成：跑一次后文件存在且含全链路 |
+| 14.3 | 埋点接入 | 在 `task_parser` / `strategic_loop` / `source_selector` / `gap_executor` / `analyzers` / `report_builder` 关键路径打日志 | 日志含"竞品识别 / 选源 / 采集状态 / 分析置信度 / 终止原因" |
+| 14.4 | LLM 调用日志（脱敏） | 记录模型 / `base_url` / token / 耗时 / 成本，prompt 仅记长度不记全文 | 含成本字段；无密钥 / 长文本泄漏 |
+| 14.5 | Web 日志端点 | `/api/logs/{session_id}` 返回该次分析日志；前端可切换查看 | 浏览器可看历史分析日志 |
+
+### 出口条件
+- 任意一次分析的全过程可在日志文件 / Web 端点完整回溯；"0 维度"类问题一眼可定位（如"竞品未识别 / 无候选源"）。
+- detached 服务器日志实时可见，不再因缓冲丢失。
+
+### 依赖
+- `observability/logger.py`（已有基础）、`config/loader.py` 的 `observability.log_level` 应真正注入（呼应第 11.2 #5 配置未加载）。
+
+---
+
+## 15. P0 — Web 端显示 / 导出报告（待办，用户已确认）
+
+> 触发：用户在 Web UI 跑出「报告生成完成，N 维度」后，页面只显示状态行，**报告正文不展示、也不导出文件**；
+> 报告仅存档于 L1 记忆 JSON（`~/.competitor_agent/memory/memory/session_archive.json` 的 `raw.markdown_report`），看不到也拿不到。
+
+### 目标
+1. **Web 端展示报告正文**：`report` 事件的 SSE payload 携带 `markdown_report`，前端把 Markdown 渲染为可读报告（而非仅状态日志）。
+2. **一键导出 / 自动落盘**：分析完成自动保存为 `reports/competitor/<竞品>.md`（对齐 `config.report.output_dir`）；前端提供"下载 / 复制"入口。
+
+### 步骤清单（P0 待办）
+
+| # | 任务 | 交付物 | 验证方式 |
+|---|------|--------|----------|
+| 15.1 | SSE 携带报告正文 | `web_app.py` 的 `report` 事件 `payload` 增加 `markdown_report` 字段 | 单测：事件 payload 含正文 |
+| 15.2 | 前端渲染 Markdown | `index()` 页面在 `report` 事件后把 `markdown_report` 渲染为 HTML（前端 Markdown 解析或后端预渲染）；保留实时进度日志 | 浏览器：分析完直接在页面看到完整报告 |
+| 15.3 | 自动落盘报告文件 | `facade/api.py` 或 `web_app.py` 分析结束写 `reports/competitor/<竞品>.md`（复用 `report.output_dir`） | 集成：跑一次后文件存在 |
+| 15.4 | 前端导出入口 | 报告区提供「复制 Markdown」「下载 .md」按钮 | 浏览器可导出 |
+
+### 出口条件
+- Web 分析完成后，报告正文直接在页面可读，且 `reports/competitor/<竞品>.md` 自动生成可下载。
+
+### 依赖
+- 与 §14 日志完善可共用"分析完成"钩子；落盘路径复用 `config.report.output_dir`（呼应第 11.2 #5 配置未加载，应输出到该目录）。

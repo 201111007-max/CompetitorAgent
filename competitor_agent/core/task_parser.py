@@ -14,6 +14,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import TYPE_CHECKING
 
 from competitor_agent.core.competitor_registry import resolve_competitors
@@ -36,6 +37,25 @@ DIMENSION_KEYWORDS: dict[str, list[str]] = {
 # 只分析 X 的触发词（出现才产出维度白名单；否则全部维度）
 _RESTRICT_MARKERS = ("只分析", "仅分析", "只看", "只关注", "only analyze", "just analyze")
 
+# 市场普查/发现意图触发词（规则版弱推断 resolution=DISCOVERY；主决策交给 LLM）
+_DISCOVERY_MARKERS = (
+    "所有",
+    "全部",
+    "有哪些",
+    "哪些",
+    "盘点",
+    "市场",
+    "市面上",
+    "现在市场上的",
+    "帮我找",
+    "帮我寻找",
+    "discover",
+    "find all",
+    "list all",
+    "top ai coding",
+    "best ai coding",
+)
+
 # 自定义数据源模式：官网/定价页/文档页 → URL
 _SOURCE_URL_PATTERNS: dict[str, re.Pattern[str]] = {
     "home": re.compile(r"(?:官网|首页|主页)(?:地址|链接|是)?[:：]?\s*(https?://\S+)"),
@@ -45,11 +65,22 @@ _SOURCE_URL_PATTERNS: dict[str, re.Pattern[str]] = {
 
 _LLM_PARSE_PROMPT = (
     "你是竞品分析任务的语义解析器。从用户任务中提取结构化信息，只输出 JSON，不要其他文字。"
-    'JSON 格式：{"competitors": ["竞品规范名1", "竞品规范名2（对比才有）"], '
+    'JSON 格式：{"resolution": "registry" 或 "discovery" 或 "compare", '
+    '"competitors": ["竞品规范名1", "竞品规范名2（对比才有）"], '
     '"dimensions": ["维度名"] 或 null（null 表示全部维度，'
     '["pricing","performance","feature","ecosystem","sentiment","roadmap"] 之一），'
     '"custom_sources": {"home或pricing或docs": "用户提供的URL"}}。'
+    "resolution 判定：任务点名具体竞品=registry；任务是市场普查/发现（如"
+    "'所有 AI coding agent''有哪些''盘点'）=discovery；任务点名 ≥2 个竞品做对比=compare。"
 )
+
+
+class ResolutionDecision(str, Enum):
+    """解析决策：走注册表匹配 / 联网发现 / N 向对比（设计文档 20，由 LLM 决定）"""
+
+    REGISTRY = "registry"
+    DISCOVERY = "discovery"
+    COMPARE = "compare"
 
 
 @dataclass
@@ -60,10 +91,15 @@ class TaskParseResult:
     dimensions: list[str] | None = None  # None = 全部维度
     custom_sources: dict[str, str] = field(default_factory=dict)
     raw_task: str = ""
+    resolution: ResolutionDecision = ResolutionDecision.REGISTRY  # LLM 决定，规则版弱推断
 
     @property
     def is_compare(self) -> bool:
-        return len(self.competitors) >= 2
+        return self.resolution == ResolutionDecision.COMPARE or len(self.competitors) >= 2
+
+    @property
+    def is_discovery(self) -> bool:
+        return self.resolution == ResolutionDecision.DISCOVERY
 
     @property
     def primary_competitor(self) -> str:
@@ -87,18 +123,29 @@ def parse_task(
 
 
 def _parse_task_rule(task: str) -> TaskParseResult:
-    """规则版：对比拆分 + 维度白名单 + 自定义源"""
+    """规则版：对比拆分 + 维度白名单 + 自定义源 + 弱推断 resolution"""
     competitors = [c.name for c in resolve_competitors(task)]
     return TaskParseResult(
         competitors=competitors,
         dimensions=_extract_dimensions(task),
         custom_sources=_extract_custom_sources(task),
         raw_task=task,
+        resolution=_infer_resolution(task, competitors),
     )
 
 
+def _infer_resolution(task: str, competitors: list[str]) -> ResolutionDecision:
+    """规则版弱推断 resolution（主决策在 LLM；此处仅无 Key 降级路径）"""
+    lowered = task.lower()
+    if len(competitors) >= 2:
+        return ResolutionDecision.COMPARE
+    if any(marker in lowered for marker in _DISCOVERY_MARKERS):
+        return ResolutionDecision.DISCOVERY
+    return ResolutionDecision.REGISTRY
+
+
 def _parse_task_llm(task: str, llm: LLMClient) -> TaskParseResult:
-    """LLM 版：一次轻量 JSON 调用解析结构"""
+    """LLM 版：一次轻量 JSON 调用解析结构（含 resolution 决策）"""
     raw = llm.complete(
         messages=[
             {"role": "system", "content": _LLM_PARSE_PROMPT},
@@ -115,11 +162,21 @@ def _parse_task_llm(task: str, llm: LLMClient) -> TaskParseResult:
     custom_sources = {
         str(k): str(v) for k, v in data.get("custom_sources", {}).items()
     }
+    # LLM 决策 resolution；畸形/缺失回退规则弱推断（不崩溃）
+    resolution = ResolutionDecision.REGISTRY
+    res_raw = str(data.get("resolution", "")).strip().lower()
+    for candidate in ResolutionDecision:
+        if candidate.value == res_raw:
+            resolution = candidate
+            break
+    else:
+        resolution = _infer_resolution(task, competitors)
     return TaskParseResult(
         competitors=competitors,
         dimensions=dimensions,
         custom_sources=custom_sources,
         raw_task=task,
+        resolution=resolution,
     )
 
 
@@ -153,4 +210,4 @@ def _extract_custom_sources(task: str) -> dict[str, str]:
     return sources
 
 
-__all__ = ["DIMENSION_KEYWORDS", "TaskParseResult", "parse_task"]
+__all__ = ["DIMENSION_KEYWORDS", "ResolutionDecision", "TaskParseResult", "parse_task"]

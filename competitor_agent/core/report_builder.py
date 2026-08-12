@@ -4,7 +4,7 @@ from __future__ import annotations
 from competitor_agent.core.markdown_renderer import MarkdownRenderer
 from competitor_agent.domain_types.competitor import Competitor
 from competitor_agent.domain_types.info_gap import InfoGap
-from competitor_agent.domain_types.report import CompetitorReport, DimensionResult
+from competitor_agent.domain_types.report import ComparisonReport, CompetitorReport, DimensionResult
 from competitor_agent.observability.logger import get_logger
 
 logger = get_logger("core.report_builder")
@@ -60,3 +60,16 @@ class ReportBuilder:
 
     def to_markdown(self, report: CompetitorReport) -> str:
         return self._renderer.render(report)
+
+    def build_comparison(self, reports: list[CompetitorReport]) -> ComparisonReport:
+        """聚合多份单竞品报告为品类格局对比报告（设计文档 20）。
+
+        聚合维度并集、每维度置信度表、每维度最佳/最差、缺失维度标注 N/A，
+        渲染为"维度 × 竞品"品类格局矩阵。
+        """
+        comparison = ComparisonReport(
+            competitors=[r.competitor for r in reports],
+            reports=list(reports),
+        )
+        comparison.markdown_report = self._renderer.render_comparison(comparison)
+        return comparison

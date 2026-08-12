@@ -62,6 +62,15 @@ def mock_llm() -> LLMClient:
     return LLMClient(call_func=BenchmarkMockLLM().complete)
 
 
+@pytest.fixture(autouse=True)
+def _isolate_llm_env():
+    """确保单测不触发真实 LLM 调用：清除 API Key 环境变量"""
+    import os
+
+    for key in ("OPENAI_API_KEY", "DEEPSEEK_API_KEY", "LLM_API_KEY"):
+        os.environ.pop(key, None)
+
+
 @pytest.fixture
 def memory(tmp_path: Path) -> FourLayerMemory:
     return FourLayerMemory(tmp_path / "memory")

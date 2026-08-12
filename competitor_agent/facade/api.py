@@ -37,15 +37,18 @@ from competitor_agent.core.checkpoint import (
     save_checkpoint,
     set_cancel,
 )
+from competitor_agent.core.competitor_discoverer import CompetitorDiscoverer
 from competitor_agent.core.input_sanitizer import sanitize_task
 from competitor_agent.core.report_builder import ReportBuilder
 from competitor_agent.core.stop_verifier import StopVerifier
 from competitor_agent.core.strategic_loop import StrategicPlanner
 from competitor_agent.core.tactical_loop import TacticalLoop
 from competitor_agent.core.task_parser import parse_task
-from competitor_agent.domain_types.enums import TerminalState
+from competitor_agent.domain_types.competitor import Competitor
+from competitor_agent.domain_types.enums import GapStatus, ResultStatus, TerminalState
 from competitor_agent.domain_types.events import ProgressEvent
 from competitor_agent.domain_types.info_gap import InfoGap
+from competitor_agent.domain_types.observation import SourceEvidence
 from competitor_agent.domain_types.report import (
     CancelledResult,
     ComparisonReport,
@@ -80,6 +83,7 @@ class CompetitorAnalysisAPI:
         extractor: WebExtractor | None = None,
         memory: IFourLayerMemory | None = None,
         config: AppConfig | None = None,
+        web_tool: Callable[[str], list[dict]] | None = None,
     ) -> None:
         # 配置注入：显式参数优先，其次 config，最后默认值
         cfg = config or load_config()
@@ -109,6 +113,9 @@ class CompetitorAnalysisAPI:
         self._store = CompetitorStore()
         self._ingester = Ingester(store=self._store)
         self._retriever = Retriever(store=self._store)
+
+        # 竞品发现器（设计文档 20）：仅 DISCOVERY 意图时被调用，web_tool 可注入
+        self._discoverer = CompetitorDiscoverer(llm=llm, use_llm=use_llm, web_tool=web_tool)
 
     def analyze(
         self,
@@ -413,19 +420,6 @@ class CompetitorAnalysisAPI:
         """流式分析：逐条 yield ProgressEvent（供 Web SSE 消费）"""
         sid = session_id or f"sess_{uuid.uuid4().hex[:8]}"
 
-        def _sink(event: ProgressEvent) -> None:
-            self._emit(event)
-
-        api = CompetitorAnalysisAPI(
-            llm=self._llm,
-            use_llm=self._use_llm,
-            max_iterations=self._budget.max_iterations,
-            cost_limit=self._budget.cost_limit,
-            event_sink=_sink,
-            extractor=self._extractor,
-            memory=self._memory,
-        )
-
         yield ProgressEvent(
             event="session_started",
             phase="init",
@@ -436,7 +430,7 @@ class CompetitorAnalysisAPI:
         import asyncio
 
         loop = asyncio.get_running_loop()
-        report = await loop.run_in_executor(None, api.analyze, task, None, "team", sid)
+        report = await loop.run_in_executor(None, self.analyze, task, None, "team", sid)
 
         yield ProgressEvent(
             event="report",
@@ -450,7 +444,7 @@ class CompetitorAnalysisAPI:
             },
         )
 
-        # 归档会话
+        # 归档会话（统一 raw schema，见问题 18）
         if self._memory is not None:
             self._memory.archive_session(
                 AnalysisSession(
@@ -458,8 +452,11 @@ class CompetitorAnalysisAPI:
                     competitor_name=report.competitor.name,
                     session_id=sid,
                     raw={
+                        "markdown_report": report.markdown_report,
                         "terminal_state": report.terminal_state,
                         "dimension_count": len(report.dimension_results),
+                        "competitor_name": report.competitor.name,
+                        "created_at": report.created_at,
                     },
                 )
             )
@@ -472,14 +469,113 @@ class CompetitorAnalysisAPI:
         logger.info("已请求取消会话: %s", session_id)
 
     def resume(self, session_id: str) -> CompetitorReport:
-        """从 checkpoint 恢复未完成的分析会话"""
+        """从 checkpoint 恢复：重建缺口状态与剩余预算，真正重跑未关闭缺口。"""
         cp = load_checkpoint(session_id)
         if cp is None:
             raise ValueError(f"会话 {session_id} 无 checkpoint，无法恢复")
         logger.info("从 checkpoint 恢复会话: %s (%d gaps)", session_id, len(cp.gaps))
-        report = checkpoint_to_report(cp)
+
+        # 1. 重建策略与缺口状态
+        competitor = Competitor(name=cp.competitor_name)
+        gaps = self._reconstruct_gaps_from_checkpoint(cp.gaps)
+        strategy = CompetitorStrategy(competitor=competitor, gaps=gaps)
+
+        # 2. 重建剩余预算（已消耗部分已预置）
+        iteration_budget = IterationBudget(
+            max_iterations=cp.max_iterations,
+            cost_limit=cp.cost_limit,
+        )
+        iteration_budget._used_iterations = cp.iterations_used
+        iteration_budget._used_cost = cp.cost_used
+
+        # 3. 预置已完成维度（不重跑已关闭缺口）
+        completed: list[DimensionResult] = [
+            checkpoint_to_report._result_from_dict(r) if hasattr(checkpoint_to_report, '_result_from_dict') else
+            DimensionResult(
+                dimension=r["dimension"],
+                summary=r.get("summary", ""),
+                details=r.get("details", {}),
+                confidence=r.get("confidence", 0.0),
+                evidence=[
+                    SourceEvidence(
+                        source_name=e["source_name"],
+                        url=e.get("url", ""),
+                        access_time=e.get("access_time", ""),
+                        content_hash=e.get("content_hash", ""),
+                        trust_level=e.get("trust_level", 0.5),
+                    )
+                    for e in r.get("evidence", [])
+                ],
+                timestamp=r.get("timestamp", ""),
+                status=ResultStatus(r.get("status", "partial")),
+            )
+            for r in cp.dimension_results
+        ]
+
+        # 4. 仅重跑未关闭缺口
+        open_gaps = [g for g in strategy.gaps if not g.is_closed]
+        if open_gaps:
+            new_results = self._run_gaps(strategy, iteration_budget, session_id, cp.task)
+            # 合并已关闭维度 + 新完成维度
+            by_dim = {r.dimension: r for r in completed}
+            for r in new_results:
+                by_dim[r.dimension] = r
+            results = list(by_dim.values())
+        else:
+            results = completed
+
+        # 5. 删除 checkpoint（一次性消费），返回当前进度
+        pending = [g for g in strategy.gaps if not g.is_closed]
         delete_checkpoint(session_id)
+
+        report = self._builder.build(
+            competitor=competitor,
+            results=results,
+            gaps_pending=pending,
+            terminal_state="success" if not pending else "partial",
+        )
+
+        if is_cancelled(session_id):
+            logger.info("会话 %s 续跑中再次取消，返回部分结果", session_id)
+            self._emit(ProgressEvent(event="cancelled", phase="report", message="续跑已取消"))
+            return CancelledResult(
+                competitor=report.competitor,
+                dimension_results=report.dimension_results,
+                overall_score=report.overall_score,
+                overall_confidence=report.overall_confidence,
+                gaps_pending=report.gaps_pending,
+                markdown_report=report.markdown_report,
+                terminal_state="cancelled",
+                created_at=report.created_at,
+                cancelled=True,
+            )
+
+        self._emit(ProgressEvent(event="report", phase="report", progress=1.0, message="续跑完成"))
         return report
+
+    @staticmethod
+    def _reconstruct_gaps_from_checkpoint(gaps_data: list[dict]) -> list[InfoGap]:
+        """从 checkpoint gap 字典列表重建 InfoGap 对象（保留 status/confidence/evidence）。"""
+        gaps = []
+        for g in gaps_data:
+            gap = InfoGap(
+                field=g["field"],
+                priority=g.get("priority", 5),
+                confidence=g.get("confidence", 0.0),
+                sources_tried=g.get("sources_tried", []),
+                status=GapStatus(g.get("status", "open")),
+            )
+            for ev in g.get("evidence", []):
+                gap.add_evidence(
+                    SourceEvidence(
+                        source_name=ev.get("source_name", ""),
+                        url=ev.get("url", ""),
+                        content_hash=ev.get("content_hash", ""),
+                        trust_level=ev.get("trust_level", 0.5),
+                    )
+                )
+            gaps.append(gap)
+        return gaps
 
     # ── M4: 历史查询 ──────────────────────────────────────────────────
 
@@ -494,16 +590,11 @@ class CompetitorAnalysisAPI:
         if self._memory is None:
             return []
 
-        if competitor:
-            sessions = self._memory._sessions.retrieve(competitor)  # type: ignore[attr-defined]
-        else:
-            sessions = self._memory.recent_sessions()  # type: ignore[attr-defined]
+        sessions = self._memory.list_sessions(competitor)
 
         reports: list[CompetitorReport] = []
         for s in sessions:
             raw = s.raw if hasattr(s, "raw") else {}
-            from competitor_agent.domain_types.competitor import Competitor
-
             reports.append(
                 CompetitorReport(
                     competitor=Competitor(name=s.competitor_name),
@@ -548,55 +639,71 @@ class CompetitorAnalysisAPI:
                     return competitor.name
         return ""
 
-    def compare(self, a: str, b: str | None = None) -> ComparisonReport:
-        """竞品对比：两个竞品（或一个"对比 A 和 B"任务）→ 对比报告
+    def compare(self, *competitors: str) -> ComparisonReport:
+        """N 向竞品对比（设计文档 20）：接受 ≥2 个竞品（或单个"对比 A 和 B"任务）。
 
-        内部复用 parse_task 的对比拆分；逐个 analyze 后拼装 ComparisonReport。
+        兼容旧签名 compare(a, b=None)：单个参数会被解析（"对比 A 和 B" / "A vs B"）；
+        多个参数逐个作为竞品名处理。逐个 analyze 后聚合为品类格局对比报告。
         """
-        if b is None:
-            parsed = parse_task(a, llm=self._llm, use_llm=self._use_llm)
-            if len(parsed.competitors) >= 2:
-                a_name, b_name = parsed.competitors[0], parsed.competitors[1]
-            else:
-                a_name = parsed.primary_competitor
-                b_name = ""
+        names: list[str] = []
+        if len(competitors) == 1:
+            parsed = parse_task(competitors[0], llm=self._llm, use_llm=self._use_llm)
+            names = list(parsed.competitors)
         else:
-            a_name = parse_task(a, llm=self._llm, use_llm=self._use_llm).primary_competitor
-            b_name = parse_task(b, llm=self._llm, use_llm=self._use_llm).primary_competitor
+            for c in competitors:
+                parsed = parse_task(c, llm=self._llm, use_llm=self._use_llm)
+                primary = parsed.primary_competitor
+                if primary and primary != "unknown" and primary not in names:
+                    names.append(primary)
 
-        if not b_name:
-            raise ValueError("对比需要两个竞品（或用 /compare A 和 B）")
+        if len(names) < 2:
+            raise ValueError("对比需要两个及以上竞品（或用 /compare A 和 B）")
 
-        report_a = self.analyze(a_name)
-        report_b = self.analyze(b_name)
-        markdown = self._build_comparison_markdown(report_a, report_b)
-        return ComparisonReport(
-            competitors=[report_a.competitor, report_b.competitor],
-            reports=[report_a, report_b],
-            markdown_report=markdown,
+        self._emit(
+            ProgressEvent(
+                event="phase_start",
+                phase="compare",
+                message=f"N 向对比 {len(names)} 个竞品: {', '.join(names)}",
+            )
         )
+        reports = [self.analyze(name, mode="team") for name in names]
+        return self._builder.build_comparison(reports)
 
-    def _build_comparison_markdown(
-        self,
-        a: CompetitorReport,
-        b: CompetitorReport,
-    ) -> str:
-        """拼装对比 Markdown（维度 × 竞品表格 + 摘要）"""
-        name_a = a.competitor.name
-        name_b = b.competitor.name
-        lines = [f"# {name_a} vs {name_b} 对比报告", ""]
-        lines.append("| 维度 | 置信度 A | 置信度 B |")
-        lines.append("|------|:--------:|:--------:|")
-        dims_a = {r.dimension: r for r in a.dimension_results}
-        dims_b = {r.dimension: r for r in b.dimension_results}
-        all_dims = list(dict.fromkeys([*dims_a.keys(), *dims_b.keys()]))
-        for dim in all_dims:
-            conf_a = f"{dims_a[dim].confidence:.2f}" if dim in dims_a else "-"
-            conf_b = f"{dims_b[dim].confidence:.2f}" if dim in dims_b else "-"
-            lines.append(f"| {dim} | {conf_a} | {conf_b} |")
-        lines.append("")
-        lines.append(f"总置信度：{a.overall_confidence:.2f} vs {b.overall_confidence:.2f}")
-        return "\n".join(lines)
+    def discover(self, task: str) -> ComparisonReport:
+        """市场普查/发现（设计文档 20）：LLM 判定 DISCOVERY 后被调用。
+
+        CompetitorDiscoverer 联网枚举候选（名称 + 官网，无 Key 走内置兜底清单），
+        逐个 analyze 后合并为品类格局对比报告——根治"所有 X"拼成假竞品导致 0 维度。
+        """
+        competitors = self._discoverer.discover(task)
+        if not competitors:
+            raise ValueError(f"未能发现任何竞品: {task[:60]}")
+        names = [c.name for c in competitors]
+        self._emit(
+            ProgressEvent(
+                event="discovery",
+                phase="strategic",
+                message=f"发现 {len(names)} 个候选竞品: {', '.join(names)}",
+                payload={"candidates": names},
+            )
+        )
+        reports = [self.analyze(self._task_with_sources(c), mode="team") for c in competitors]
+        return self._builder.build_comparison(reports)
+
+    @staticmethod
+    def _task_with_sources(competitor: Competitor) -> str:
+        """把发现竞品的 official_links 注入任务文本，使规划/采集拿到官方源。
+
+        复用 parse_task 的 custom_sources 提取（"官网是 …"/"定价页是 …"），
+        避免发现出的未知竞品因无 official_links 而 0 候选 → 0 维度。
+        """
+        parts = [f"分析 {competitor.name}"]
+        label = {"home": "官网是", "pricing": "定价页是", "docs": "文档是", "changelog": "更新日志是"}
+        for key, text in label.items():
+            url = competitor.official_links.get(key)
+            if url:
+                parts.append(f"{text} {url}")
+        return "，".join(parts)
 
     def continue_analysis(self, session_id: str) -> CompetitorReport:
         """恢复未完成的会话（对齐 hermes -c/--continue 语义）"""
