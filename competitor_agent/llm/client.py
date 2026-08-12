@@ -30,7 +30,7 @@ class LLMClient:
     def __init__(
         self,
         call_func: Callable[..., str] | None = None,
-        model: str = "deepseek-v4-flash",
+        model: str = "deepseek-chat",
         api_key: str | None = None,
         base_url: str | None = None,
     ) -> None:

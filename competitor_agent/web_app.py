@@ -29,8 +29,13 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from competitor_agent import CompetitorAnalysisAPI
 from competitor_agent.config.loader import AppConfig, load_config
 from competitor_agent.core.checkpoint import set_cancel
+from competitor_agent.core.task_parser import ResolutionDecision, parse_task
 from competitor_agent.domain_types.events import ProgressEvent
-from competitor_agent.domain_types.report import CancelledResult, CompetitorReport
+from competitor_agent.domain_types.report import (
+    CancelledResult,
+    ComparisonReport,
+    CompetitorReport,
+)
 from competitor_agent.interfaces.context import AnalysisSession
 from competitor_agent.llm.client import LLMClient
 from competitor_agent.memory.four_layer_memory import FourLayerMemory
@@ -71,16 +76,22 @@ async def _event_generator(
             pass
 
     api_with_sink = CompetitorAnalysisAPI(
-        llm=LLMClient(),
+        llm=LLMClient(model=_config.model, base_url=_config.api_base_url),
         use_llm=True,
         memory=_get_memory(),
         event_sink=_on_event,
         config=load_config(),
     )
 
-    # 启动后台分析任务
-    async def _run_analysis() -> CompetitorReport:
+    # 启动后台分析任务（按 resolution 路由：DISCOVERY→发现对比 / COMPARE→N 向对比 / 其余→单竞品）
+    # 路由用规则解析（不触发真实 LLM/网络；实际分析在 api.discover/analyze 内部再走 LLM）
+    async def _run_analysis() -> CompetitorReport | ComparisonReport:
         loop = asyncio.get_running_loop()
+        parsed = parse_task(task, llm=None, use_llm=False)
+        if parsed.resolution == ResolutionDecision.DISCOVERY:
+            return await loop.run_in_executor(None, api_with_sink.discover, task)
+        if parsed.is_compare and len(parsed.competitors) >= 2:
+            return await loop.run_in_executor(None, api_with_sink.compare, *parsed.competitors)
         return await loop.run_in_executor(None, api_with_sink.analyze, task, None, "team", session_id)
 
     analysis_task = asyncio.create_task(_run_analysis())
@@ -133,30 +144,71 @@ async def _event_generator(
                     "terminal_state": "cancelled",
                 },
             ).to_sse()
-        else:
+            return
+
+        if isinstance(report, ComparisonReport):
+            # 多竞品对比/发现：聚合维度 + 整份矩阵 Markdown
+            all_dims = [
+                r.dimension for rep in report.reports for r in rep.dimension_results
+            ]
             yield ProgressEvent(
                 event="report",
                 phase="report",
                 progress=1.0,
-                message=f"报告生成完成，{len(report.dimension_results)} 个维度",
+                message=f"对比报告生成完成，{len(report.reports)} 个竞品 / {len(set(all_dims))} 个维度",
                 payload={
-                    "competitor": report.competitor.name,
-                    "terminal_state": report.terminal_state,
-                    "overall_confidence": report.overall_confidence,
-                    "dimensions": [r.dimension for r in report.dimension_results],
+                    "competitor": " / ".join(c.name for c in report.competitors),
+                    "terminal_state": "compare",
+                    "overall_confidence": max(
+                        (r.overall_confidence for r in report.reports), default=0.0
+                    ),
+                    "dimensions": list(dict.fromkeys(all_dims)),
+                    "markdown_report": report.markdown_report,
+                    "is_comparison": True,
                 },
             ).to_sse()
+            # 归档会话
+            _get_memory().archive_session(
+                AnalysisSession(
+                    task=task,
+                    competitor_name=" / ".join(c.name for c in report.competitors),
+                    session_id=session_id,
+                    raw={
+                        "markdown_report": report.markdown_report,
+                        "terminal_state": "compare",
+                        "dimension_count": len(set(all_dims)),
+                        "competitor_name": " / ".join(c.name for c in report.competitors),
+                        "created_at": report.created_at,
+                    },
+                )
+            )
+            return
 
-        # 归档会话
+        yield ProgressEvent(
+            event="report",
+            phase="report",
+            progress=1.0,
+            message=f"报告生成完成，{len(report.dimension_results)} 个维度",
+            payload={
+                "competitor": report.competitor.name,
+                "terminal_state": report.terminal_state,
+                "overall_confidence": report.overall_confidence,
+                "dimensions": [r.dimension for r in report.dimension_results],
+            },
+        ).to_sse()
+
+        # 归档会话（统一 raw schema）
         _get_memory().archive_session(
             AnalysisSession(
                 task=task,
                 competitor_name=report.competitor.name,
                 session_id=session_id,
                 raw={
+                    "markdown_report": report.markdown_report,
                     "terminal_state": report.terminal_state,
                     "dimension_count": len(report.dimension_results),
-                    "markdown_report": report.markdown_report,
+                    "competitor_name": report.competitor.name,
+                    "created_at": report.created_at,
                 },
             )
         )
@@ -238,7 +290,7 @@ button:disabled { background: #ccc; }
 <body>
 <h1>竞品分析 Agent</h1>
 <div>
-    <input id="task" type="text" placeholder="输入竞品名称，如 Cursor" value="Cursor" />
+    <input id="task" type="text" placeholder="输入竞品名称，如 Cursor（多竞品用逗号分隔，普查任务如“所有 AI coding agent”将自动发现）" value="Cursor" />
     <button id="start-btn" onclick="startAnalysis()">开始分析</button>
     <button id="cancel-btn" onclick="cancelAnalysis()" disabled>取消</button>
 </div>
@@ -350,7 +402,7 @@ async def history(_: None = Depends(require_auth)) -> JSONResponse:
 @app.get("/api/history/{competitor}")
 async def history_by_competitor(competitor: str, _: None = Depends(require_auth)) -> JSONResponse:
     """查询指定竞品的历史分析记录"""
-    sessions = _get_memory()._sessions.retrieve(competitor)
+    sessions = _get_memory().list_sessions(competitor)
     return JSONResponse(
         [
             {

@@ -14,6 +14,10 @@ class IFourLayerMemory(Protocol):
         """L1: 归档一次分析会话"""
         ...
 
+    def list_sessions(self, competitor: str | None = None) -> list[AnalysisSession]:
+        """L1: 列出归档会话；competitor 为空返回最近全部"""
+        ...
+
     def save_note(self, competitor: str, note: str) -> None:
         """L2: 保存持久笔记"""
         ...

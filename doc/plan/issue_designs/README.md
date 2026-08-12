@@ -1,6 +1,6 @@
 # 已知问题设计文档目录
 
-> 本目录为 `implementation_plan.md` 第 11 节「已知问题与待改进项」中每个问题对应的**设计文档**。
+> 本目录为 `implementation_plan.md` 第 11 节「已知问题与待改进项」以及第 13-15 节 P0 待办中每项对应的**设计文档**。
 > 每个文档描述问题的现状、目标设计、模块/接口、接入方式、验证方式与实现优先级。
 
 ## 文档索引
@@ -19,6 +19,16 @@
 | `10_parallel_runner_design.md` | 问题 10：ParallelRunner 未接入主流程 | P2 | ✅ 已修复 |
 | `11_integration_test_design.md` | 问题 11：测试缺集成/端到端 | P2 | ✅ 已修复 |
 | `12_code_quality_design.md` | 问题 12-14：重复代码 / 死代码 / 过度设计 | P3 | ✅ 已修复 |
+| `13_test_isolation_design.md` | 问题 15：单测隔离缺陷，CLI handler 硬编码真实 LLM | P0 | ✅ 已修复 |
+| `14_resume_semantics_design.md` | 问题 16：`resume()` 不续跑，只回读快照即删 | P0 | ✅ 已修复 |
+| `15_stream_config_design.md` | 问题 17：`analyze_stream` 静默丢弃 config | P1 | ✅ 已修复 |
+| `16_history_interface_design.md` | 问题 18：`get_history` 直捅 `_memory._sessions`，raw 结构不一致 | P1 | ✅ 已修复 |
+| `17_observability_design.md` | 问题 19：可观测性配置（tracing/metrics/langfuse）无实现 | P1 | ✅ 已修复 |
+| `18_dual_pipeline_design.md` | 问题 20：single/team 两套平行流水线语义分裂 | P2 | ✅ 已设计 |
+| `19_engineering_hygiene_design.md` | 问题 21-23：requires-python 声明不一致 / 锁表泄漏 / coverage 无门槛 | P3 | ✅ 已修复 |
+| `20_multi_competitor_discovery_design.md` | §13：自主发现竞品 + 多竞品并排对比 | P0 | ✅ 已修复 |
+| `21_log_observability_design.md` | §14：日志完善功能（可观测性补齐） | P0 | ⏳ 待办 |
+| `22_web_report_display_design.md` | §15：Web 端显示 / 导出报告 | P0 | ⏳ 待办 |
 
 > **问题 1 修复说明**：多 Agent 已接入主流程。`CompetitorAnalysisAPI.analyze()` 新增 `mode` 参数（`single` / `team`，**默认 `team`**），`mode="team"` 时走事件驱动 + 状态决策的多 Agent 流水线（Collector→Analyzer→Validator→Reporter，支持 SUCCESS/RETRY/DEGRADED/FAILED 决策）。CLI 新增 `--mode` 选项。全量 312 个测试通过。
 
@@ -44,6 +54,26 @@
 
 > **问题 12 修复说明**：按设计文档 12 完成代码质量整改。① **消除重复（12.1）**：新增 `core/gap_executor.py`——`GapExecutor` 收敛"计划/取消检查→选源→采集（按 source_name 分发、失败降级记录 sources_tried）→RAG 摄入/检索注入→分析→缺口置信度与状态更新"的完整单缺口闭环；`TacticalLoop.execute` 与 `SubAgent.run` 均改为委托 `GapExecutor`（并行子代理与单 Agent 主路径闭环行为完全一致，并行预算共享语义不变）；采集环节另抽出 `fetch_candidate` 共享助手，`CollectorAgent.collect` 复用（多 Agent 采集 Agent 只采集不分析，故合理复用选源-采集段而非整环）。② **清理死代码（12.2）**：删除 `web_app.py` 中创建后立即丢弃的 `CompetitorAnalysisAPI` 实例；`analyze_react` 的 `web_extract` 工具由硬编码占位改为**接入真实采集链路**（`self._extractor.fetch`，失败返回可读信息而非抛异常）。③ **简化过度设计（12.3）**：`team/message_bus.py` 删除无任何调用方的 `subscribe_and_forward` 与未用的 `T_STRATEGY` topic，保留最小 pub/sub + 顺序审计（`history`/`Envelope`，多 Agent 流水线各阶段发布 artifact 供回溯）。④ 新增 `tests/unit/core/test_gap_executor.py`（6 个：成功闭环、跨源降级、预算耗尽 BLOCKED、会话取消不抓取即 BLOCKED、RAG 上下文注入 + 观察摄入、`fetch_candidate` 按源分发与默认回退）。全量 **407 个测试通过**（401 + 6），`GapExecutor`/`fetch_candidate` 从 `core` 包导出。
 
+> **问题 15 修复说明**：CLI handler 不再硬编码 `LLMClient()`。`_run_analyze` 新增 `llm` / `use_llm` 参数，由 `main` 统一构造并传递；默认 `use_llm=False`（无 key 不联网）。`tests/conftest.py` 新增 `autouse` fixture 清除 API Key 环境变量，确保单测进程内零真实网络。`TestMain._patch_api` 同时 monkeypatch `LLMClient`。全量 407 个测试通过。
+
+> **问题 16 修复说明**：`resume()` 从"读快照即删"改为真正**断点续跑**。新增 `_reconstruct_gaps_from_checkpoint` 从 checkpoint 重建 `InfoGap` 对象（保留 status/confidence/evidence），重建剩余预算（`_used_iterations` / `_used_cost` 预置已消耗部分），仅重跑 `not g.is_closed` 的缺口（复用 `_run_gaps` / `_run_gap`），合并已关闭维度 + 新完成维度，一次性消费 checkpoint。续跑中再次取消返回 `CancelledResult`。全量 407 个测试通过。
+
+> **问题 17 修复说明**：`analyze_stream` 不再内部 new `CompetitorAnalysisAPI` 子实例。改为直接复用 `self`（`self.analyze`），配置与组件完全透传，流式路径与直调路径行为一致。归档 `raw` schema 统一（含 `markdown_report`）。全量 407 个测试通过。
+
+> **问题 18 修复说明**：`get_history` 不再直捅 `self._memory._sessions` 私有字段。新增 `IFourLayerMemory.list_sessions(competitor)` 协议方法，`FourLayerMemory` 实现按竞品过滤 / 最近全部查询；`get_history` / `web_app.py` 均改为调用协议方法。归档 `raw` schema 统一为含 `markdown_report` + `terminal_state` + `dimension_count` + `competitor_name` + `created_at`。全量 407 个测试通过。
+
+> **问题 19 修复说明**：从 `ObservabilityConfig` 与 `review_config.yaml` 中移除无任何消费方的 `tracing` / `metrics` / `langfuse_*` 字段，仅保留 `log_level`。消除"假亮点"配置。全量 407 个测试通过。
+
+> **问题 20 修复说明**：⚠️ 待设计，尚未修复。**现状**：single 路径（`_run_gap`→TacticalLoop→GapExecutor）与 team 路径（`TeamOrchestrator`→Collector/Analyzer/Validator/Reporter）各自实现"采集→分析→记忆→checkpoint"，team 不写 checkpoint、无预算强约束、无并行；两路径对取消/失败/记忆沉淀行为不一致。`facade/api.py` 已膨胀至 600+ 行（orchestration/RAG/streaming/history 混装）。**设计方向**：收敛统一编排层，team 复用 GapExecutor 闭环；或明确两条路径边界并用文档给出取舍依据。
+
+> **问题 21-23 修复说明**：① `pyproject.toml` `requires-python` / poetry.python / ruff / mypy / black 统一对齐到 `>=3.10`；② `checkpoint.py` `_session_locks` 由 `dict` 改为 `weakref.WeakValueDictionary`，会话结束后锁条目自动回收，防内存泄漏；③ `pyproject.toml` 新增 `[tool.coverage.report] fail_under = 80` + `addopts` 含 `--cov-report=xml --cov-report=html`，覆盖率下降有门禁。全量 407 个测试通过。
+
+> **§13 修复说明**：多竞品发现与对比已落地。① **LLM 决策**：`parse_task` 输出 `resolution`（`REGISTRY` / `DISCOVERY` / `COMPARE`），`TaskParseResult.is_discovery` 派生；畸形/缺失回退规则弱推断（无 Key 降级，`_DISCOVERY_MARKERS` 识别"所有/有哪些/市场"等）；② **发现器** `core/competitor_discoverer.py`：`CompetitorDiscoverer.discover(task)` 注册表命中优先 → 注入 `web_tool` 联网枚举 → 无候选走内置兜底清单（8 个常见 AI coding agent，均带 official_links），`use_llm=True` 时 LLM 归纳去重补全链接；③ **N 向对比**：`api.compare(*competitors)` 支持 ≥2（旧 `compare(a, b=None)` 签名兼容），逐个 `analyze` 后聚合；④ **品类格局矩阵**：`report_builder.build_comparison` + `markdown_renderer.render_comparison` 产出"维度 × 竞品"矩阵 + 每维度最佳（状态 [OK]>[PARTIAL]>[N/A] + 置信度）+ 汇总排名/覆盖缺口；⑤ **任务带源注入** `_task_with_sources`：把发现竞品的 official_links 转成 custom_sources，根治"未知竞品 0 候选 → 0 维度"；⑥ CLI/Web 路由：普查任务走 `discover()` 而非把整句拼成假竞品。注册表新增 windsurf/aider/gemini-cli/opencode。新增 4+8+5+5 共 22 个测试（LLM 决策 schema 鲁棒性、发现器去重/兜底、N 向对比、矩阵渲染、发现集成 e2e）。全量 441 个测试通过。**待办（下一步）**：`api.compare` 聚合时支持按 `execution.mode=parallel` 并行分析多个竞品（当前逐个串行）；Web 前端报告矩阵可视化与 `discovery` 阶段 SSE 候选实时推送（当前仅 text 提示）。
+
+> **§14 设计说明（待办）**：增强 `observability/logger.py`（JSON 结构化格式 + `session_id` 注入 + `get_session_logger(sid)` 落盘 `~/.competitor_agent/logs/<sid>.log` + 强制 flush 解决 detached 缓冲）；在 task_parser / strategic_loop / source_selector / gap_executor / analyzers / llm.client / report_builder 关键路径埋 7 类事件（解析/识别/选源/采集/分析/终止/汇总）；`llm/client.py` 记录脱敏调用日志（model/base_url/tokens/耗时/cost，不落 prompt 全文与密钥）；Web 新增 `/api/logs/{session_id}` 与 `/api/logs/stream/{sid}`。详见 `21_log_observability_design.md`。
+
+> **§15 设计说明（待办）**：`report` 事件 payload 增加 `markdown_report` + `session_id`；新增 `save_report_markdown()` 原子写 `reports/competitor/<竞品>.md`（复用 `config.report.output_dir`，对齐原子写模式）；Web 新增 `/api/reports/{competitor}`（查看）与 `/download`（attachment 下载）端点；前端新增报告渲染面板 + 「复制 Markdown」「下载 .md」按钮。详见 `22_web_report_display_design.md`。
+
 ## 设计文档统一模板
 
 每个设计文档包含以下章节：
@@ -54,3 +84,21 @@
 4. **接入方式** — 如何接入主流程
 5. **验证方式** — 单测/集成/端到端验证
 6. **实现优先级与工作量** — 建议顺序与估算
+
+> 待办项（§13-15）对应文档沿用同一模板；实现完成后在表中将状态更新为 ✅ 并追加"修复说明"。
+
+---
+
+## 当前进展与下一步计划（2026-08-13）
+
+### 已完成
+- 问题 1-23 全部按设计文档修复并通过全量测试。
+- **§13 多竞品发现与对比（P0）**：本轮已实现（见上方 §13 修复说明）——`resolution` LLM 决策 + 规则降级、`CompetitorDiscoverer`（web_tool 注入 + 内置兜底清单）、`compare(*competitors)` N 向对比、品类格局矩阵渲染、CLI/Web 路由。全量 441 个测试通过。
+
+### 待办（P0，下一步按序实施）
+1. **§14 日志完善**（`21_log_observability_design.md`，工作量约 2-3 天）——结构化 JSON 日志 + `get_session_logger` 会话级落盘 + 7 类关键路径埋点 + LLM 脱敏调用日志 + Web `/api/logs/{sid}` 与 `/api/logs/stream/{sid}`。
+2. **§15 Web 报告显示/导出**（`22_web_report_display_design.md`，约 1.5-2 天）——`report` 事件 payload 携带 `markdown_report` + `save_report_markdown` 原子落盘 + `/api/reports/{competitor}` 与 `/download` 端点 + 前端渲染面板/复制/下载。
+3. **问题 20 双流水线语义分裂**（`18_dual_pipeline_design.md`，仅设计未修复）——收敛统一编排层（team 复用 GapExecutor）或明确路径边界。
+4. **§13 增强项（本轮未做）**——`compare` 多竞品并行分析（按 `execution.mode=parallel`）；Web 前端矩阵可视化 + `discovery` 阶段候选实时推送。
+
+> 说明：`21`/`22` 与"分析完成"钩子共享，可一并接入；`20` 的 discovery 事件依赖 `21` 的埋点，故顺序为 21 → 22 → 18 → 20 增强。

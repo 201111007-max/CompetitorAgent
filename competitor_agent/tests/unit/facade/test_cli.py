@@ -36,6 +36,13 @@ class StubAPI:
             markdown_report=f"# {a} vs {b or 'b'} 对比报告",
         )
 
+    def discover(self, task):
+        return ComparisonReport(
+            competitors=[Competitor(name="cursor"), Competitor(name="windsurf")],
+            reports=[StubReport("cursor"), StubReport("windsurf")],
+            markdown_report="# cursor vs windsurf 竞品格局对比报告\n\n## 品类格局矩阵",
+        )
+
     def get_history(self, competitor=None):
         return [StubReport(competitor or "cursor")]
 
@@ -122,6 +129,13 @@ class TestRunAnalyze:
         assert files
         assert "竞品分析报告" in files[0].read_text(encoding="utf-8")
 
+    def test_analyze_discovery_task(self, capsys):
+        """设计文档 20：普查任务路由到 discover，输出品类格局矩阵"""
+        _run_analyze(StubAPI(), "帮我寻找市场上所有 AI coding agent")
+        captured = capsys.readouterr()
+        assert "竞品格局对比报告" in captured.out
+        assert "品类格局矩阵" in captured.out
+
 
 class TestRunHistory:
     def test_history_lists(self, capsys):
@@ -157,6 +171,8 @@ class TestRunResume:
 class TestMain:
     def _patch_api(self, monkeypatch, api=None):
         monkeypatch.setattr("competitor_agent.cli._make_api", lambda: api or StubAPI())
+        # main() 现以 kwargs 构造 LLMClient（model/base_url），mock 需接受任意参数
+        monkeypatch.setattr("competitor_agent.cli.LLMClient", lambda *a, **kw: None)
 
     def test_main_oneshot(self, monkeypatch, capsys):
         self._patch_api(monkeypatch)

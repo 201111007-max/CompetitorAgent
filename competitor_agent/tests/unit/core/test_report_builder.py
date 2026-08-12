@@ -2,6 +2,7 @@
 from competitor_agent.core.report_builder import ReportBuilder
 from competitor_agent.domain_types import (
     Competitor,
+    ComparisonReport,
     DimensionResult,
     GapStatus,
     InfoGap,
@@ -78,3 +79,47 @@ class TestMarkdownRenderer:
         b = ReportBuilder()
         report = b.build(Competitor(name="x"), [_result("pricing", 0.8)], [], "success")
         assert "全部缺口已关闭" in report.markdown_report
+
+
+class TestBuildComparison:
+    def _single_report(self, name, results):
+        b = ReportBuilder()
+        return b.build(Competitor(name=name), results, [], "success")
+
+    def test_build_comparison_matrix_columns(self):
+        b = ReportBuilder()
+        r1 = self._single_report("cursor", [_result("pricing", 0.8), _result("feature", 0.9)])
+        r2 = self._single_report("windsurf", [_result("pricing", 0.7)])
+        comp = b.build_comparison([r1, r2])
+        assert isinstance(comp, ComparisonReport)
+        assert len(comp.reports) == 2
+        md = comp.markdown_report
+        assert "cursor" in md and "windsurf" in md
+        assert "品类格局矩阵" in md
+        assert "pricing" in md and "feature" in md
+
+    def test_render_comparison_best_per_dim(self):
+        b = ReportBuilder()
+        r1 = self._single_report("cursor", [_result("pricing", 0.9)])
+        r2 = self._single_report("windsurf", [_result("pricing", 0.6)])
+        comp = b.build_comparison([r1, r2])
+        md = comp.markdown_report
+        # 每维度最佳应为置信度更高的 cursor
+        assert "**cursor**" in md
+
+    def test_render_comparison_missing_dimension_n_a(self):
+        b = ReportBuilder()
+        r1 = self._single_report("cursor", [_result("pricing", 0.9)])
+        r2 = self._single_report("windsurf", [])
+        comp = b.build_comparison([r1, r2])
+        md = comp.markdown_report
+        assert "N/A" in md
+
+    def test_render_comparison_ranking(self):
+        b = ReportBuilder()
+        r1 = self._single_report("cursor", [_result("pricing", 0.9)])
+        r2 = self._single_report("windsurf", [_result("pricing", 0.5)])
+        comp = b.build_comparison([r1, r2])
+        md = comp.markdown_report
+        # 汇总排名 cursor 在前
+        assert md.index("cursor") < md.index("windsurf")

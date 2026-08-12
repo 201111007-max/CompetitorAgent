@@ -41,6 +41,12 @@ class FourLayerMemory(IFourLayerMemory):
     def archive_session(self, session: AnalysisSession) -> None:
         self._sessions.archive(session)
 
+    def list_sessions(self, competitor: str | None = None) -> list[AnalysisSession]:
+        """列出归档会话：指定竞品返回该竞品历史，为空返回最近全部。"""
+        if competitor:
+            return self._sessions.retrieve(competitor)
+        return self._sessions.recent_sessions()
+
     def recent_sessions(self) -> list[AnalysisSession]:
         return self._sessions.recent_sessions()
 

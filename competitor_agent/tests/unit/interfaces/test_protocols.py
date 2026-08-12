@@ -52,6 +52,9 @@ class FakeMemory:
     def archive_session(self, session: AnalysisSession) -> None:
         return None
 
+    def list_sessions(self, competitor: str | None = None) -> list:
+        return []
+
     def save_note(self, competitor: str, note: str) -> None:
         return None
 

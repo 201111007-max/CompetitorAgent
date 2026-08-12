@@ -38,6 +38,36 @@ COMPETITOR_REGISTRY: dict[str, Competitor] = {
             "home": "https://openai.com/index/introducing-codex/",
         },
     ),
+    "windsurf": Competitor(
+        name="windsurf",
+        aliases=["windsurf ai", "codeium"],
+        official_links={
+            "home": "https://windsurf.com",
+            "pricing": "https://windsurf.com/pricing",
+        },
+    ),
+    "aider": Competitor(
+        name="aider",
+        aliases=["aider ai"],
+        official_links={
+            "home": "https://aider.chat",
+            "docs": "https://aider.chat/docs/",
+        },
+    ),
+    "gemini-cli": Competitor(
+        name="gemini-cli",
+        aliases=["gemini cli"],
+        official_links={
+            "home": "https://github.com/google-gemini/gemini-cli",
+        },
+    ),
+    "opencode": Competitor(
+        name="opencode",
+        aliases=[],
+        official_links={
+            "home": "https://opencode.ai",
+        },
+    ),
 }
 
 

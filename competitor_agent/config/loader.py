@@ -85,11 +85,6 @@ class ReportConfig:
 @dataclass
 class ObservabilityConfig:
     log_level: str = "INFO"
-    tracing: bool = True
-    metrics: bool = True
-    langfuse_enabled: bool = False
-    langfuse_public_key_env: str = "LANGFUSE_PUBLIC_KEY"
-    langfuse_secret_key_env: str = "LANGFUSE_SECRET_KEY"
 
 
 @dataclass
