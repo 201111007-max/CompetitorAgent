@@ -47,6 +47,7 @@ from competitor_agent.core.task_parser import parse_task
 from competitor_agent.domain_types.competitor import Competitor
 from competitor_agent.domain_types.enums import GapStatus, ResultStatus, TerminalState
 from competitor_agent.domain_types.events import ProgressEvent
+from competitor_agent.domain_types.freshness import stale_under_ttl
 from competitor_agent.domain_types.info_gap import InfoGap
 from competitor_agent.domain_types.observation import SourceEvidence
 from competitor_agent.domain_types.report import (
@@ -65,9 +66,9 @@ from competitor_agent.interfaces.context import (
 from competitor_agent.interfaces.exceptions import DataSourceUnavailableError
 from competitor_agent.interfaces.memory import IFourLayerMemory
 from competitor_agent.llm.client import LLMClient
+from competitor_agent.memory.timeline_memory import TimelineMemory
 from competitor_agent.observability.logger import (
     close_session_log,
-    emit_session_event,
     get_session_logger,
     log_event,
     set_current_session,
@@ -91,6 +92,7 @@ class CompetitorAnalysisAPI:
         memory: IFourLayerMemory | None = None,
         config: AppConfig | None = None,
         web_tool: Callable[[str], list[dict]] | None = None,
+        timeline: TimelineMemory | None = None,
     ) -> None:
         # 配置注入：显式参数优先，其次 config，最后默认值
         cfg = config or load_config()
@@ -111,9 +113,12 @@ class CompetitorAnalysisAPI:
             self._selector.set_success_rates(memory.source_success_rates())
         self._extractor = extractor or WebExtractor()
         self._analyzers = AnalyzerRegistry(llm=llm, use_llm=use_llm)
-        self._builder = ReportBuilder()
+        # 新鲜度 TTL（设计文档 26）：build() 为报告计算 freshness 元数据
+        self._builder = ReportBuilder(dimension_ttl_days=cfg.freshness.dimension_ttl_days)
         self._budget = BudgetController(max_iterations=max_iterations, cost_limit=cost_limit)
         self._verifier = StopVerifier()
+        # 竞品时间线记忆（设计文档 26 §3.4）：跨分析 diff，独立于四层记忆
+        self._timeline = timeline or TimelineMemory()
 
         # RAG 知识库：采集后摄入 + 分析前检索注入（外部事实依据，降低幻觉）
         from competitor_agent.knowledge_base.competitor_store import CompetitorStore
@@ -229,7 +234,9 @@ class CompetitorAnalysisAPI:
                 created_at=report.created_at,
                 cancelled=True,
             )
-        # 分析正常完成：清理 checkpoint
+        # 分析正常完成：记录时间线 diff + 归档带新鲜度的会话（设计文档 26）
+        self._record_timeline(report)
+        self._archive_report(report, task, sid)
         delete_checkpoint(sid)
         close_session_log(sid)
         self._emit(
@@ -261,6 +268,43 @@ class CompetitorAnalysisAPI:
     @property
     def memory(self) -> IFourLayerMemory | None:
         return self._memory
+
+    @property
+    def timeline(self) -> TimelineMemory:
+        """竞品时间线记忆（设计文档 26）：跨分析 diff 的事件仓库。"""
+        return self._timeline
+
+    def _record_timeline(self, report: CompetitorReport) -> None:
+        """记录竞品时间线 diff（设计文档 26 §3.4），并把事件段落追加进 Markdown。"""
+        try:
+            events = self._timeline.update(report)
+        except Exception:  # 时间线记录失败不影响主流程，仅告警
+            logger.warning("时间线记录失败: %s", report.competitor.name, exc_info=True)
+            return
+        if events:
+            section = self._builder.render_timeline(events)
+            if section:
+                report.markdown_report = report.markdown_report.rstrip() + "\n\n" + section + "\n"
+
+    def _archive_report(self, report: CompetitorReport, task: str, session_id: str) -> None:
+        """归档会话（统一 raw schema + freshness 元数据），供 refresh_stale 判定过期。"""
+        if self._memory is None:
+            return
+        self._memory.archive_session(
+            AnalysisSession(
+                task=task,
+                competitor_name=report.competitor.name,
+                session_id=session_id,
+                raw={
+                    "markdown_report": report.markdown_report,
+                    "terminal_state": report.terminal_state,
+                    "dimension_count": len(report.dimension_results),
+                    "competitor_name": report.competitor.name,
+                    "created_at": report.created_at,
+                    "freshness": report.freshness.to_dict() if report.freshness else None,
+                },
+            )
+        )
 
     def analyze_react(self, task: str) -> str:
         """ReAct 模式：LLM 驱动工具调用（需 LLM Key）
@@ -325,6 +369,7 @@ class CompetitorAnalysisAPI:
             retriever=self._retriever,
             session_id=session_id,
             providers=self._providers,
+            builder=self._builder,
         )
 
         # 预算一致性：与 single 共用 BudgetController，耗尽即提前终止
@@ -394,6 +439,9 @@ class CompetitorAnalysisAPI:
                 created_at=report.created_at,
                 cancelled=True,
             )
+        # 设计文档 26：记录时间线 diff + 归档带新鲜度的会话（多 Agent 路径同样对齐）
+        self._record_timeline(report)
+        self._archive_report(report, task, session_id or "")
         delete_checkpoint(session_id) if session_id else None
         close_session_log(session_id)
         return report
@@ -457,6 +505,7 @@ class CompetitorAnalysisAPI:
                         "dimension_count": len(report.dimension_results),
                         "competitor_name": report.competitor.name,
                         "created_at": report.created_at,
+                        "freshness": report.freshness.to_dict() if report.freshness else None,
                     },
                 )
             )
@@ -560,6 +609,7 @@ class CompetitorAnalysisAPI:
                 cancelled=True,
             )
 
+        self._record_timeline(report)
         self._emit(ProgressEvent(event="report", phase="report", progress=1.0, message="续跑完成"))
         return report
 
@@ -701,7 +751,7 @@ class CompetitorAnalysisAPI:
             for future in as_completed(futures):
                 try:
                     done.append(future.result())
-                except Exception:  # noqa: BLE001 - 单竞品失败不影响对比整体
+                except Exception:  # 单竞品失败不影响对比整体
                     logger.exception("并行对比竞品 %s 失败", futures[future])
         by_name = {r.competitor.name: r for r in done}
         return [by_name[n] for n in names if n in by_name]
@@ -755,6 +805,56 @@ class CompetitorAnalysisAPI:
     def continue_analysis(self, session_id: str) -> CompetitorReport:
         """恢复未完成的会话（对齐 hermes -c/--continue 语义）"""
         return self.resume(session_id)
+
+    def refresh_stale(
+        self,
+        ttl_override: dict[str, int] | None = None,
+        recompute_all: bool = False,
+    ) -> list[CompetitorReport]:
+        """陈旧度检测 + 定时重爬（设计文档 26 §3.3）。
+
+        扫描记忆/存档中每个竞品的最新会话，按维度 TTL 判定过期后重分析。
+        并发安全沿用 execution.mode（analyze 内部分派）；单竞品失败不回滚整体。
+
+        Args:
+            ttl_override: 覆盖默认维度 TTL（天），None 用 config.freshness。
+            recompute_all: True 时无视新鲜度，全部竞品重新分析（CLI --all）。
+        Returns:
+            刷新后的报告列表。
+        """
+        if self._memory is None:
+            return []
+        ttl = dict(self._config.freshness.dimension_ttl_days)
+        if ttl_override:
+            ttl.update(ttl_override)
+        if not recompute_all and not self._config.freshness.refresh_check_enabled:
+            return []
+
+        # 每个竞品只取最新会话（list_sessions 已按 created_at 降序）
+        latest: dict[str, object] = {}
+        for s in self._memory.list_sessions():
+            comp = getattr(s, "competitor_name", "")
+            if not comp or " / " in comp:
+                continue  # 跳过对比/发现的聚合会话
+            if comp not in latest:
+                latest[comp] = s
+
+        refreshed: list[CompetitorReport] = []
+        for comp, session in latest.items():
+            stale = stale_under_ttl(getattr(session, "raw", None) or {}, ttl) if not recompute_all else []
+            if not recompute_all and not stale:
+                continue
+            report = self.analyze(comp, mode="team", session_id=f"refresh_{uuid.uuid4().hex[:8]}")
+            refreshed.append(report)
+            self._emit(
+                ProgressEvent(
+                    event="refreshed",
+                    phase="refresh",
+                    message=f"已刷新 {comp}",
+                    payload={"competitor": comp, "stale_dimensions": stale or None},
+                )
+            )
+        return refreshed
 
     def _terminal_state(self, reason: str, strategy: CompetitorStrategy) -> TerminalState:
         if reason in (StopReason.ALL_GAPS_CLOSED, StopReason.CORE_SATISFACTION_REACHED, StopReason.NO_GAPS):

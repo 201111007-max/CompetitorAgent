@@ -17,6 +17,7 @@ from typing import Any
 from competitor_agent.analyzers.registry import AnalyzerRegistry
 from competitor_agent.collector.source_selector import SourceSelector
 from competitor_agent.core.checkpoint import is_cancelled
+from competitor_agent.core.report_builder import ReportBuilder
 from competitor_agent.core.strategic_loop import StrategicPlanner
 from competitor_agent.domain_types.report import CompetitorReport
 from competitor_agent.domain_types.strategy import CompetitorStrategy
@@ -48,6 +49,7 @@ class TeamOrchestrator:
         retriever: Any | None = None,
         session_id: str | None = None,
         providers: dict[str, object] | None = None,
+        builder: ReportBuilder | None = None,
     ) -> None:
         self._bus = bus or MessageBus()
         self._planner = StrategicPlanner(llm=llm, use_llm=use_llm)
@@ -67,7 +69,8 @@ class TeamOrchestrator:
             retriever=retriever,
         )
         self._validator = ValidatorAgent(self._bus, FactValidator(), memory=memory)
-        self._reporter = ReporterAgent(self._bus, memory=memory)
+        # 复用外层 ReportBuilder（含 freshness TTL），使 team 报告带新鲜度元数据（设计文档 26）
+        self._reporter = ReporterAgent(self._bus, builder or ReportBuilder(), memory=memory)
         self._memory = memory
         self._max_retries = max_retries
         self._session_id = session_id or ""

@@ -90,6 +90,23 @@ class ReportConfig:
 
 
 @dataclass
+class FreshnessConfig:
+    """新鲜度/陈旧度配置（设计文档 26 §3.2）"""
+
+    dimension_ttl_days: dict[str, int] = field(
+        default_factory=lambda: {
+            "pricing": 7,
+            "performance": 14,
+            "feature": 30,
+            "ecosystem": 30,
+            "sentiment": 7,
+            "roadmap": 14,
+        }
+    )
+    refresh_check_enabled: bool = True
+
+
+@dataclass
 class ObservabilityConfig:
     log_level: str = "INFO"
 
@@ -126,11 +143,12 @@ class AppConfig:
     stop_verifier: StopVerifierConfig = field(default_factory=StopVerifierConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     report: ReportConfig = field(default_factory=ReportConfig)
+    freshness: FreshnessConfig = field(default_factory=FreshnessConfig)
     observability: ObservabilityConfig = field(default_factory=ObservabilityConfig)
     security: SecurityConfig = field(default_factory=SecurityConfig)
 
 
-def _build_section(cls, data: dict[str, Any] | None) -> Any:
+def _build_section(cls: type[Any], data: dict[str, Any] | None) -> Any:
     """用 YAML section 字典构造 dataclass，缺失字段用默认值。"""
     if not data:
         return cls()
@@ -165,9 +183,20 @@ def load_config(path: str | os.PathLike | None = None) -> AppConfig:
         stop_verifier=_build_section(StopVerifierConfig, raw.get("stop_verifier")),
         memory=_build_section(MemoryConfig, raw.get("memory")),
         report=_build_section(ReportConfig, raw.get("report")),
+        freshness=_build_freshness(raw.get("freshness")),
         observability=_build_section(ObservabilityConfig, raw.get("observability")),
         security=_build_security(raw.get("security")),
     )
+
+
+def _build_freshness(data: dict[str, Any] | None) -> FreshnessConfig:
+    """构造新鲜度配置：TLL 表只覆盖 YAML 中给出的维度，其余沿用默认（叠加）。"""
+    cfg = _build_section(FreshnessConfig, data)
+    if isinstance(data, dict) and isinstance(data.get("dimension_ttl_days"), dict):
+        merged = dict(FreshnessConfig().dimension_ttl_days)
+        merged.update(data["dimension_ttl_days"])
+        cfg.dimension_ttl_days = merged
+    return cfg
 
 
 def _build_security(data: dict[str, Any] | None) -> SecurityConfig:

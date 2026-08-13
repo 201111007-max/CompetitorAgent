@@ -75,6 +75,17 @@ report:
   include_evidence_urls: true
   output_dir: "reports/competitor"
 
+# ===== 新鲜度 / 陈旧度（设计文档 26）=====
+freshness:
+  dimension_ttl_days:
+    pricing: 7
+    performance: 14
+    feature: 30
+    ecosystem: 30
+    sentiment: 7
+    roadmap: 14
+  refresh_check_enabled: true    # refresh_stale 定时重爬开关
+
 # ===== 可观测性 =====
 observability:
   log_level: "INFO"

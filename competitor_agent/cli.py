@@ -21,7 +21,7 @@ from competitor_agent.config.loader import load_config
 from competitor_agent.core.command_registry import command_dispatch
 from competitor_agent.core.input_sanitizer import sanitize_task
 from competitor_agent.core.task_parser import ResolutionDecision, parse_task
-from competitor_agent.domain_types.report import ComparisonReport, CompetitorReport
+from competitor_agent.domain_types.report import CompetitorReport
 from competitor_agent.facade.api import CompetitorAnalysisAPI
 from competitor_agent.llm.client import LLMClient
 from competitor_agent.observability.logger import setup_logging
@@ -97,6 +97,39 @@ def _run_history(api: CompetitorAnalysisAPI, args: str) -> None:
         print(f"- {r.competitor.name} | {r.terminal_state} | {r.created_at}")
 
 
+def _run_refresh(api: CompetitorAnalysisAPI, args: str) -> None:
+    """refresh [--stale|--all]：陈旧度检测重爬（设计文档 26 §3.3）。"""
+    lowered = (args or "").lower()
+    recompute_all = "--all" in lowered or "-a" in lowered
+    if recompute_all:
+        reports = api.refresh_stale(recompute_all=True)
+        print(f"已重爬全部 {len(reports)} 个竞品")
+    else:
+        reports = api.refresh_stale()
+        print(f"已刷新 {len(reports)} 个过期竞品报告")
+    for r in reports:
+        print(f"- {r.competitor.name} | 终态={r.terminal_state} | {len(r.dimension_results)} 维度")
+
+
+def _run_timeline(api: CompetitorAnalysisAPI, args: str) -> None:
+    """timeline <competitor>：查看竞品时间线事件（设计文档 26 §3.4）。"""
+    competitor = args.strip()
+    if not competitor:
+        print("用法: timeline <competitor>")
+        return
+    events = api.timeline.events(competitor)
+    if not events:
+        print(f"（{competitor} 暂无时间线事件，可先 analyze 该竞品）")
+        return
+    print(f"# {competitor} 竞品时间线")
+    for e in events:
+        date = str(getattr(e, "occurred_at", ""))[:10] or "-"
+        print(f"- [{date}] {e.event_type}: {e.summary}")
+        urls = getattr(e, "evidence_urls", None) or []
+        if urls:
+            print(f"  证据: {', '.join(str(u) for u in urls[:2])}")
+
+
 def _run_resume(api: CompetitorAnalysisAPI, args: str) -> None:
     session_id = args.strip()
     if not session_id:
@@ -146,6 +179,8 @@ def _repl(api: CompetitorAnalysisAPI, llm: LLMClient | None = None, use_llm: boo
         "compare": lambda a: _run_compare_repl(api, a),
         "history": lambda a: _run_history(api, a),
         "resume": lambda a: _run_resume(api, a),
+        "refresh": lambda a: _run_refresh(api, a),
+        "timeline": lambda a: _run_timeline(api, a),
         "benchmark": lambda a: _run_benchmark(a),
         "help": lambda a: _run_help(a),
     }
@@ -196,6 +231,13 @@ def build_parser() -> argparse.ArgumentParser:
     history_p = sub.add_parser("history", help="查询历史分析记录")
     history_p.add_argument("--competitor", default=None, help="按竞品过滤")
 
+    refresh_p = sub.add_parser("refresh", help="陈旧度检测/定时重爬过期竞品报告（设计文档 26）")
+    refresh_p.add_argument("--stale", action="store_true", help="仅刷新超过维度 TTL 的报告（默认）")
+    refresh_p.add_argument("--all", dest="recompute_all", action="store_true", help="无视新鲜度，全部竞品重爬")
+
+    timeline_p = sub.add_parser("timeline", help="查看竞品时间线事件（版本/功能/价格/榜单变化）")
+    timeline_p.add_argument("competitor", nargs="?", default=None, help="竞品名称")
+
     sub.add_parser("benchmark", help="运行评测基准")
     return parser
 
@@ -226,6 +268,12 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         for r in reports:
             print(f"- {r.competitor.name} | {r.terminal_state} | {r.created_at}")
+        return 0
+    if args.command == "refresh":
+        _run_refresh(api, " --all" if args.recompute_all else "--stale")
+        return 0
+    if args.command == "timeline":
+        _run_timeline(api, args.competitor or "")
         return 0
     if args.command == "benchmark":
         _run_benchmark("")

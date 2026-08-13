@@ -1,6 +1,8 @@
 """Markdown 渲染器 — 把 CompetitorReport 渲染为 Markdown"""
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from competitor_agent.domain_types.enums import ResultStatus
 from competitor_agent.domain_types.report import ComparisonReport, CompetitorReport, DimensionResult
 from competitor_agent.observability.logger import get_logger
@@ -32,6 +34,11 @@ class MarkdownRenderer:
         lines.append(f"> 终态: `{report.terminal_state}`")
         lines.append(f"> 综合置信度: **{report.overall_confidence:.2f}**")
         lines.append("")
+        if report.freshness is not None:
+            note = report.freshness.markdown_note()
+            if note:
+                lines.append(note)
+                lines.append("")
         lines.append("## 维度结论")
         lines.append("")
 
@@ -74,6 +81,27 @@ class MarkdownRenderer:
                 lines.append(f"证据: {urls}")
         lines.append("")
 
+    def render_timeline(self, events: Sequence[object]) -> str:
+        """渲染竞品时间线 Markdown 段落（设计文档 26 §3.4）。
+
+        ``events`` 为 ``TimelineEvent``（duck-type 出 event_type/summary/occurred_at/evidence_urls）。
+        """
+        if not events:
+            return ""
+        lines = ["## 竞品时间线", ""]
+        lines.append("| 日期 | 类型 | 变化 | 证据 |")
+        lines.append("|------|------|------|------|")
+        for ev in events:
+            occurred = str(getattr(ev, "occurred_at", ""))[:10] or "-"
+            event_type = str(getattr(ev, "event_type", "change"))
+            summary = _truncate(str(getattr(ev, "summary", "") or ""), 80)
+            urls = getattr(ev, "evidence_urls", None) or []
+            if isinstance(urls, dict):
+                urls = list(urls.values())
+            evidence = ", ".join(str(u) for u in urls[:2]) or "-"
+            lines.append(f"| {occurred} | {event_type} | {summary} | {evidence} |")
+        return "\n".join(lines)
+
     def render_comparison(self, report: ComparisonReport) -> str:
         """渲染多竞品品类格局对比报告（设计文档 20）：
         - 品类格局矩阵：| 维度 | 竞品A | 竞品B | ... | 最佳 |
@@ -82,7 +110,7 @@ class MarkdownRenderer:
         """
         reports = report.reports
         if not reports:
-            return f"# 竞品格局对比报告\n\n_无可用竞品报告。_\n"
+            return "# 竞品格局对比报告\n\n_无可用竞品报告。_\n"
 
         names = [r.competitor.name for r in reports]
         dims_by_rep = [{r.dimension: r for r in r.dimension_results} for r in reports]
@@ -185,3 +213,11 @@ def _best_for_dim(
         ):
             best = (report.competitor.name, r.confidence, r.status, r.summary)
     return best if best is not None else ("", 0.0, None, "")
+
+
+def _truncate(text: str, limit: int = 80) -> str:
+    """截断长文本为一行（超限加省略号）"""
+    if not text:
+        return ""
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[:limit] + "…"

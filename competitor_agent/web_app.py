@@ -42,8 +42,8 @@ from competitor_agent.domain_types.report import (
 from competitor_agent.interfaces.context import AnalysisSession
 from competitor_agent.llm.client import LLMClient
 from competitor_agent.memory.four_layer_memory import FourLayerMemory
+from competitor_agent.memory.timeline_memory import TimelineMemory
 from competitor_agent.observability.logger import (
-    close_session_log,
     read_session_log,
     setup_logging,
 )
@@ -62,6 +62,17 @@ def _get_memory() -> FourLayerMemory:
     if _memory is None:
         _memory = FourLayerMemory(data_dir=get_data_dir() / "memory")
     return _memory
+
+
+_timeline: TimelineMemory | None = None
+
+
+def _get_timeline() -> TimelineMemory:
+    """竞品时间线记忆（设计文档 26 §3.4）：Web 端点 /api/timeline/{competitor} 读取。"""
+    global _timeline
+    if _timeline is None:
+        _timeline = TimelineMemory(data_dir=get_data_dir())
+    return _timeline
 
 
 # ── SSE 辅助 ──────────────────────────────────────────────────────────────
@@ -213,7 +224,7 @@ async def _event_generator(
         # 自动落盘 reports/competitor/<竞品>.md（导出/下载用）
         save_report_markdown(report)
 
-        # 归档会话（统一 raw schema）
+        # 归档会话（统一 raw schema + freshness 元数据）
         _get_memory().archive_session(
             AnalysisSession(
                 task=task,
@@ -225,6 +236,7 @@ async def _event_generator(
                     "dimension_count": len(report.dimension_results),
                     "competitor_name": report.competitor.name,
                     "created_at": report.created_at,
+                    "freshness": report.freshness.to_dict() if report.freshness else None,
                 },
             )
         )
@@ -558,6 +570,23 @@ async def history_by_competitor(competitor: str, _: None = Depends(require_auth)
             }
             for s in sessions
         ]
+    )
+
+
+@app.get("/api/timeline/{competitor}")
+async def timeline(
+    competitor: str,
+    _: None = Depends(require_auth),
+    limit: int = Query(default=20, ge=1, le=100),
+) -> JSONResponse:
+    """查询竞品时间线事件（版本/功能/价格/榜单变化，设计文档 26 §3.4）。"""
+    events = _get_timeline().events(competitor, limit=limit)
+    return JSONResponse(
+        {
+            "competitor": competitor,
+            "count": len(events),
+            "events": [e.__dict__ for e in events],
+        }
     )
 
 
