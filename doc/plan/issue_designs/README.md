@@ -83,6 +83,12 @@
 
 > **§15 修复说明**：Web 显示/导出已落地。① **SSE 携带报告正文**：`report` 事件 payload 增加 `markdown_report` + `session_id`，前端收到后渲染为可读报告（不再仅状态行）。② **自动落盘**：新增 `core/report_archiver.py`——`save_report_markdown()` 原子写 `reports/competitor/<竞品>.md`（复用 `config.report.output_dir`，`_safe_filename` 清洗文件名，`resolve_output_dir` 对齐命名）。③ **Web 导出端点**：`/api/reports/{competitor}`（查看）+ `/download`（`Content-Disposition: attachment` 下载）。④ **前端导出入口**：报告区「复制 Markdown」（`navigator.clipboard`，失败降级）+「下载 .md」按钮；`clearReport()` 清空报告区。新增 `tests/unit/core/test_report_archiver.py`、`tests/integration/test_report_export.py`。详见 `22_web_report_display_design.md`。
 
+> **设计文档 23 修复说明**：多源路由已落地。`ExternalSourceProvider` 协议（kind/supports/candidates/fetch）+ `Competitor.external_refs`（github_repo/marketplace 等）；`SourceSelector` 按缺口路由到外部源（ecosystem→github+marketplace、sentiment→social、performance→benchmark、roadmap→github），trust 排序 + L4 成功率提升 + 剔除已尝试源 + SPA 兜底；`GithubSourceProvider`/`MarketplaceSourceProvider`/`CommunitySourceProvider` + `build_providers` 按配置构造；`fetch_candidate` 按 kind 分发到 provider，`GapExecutor`/`TacticalLoop`/`CollectorAgent` 统一复用。外部源主开关 `enable_external_sources` 默认关，保证 CI/benchmark 零真实网络。新增 17 个路由/Provider 单测，全量 **487 个测试通过**。
+
+> **设计文档 24 修复说明**：ecosystem/sentiment 专属分析器已落地。`EcosystemAnalyzer`（MCP server/插件/IDE/集成/仓库活跃度结构化盘点）+ `SentimentAnalyzer`（正负信号 + polarity_ratio + 信号不足 → `[PARTIAL]` 低置信不编造）注册进 `AnalyzerRegistry`（roadmap 保留 Fallback）；`base._analyze_with_rules` 支持显式 confidence → 低置信自动 PARTIAL。新增 14 个分析器/注册/注入防护/多源集成单测，全量 **501 个测试通过**。
+
+> **设计文档 25 修复说明**：性能榜单直连已落地。`BenchmarkScore`（board/score/unit/retrieved_at/source_url）+ `BenchmarkSourceProvider`（SWE-bench/Aider/Terminal-Bench/LMArena 按竞品名匹配，TTL 缓存）；`PerformanceAnalyzer` 榜单优先合并（同指标以榜单为准、仅页面降档、均无 `[PARTIAL]` 不编造；无榜单时完全保留原页面/LLM 结果，不破坏评测抽取契约）；`GapExecutor` 对 performance 缺口注入 `context.benchmark_scores`。新增 10 个 Provider/合并/注入闭环单测 + 2 个路由单测，全量 **514 个测试通过**。
+
 ## 设计文档统一模板
 
 每个设计文档包含以下章节：
@@ -107,17 +113,17 @@
 - **§14 日志完善（P0）**：已实现（见上方 §14 修复说明）——结构化 JSON 日志 + `SessionRouterHandler` 会话级落盘 `logs/<sid>.log` + 关键路径埋点 + LLM 脱敏调用日志 + Web `/api/logs/{sid}` 与 `/api/logs/stream/{sid}`。
 - **§15 Web 报告显示/导出（P0）**：已实现（见上方 §15 修复说明）——`report` 事件 payload 携带 `markdown_report` + `save_report_markdown` 原子落盘 + `/api/reports/{competitor}` 与 `/download` 端点 + 前端渲染面板/复制/下载。
 - **问题 20 双流水线语义分裂（P2）**：已修复（见上方问题 20 修复说明）——统一入口（`analyze` 默认 team）/统一规划/统一预算/统一 checkpoint/统一记忆沉淀；新增 `core/orchestrator.py` 收敛缺口执行闭环。
-- 全量 **471 个测试通过**（3 skipped）。
+- **设计文档 23 §12.1 #1 SourceSelector 多源路由**：已实现（见上方修复说明）——`ExternalSourceProvider` 协议 + `Competitor.external_refs` + 缺口→github/marketplace/benchmark/social 路由 + `GapExecutor.fetch_candidate` 按 kind 分发 + `build_providers` 配置开关。
+- **设计文档 24 §12.1 #2 Ecosystem/Sentiment 分析器**：已实现（见上方修复说明）——`EcosystemAnalyzer`（MCP server/插件/IDE/tool-use/仓库活跃度）+ `SentimentAnalyzer`（社区正负信号，低置信护栏不编造）注册进 `AnalyzerRegistry`。
+- **设计文档 25 §12.2 #4 直连榜单源**：已实现（见上方修复说明）——`BenchmarkSourceProvider` 直连 SWE-bench/Aider/Terminal-Bench/LM Arena（TTL 缓存 + 失败降级），`PerformanceAnalyzer` 榜单优先合并 + 页面兜底。
+- 全量 **514 个测试通过**（3 skipped）。
 
 ### 待办（下一步按序实施，均已有设计文档）
-1. **§12.1 #1 SourceSelector 多源路由**（`23_multi_source_routing_design.md`，P0，约 2-3 天）——`ExternalSourceProvider` 协议 + `Competitor.external_refs` + 缺口→github/marketplace/benchmark/social 路由 + `fetch_candidate` 按 kind 分发。
-2. **§12.1 #2 Ecosystem/Sentiment 分析器**（`24_ecosystem_sentiment_analyzers_design.md`，P0，约 2-3 天）——`EcosystemAnalyzer`（MCP server/插件/IDE/tool-use/仓库活跃度）+ `SentimentAnalyzer`（社区正负信号，低置信护栏不编造）注册进 `AnalyzerRegistry`。
-3. **§12.2 #4 直连榜单源**（`25_direct_benchmark_sources_design.md`，P1，约 1.5-2 天）——`BenchmarkSourceProvider` 直连 SWE-bench/Aider/Terminal-Bench，`PerformanceAnalyzer` 榜单优先 + 页面兜底。
-4. **§12.2 #5 + §12.3 #7 新鲜度/时间线**（`26_freshness_timeline_design.md`，P1，约 2-3 天）——`ReportFreshness` 陈旧度标注 + `api.refresh_stale` 定时重爬 + `TimelineMemory` 竞品时间线 diff。
-5. **§12.3 #6 定价分层/用量建模**（`27_pricing_modeling_design.md`，P2，约 1.5 天）——`PricingProfile`（plans/usage/cost_scenarios）+ 询价标注。
-6. **§12.3 #8 结构化导出 + 定时 + 告警**（`28_structured_export_design.md`，P2，约 2-3 天）——`report_exporter` JSON/矩阵导出 + `run_scheduled` + `AlertSink` 异动告警。
-7. **§12.3 #9 评测盲区覆盖**（`29_evaluation_coverage_design.md`，P2，约 1.5-2 天）——`DIMENSION_KINDS` 增 ecosystem/sentiment/roadmap + fixture 用例 + 评测指南同步。
-8. **§12.3 #10 消融/对比实验**（`30_ablation_comparison_design.md`，P2，约 1-1.5 天）——`enable_rag`/`enable_memory` 开关 + `AblationRunner` 对 26 条真实执行用例跑 full/no-rag/no-memory/no-llm-rule 对比表（简历/面试数据支撑）。
-9. **§12.3 #11 失败类型统计**（`31_failure_stats_design.md`，P2，约 0.5-1 天）——`FailureType` 五类分类 + `BenchmarkReport.failure_stats` 聚合 + 分布报告（归因与简历证据）。
+1. **§12.2 #5 + §12.3 #7 新鲜度/时间线**（`26_freshness_timeline_design.md`，P1，约 2-3 天）——`ReportFreshness` 陈旧度标注 + `api.refresh_stale` 定时重爬 + `TimelineMemory` 竞品时间线 diff。
+2. **§12.3 #6 定价分层/用量建模**（`27_pricing_modeling_design.md`，P2，约 1.5 天）——`PricingProfile`（plans/usage/cost_scenarios）+ 询价标注。
+3. **§12.3 #8 结构化导出 + 定时 + 告警**（`28_structured_export_design.md`，P2，约 2-3 天）——`report_exporter` JSON/矩阵导出 + `run_scheduled` + `AlertSink` 异动告警。
+4. **§12.3 #9 评测盲区覆盖**（`29_evaluation_coverage_design.md`，P2，约 1.5-2 天）——`DIMENSION_KINDS` 增 ecosystem/sentiment/roadmap + fixture 用例 + 评测指南同步。
+5. **§12.3 #10 消融/对比实验**（`30_ablation_comparison_design.md`，P2，约 1-1.5 天）——`enable_rag`/`enable_memory` 开关 + `AblationRunner` 对 26 条真实执行用例跑 full/no-rag/no-memory/no-llm-rule 对比表（简历/面试数据支撑）。
+6. **§12.3 #11 失败类型统计**（`31_failure_stats_design.md`，P2，约 0.5-1 天）——`FailureType` 五类分类 + `BenchmarkReport.failure_stats` 聚合 + 分布报告（归因与简历证据）。
 
 > 依赖顺序建议：23（多源路由，底层）→ 24（分析器）→ 25（榜单，复用 23 的 provider）→ 26（时间线，复用 23 的 Releases）→ 27（定价，独立）→ 28（导出，复用 26/27）→ 29（评测，依赖 24/25/26 的结构化产出）。23-26 是产品差异化主线，27-29 是可信度与交付增强；**30/31 为简历/面试达标补充**，仅依赖已就绪的 `evaluation/benchmark.py`（真实执行版），可随时穿插实现。
