@@ -1,7 +1,8 @@
 # competitor_agent — AI coding agent 竞品分析 Agent
 
 自动采集并分析 AI coding agent 竞品（Claude Code、Cursor、Windsurf、Copilot 等），
-输出含功能 / 定价 / 性能 / 生态 / 口碑 / 路线图的 Markdown 报告。
+输出含功能 / 定价 / 性能 / 生态 / 口碑 / 路线图的 Markdown 报告，
+并附**数据新鲜度注记**（维度 TTL / 过期提示）与跨分析**竞品时间线**（价格/版本/功能变化事件）。
 
 复用 `dota_helper` 的框架思想（双循环编排、信息缺口驱动、证据链防幻觉、四层记忆），
 但独立目录、独立包、**零 import 耦合**。
@@ -22,6 +23,8 @@ pytest
 ```bash
 python -m competitor_agent.cli analyze "Cursor"
 python -m competitor_agent.cli history --competitor cursor
+python -m competitor_agent.cli refresh                 # 过期竞品按 TTL 重爬（--all 全量）
+python -m competitor_agent.cli timeline cursor         # 查看竞品时间线事件（价格/版本/功能变化）
 ```
 
 ### Web（SSE 可视化）
@@ -57,21 +60,25 @@ history = api.get_history("cursor")
 # 断点续跑
 api.cancel("sess_abc123")
 report = api.resume("sess_abc123")
+
+# 新鲜度与时间线（设计文档 26）
+stale = api.refresh_stale()          # 按维度 TTL 重爬过期竞品（可 ttl_override / recompute_all）
+events = api.timeline.events("cursor")  # 跨分析 diff 产生的 price_change/version_release 等事件
 ```
 
 ## 目录结构
 
 ```
 competitor_agent/
-├── config/review_config.yaml   # 预算/维度/终止阈值配置
-├── domain_types/               # 领域数据模型（InfoGap/Observation/CompetitorStrategy...）
+├── config/review_config.yaml   # 预算/维度/终止阈值/新鲜度 TTL 配置
+├── domain_types/               # 领域数据模型（InfoGap/Observation/CompetitorStrategy/ReportFreshness...）
 ├── interfaces/                 # Protocol 契约层
 ├── core/                       # 框架内核（双循环/预算/停止验证/报告/checkpoint）
 ├── agent/                      # ReAct 交互层 + 护栏 + prompts
 ├── collector/                  # 数据源（web/github/pricing/benchmark/review）
 ├── analyzers/                  # 维度分析器（LLM 驱动，规则降级）
 ├── knowledge_base/             # 竞品知识库（RAG）
-├── memory/                     # 四层记忆
+├── memory/                     # 四层记忆 + 竞品时间线（timeline_memory）
 ├── team/                       # 多 Agent 协作
 ├── evaluation/                 # 评测体系
 ├── mcp_server/                 # MCP Server（对外暴露采集/分析工具）
@@ -86,6 +93,7 @@ competitor_agent/
 - 架构总纲：`../doc/ai_coding_agent_competitor_analysis_architecture.md`
 - 分步实现计划：`../doc/plan/implementation_plan.md`
 - 各模块契约/规范：`docs/`（interfaces/domain_models/prompts/data_sources/configuration/evaluation_guide/testing/usage/api）
+- 逐期设计文档：`../doc/plan/issue_designs/`（含 26_freshness_timeline_design.md：新鲜度 TTL / 过期提示 / refresh_stale / 时间线事件）
 
 ## 里程碑状态
 
@@ -94,3 +102,4 @@ competitor_agent/
 - [x] M2 记忆与自进化
 - [x] M3 多 Agent 协作 + 评测体系
 - [x] M4 工程化（Web/MCP/CI/断点）
+- [x] M5 数据新鲜度 + 竞品时间线（设计文档 26：维度 TTL / 过期提示 / `refresh_stale` 过期重爬 / 跨分析 diff → 时间线事件 / `timeline` 记忆 + CLI/Web 查询）

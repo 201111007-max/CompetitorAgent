@@ -11,6 +11,7 @@ from competitor_agent.domain_types.enums import (
     TerminalState,
 )
 from competitor_agent.domain_types.events import ProgressEvent
+from competitor_agent.domain_types.freshness import ReportFreshness
 from competitor_agent.domain_types.info_gap import InfoGap
 from competitor_agent.domain_types.observation import Observation, SourceEvidence
 from competitor_agent.domain_types.report import (
@@ -39,6 +40,7 @@ __all__ = [
     "Observation",
     "ObservationStatus",
     "ProgressEvent",
+    "ReportFreshness",
     "ResultStatus",
     "SourceEvidence",
     "TerminalState",

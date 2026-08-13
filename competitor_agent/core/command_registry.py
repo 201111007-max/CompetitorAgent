@@ -28,6 +28,8 @@ COMMAND_REGISTRY: list[CommandDef] = [
     CommandDef("compare", ["c"], "compare", "A 和 B"),
     CommandDef("history", ["h"], "history", "[--competitor X]"),
     CommandDef("resume", ["r"], "resume", "[session_id]"),
+    CommandDef("refresh", ["re"], "refresh", "[--stale|--all]"),
+    CommandDef("timeline", ["tl"], "timeline", "<competitor>"),
     CommandDef("benchmark", ["b"], "benchmark", ""),
     CommandDef("help", ["?"], "help", "[command]"),
 ]

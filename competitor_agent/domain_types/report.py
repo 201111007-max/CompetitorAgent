@@ -7,6 +7,7 @@ from typing import Any
 
 from competitor_agent.domain_types.competitor import Competitor
 from competitor_agent.domain_types.enums import ResultStatus
+from competitor_agent.domain_types.freshness import ReportFreshness
 from competitor_agent.domain_types.info_gap import InfoGap
 from competitor_agent.domain_types.observation import SourceEvidence
 
@@ -36,6 +37,7 @@ class CompetitorReport:
     markdown_report: str = ""
     terminal_state: str = ""
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    freshness: ReportFreshness | None = None  # 新鲜度元数据（设计文档 26）
 
 
 @dataclass

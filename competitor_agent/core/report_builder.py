@@ -1,8 +1,11 @@
 """ReportBuilder — 汇总维度结果与未关闭缺口为报告"""
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from competitor_agent.core.markdown_renderer import MarkdownRenderer
 from competitor_agent.domain_types.competitor import Competitor
+from competitor_agent.domain_types.freshness import ReportFreshness
 from competitor_agent.domain_types.info_gap import InfoGap
 from competitor_agent.domain_types.report import ComparisonReport, CompetitorReport, DimensionResult
 from competitor_agent.observability.logger import get_logger
@@ -23,8 +26,14 @@ _DIMENSION_WEIGHTS = {
 class ReportBuilder:
     """实现 IReportBuilder：汇总 + 渲染"""
 
-    def __init__(self, renderer: MarkdownRenderer | None = None) -> None:
+    def __init__(
+        self,
+        renderer: MarkdownRenderer | None = None,
+        dimension_ttl_days: dict[str, int] | None = None,
+    ) -> None:
         self._renderer = renderer or MarkdownRenderer()
+        # 新鲜度 TTL（设计文档 26）：传入时 build() 为报告计算 freshness 元数据
+        self._ttl = dict(dimension_ttl_days) if dimension_ttl_days else None
 
     def build(
         self,
@@ -42,6 +51,8 @@ class ReportBuilder:
             gaps_pending=gaps_pending,
             terminal_state=terminal_state,
         )
+        if self._ttl and results:
+            report.freshness = ReportFreshness.from_results(results, self._ttl)
         report.markdown_report = self.to_markdown(report)
         return report
 
@@ -60,6 +71,10 @@ class ReportBuilder:
 
     def to_markdown(self, report: CompetitorReport) -> str:
         return self._renderer.render(report)
+
+    def render_timeline(self, events: Sequence[object]) -> str:
+        """渲染竞品时间线 Markdown 段落（设计文档 26 §3.4）。"""
+        return self._renderer.render_timeline(events)
 
     def build_comparison(self, reports: list[CompetitorReport]) -> ComparisonReport:
         """聚合多份单竞品报告为品类格局对比报告（设计文档 20）。
