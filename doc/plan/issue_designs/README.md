@@ -31,7 +31,7 @@
 | `22_web_report_display_design.md` | §15：Web 端显示 / 导出报告 | P0 | ✅ 已修复 |
 | `23_multi_source_routing_design.md` | §12.1 #1：数据源只认官网（SourceSelector 多源路由） | P0 | ✅ 已实现 |
 | `24_ecosystem_sentiment_analyzers_design.md` | §12.1 #2：ecosystem / sentiment 无专属分析器 | P0 | ✅ 已实现 |
-| `25_direct_benchmark_sources_design.md` | §12.2 #4：性能数字靠 LLM 读网页（直连榜单） | P1 | ⏳ 待办 |
+| `25_direct_benchmark_sources_design.md` | §12.2 #4：性能数字靠 LLM 读网页（直连榜单） | P1 | ✅ 已实现 |
 | `26_freshness_timeline_design.md` | §12.2 #5 + §12.3 #7：无新鲜度/时间线（定时重爬） | P1 | ⏳ 待办 |
 | `27_pricing_modeling_design.md` | §12.3 #6：定价分层/用量建模弱 | P2 | ⏳ 待办 |
 | `28_structured_export_design.md` | §12.3 #8：输出仅 Markdown（结构化导出+定时+告警） | P2 | ⏳ 待办 |

@@ -1,4 +1,5 @@
 """领域数据模型"""
+from competitor_agent.domain_types.benchmark import BenchmarkScore
 from competitor_agent.domain_types.competitor import Competitor, CompetitorProfile
 from competitor_agent.domain_types.enums import (
     DimensionType,
@@ -21,6 +22,7 @@ from competitor_agent.domain_types.report import (
 from competitor_agent.domain_types.strategy import CompetitorStrategy, DimensionBudget
 
 __all__ = [
+    "BenchmarkScore",
     "CancelledResult",
     "ComparisonReport",
     "Competitor",

@@ -23,6 +23,7 @@ class AnalysisContext:
     dimension: DimensionType | None = None
     history: list[object] = field(default_factory=list)
     rag_context: str = ""  # RAG 检索到的背景知识片段（含来源），注入分析器 prompt
+    benchmark_scores: dict[str, object] = field(default_factory=dict)  # 榜单直连结果（设计文档 25）
 
 
 @dataclass
