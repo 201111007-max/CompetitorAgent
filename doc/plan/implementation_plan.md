@@ -475,6 +475,8 @@ dev:
 | 7 | **无趋势/时序** | `core/report_builder.py`、`markdown_renderer.py` | 报告为时间点快照，无竞品变化追踪（"Cursor 于 X 日加 background agents"） |
 | 8 | **输出仅 Markdown** | `core/report_builder.py` → `markdown_renderer.py` | 无结构化 JSON/矩阵导出、无定时跑、无"竞品异动"告警 |
 | 9 | **评测有盲区** | `evaluation/benchmark.py`、`tests/evaluation/fixtures/` | 真实执行 + 幻觉率指标是亮点，但 ground-truth fixture 偏通用；对"是否正确刻画 agentic 能力/生态/口碑"覆盖不足——而这恰是当前最弱的分析器（见 12.1 #2） |
+| 10 | **无对比/消融实验** | `facade/api.py:114-121`、`evaluation/benchmark.py` | RAG/记忆无条件组装、无开关，从未回答"有无 RAG / 有无 rerank / 有无 memory"的差分效果（简历/面试硬缺口）。已具备 26 条真实执行用例可作对照基线，只差变体运行器 |
+| 11 | **无失败类型统计** | `evaluation/accuracy_eval.py:31`、`evaluation/benchmark.py:490` | 只有幻觉率 + 逐实例清单与工具选择混淆矩阵，无"失败根因（源不可用/幻觉/无数据/解析错/预算耗尽）→ 计数 → 占比"聚合口径；底层信号（BLOCKED/`collect.fail`/`[PARTIAL]`/`real_trace`）已存在但未聚合 |
 
 ### 12.4 建议落地顺序（与第 11 节协同）
 
@@ -484,6 +486,8 @@ dev:
 4. **新鲜度/陈旧度 + 定时重爬 + 竞品时间线**（对应 12.2 #5、12.3 #7）。
 5. **直连榜单源**拉性能数字，而非靠 LLM 读网页（对应 12.2 #4）。
 6. **结构化输出 + 定时/告警**（对应 12.3 #8）；并扩充评测 fixture 覆盖生态/口碑维度（对应 12.3 #9）。
+7. **消融/对比实验**（对应 12.3 #10）：加 `enable_rag`/`enable_memory` 开关 + `AblationRunner`，对 26 条真实执行用例跑 full / no-rag / no-memory / no-llm-rule 对比表（简历与面试叙事最直接的数据支撑）。
+8. **失败类型统计**（对应 12.3 #11）：`FailureType` 五类分类 + `BenchmarkReport.failure_stats` 聚合 + 分布报告，补齐归因能力与简历证据。
 
 > 注：第 11 节的"RAG 未接线 / analyze_team 死代码 / ParallelRunner 未接入"若先修复，
 > 本节的"多源采集""N 向对比""生态分析"可直接建于其上，避免重复造轮子。
