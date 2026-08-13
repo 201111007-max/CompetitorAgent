@@ -171,6 +171,38 @@ class TimelineMemory:
         """上次分析的快照时间（无记录返回空串）。"""
         return str(self._bucket(competitor).get("last_analyzed_at", ""))
 
+    def report_for(self, competitor: str) -> CompetitorReport | None:
+        """上次快照重建为 CompetitorReport（run_scheduled 告警 diff 的 prev）。
+
+        快照由 ``update()`` 存储（summary/details/timestamp/urls），重建为
+        维度结果对象；无快照（首轮）返回 None，不产生伪告警。
+        """
+        from competitor_agent.domain_types.competitor import Competitor
+        from competitor_agent.domain_types.observation import SourceEvidence
+        from competitor_agent.domain_types.report import DimensionResult
+
+        snapshot = self._bucket(competitor).get("snapshot", {})
+        if not snapshot:
+            return None
+        results = [
+            DimensionResult(
+                dimension=dim,
+                summary=str(data.get("summary", "") or ""),
+                details=dict(data.get("details", {}) or {}),
+                timestamp=str(data.get("timestamp", "") or ""),
+                evidence=[
+                    SourceEvidence(source_name="timeline_snapshot", url=str(u))
+                    for u in data.get("urls", [])
+                ],
+            )
+            for dim, data in snapshot.items()
+        ]
+        return CompetitorReport(
+            competitor=Competitor(name=competitor),
+            dimension_results=results,
+            created_at=self.last_analyzed_at(competitor) or now_iso(),
+        )
+
     def _bucket(self, competitor: str) -> dict[str, Any]:
         return self._store.get(competitor, {"events": [], "snapshot": {}})
 

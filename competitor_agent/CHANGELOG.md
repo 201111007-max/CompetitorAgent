@@ -13,6 +13,7 @@
 - M3 多 Agent 协作：`team/`（message_bus / collector_agent / analyzer_agent / validator_agent / reporter_agent / orchestrator）。
 - M3 评测体系：`evaluation/`（accuracy_eval / strategy_eval / benchmark）+ `tests/evaluation/fixtures/` 标注用例。
 - M3 并行执行：`core/subagent.py` + `core/parallel_runner.py`（ThreadPoolExecutor + 共享预算 + 稳定合并）。
+- M7 结构化导出 + 定时调度轮 + 异动告警（设计文档 28）：`core/report_exporter.py`（竞品 JSON schema v1.0.0 / 对比矩阵 JSON）、`facade/api.py`（`run_scheduled` 按 TTL 定时重爬）、`core/alerting.py`（`ConsoleAlertSink` / `FileAlertSink`，时间线 diff → 异动告警）、CLI `schedule` 子命令。
 
 ### Fixed
 - （暂无）

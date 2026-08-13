@@ -94,7 +94,7 @@ competitor_agent/
 - 架构总纲：`../doc/ai_coding_agent_competitor_analysis_architecture.md`
 - 分步实现计划：`../doc/plan/implementation_plan.md`
 - 各模块契约/规范：`docs/`（interfaces/domain_models/prompts/data_sources/configuration/evaluation_guide/testing/usage/api）
-- 逐期设计文档：`../doc/plan/issue_designs/`（含 26_freshness_timeline_design.md：新鲜度 TTL / 过期提示 / refresh_stale / 时间线事件；27_pricing_modeling_design.md：结构化定价画像 / 成本估算）
+- 逐期设计文档：`../doc/plan/issue_designs/`（含 26_freshness_timeline_design.md：新鲜度 TTL / 过期提示 / refresh_stale / 时间线事件；27_pricing_modeling_design.md：结构化定价画像 / 成本估算；28_structured_export_design.md：结构化导出 / 定时调度轮 / 异动告警）
 
 ## 里程碑状态
 
@@ -105,3 +105,4 @@ competitor_agent/
 - [x] M4 工程化（Web/MCP/CI/断点）
 - [x] M5 数据新鲜度 + 竞品时间线（设计文档 26：维度 TTL / 过期提示 / `refresh_stale` 过期重爬 / 跨分析 diff → 时间线事件 / `timeline` 记忆 + CLI/Web 查询）
 - [x] M6 结构化定价画像（设计文档 27：`PricingProfile` 档位 + 按量计费 + 模型档位 / light·medium·heavy 成本估算 / 企业询价标注 / 报告渲染与归档 `pricing_profiles` / 时间线价格变化 diff）
+- [x] M7 结构化导出 + 定时跑 + 异动告警（设计文档 28：`report_exporter` 竞品/对比矩阵 JSON（schema v1.0.0）/ `api.run_scheduled` 按 TTL 定时重爬 / `alerting` 异动告警（Console/FileAlertSink）/ CLI `schedule`）

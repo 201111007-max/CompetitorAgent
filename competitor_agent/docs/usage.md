@@ -47,6 +47,9 @@ python -m competitor_agent.cli -c sess_abc123
 # 运行评测基准
 python -m competitor_agent.cli benchmark
 
+# 定时调度轮：只重爬过期竞品 + 结构化 JSON 导出 + 异动告警（设计文档 28）
+python -m competitor_agent.cli schedule --competitors cursor,copilot
+
 # 交互模式（无子命令时进入 REPL，支持斜杠命令）
 python -m competitor_agent.cli
 ```
@@ -59,6 +62,7 @@ python -m competitor_agent.cli
 | `/compare A 和 B` | `/c` | 两个竞品对比 |
 | `/history [--competitor X]` | `/h` | 查询历史 |
 | `/resume [session_id]` | `/r` | 恢复会话（缺省取最近 checkpoint） |
+| `/schedule [--competitors a,b]` |  | 定时调度轮（重爬过期 + 导出 + 告警） |
 | `/benchmark` | `/b` | 运行评测基准 |
 | `/help [命令]` | `/?` | 帮助 |
 
@@ -168,6 +172,7 @@ report = api.resume("sess_abc123")
 | 恢复 | `resume(session_id)` / `continue_analysis(session_id)` / CLI `-c` |
 | 历史 | `get_history(competitor)` / CLI `history` / `/history` |
 | 评测 | `pytest tests/evaluation` / CLI `benchmark` |
+| 定时调度轮 | `run_scheduled(competitors=None, alert_sink=None)` / CLI `schedule` |
 | MCP | `mcp_server.server --transport sse` |
 
 ---
@@ -178,6 +183,7 @@ report = api.resume("sess_abc123")
 - 低置信度项明确标注 `[low-confidence]`，不隐藏。
 - 全部结论带采集时间戳，过期风险可见。
 - **定价维度（设计文档 27）**：渲染「定价档位 / 按量计费 / 成本场景估算」三张表——档位含月付/年付/限额与 `需询价` 标注（企业档不猜数字），成本场景按 light(30)/medium(100)/heavy(1000) 次/天×30 天估算月成本（无按量单价且超限 → 需询价/无法估算，不编造）。`PricingProfile` 随报告归档为 `pricing_profiles`，时间线 `price_change` 事件摘要直接给出价格变化（如 `$20/mo → $40/mo`）。
+- **结构化导出（设计文档 28）**：分析完成后自动导出 `reports/competitor/<竞品>.json`（`config.report.export_json` 开启时，与 .md 同目录同名），`compare` 另出 `reports/comparison/<names>.json`（维度×竞品矩阵 + 每维度最佳 + 汇总排名）；报告末尾追加「已导出 JSON 路径」提示。定时轮 `schedule`/`run_scheduled` 只重爬过期（超过维度 TTL）竞品，把与上次快照的 diff 映射为异动告警（`price_change`/`feature_added`/`version_release`/`score_change`），`ConsoleAlertSink` 打印、`FileAlertSink` 追加 `reports/alerts/<date>.md`。
 
 ---
 
