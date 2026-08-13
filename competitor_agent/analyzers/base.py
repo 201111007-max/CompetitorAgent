@@ -104,8 +104,12 @@ class BaseCompetitorAnalyzer:
         context: AnalysisContext,
     ) -> DimensionResult:
         parsed = self._rule_extract(observation)
+        # 规则路径默认 0.5；子类可在 _rule_extract 返回中显式给 confidence
+        # （如 sentiment 无信号 → 低置信 PARTIAL，避免编造）
+        confidence = float(parsed.get("confidence", 0.5))
+        status = ResultStatus.COMPLETE if confidence >= 0.5 else ResultStatus.PARTIAL
         return self._make_result(
-            observation, gap, parsed, confidence=0.5, status=ResultStatus.PARTIAL
+            observation, gap, parsed, confidence=confidence, status=status
         )
 
     def _make_result(
