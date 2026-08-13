@@ -47,11 +47,18 @@ class TeamOrchestrator:
         ingester: Any | None = None,
         retriever: Any | None = None,
         session_id: str | None = None,
+        providers: dict[str, object] | None = None,
     ) -> None:
         self._bus = bus or MessageBus()
         self._planner = StrategicPlanner(llm=llm, use_llm=use_llm)
         self._collector = CollectorAgent(
-            self._bus, SourceSelector(), extractor, memory=memory, ingester=ingester, session_id=session_id
+            self._bus,
+            SourceSelector(providers=list((providers or {}).values())),
+            extractor,
+            memory=memory,
+            ingester=ingester,
+            session_id=session_id,
+            providers=providers,
         )
         self._analyzer = AnalyzerAgent(
             self._bus,

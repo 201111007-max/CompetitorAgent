@@ -23,6 +23,7 @@ from competitor_agent.agent.react_agent import ReactAgent
 from competitor_agent.agent.react_loop import ReactLoop
 from competitor_agent.agent.tool_dispatcher import ToolDispatcher
 from competitor_agent.analyzers.registry import AnalyzerRegistry
+from competitor_agent.collector.providers import build_providers
 from competitor_agent.collector.source_selector import SourceSelector
 from competitor_agent.collector.web_extractor import WebExtractor
 from competitor_agent.config.loader import AppConfig, load_config
@@ -102,7 +103,10 @@ class CompetitorAnalysisAPI:
         self._memory = memory
 
         self._planner = StrategicPlanner(llm=llm, use_llm=use_llm)
-        self._selector = SourceSelector()
+        # 外部源提供方（设计文档 23）：按 config 构造；主开关默认关闭（无网络/无 Key 不触发真实网络）
+        providers = build_providers(cfg.collector)
+        self._providers: dict[str, object] = {p.kind: p for p in providers}
+        self._selector = SourceSelector(providers=providers)
         if memory is not None:
             self._selector.set_success_rates(memory.source_success_rates())
         self._extractor = extractor or WebExtractor()
@@ -251,6 +255,7 @@ class CompetitorAnalysisAPI:
             ingester=self._ingester,
             retriever=self._retriever,
             memory=self._memory,
+            providers=self._providers,
         )
 
     @property
@@ -319,6 +324,7 @@ class CompetitorAnalysisAPI:
             ingester=self._ingester,
             retriever=self._retriever,
             session_id=session_id,
+            providers=self._providers,
         )
 
         # 预算一致性：与 single 共用 BudgetController，耗尽即提前终止

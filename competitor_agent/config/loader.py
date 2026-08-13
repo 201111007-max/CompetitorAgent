@@ -57,6 +57,13 @@ class CollectorConfig:
     rate_limit_per_second: int = 2
     use_playwright: bool = False
     user_agent: str = "competitor-agent/0.1"
+    # 外部源多源路由（设计文档 23）：主开关默认关闭，保证无网络/无 Key 的测试与
+    # benchmark 不触发真实网络；开启后按维度开关启用对应提供方。
+    enable_external_sources: bool = False
+    enable_github: bool = True
+    enable_marketplace: bool = True
+    enable_community: bool = True
+    enable_benchmark: bool = True
 
 
 @dataclass

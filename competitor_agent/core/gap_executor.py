@@ -30,30 +30,43 @@ from competitor_agent.observability.logger import get_logger, get_session_logger
 
 logger = get_logger("core.gap_executor")
 
+# 走默认 extractor 的候选 kind（官网/SPA/缓存）；其余 kind 走外部源 provider 分发
+_WEB_KINDS = frozenset({"web", "spa", "cache"})
+
 
 def fetch_candidate(
     gap: InfoGap,
     candidate: SourceCandidate,
-    competitor_name: str,
+    competitor: Competitor,
     default_extractor: ICompetitorDataSource,
     extractors: dict[str, ICompetitorDataSource] | None = None,
+    providers: dict[str, object] | None = None,
 ) -> Observation:
-    """按候选源抓取观测：按 source_name 分发到注册采集器，未注册回退默认。
+    """按候选源抓取观测（设计文档 23 §3.3）。
+
+    - `web` / `spa` / `cache`：按 source_name 分发到注册采集器，未注册回退默认；
+    - `github` / `marketplace` / `benchmark` / `social`：查 provider 注册表（kind 索引）
+      调用对应采集函数，失败抛 DataSourceUnavailableError 走降级链。
 
     供 GapExecutor._collect 与 CollectorAgent 共用，消除"构造 SourceContext +
     按源分发采集器"的重复。
     """
-    extractor = default_extractor
-    if extractors:
-        extractor = extractors.get(candidate.source_name, default_extractor)
-    return extractor.fetch(
-        gap,
-        SourceContext(
-            competitor_name=competitor_name,
-            query=gap.field,
-            kwargs={"url": candidate.url},
-        ),
-    )
+    if candidate.kind in _WEB_KINDS:
+        extractor = default_extractor
+        if extractors:
+            extractor = extractors.get(candidate.source_name, default_extractor)
+        return extractor.fetch(
+            gap,
+            SourceContext(
+                competitor_name=competitor.name,
+                query=gap.field,
+                kwargs={"url": candidate.url},
+            ),
+        )
+    provider = (providers or {}).get(candidate.kind)
+    if provider is None:
+        raise DataSourceUnavailableError(f"无 {candidate.kind} 类提供方，无法采集 {candidate.source_name}")
+    return provider.fetch(gap, candidate, competitor)
 
 
 class GapExecutor:
@@ -73,6 +86,7 @@ class GapExecutor:
         ingester: Any | None = None,
         retriever: Any | None = None,
         session_id: str | None = None,
+        providers: dict[str, object] | None = None,
     ) -> None:
         self._selector = selector
         self._default_extractor = extractor
@@ -87,6 +101,8 @@ class GapExecutor:
                 "spa_extractor": SpaExtractor(),
             }
         )
+        # 外部源提供方（设计文档 23）：kind → provider，fetch_candidate 按 kind 分发
+        self._providers: dict[str, object] = dict(providers or {})
         # RAG 知识库（可选）：采集后摄入 + 分析前检索注入
         self._ingester = ingester
         self._retriever = retriever
@@ -118,7 +134,7 @@ class GapExecutor:
             )
             started = time.monotonic()
             try:
-                observation = self._collect(candidate, gap, context)
+                observation = self._collect(candidate, gap, context, competitor)
             except DataSourceUnavailableError as exc:
                 gap.record_source_try(candidate.source_name)
                 logger.info("候选源失败 %s: %s", candidate.source_name, exc)
@@ -152,13 +168,16 @@ class GapExecutor:
         gap.status = GapStatus.BLOCKED
         return None
 
-    def _collect(self, candidate: SourceCandidate, gap: InfoGap, context: SourceContext) -> Observation:
+    def _collect(
+        self, candidate: SourceCandidate, gap: InfoGap, context: SourceContext, competitor: Competitor
+    ) -> Observation:
         return fetch_candidate(
             gap,
             candidate,
-            context.competitor_name,
+            competitor,
             self._default_extractor,
             self._extractors,
+            self._providers,
         )
 
     def _ingest_observation(self, observation: Observation, competitor: str, dimension: str) -> None:

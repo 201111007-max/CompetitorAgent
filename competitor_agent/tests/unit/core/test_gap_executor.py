@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from competitor_agent.collector.source_selector import SourceCandidate, SourceSelector
 from competitor_agent.core.budget import IterationBudget
 from competitor_agent.core.checkpoint import clear_cancel, set_cancel
@@ -208,13 +210,44 @@ class TestFetchCandidate:
         registered = TrackingExtractor("magic", "registered content")
         fallback = TrackingExtractor("default", "fallback content")
         gap = InfoGap(field="pricing")
+        competitor = _cursor()
         c1 = SourceCandidate(source_name="magic", url="https://a.com", trust_level=0.9)
         c2 = SourceCandidate(source_name="other", url="https://b.com", trust_level=0.9)
 
-        obs1 = fetch_candidate(gap, c1, "cursor", fallback, {"magic": registered})
-        obs2 = fetch_candidate(gap, c2, "cursor", fallback, {"magic": registered})
+        obs1 = fetch_candidate(gap, c1, competitor, fallback, {"magic": registered})
+        obs2 = fetch_candidate(gap, c2, competitor, fallback, {"magic": registered})
 
         assert obs1.source == "magic"
         assert obs2.source == "default"
         assert registered.urls == ["https://a.com"]
         assert fallback.urls == ["https://b.com"]
+
+    def test_dispatches_external_kind_to_provider(self):
+        """设计文档 23：github/marketplace/social 类候选按 kind 路由到 provider 采集。"""
+        provider_calls: list[str] = []
+
+        class FakeGithubProvider:
+            kind = "github"
+
+            def fetch(self, gap, candidate, competitor):
+                provider_calls.append(candidate.source_name)
+                return Observation(
+                    gap_field=gap.field,
+                    source=candidate.source_name,
+                    raw_text="stars: 100",
+                    evidence=SourceEvidence(source_name=candidate.source_name, url=candidate.url),
+                )
+
+        gap = InfoGap(field="ecosystem")
+        competitor = Competitor(name="cursor", external_refs={"github_repo": "getcursor/cursor"})
+        cand = SourceCandidate(source_name="github_stars", url="https://github.com/getcursor/cursor", trust_level=0.85, kind="github")
+        obs = fetch_candidate(gap, cand, competitor, FakeExtractor(), providers={"github": FakeGithubProvider()})
+        assert obs.raw_text == "stars: 100"
+        assert provider_calls == ["github_stars"]
+
+    def test_external_kind_without_provider_raises(self):
+        gap = InfoGap(field="ecosystem")
+        competitor = _cursor()
+        cand = SourceCandidate(source_name="github_stars", url="https://github.com/x/y", trust_level=0.85, kind="github")
+        with pytest.raises(DataSourceUnavailableError):
+            fetch_candidate(gap, cand, competitor, FakeExtractor())

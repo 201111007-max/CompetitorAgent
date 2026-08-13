@@ -29,13 +29,15 @@
 | `20_multi_competitor_discovery_design.md` | §13：自主发现竞品 + 多竞品并排对比 | P0 | ✅ 已修复 |
 | `21_log_observability_design.md` | §14：日志完善功能（可观测性补齐） | P0 | ✅ 已修复 |
 | `22_web_report_display_design.md` | §15：Web 端显示 / 导出报告 | P0 | ✅ 已修复 |
-| `23_multi_source_routing_design.md` | §12.1 #1：数据源只认官网（SourceSelector 多源路由） | P0 | ⏳ 待办 |
-| `24_ecosystem_sentiment_analyzers_design.md` | §12.1 #2：ecosystem / sentiment 无专属分析器 | P0 | ⏳ 待办 |
+| `23_multi_source_routing_design.md` | §12.1 #1：数据源只认官网（SourceSelector 多源路由） | P0 | ✅ 已实现 |
+| `24_ecosystem_sentiment_analyzers_design.md` | §12.1 #2：ecosystem / sentiment 无专属分析器 | P0 | ✅ 已实现 |
 | `25_direct_benchmark_sources_design.md` | §12.2 #4：性能数字靠 LLM 读网页（直连榜单） | P1 | ⏳ 待办 |
 | `26_freshness_timeline_design.md` | §12.2 #5 + §12.3 #7：无新鲜度/时间线（定时重爬） | P1 | ⏳ 待办 |
 | `27_pricing_modeling_design.md` | §12.3 #6：定价分层/用量建模弱 | P2 | ⏳ 待办 |
 | `28_structured_export_design.md` | §12.3 #8：输出仅 Markdown（结构化导出+定时+告警） | P2 | ⏳ 待办 |
 | `29_evaluation_coverage_design.md` | §12.3 #9：评测盲区（生态/口碑/时间线覆盖） | P2 | ⏳ 待办 |
+| `30_ablation_comparison_design.md` | §12.3 #10：无对比/消融实验（有无 RAG/rerank/memory） | P2 | ⏳ 待办 |
+| `31_failure_stats_design.md` | §12.3 #11：无失败类型统计（五类分类+聚合分布） | P2 | ⏳ 待办 |
 
 > **问题 1 修复说明**：多 Agent 已接入主流程。`CompetitorAnalysisAPI.analyze()` 新增 `mode` 参数（`single` / `team`，**默认 `team`**），`mode="team"` 时走事件驱动 + 状态决策的多 Agent 流水线（Collector→Analyzer→Validator→Reporter，支持 SUCCESS/RETRY/DEGRADED/FAILED 决策）。CLI 新增 `--mode` 选项。全量 312 个测试通过。
 
@@ -115,5 +117,7 @@
 5. **§12.3 #6 定价分层/用量建模**（`27_pricing_modeling_design.md`，P2，约 1.5 天）——`PricingProfile`（plans/usage/cost_scenarios）+ 询价标注。
 6. **§12.3 #8 结构化导出 + 定时 + 告警**（`28_structured_export_design.md`，P2，约 2-3 天）——`report_exporter` JSON/矩阵导出 + `run_scheduled` + `AlertSink` 异动告警。
 7. **§12.3 #9 评测盲区覆盖**（`29_evaluation_coverage_design.md`，P2，约 1.5-2 天）——`DIMENSION_KINDS` 增 ecosystem/sentiment/roadmap + fixture 用例 + 评测指南同步。
+8. **§12.3 #10 消融/对比实验**（`30_ablation_comparison_design.md`，P2，约 1-1.5 天）——`enable_rag`/`enable_memory` 开关 + `AblationRunner` 对 26 条真实执行用例跑 full/no-rag/no-memory/no-llm-rule 对比表（简历/面试数据支撑）。
+9. **§12.3 #11 失败类型统计**（`31_failure_stats_design.md`，P2，约 0.5-1 天）——`FailureType` 五类分类 + `BenchmarkReport.failure_stats` 聚合 + 分布报告（归因与简历证据）。
 
-> 依赖顺序建议：23（多源路由，底层）→ 24（分析器）→ 25（榜单，复用 23 的 provider）→ 26（时间线，复用 23 的 Releases）→ 27（定价，独立）→ 28（导出，复用 26/27）→ 29（评测，依赖 24/25/26 的结构化产出）。23-26 是产品差异化主线，27-29 是可信度与交付增强。
+> 依赖顺序建议：23（多源路由，底层）→ 24（分析器）→ 25（榜单，复用 23 的 provider）→ 26（时间线，复用 23 的 Releases）→ 27（定价，独立）→ 28（导出，复用 26/27）→ 29（评测，依赖 24/25/26 的结构化产出）。23-26 是产品差异化主线，27-29 是可信度与交付增强；**30/31 为简历/面试达标补充**，仅依赖已就绪的 `evaluation/benchmark.py`（真实执行版），可随时穿插实现。
