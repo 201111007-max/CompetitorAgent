@@ -15,7 +15,9 @@ SSE 端点：
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import time
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -24,11 +26,12 @@ from typing import Any
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 
 from competitor_agent import CompetitorAnalysisAPI
 from competitor_agent.config.loader import AppConfig, load_config
 from competitor_agent.core.checkpoint import set_cancel
+from competitor_agent.core.report_archiver import report_file_path, save_report_markdown
 from competitor_agent.core.task_parser import ResolutionDecision, parse_task
 from competitor_agent.domain_types.events import ProgressEvent
 from competitor_agent.domain_types.report import (
@@ -39,6 +42,11 @@ from competitor_agent.domain_types.report import (
 from competitor_agent.interfaces.context import AnalysisSession
 from competitor_agent.llm.client import LLMClient
 from competitor_agent.memory.four_layer_memory import FourLayerMemory
+from competitor_agent.observability.logger import (
+    close_session_log,
+    read_session_log,
+    setup_logging,
+)
 from competitor_agent.secret_vault import get_data_dir
 
 logger = logging.getLogger("competitor_agent.web_app")
@@ -164,9 +172,12 @@ async def _event_generator(
                     ),
                     "dimensions": list(dict.fromkeys(all_dims)),
                     "markdown_report": report.markdown_report,
+                    "session_id": session_id,
                     "is_comparison": True,
                 },
             ).to_sse()
+            # 自动落盘对比报告
+            save_report_markdown(report)
             # 归档会话
             _get_memory().archive_session(
                 AnalysisSession(
@@ -194,8 +205,13 @@ async def _event_generator(
                 "terminal_state": report.terminal_state,
                 "overall_confidence": report.overall_confidence,
                 "dimensions": [r.dimension for r in report.dimension_results],
+                "markdown_report": report.markdown_report,
+                "session_id": session_id,
             },
         ).to_sse()
+
+        # 自动落盘 reports/competitor/<竞品>.md（导出/下载用）
+        save_report_markdown(report)
 
         # 归档会话（统一 raw schema）
         _get_memory().archive_session(
@@ -285,6 +301,18 @@ button:hover { background: #1976D2; }
 button:disabled { background: #ccc; }
 #cancel-btn { background: #f44336; }
 #cancel-btn:hover { background: #d32f2f; }
+#report { border: 1px solid #ddd; border-radius: 6px; padding: 12px; margin-top: 12px; white-space: pre-wrap; font-size: 13px; display: none; }
+#report.visible { display: block; }
+#candidates { margin-top: 12px; font-size: 13px; color: #1565C0; display: none; }
+#candidates.visible { display: block; }
+.matrix-box { margin-top: 12px; }
+.matrix-box table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.matrix-box th, .matrix-box td { border: 1px solid #ddd; padding: 6px 8px; text-align: left; }
+.matrix-box th { background: #f0f4f8; }
+.report-toolbar { margin-top: 12px; }
+.report-toolbar button { margin-right: 8px; }
+#session-log { background: #111; color: #0f0; padding: 12px; border-radius: 6px; font-size: 12px; line-height: 1.5; height: 160px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; }
+details { margin-top: 12px; }
 </style>
 </head>
 <body>
@@ -296,9 +324,23 @@ button:disabled { background: #ccc; }
 </div>
 <hr/>
 <div id="log">等待输入...</div>
+<div id="candidates"><strong>发现候选:</strong> <span id="candidate-list"></span></div>
+<div id="report-toolbar" class="report-toolbar" style="display:none;">
+    <button onclick="copyReport()">复制 Markdown</button>
+    <button id="download-btn" onclick="downloadReport()">下载 .md</button>
+</div>
+<div id="matrix" class="matrix-box" style="display:none;"></div>
+<div id="report"></div>
+<details>
+    <summary>会话日志</summary>
+    <div id="session-log">（分析开始后实时显示）</div>
+</details>
 <script>
 let eventSource = null;
+let logSource = null;
 let sessionId = null;
+let discoveredCandidates = [];
+let lastReport = null;
 
 function addLog(event, message) {
     const log = document.getElementById('log');
@@ -309,30 +351,134 @@ function addLog(event, message) {
     log.scrollTop = log.scrollHeight;
 }
 
+function openLogStream() {
+    if (!sessionId) return;
+    document.getElementById('session-log').textContent = '';
+    logSource = new EventSource('/api/logs/stream/' + sessionId);
+    logSource.onmessage = function(e) {
+        const data = JSON.parse(e.data);
+        if (data.event === 'log_end') { logSource.close(); return; }
+        const line = '[' + (data.ts || '') + '] ' + (data.event || '') + ' ' + (data.message || JSON.stringify(data));
+        const box = document.getElementById('session-log');
+        box.textContent += line + '\n';
+        box.scrollTop = box.scrollHeight;
+    };
+    logSource.onerror = function() { if (logSource) logSource.close(); };
+}
+
+function closeLogStream() { if (logSource) { logSource.close(); logSource = null; } }
+
 function startAnalysis() {
     const task = document.getElementById('task').value.trim();
     if (!task) return;
     sessionId = 'sess_' + Date.now();
     document.getElementById('log').innerHTML = '';
+    clearCandidates();
+    clearReport();
     document.getElementById('start-btn').disabled = true;
     document.getElementById('cancel-btn').disabled = false;
+    openLogStream();
 
     eventSource = new EventSource('/api/analyze?task=' + encodeURIComponent(task) + '&session_id=' + sessionId);
     eventSource.onmessage = function(e) {
         const data = JSON.parse(e.data);
         addLog(data.event, data.message || (data.phase || '') + ' [' + (data.progress * 100).toFixed(0) + '%]');
+        if (data.event === 'discovery.candidate' && data.payload && data.payload.candidate) {
+            addCandidate(data.payload.candidate);
+        }
+        if (data.event === 'report') {
+            renderReport(data.payload);
+        }
         if (data.event === 'report' || data.event === 'error' || data.event === 'cancelled') {
             eventSource.close();
+            closeLogStream();
             document.getElementById('start-btn').disabled = false;
             document.getElementById('cancel-btn').disabled = true;
+            if (data.event !== 'report') clearReport();
         }
     };
     eventSource.onerror = function() {
         addLog('error', '连接断开');
         eventSource.close();
+        closeLogStream();
         document.getElementById('start-btn').disabled = false;
         document.getElementById('cancel-btn').disabled = true;
+        clearReport();
     };
+}
+
+function addCandidate(name) {
+    if (discoveredCandidates.indexOf(name) === -1) {
+        discoveredCandidates.push(name);
+        document.getElementById('candidates').classList.add('visible');
+        document.getElementById('candidate-list').textContent = discoveredCandidates.join(', ');
+    }
+}
+
+function clearCandidates() {
+    discoveredCandidates = [];
+    document.getElementById('candidates').classList.remove('visible');
+    document.getElementById('candidate-list').textContent = '';
+}
+
+function escapeHtml(s) {
+    const div = document.createElement('div');
+    div.textContent = s;
+    return div.innerHTML;
+}
+
+function renderMatrix(md) {
+    const matrix = document.getElementById('matrix');
+    if (!md || !md.includes('品类格局矩阵')) {
+        matrix.innerHTML = '';
+        matrix.style.display = 'none';
+        return;
+    }
+    const rows = md.split('\n')
+        .filter(l => l.trim().startsWith('|'))
+        .map(l => l.trim().replace(/^[|]/, '').replace(/[|]$/, '').split('|').map(c => c.trim()))
+        .filter(row => !row.every(c => /^:?-+:?$/.test(c)));  // 跳过 --- 分隔行
+    const html = rows.map((row, i) => '<tr>' + row.map(c =>
+        '<' + (i === 0 ? 'th' : 'td') + '>' + escapeHtml(c) + '</' + (i === 0 ? 'th' : 'td') + '>'
+    ).join('') + '</tr>').join('');
+    matrix.innerHTML = '<table>' + html + '</table>';
+    matrix.style.display = 'block';
+}
+
+function renderReport(payload) {
+    const report = document.getElementById('report');
+    if (!payload || !payload.markdown_report) return;
+    lastReport = payload;
+    report.textContent = payload.markdown_report;  // 服务端已转义，直接文本注入（防 XSS）
+    report.classList.add('visible');
+    document.getElementById('report-toolbar').style.display = 'block';
+    const dl = document.getElementById('download-btn');
+    dl.disabled = !payload.competitor;
+    renderMatrix(payload.markdown_report);  // 对比报告额外渲染品类格局矩阵表格
+}
+
+function copyReport() {
+    if (!lastReport || !lastReport.markdown_report) return;
+    navigator.clipboard.writeText(lastReport.markdown_report)
+        .then(() => addLog('report', '已复制 Markdown'))
+        .catch(() => addLog('error', '复制失败'));
+}
+
+function downloadReport() {
+    if (!lastReport || !lastReport.competitor) return;
+    window.location.href = '/api/reports/' + encodeURIComponent(lastReport.competitor) + '/download';
+}
+
+function clearReport() {
+    lastReport = null;
+    const report = document.getElementById('report');
+    report.textContent = '';
+    report.classList.remove('visible');
+    document.getElementById('report-toolbar').style.display = 'none';
+    const matrix = document.getElementById('matrix');
+    matrix.innerHTML = '';
+    matrix.style.display = 'none';
+    clearCandidates();
 }
 
 function cancelAnalysis() {
@@ -430,6 +576,72 @@ async def status(session_id: str, _: None = Depends(require_auth)) -> JSONRespon
     )
 
 
+@app.get("/api/logs/{session_id}")
+async def logs(
+    session_id: str,
+    _: None = Depends(require_auth),
+    tail: int = Query(default=500, ge=1, le=10000),
+) -> JSONResponse:
+    """返回该次分析的会话日志（logs/<sid>.log，tail 限定最近 N 行）"""
+    lines = read_session_log(session_id, tail=tail)
+    return JSONResponse({"session_id": session_id, "count": len(lines), "lines": lines})
+
+
+@app.get("/api/logs/stream/{session_id}")
+async def logs_stream(
+    request: Request,
+    session_id: str,
+    _: None = Depends(require_auth),
+) -> StreamingResponse:
+    """SSE 推送会话日志尾部追加（配合前端实时查看）"""
+
+    async def _stream() -> AsyncIterator[str]:
+        sent = 0
+        last_activity = time.monotonic()
+        while True:
+            if await request.is_disconnected():
+                break
+            lines = read_session_log(session_id)
+            if len(lines) > sent:
+                for line in lines[sent:]:
+                    yield f"data: {json.dumps(line, ensure_ascii=False)}\n\n"
+                sent = len(lines)
+                last_activity = time.monotonic()
+            # 会话结束（_sessions 中已移除）且已推完 → 收尾
+            if session_id not in _sessions and len(lines) == sent:
+                yield f"data: {json.dumps({'event': 'log_end', 'session_id': session_id})}\n\n"
+                break
+            if time.monotonic() - last_activity > 300:
+                break
+            await asyncio.sleep(0.5)
+
+    return StreamingResponse(_stream(), media_type="text/event-stream")
+
+
+@app.get("/api/reports/{competitor}")
+async def report_file(
+    competitor: str,
+    _: None = Depends(require_auth),
+) -> FileResponse:
+    """返回落盘的报告文件 reports/competitor/<competitor>.md；不存在返回 404。"""
+    path = report_file_path(competitor)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"报告不存在: {competitor}")
+    return FileResponse(path, media_type="text/markdown; charset=utf-8")
+
+
+@app.get("/api/reports/{competitor}/download")
+async def report_download(
+    competitor: str,
+    _: None = Depends(require_auth),
+) -> FileResponse:
+    """以 Content-Disposition: attachment 下载报告（触发浏览器下载）。"""
+    path = report_file_path(competitor)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"报告不存在: {competitor}")
+    return FileResponse(path, media_type="text/markdown; charset=utf-8", filename=f"{competitor}.md")
+
+
 def main() -> None:
     """命令行入口"""
     import argparse
@@ -439,7 +651,7 @@ def main() -> None:
     parser.add_argument("--host", type=str, default="127.0.0.1", help="监听地址")
     args = parser.parse_args()
 
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    setup_logging(level=_config.observability.log_level, log_dir=get_data_dir() / "logs")
     uvicorn.run(app, host=args.host, port=args.port)
 
 

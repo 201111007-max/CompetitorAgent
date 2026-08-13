@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from competitor_agent.analyzers.base import BaseCompetitorAnalyzer
@@ -25,7 +26,7 @@ from competitor_agent.domain_types.report import DimensionResult
 from competitor_agent.interfaces.collector import ICompetitorDataSource
 from competitor_agent.interfaces.context import AnalysisContext, SourceContext
 from competitor_agent.interfaces.exceptions import DataSourceUnavailableError
-from competitor_agent.observability.logger import get_logger
+from competitor_agent.observability.logger import get_logger, get_session_logger, log_event
 
 logger = get_logger("core.gap_executor")
 
@@ -98,6 +99,7 @@ class GapExecutor:
         """执行单缺口闭环。返回维度结论（失败/被取消返回 None）。"""
         context = SourceContext(competitor_name=competitor.name)
         candidates = self._selector.candidates(gap, competitor)
+        slog = get_session_logger(self._session_id)
 
         for candidate in candidates:
             if self._session_id and is_cancelled(self._session_id):
@@ -108,16 +110,42 @@ class GapExecutor:
                 gap.status = GapStatus.BLOCKED
                 return None
 
+            log_event(
+                slog, "source.selected", "select",
+                f"缺口 {gap.field} 选源 {candidate.source_name}",
+                gap_field=gap.field, source_name=candidate.source_name,
+                url=candidate.url, degraded=(candidate.trust_level < 0.9),
+            )
+            started = time.monotonic()
             try:
                 observation = self._collect(candidate, gap, context)
             except DataSourceUnavailableError as exc:
                 gap.record_source_try(candidate.source_name)
                 logger.info("候选源失败 %s: %s", candidate.source_name, exc)
+                log_event(
+                    slog, "collect.fail", "collect",
+                    f"采集失败 {candidate.source_name}: {exc}",
+                    gap_field=gap.field, source_name=candidate.source_name,
+                    url=candidate.url, elapsed_ms=int((time.monotonic() - started) * 1000),
+                )
                 continue
 
             gap.record_source_try(candidate.source_name)
+            elapsed = int((time.monotonic() - started) * 1000)
+            log_event(
+                slog, "collect.done", "collect",
+                f"采集完成 {candidate.source_name}（{len(observation.raw_text)} 字节, {elapsed}ms）",
+                gap_field=gap.field, source_name=candidate.source_name,
+                url=candidate.url, bytes=len(observation.raw_text), elapsed_ms=elapsed,
+            )
             self._ingest_observation(observation, competitor.name, gap.field)
             result = self._analyze(observation, gap, context)
+            log_event(
+                slog, "analyze.done", "analyze",
+                f"分析完成 {gap.field}（置信度 {result.confidence:.2f}）",
+                dimension=gap.field, confidence=round(result.confidence, 3),
+                model=(getattr(self._analyzer, "_llm", None) and getattr(self._analyzer._llm, "_model", "")) or "rules",
+            )
             self._update_gap(gap, observation, result)
             return result
 

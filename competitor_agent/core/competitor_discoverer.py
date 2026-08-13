@@ -57,14 +57,25 @@ class CompetitorDiscoverer:
         self._use_llm = use_llm
         self._web_tool = web_tool
 
-    def discover(self, task: str) -> list[Competitor]:
+    def discover(
+        self,
+        task: str,
+        on_candidate: Callable[[str], None] | None = None,
+    ) -> list[Competitor]:
         """联网检索候选竞品列表（名称 + official_links），返回去重后的 ≥1 个竞品。
 
         1) 注册表命中优先；
         2) 未知 → web_tool 搜索（名称 + 官网），use_llm=True 时 LLM 归纳去重补全；
         3) 兜底内置清单。
+
+        on_candidate: 每发现一个候选竞品名即回调（供 Web SSE 实时推送）。
         """
         candidates = self._search(task)
+        if on_candidate is not None:
+            for cand in candidates:
+                name = str(cand.get("name", "")).strip()
+                if name:
+                    on_candidate(name)
         return self._to_competitors(candidates)
 
     def _search(self, task: str) -> list[dict[str, Any]]:

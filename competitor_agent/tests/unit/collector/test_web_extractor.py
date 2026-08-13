@@ -1,4 +1,8 @@
 """collector/web_extractor.py 单测：mock 页面返回结构化 Observation"""
+import pytest
+
+pytest.importorskip("bs4")  # bs4 为可选依赖，缺失时跳过本组测试
+
 import httpx
 
 from competitor_agent.collector.web_extractor import WebExtractor

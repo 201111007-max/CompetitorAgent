@@ -88,6 +88,25 @@ class TestDiscover:
         assert any(e.event == "discovery" for e in events)
         assert any(e.payload and e.payload.get("candidates") for e in events)
 
+    def test_discover_emits_per_candidate_events_before_discovery(self):
+        """discovery 阶段逐候选实时推送（discovery.candidate），先于聚合的 discovery 事件。"""
+
+        def web_tool(task: str) -> list[dict]:
+            return [
+                {"name": "cursor", "home": "https://www.cursor.com"},
+                {"name": "windsurf", "home": "https://windsurf.com"},
+            ]
+
+        events = []
+        api = CompetitorAnalysisAPI(
+            extractor=FakeExtractor(), use_llm=False, event_sink=events.append, web_tool=web_tool
+        )
+        api.discover("帮我寻找市场上所有 AI coding agent")
+        cands = [e.payload["candidate"] for e in events if e.event == "discovery.candidate" and e.payload]
+        assert cands == ["cursor", "windsurf"], f"应逐候选推送，实际: {cands}"
+        seq = [e.event for e in events]
+        assert seq.index("discovery.candidate") < seq.index("discovery")
+
     def test_task_with_sources_injects_links(self):
         api = _api()
         competitor = Competitor(

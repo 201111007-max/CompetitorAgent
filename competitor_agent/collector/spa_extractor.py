@@ -14,8 +14,6 @@ from __future__ import annotations
 import logging
 from typing import Callable
 
-from bs4 import BeautifulSoup
-
 from competitor_agent.domain_types.enums import ObservationStatus
 from competitor_agent.domain_types.info_gap import InfoGap
 from competitor_agent.domain_types.observation import Observation, SourceEvidence
@@ -112,7 +110,16 @@ class SpaExtractor:
                 browser.close()
 
     def _clean(self, html: str) -> str:
-        soup = BeautifulSoup(html, "lxml")
+        try:
+            from bs4 import BeautifulSoup  # 可选依赖（与 Playwright 同机制），缺失时优雅降级
+        except ImportError as exc:
+            raise DataSourceUnavailableError(
+                "bs4 未安装，无法解析 SPA 渲染内容。请 `pip install beautifulsoup4`。"
+            ) from exc
+        try:
+            soup = BeautifulSoup(html, "lxml")
+        except Exception:  # lxml 解析器缺失时回退标准库 html.parser
+            soup = BeautifulSoup(html, "html.parser")
         for tag in soup(_SKIP_TAGS):
             tag.decompose()
         text = soup.get_text(separator="\n")
