@@ -63,6 +63,7 @@ class SingleOrchestrator:
         ingester: Any | None = None,
         retriever: Any | None = None,
         memory: IFourLayerMemory | None = None,
+        providers: dict[str, object] | None = None,
     ) -> None:
         self._config = config
         self._budget = budget
@@ -72,6 +73,7 @@ class SingleOrchestrator:
         self._ingester = ingester
         self._retriever = retriever
         self._memory = memory
+        self._providers = dict(providers or {})
 
     def run(
         self,
@@ -183,6 +185,7 @@ class SingleOrchestrator:
             ingester=self._ingester,
             retriever=self._retriever,
             session_id=sid,
+            providers=self._providers,
         )
         result = loop.execute(gap, strategy)
         # 每完成一个缺口保存 checkpoint（结果快照 + 共享预算用量）

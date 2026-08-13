@@ -45,6 +45,13 @@ collector:
   rate_limit_per_second: 2   # 每源限速（ToolGuard）
   use_playwright: false      # M1 关；M2 接入后按需开
   user_agent: "competitor-agent/0.1"
+  # 外部源多源路由（设计文档 23）：默认关闭，保证无网络/无 Key 测试与 benchmark 不触发真实网络。
+  # 有网络/Key 的真实运行环境打开 enable_external_sources 即可启用 GitHub/插件市场等外部源。
+  enable_external_sources: false
+  enable_github: true
+  enable_marketplace: true
+  enable_community: true
+  enable_benchmark: true
 
 # ===== 停止验证 =====
 stop_verifier:

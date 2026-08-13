@@ -12,6 +12,9 @@ class Competitor:
     aliases: list[str] = field(default_factory=list)
     category: str = "ai_coding_agent"
     official_links: dict[str, str] = field(default_factory=dict)
+    # 官网之外的结构化引用（设计文档 23）：如 {"github_repo": "getcursor/cursor",
+    # "marketplace": "https://marketplace.visualstudio.com/items?itemName=..."}
+    external_refs: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "name", self.name.strip().lower().replace(" ", "-"))

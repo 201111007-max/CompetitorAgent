@@ -12,6 +12,7 @@ COMPETITOR_REGISTRY: dict[str, Competitor] = {
             "docs": "https://docs.anthropic.com/en/docs/claude-code",
             "pricing": "https://www.anthropic.com/pricing",
         },
+        external_refs={"github_repo": "anthropics/claude-code"},
     ),
     "cursor": Competitor(
         name="cursor",
@@ -20,6 +21,10 @@ COMPETITOR_REGISTRY: dict[str, Competitor] = {
             "home": "https://www.cursor.com",
             "pricing": "https://www.cursor.com/pricing",
             "docs": "https://docs.cursor.com",
+        },
+        external_refs={
+            "github_repo": "getcursor/cursor",
+            "marketplace": "https://marketplace.visualstudio.com/items?itemName=Anysphere.cursor",
         },
     ),
     "copilot": Competitor(
@@ -37,6 +42,7 @@ COMPETITOR_REGISTRY: dict[str, Competitor] = {
         official_links={
             "home": "https://openai.com/index/introducing-codex/",
         },
+        external_refs={"github_repo": "openai/codex"},
     ),
     "windsurf": Competitor(
         name="windsurf",
@@ -44,6 +50,9 @@ COMPETITOR_REGISTRY: dict[str, Competitor] = {
         official_links={
             "home": "https://windsurf.com",
             "pricing": "https://windsurf.com/pricing",
+        },
+        external_refs={
+            "marketplace": "https://marketplace.visualstudio.com/items?itemName=Windsurf.windsurf",
         },
     ),
     "aider": Competitor(
@@ -53,6 +62,7 @@ COMPETITOR_REGISTRY: dict[str, Competitor] = {
             "home": "https://aider.chat",
             "docs": "https://aider.chat/docs/",
         },
+        external_refs={"github_repo": "Aider-AI/aider"},
     ),
     "gemini-cli": Competitor(
         name="gemini-cli",
@@ -60,6 +70,7 @@ COMPETITOR_REGISTRY: dict[str, Competitor] = {
         official_links={
             "home": "https://github.com/google-gemini/gemini-cli",
         },
+        external_refs={"github_repo": "google-gemini/gemini-cli"},
     ),
     "opencode": Competitor(
         name="opencode",
@@ -67,6 +78,7 @@ COMPETITOR_REGISTRY: dict[str, Competitor] = {
         official_links={
             "home": "https://opencode.ai",
         },
+        external_refs={"github_repo": "sst/opencode"},
     ),
 }
 

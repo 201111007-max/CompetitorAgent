@@ -36,12 +36,14 @@ class CollectorAgent(BaseAgent):
         memory: IFourLayerMemory | None = None,
         ingester: Any | None = None,
         session_id: str | None = None,
+        providers: dict[str, object] | None = None,
     ) -> None:
         super().__init__("collector", bus, memory)
         self._selector = selector
         self._extractor = extractor
         self._ingester = ingester
         self._session_id = session_id or ""
+        self._providers = dict(providers or {})
 
     def run(self, ctx: AgentContext) -> AgentResult:
         """决策入口：采集缺口数据，产出 Observation 列表。"""
@@ -66,7 +68,9 @@ class CollectorAgent(BaseAgent):
                 break
             for candidate in self._selector.candidates(gap, strategy.competitor):
                 try:
-                    obs = fetch_candidate(gap, candidate, strategy.competitor.name, self._extractor)
+                    obs = fetch_candidate(
+                        gap, candidate, strategy.competitor, self._extractor, providers=self._providers
+                    )
                 except DataSourceUnavailableError as exc:
                     gap.record_source_try(candidate.source_name)
                     logger.info("候选源失败 %s: %s", candidate.source_name, exc)

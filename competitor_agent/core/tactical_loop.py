@@ -41,6 +41,7 @@ class TacticalLoop:
         ingester: Any | None = None,
         retriever: Any | None = None,
         session_id: str | None = None,
+        providers: dict[str, object] | None = None,
     ) -> None:
         self._executor = GapExecutor(
             selector=selector,
@@ -51,6 +52,7 @@ class TacticalLoop:
             ingester=ingester,
             retriever=retriever,
             session_id=session_id,
+            providers=providers,
         )
 
     @property
