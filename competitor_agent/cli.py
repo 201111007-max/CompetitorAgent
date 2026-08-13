@@ -130,6 +130,26 @@ def _run_timeline(api: CompetitorAnalysisAPI, args: str) -> None:
             print(f"  证据: {', '.join(str(u) for u in urls[:2])}")
 
 
+def _run_schedule(api: CompetitorAnalysisAPI, args: str) -> None:
+    """schedule [--competitors a,b]：定时调度轮（设计文档 28 §3.2）。
+
+    只重爬过期（超过维度 TTL）竞品，产出含结构化 JSON 报告 + 异动告警文件。
+    """
+    from competitor_agent.core.alerting import FileAlertSink
+
+    competitors = None
+    if args and args.strip():
+        competitors = [p.strip() for p in args.split(",") if p.strip()]
+    sink = FileAlertSink()
+    reports = api.run_scheduled(competitors=competitors, alert_sink=sink)
+    if not reports:
+        print("（无过期竞品需重爬，或尚无跟踪竞品）")
+        return
+    print(f"定时调度完成：重爬 {len(reports)} 个过期竞品")
+    for r in reports:
+        print(f"- {r.competitor.name} | 终态={r.terminal_state} | {len(r.dimension_results)} 维度")
+
+
 def _run_resume(api: CompetitorAnalysisAPI, args: str) -> None:
     session_id = args.strip()
     if not session_id:
@@ -181,6 +201,7 @@ def _repl(api: CompetitorAnalysisAPI, llm: LLMClient | None = None, use_llm: boo
         "resume": lambda a: _run_resume(api, a),
         "refresh": lambda a: _run_refresh(api, a),
         "timeline": lambda a: _run_timeline(api, a),
+        "schedule": lambda a: _run_schedule(api, a),
         "benchmark": lambda a: _run_benchmark(a),
         "help": lambda a: _run_help(a),
     }
@@ -238,6 +259,9 @@ def build_parser() -> argparse.ArgumentParser:
     timeline_p = sub.add_parser("timeline", help="查看竞品时间线事件（版本/功能/价格/榜单变化）")
     timeline_p.add_argument("competitor", nargs="?", default=None, help="竞品名称")
 
+    schedule_p = sub.add_parser("schedule", help="定时调度轮：重爬过期竞品 + 结构化导出 + 异动告警（设计文档 28）")
+    schedule_p.add_argument("--competitors", default=None, help="目标竞品（逗号分隔）；缺省用跟踪竞品")
+
     sub.add_parser("benchmark", help="运行评测基准")
     return parser
 
@@ -274,6 +298,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "timeline":
         _run_timeline(api, args.competitor or "")
+        return 0
+    if args.command == "schedule":
+        _run_schedule(api, args.competitors or "")
         return 0
     if args.command == "benchmark":
         _run_benchmark("")

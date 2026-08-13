@@ -17,6 +17,7 @@ import logging
 import uuid
 from collections.abc import AsyncIterator
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 from typing import Callable
 
 from competitor_agent.agent.react_agent import ReactAgent
@@ -27,6 +28,8 @@ from competitor_agent.collector.providers import build_providers
 from competitor_agent.collector.source_selector import SourceSelector
 from competitor_agent.collector.web_extractor import WebExtractor
 from competitor_agent.config.loader import AppConfig, load_config
+from competitor_agent.core.alerting import Alert, AlertSink, ConsoleAlertSink
+from competitor_agent.core.alerting import report_diff as _diff_to_alerts
 from competitor_agent.core.budget import IterationBudget
 from competitor_agent.core.budget_controller import BudgetController, StopReason
 from competitor_agent.core.checkpoint import (
@@ -41,6 +44,10 @@ from competitor_agent.core.competitor_discoverer import CompetitorDiscoverer
 from competitor_agent.core.input_sanitizer import sanitize_task
 from competitor_agent.core.orchestrator import SingleOrchestrator
 from competitor_agent.core.report_builder import ReportBuilder
+from competitor_agent.core.report_exporter import (
+    export_comparison_json,
+    export_competitor_json,
+)
 from competitor_agent.core.stop_verifier import StopVerifier
 from competitor_agent.core.strategic_loop import StrategicPlanner
 from competitor_agent.core.task_parser import parse_task
@@ -237,6 +244,7 @@ class CompetitorAnalysisAPI:
         # 分析正常完成：记录时间线 diff + 归档带新鲜度的会话（设计文档 26）
         self._record_timeline(report)
         self._archive_report(report, task, sid)
+        self._export_competitor_json(report, sid)
         delete_checkpoint(sid)
         close_session_log(sid)
         self._emit(
@@ -312,6 +320,122 @@ class CompetitorAnalysisAPI:
                 },
             )
         )
+
+    def _export_competitor_json(self, report: CompetitorReport, session_id: str) -> Path | None:
+        """设计文档 28：config.report.export_json 开启时导出 reports/competitor/<竞品>.json。
+
+        结构化副本与 .md 同目录同名；成功后在报告正文末尾追加"已导出 JSON 路径"提示。
+        失败仅告警不影响主流程；成功返回落盘路径。
+        """
+        if not self._config.report.export_json:
+            return None
+        try:
+            path = export_competitor_json(report, self._config.report.output_dir)
+        except Exception:
+            logger.warning("JSON 导出失败（竞品: %s）: ", report.competitor.name, exc_info=True)
+            return None
+        try:
+            note = f"\n> 结构化数据已导出: `{path}`\n"
+            if report.markdown_report and note.strip() not in report.markdown_report:
+                report.markdown_report = report.markdown_report.rstrip() + "\n" + note
+        except Exception:
+            pass
+        return path
+
+    def _export_comparison_json(self, report: ComparisonReport) -> Path | None:
+        """设计文档 28：比较报告导出 reports/comparison/<names>.json（品类矩阵）。"""
+        if not self._config.report.export_json:
+            return None
+        try:
+            path = export_comparison_json(report, self._config.report.comparison_dir)
+        except Exception:
+            logger.warning("对比矩阵 JSON 导出失败: ", exc_info=True)
+            return None
+        try:
+            note = f"\n> 结构化矩阵已导出: `{path}`\n"
+            if report.markdown_report and note.strip() not in report.markdown_report:
+                report.markdown_report = report.markdown_report.rstrip() + "\n" + note
+        except Exception:
+            pass
+        return path
+
+    def report_diff(self, prev: CompetitorReport, cur: CompetitorReport) -> list[Alert]:
+        """两份报告维度级 diff → 竞品异动告警（复用 TimelineMemory.diff 映射为 Alert）。"""
+        return _diff_to_alerts(prev, cur)
+
+    def run_scheduled(
+        self,
+        competitors: list[str] | None = None,
+        alert_sink: AlertSink | None = None,
+    ) -> list[CompetitorReport]:
+        """定时调度轮（设计文档 28 §3.2）：对跟踪竞品执行一次调度轮。
+
+        - 目标竞品：显式传入或归档里的跟踪竞品（去重、跳过对比/发现聚合会话）；
+        - 过滤未过期（freshness 内）的竞品，仅重爬过期的；
+        - 逐个 analyze（含 JSON 导出），与上次报告 diff 产出异动告警 → AlertSink；
+        - 单竞品失败不回滚整体。
+
+        调用时机由外部调度器（cron）控制，本方法只保证"过期才重爬"语义。
+        """
+        sink = alert_sink or ConsoleAlertSink()
+        names = list(competitors) if competitors else self._tracked_competitors()
+        if not names:
+            return []
+        ttl = dict(self._config.freshness.dimension_ttl_days)
+        refreshed: list[CompetitorReport] = []
+        for name in names:
+            if not self._stale_for_schedule(name, ttl):
+                continue
+            # 先取上次快照作 diff 基线，再重爬（analyze 会在 _record_timeline 里覆盖快照）
+            prev = self._timeline.report_for(name)
+            self._emit(
+                ProgressEvent(
+                    event="phase_start",
+                    phase="schedule",
+                    message=f"定时重爬过期竞品: {name}",
+                )
+            )
+            report = self.analyze(name, mode="team", session_id=f"schedule_{uuid.uuid4().hex[:8]}")
+            refreshed.append(report)
+            if prev is not None:
+                for alert in self.report_diff(prev, report):
+                    sink.emit(alert)
+            self._emit(
+                ProgressEvent(
+                    event="refreshed",
+                    phase="schedule",
+                    message=f"已刷新 {name}",
+                    payload={"competitor": name},
+                )
+            )
+        return refreshed
+
+    def _tracked_competitors(self) -> list[str]:
+        """归档里的跟踪竞品（每个竞品取最新会话，跳过 " / " 的聚合/对比会话）。"""
+        if self._memory is None:
+            return []
+        latest: dict[str, object] = {}
+        for s in self._memory.list_sessions():
+            comp = getattr(s, "competitor_name", "")
+            if not comp or " / " in comp:
+                continue
+            if comp not in latest:
+                latest[comp] = s
+        return list(latest)
+
+    def _stale_for_schedule(self, name: str, ttl: dict[str, int]) -> bool:
+        """竞品最新归档会话的 stale 判定：无归档 → 视为需重爬；freshness 内 → 跳过。"""
+        if self._memory is None:
+            return True
+        sessions = self._memory.list_sessions(name)
+        if not sessions:
+            return True
+        raw = getattr(sessions[0], "raw", None) or {}
+        return bool(stale_under_ttl(raw, ttl)) or not raw
+
+    def _last_report_for(self, name: str) -> CompetitorReport | None:
+        """最近一次时间线快照重建为 CompetitorReport（告警 diff 的 prev；无则 None）。"""
+        return self._timeline.report_for(name)
 
     def analyze_react(self, task: str) -> str:
         """ReAct 模式：LLM 驱动工具调用（需 LLM Key）
@@ -449,6 +573,7 @@ class CompetitorAnalysisAPI:
         # 设计文档 26：记录时间线 diff + 归档带新鲜度的会话（多 Agent 路径同样对齐）
         self._record_timeline(report)
         self._archive_report(report, task, session_id or "")
+        self._export_competitor_json(report, session_id or "")
         delete_checkpoint(session_id) if session_id else None
         close_session_log(session_id)
         return report
@@ -737,7 +862,9 @@ class CompetitorAnalysisAPI:
             reports = self._compare_parallel(names)
         else:
             reports = [self.analyze(name, mode="team") for name in names]
-        return self._builder.build_comparison(reports)
+        comparison = self._builder.build_comparison(reports)
+        self._export_comparison_json(comparison)
+        return comparison
 
     def _compare_parallel(self, names: list[str]) -> list[CompetitorReport]:
         """execution.mode=parallel 时并行分析多个竞品（共享预算），按输入顺序稳定返回。

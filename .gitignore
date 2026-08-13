@@ -112,3 +112,7 @@ dota_helper/reports/
 # ==================== Competitor Agent Reports ====================
 # 竞品分析报告输出目录 - CLI/CI 生成的 Markdown/CSV 产物，不上传到 git
 competitor_agent/reports/
+# 仓库根目录测试产物 reports/（测试运行时的落盘输出）
+reports/
+# web_app 运行时错误日志（临时产物）
+competitor_agent/web.err

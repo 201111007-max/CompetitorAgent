@@ -69,6 +69,18 @@ class TestBuildParser:
         args = parser.parse_args(["benchmark"])
         assert args.command == "benchmark"
 
+    def test_schedule_subcommand(self):
+        parser = build_parser()
+        args = parser.parse_args(["schedule", "--competitors", "cursor,copilot"])
+        assert args.command == "schedule"
+        assert args.competitors == "cursor,copilot"
+
+    def test_schedule_subcommand_default(self):
+        parser = build_parser()
+        args = parser.parse_args(["schedule"])
+        assert args.command == "schedule"
+        assert args.competitors is None
+
     def test_oneshot_flag(self):
         parser = build_parser()
         args = parser.parse_args(["-z", "分析 Cursor"])
