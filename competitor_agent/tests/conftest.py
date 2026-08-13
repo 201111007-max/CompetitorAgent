@@ -31,7 +31,12 @@ class FakeExtractor:
 
     def fetch(self, gap: object, context: SourceContext) -> Observation:
         url = str(context.kwargs.get("url"))
-        if "pricing" in url:
+        if str(getattr(gap, "field", "")) == "sentiment":
+            text = (
+                "Cursor is an AI code editor. Developers love the fast completions "
+                "and call it great, recommend it, but some find it slow."
+            )
+        elif "pricing" in url:
             text = CURSOR_PRICING
         elif "docs" in url or "cursor.com" in url:
             text = "Cursor supports MCP integration, agent mode, and Codex-style reviews."
