@@ -33,7 +33,7 @@
 | `24_ecosystem_sentiment_analyzers_design.md` | §12.1 #2：ecosystem / sentiment 无专属分析器 | P0 | ✅ 已实现 |
 | `25_direct_benchmark_sources_design.md` | §12.2 #4：性能数字靠 LLM 读网页（直连榜单） | P1 | ✅ 已实现 |
 | `26_freshness_timeline_design.md` | §12.2 #5 + §12.3 #7：无新鲜度/时间线（定时重爬） | P1 | ✅ 已实现 |
-| `27_pricing_modeling_design.md` | §12.3 #6：定价分层/用量建模弱 | P2 | ⏳ 待办 |
+| `27_pricing_modeling_design.md` | §12.3 #6：定价分层/用量建模弱 | P2 | ✅ 已实现 |
 | `28_structured_export_design.md` | §12.3 #8：输出仅 Markdown（结构化导出+定时+告警） | P2 | ⏳ 待办 |
 | `29_evaluation_coverage_design.md` | §12.3 #9：评测盲区（生态/口碑/时间线覆盖） | P2 | ⏳ 待办 |
 | `30_ablation_comparison_design.md` | §12.3 #10：无对比/消融实验（有无 RAG/rerank/memory） | P2 | ⏳ 待办 |
@@ -91,6 +91,8 @@
 
 > **设计文档 26 修复说明**：数据新鲜度 + 竞品时间线已落地。① **新鲜度元数据**：`domain_types/freshness.py` 新增 `ReportFreshness`（`dimension_ages` / `source_retrieved_at` / `stale_dimensions`，仅按证据 `access_time` 算龄，无证据不给维度）+ `stale_under_ttl`；`config/loader.py` 新增 `FreshnessConfig`（`dimension_ttl_days` 默认值 YAML 叠加覆盖），`review_config.yaml` 新增 `freshness` section。② **报告注记**：`ReportBuilder` 计算并注入 `report.freshness`，`MarkdownRenderer` 渲染 `> 数据新鲜度: 分析于 …` + 过期维度 `⚠️ **数据可能过期**` 与 `re-analyze` 提示。③ **时间线记忆**：`memory/timeline_memory.py` 新增 `TimelineMemory`——`update(report)` 对比上次快照 `_diff_snapshots` 产出 `TimelineEvent`（`price_change`/`feature_added`/`score_change`/`version_release`，带 `occurred_at` + `evidence_urls` + `diff_from` 基线），首轮无基线不产生事件防噪声；`api.analyze`/`analyze_team`/`resume` 均 `_record_timeline` 并把 `## 竞品时间线` 段落追加进 Markdown。④ **过期重爬**：`api.refresh_stale(ttl_override=…, recompute_all=…)` 按归档 freshness（含在 `_archive_report` 的 raw schema）判定过期维度并逐竞品重爬；CLI 新增 `refresh`（`--stale`/`--all`）与 `timeline <competitor>` 子命令，Web 新增 `/api/timeline/{competitor}`。新增 14（freshness）+10（timeline）+7（refresh_stale）单测与 3 个集成测试，全量 **561 个测试通过**（含 1 个环境性失败：本机已装 playwright 使 `is_available` 为真）。
 
+> **设计文档 27 修复说明**：结构化定价画像已落地。① **领域模型** `domain_types/pricing.py`：`PricingPlan`（tier/月付/年付/限额/`requires_quote` 询价标注）+ `UsageBilling`（单位/单价/模型档位表/档内包含量）+ `PricingProfile`（plans/usage/cost_scenarios/as_of/source_urls，`to_dict`/`from_dict` 序列化）。② **结构抽取**：`PricingAnalyzer.analyze` 在基类骨架之上把 `details` 解析为 `PricingProfile` 并写入 `details["pricing"]`（保留 `plans[].price/period` 兼容键，不破坏评测抽取契约）；规则降级识别免费/Pro/Team/Enterprise 档位、月付/年付、`per 1000 requests $0.5` 按量单价、`includes N requests` 档内包含量、`Advanced model $x/request` 模型档位；LLM prompt 升级为结构化 JSON schema。③ **成本估算** `_estimate_costs`：light(30/天)/medium(100/天)/heavy(1000/天) ×30 天，按每档"档价 + 超限额×单价"取最低档；无按量单价且超限 → `None`（不编造），企业档 `requires_quote` 不猜数字。④ **渲染**：`MarkdownRenderer` 对 pricing 维度渲染「定价档位 / 按量计费 / 成本场景估算」三张表（无画像时回退原明细 blob）。⑤ **落盘**：`_archive_report` 新增 `pricing_profiles` 归档；`TimelineMemory` 快照归一化剔除 `as_of` 漂移（价格不变不产生伪事件），price_change 摘要升级为「价格变化: $20/mo → $40/mo」。新增 15 个单测 + 2 个集成测试，全量 **578 个测试通过**（1 个环境性失败同前：本机已装 playwright）。
+
 ## 设计文档统一模板
 
 每个设计文档包含以下章节：
@@ -119,13 +121,13 @@
 - **设计文档 24 §12.1 #2 Ecosystem/Sentiment 分析器**：已实现（见上方修复说明）——`EcosystemAnalyzer`（MCP server/插件/IDE/tool-use/仓库活跃度）+ `SentimentAnalyzer`（社区正负信号，低置信护栏不编造）注册进 `AnalyzerRegistry`。
 - **设计文档 25 §12.2 #4 直连榜单源**：已实现（见上方修复说明）——`BenchmarkSourceProvider` 直连 SWE-bench/Aider/Terminal-Bench/LM Arena（TTL 缓存 + 失败降级），`PerformanceAnalyzer` 榜单优先合并 + 页面兜底。
 - **设计文档 26 §12.2 #5 + §12.3 #7 新鲜度/时间线**：已实现（见上方修复说明）——`ReportFreshness` 陈旧度标注 + `refresh_stale` 过期重爬 + `TimelineMemory` 跨分析 diff 事件 + CLI `refresh`/`timeline` 与 Web `/api/timeline/{competitor}`，报告含新鲜度注记与「竞品时间线」段落。
-- 全量 **561 个测试通过**（1 个环境性失败：本机已装 playwright，`test_unavailable_without_playwright_and_hook` 假设未安装）。
+- **设计文档 27 §12.3 #6 定价分层/用量建模**：已实现（见上方修复说明）——`PricingProfile` 档位 + 按量计费 + 模型档位 + light/medium/heavy 成本估算 + 企业询价标注；报告渲染定价/按量/成本三表，归档 `pricing_profiles`，时间线 price_change 摘要带价格。
+- 全量 **578 个测试通过**（1 个环境性失败：本机已装 playwright，`test_unavailable_without_playwright_and_hook` 假设未安装）。
 
 ### 待办（下一步按序实施，均已有设计文档）
-1. **§12.3 #6 定价分层/用量建模**（`27_pricing_modeling_design.md`，P2，约 1.5 天）——`PricingProfile`（plans/usage/cost_scenarios）+ 询价标注。
-2. **§12.3 #8 结构化导出 + 定时 + 告警**（`28_structured_export_design.md`，P2，约 2-3 天）——`report_exporter` JSON/矩阵导出 + `run_scheduled` + `AlertSink` 异动告警。
-3. **§12.3 #9 评测盲区覆盖**（`29_evaluation_coverage_design.md`，P2，约 1.5-2 天）——`DIMENSION_KINDS` 增 ecosystem/sentiment/roadmap + fixture 用例 + 评测指南同步。
-4. **§12.3 #10 消融/对比实验**（`30_ablation_comparison_design.md`，P2，约 1-1.5 天）——`enable_rag`/`enable_memory` 开关 + `AblationRunner` 对 26 条真实执行用例跑 full/no-rag/no-memory/no-llm-rule 对比表（简历/面试数据支撑）。
-5. **§12.3 #11 失败类型统计**（`31_failure_stats_design.md`，P2，约 0.5-1 天）——`FailureType` 五类分类 + `BenchmarkReport.failure_stats` 聚合 + 分布报告（归因与简历证据）。
+1. **§12.3 #8 结构化导出 + 定时 + 告警**（`28_structured_export_design.md`，P2，约 2-3 天）——`report_exporter` JSON/矩阵导出 + `run_scheduled` + `AlertSink` 异动告警。
+2. **§12.3 #9 评测盲区覆盖**（`29_evaluation_coverage_design.md`，P2，约 1.5-2 天）——`DIMENSION_KINDS` 增 ecosystem/sentiment/roadmap + fixture 用例 + 评测指南同步。
+3. **§12.3 #10 消融/对比实验**（`30_ablation_comparison_design.md`，P2，约 1-1.5 天）——`enable_rag`/`enable_memory` 开关 + `AblationRunner` 对 26 条真实执行用例跑 full/no-rag/no-memory/no-llm-rule 对比表（简历/面试数据支撑）。
+4. **§12.3 #11 失败类型统计**（`31_failure_stats_design.md`，P2，约 0.5-1 天）——`FailureType` 五类分类 + `BenchmarkReport.failure_stats` 聚合 + 分布报告（归因与简历证据）。
 
 > 依赖顺序建议：23（多源路由，底层）→ 24（分析器）→ 25（榜单，复用 23 的 provider）→ 26（时间线，复用 23 的 Releases）→ 27（定价，独立）→ 28（导出，复用 26/27）→ 29（评测，依赖 24/25/26 的结构化产出）。23-26 是产品差异化主线，27-29 是可信度与交付增强；**30/31 为简历/面试达标补充**，仅依赖已就绪的 `evaluation/benchmark.py`（真实执行版），可随时穿插实现。
