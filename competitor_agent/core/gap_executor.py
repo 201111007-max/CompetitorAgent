@@ -195,15 +195,20 @@ class GapExecutor:
             logger.warning("知识库摄入失败: %s/%s", competitor, dimension)
 
     def _analyze(self, observation: Observation, gap: InfoGap, context: SourceContext) -> DimensionResult:
-        return self._analyzer.analyze(
-            observation,
-            gap,
-            AnalysisContext(
-                competitor_name=context.competitor_name,
-                dimension=self._analyzer.dimension,
-                rag_context=self._retrieve_rag(context.competitor_name, gap.field),
-            ),
+        analysis_ctx = AnalysisContext(
+            competitor_name=context.competitor_name,
+            dimension=self._analyzer.dimension,
+            rag_context=self._retrieve_rag(context.competitor_name, gap.field),
         )
+        if gap.field == "performance":
+            # 榜单直连（设计文档 25）：仅 performance 缺口注入，避免其余维度额外开销
+            provider = self._providers.get("benchmark")
+            if provider is not None:
+                try:
+                    analysis_ctx.benchmark_scores = provider.fetch_scores(context.competitor_name)  # type: ignore[attr-defined]
+                except Exception:  # noqa: BLE001 — 榜单失败完全回退现状，不阻塞主流程
+                    logger.warning("榜单直连失败，回退页面抽取: %s", context.competitor_name)
+        return self._analyzer.analyze(observation, gap, analysis_ctx)
 
     def _retrieve_rag(self, competitor: str, dimension: str) -> str:
         """检索知识库相关片段，拼成可注入的文本（含来源）"""

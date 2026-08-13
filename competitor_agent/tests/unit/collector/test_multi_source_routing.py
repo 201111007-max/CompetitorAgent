@@ -8,6 +8,7 @@ from __future__ import annotations
 import pytest
 
 from competitor_agent.collector.providers import (
+    BenchmarkSourceProvider,
     CommunitySourceProvider,
     GithubSourceProvider,
     MarketplaceSourceProvider,
@@ -107,6 +108,22 @@ class TestRouting:
         cands = s.candidates(InfoGap(field="ecosystem"), _cursor())
         assert any(c.kind == "spa" for c in cands)
 
+    def test_performance_routes_benchmark_before_spa_fallback(self):
+        s = SourceSelector(
+            providers=[BenchmarkSourceProvider(extract_fn=lambda url: f"| cursor | 62% |")]
+        )
+        cands = s.candidates(InfoGap(field="performance"), _cursor())
+        bench = [c for c in cands if c.kind == "benchmark"]
+        assert bench and bench[0].source_name == "benchmark_board"
+        assert bench[0].trust_level == 0.9  # 榜单优先（分析器合并时同指标以榜单为准）
+        spa = next(c for c in cands if c.kind == "spa")
+        assert cands.index(bench[0]) < cands.index(spa)
+
+    def test_performance_without_benchmark_falls_back_to_web(self):
+        s = SourceSelector(providers=[])
+        cands = s.candidates(InfoGap(field="performance"), _cursor())
+        assert cands and cands[0].kind == "web"
+
 
 class TestProviders:
     def test_github_fetch_wraps_observation(self):
@@ -152,7 +169,16 @@ class TestBuildProviders:
 
     def test_per_kind_switch_respected(self):
         cfg = CollectorConfig(
-            enable_external_sources=True, enable_github=True, enable_marketplace=False, enable_community=False
+            enable_external_sources=True,
+            enable_github=True,
+            enable_marketplace=False,
+            enable_community=False,
+            enable_benchmark=False,
         )
         providers = build_providers(cfg)
         assert {p.kind for p in providers} == {"github"}
+
+    def test_benchmark_enabled_by_default_with_master_on(self):
+        cfg = CollectorConfig(enable_external_sources=True)
+        providers = build_providers(cfg)
+        assert "benchmark" in {p.kind for p in providers}

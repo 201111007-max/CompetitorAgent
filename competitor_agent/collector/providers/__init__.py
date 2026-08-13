@@ -6,12 +6,14 @@
 """
 from __future__ import annotations
 
+from competitor_agent.collector.providers.benchmark_source import BenchmarkSourceProvider
 from competitor_agent.collector.providers.community_provider import CommunitySourceProvider
 from competitor_agent.collector.providers.github_provider import GithubSourceProvider
 from competitor_agent.collector.providers.marketplace_provider import MarketplaceSourceProvider
 from competitor_agent.config.loader import CollectorConfig
 
 __all__ = [
+    "BenchmarkSourceProvider",
     "build_providers",
     "CommunitySourceProvider",
     "GithubSourceProvider",
@@ -23,7 +25,7 @@ def build_providers(cfg: CollectorConfig | None = None) -> list[object]:
     """按配置构造外部源提供方列表。
 
     - `cfg.enable_external_sources` 主开关关闭（默认）→ 返回空列表（行为与现状一致）；
-    - 开启后按 `enable_github` / `enable_marketplace` / `enable_community` 逐个启用。
+    - 开启后按 `enable_github` / `enable_marketplace` / `enable_community` / `enable_benchmark` 逐个启用。
     注：CommunitySourceProvider 未注入搜索函数时 supports()=False，实际不产候选。
     """
     cfg = cfg or CollectorConfig()
@@ -36,4 +38,6 @@ def build_providers(cfg: CollectorConfig | None = None) -> list[object]:
         providers.append(MarketplaceSourceProvider())
     if cfg.enable_community:
         providers.append(CommunitySourceProvider())
+    if cfg.enable_benchmark:
+        providers.append(BenchmarkSourceProvider(cache_ttl_seconds=cfg.cache_ttl_seconds))
     return providers
