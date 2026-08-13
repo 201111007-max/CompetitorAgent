@@ -287,9 +287,15 @@ class CompetitorAnalysisAPI:
                 report.markdown_report = report.markdown_report.rstrip() + "\n\n" + section + "\n"
 
     def _archive_report(self, report: CompetitorReport, task: str, session_id: str) -> None:
-        """归档会话（统一 raw schema + freshness 元数据），供 refresh_stale 判定过期。"""
+        """归档会话（统一 raw schema + freshness 元数据 + 定价画像），
+        供 refresh_stale 判定过期、定价成本对比与时间线 diff。"""
         if self._memory is None:
             return
+        pricing_profiles = [
+            r.details.get("pricing")
+            for r in report.dimension_results
+            if isinstance(r.details, dict) and isinstance(r.details.get("pricing"), dict)
+        ]
         self._memory.archive_session(
             AnalysisSession(
                 task=task,
@@ -302,6 +308,7 @@ class CompetitorAnalysisAPI:
                     "competitor_name": report.competitor.name,
                     "created_at": report.created_at,
                     "freshness": report.freshness.to_dict() if report.freshness else None,
+                    "pricing_profiles": pricing_profiles,
                 },
             )
         )

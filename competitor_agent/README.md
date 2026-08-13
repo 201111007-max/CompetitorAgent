@@ -2,7 +2,8 @@
 
 自动采集并分析 AI coding agent 竞品（Claude Code、Cursor、Windsurf、Copilot 等），
 输出含功能 / 定价 / 性能 / 生态 / 口碑 / 路线图的 Markdown 报告，
-并附**数据新鲜度注记**（维度 TTL / 过期提示）与跨分析**竞品时间线**（价格/版本/功能变化事件）。
+并附**数据新鲜度注记**（维度 TTL / 过期提示）、跨分析**竞品时间线**（价格/版本/功能变化事件），
+以及**结构化定价画像**（档位 / 按量计费 / 典型用量成本估算 / 企业询价标注）。
 
 复用 `dota_helper` 的框架思想（双循环编排、信息缺口驱动、证据链防幻觉、四层记忆），
 但独立目录、独立包、**零 import 耦合**。
@@ -93,7 +94,7 @@ competitor_agent/
 - 架构总纲：`../doc/ai_coding_agent_competitor_analysis_architecture.md`
 - 分步实现计划：`../doc/plan/implementation_plan.md`
 - 各模块契约/规范：`docs/`（interfaces/domain_models/prompts/data_sources/configuration/evaluation_guide/testing/usage/api）
-- 逐期设计文档：`../doc/plan/issue_designs/`（含 26_freshness_timeline_design.md：新鲜度 TTL / 过期提示 / refresh_stale / 时间线事件）
+- 逐期设计文档：`../doc/plan/issue_designs/`（含 26_freshness_timeline_design.md：新鲜度 TTL / 过期提示 / refresh_stale / 时间线事件；27_pricing_modeling_design.md：结构化定价画像 / 成本估算）
 
 ## 里程碑状态
 
@@ -103,3 +104,4 @@ competitor_agent/
 - [x] M3 多 Agent 协作 + 评测体系
 - [x] M4 工程化（Web/MCP/CI/断点）
 - [x] M5 数据新鲜度 + 竞品时间线（设计文档 26：维度 TTL / 过期提示 / `refresh_stale` 过期重爬 / 跨分析 diff → 时间线事件 / `timeline` 记忆 + CLI/Web 查询）
+- [x] M6 结构化定价画像（设计文档 27：`PricingProfile` 档位 + 按量计费 + 模型档位 / light·medium·heavy 成本估算 / 企业询价标注 / 报告渲染与归档 `pricing_profiles` / 时间线价格变化 diff）

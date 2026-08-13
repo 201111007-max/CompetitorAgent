@@ -47,14 +47,48 @@ def _snapshot_map(results: Sequence[object]) -> dict[str, dict[str, Any]]:
         urls = [str(getattr(e, "url", "")) for e in evs if getattr(e, "url", "")]
         snap[dim] = {
             "summary": str(getattr(r, "summary", "") or ""),
-            "details": getattr(r, "details", None) or {},
+            "details": _snap_details(getattr(r, "details", None) or {}),
             "timestamp": str(getattr(r, "timestamp", "") or ""),
             "urls": urls,
         }
     return snap
 
 
+def _snap_details(details: Any) -> dict[str, Any]:
+    """快照归一化：去掉每次分析都会漂移的元数据（如 pricing.as_of），
+    避免"价格未变"却因时间戳不同而产生伪 price_change 事件。"""
+    out = dict(details) if isinstance(details, dict) else {}
+    pricing = out.get("pricing")
+    if isinstance(pricing, dict) and "as_of" in pricing:
+        out = {**out, "pricing": {k: v for k, v in pricing.items() if k != "as_of"}}
+    return out
+
+
+def _pricing_price_label(snapshot: dict[str, Any]) -> str:
+    """定价快照 → 档位价格摘要（供价格变化 diff 的可读摘要，设计文档 27 §4）。"""
+    pricing = (snapshot.get("details") or {}).get("pricing")
+    if not isinstance(pricing, dict):
+        return ""
+    parts: list[str] = []
+    for plan in pricing.get("plans") or []:
+        if not isinstance(plan, dict):
+            continue
+        tier = str(plan.get("tier") or plan.get("name") or "plan")
+        if plan.get("requires_quote"):
+            parts.append(f"{tier}: 需询价")
+            continue
+        monthly = plan.get("monthly_price_usd")
+        if monthly is not None:
+            parts.append(f"{tier}: ${float(monthly):g}/mo")
+    return "；".join(parts[:4])
+
+
 def _summarize_change(dim: str, prev: dict[str, Any], cur: dict[str, Any]) -> str:
+    if dim == "pricing":
+        prev_price = _pricing_price_label(prev)
+        cur_price = _pricing_price_label(cur)
+        if prev_price and cur_price and prev_price != cur_price:
+            return f"价格变化: {prev_price} → {cur_price}"
     p = " ".join(str(prev.get("summary") or prev.get("details") or "").split())[:60]
     c = " ".join(str(cur.get("summary") or cur.get("details") or "").split())[:60]
     if p == c:

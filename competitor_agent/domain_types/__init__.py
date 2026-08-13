@@ -14,6 +14,7 @@ from competitor_agent.domain_types.events import ProgressEvent
 from competitor_agent.domain_types.freshness import ReportFreshness
 from competitor_agent.domain_types.info_gap import InfoGap
 from competitor_agent.domain_types.observation import Observation, SourceEvidence
+from competitor_agent.domain_types.pricing import PricingPlan, PricingProfile, UsageBilling
 from competitor_agent.domain_types.report import (
     CancelledResult,
     ComparisonReport,
@@ -39,9 +40,12 @@ __all__ = [
     "NetworkState",
     "Observation",
     "ObservationStatus",
+    "PricingPlan",
+    "PricingProfile",
     "ProgressEvent",
     "ReportFreshness",
     "ResultStatus",
     "SourceEvidence",
     "TerminalState",
+    "UsageBilling",
 ]

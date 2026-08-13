@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from competitor_agent.domain_types.enums import ResultStatus
+from competitor_agent.domain_types.pricing import PricingProfile
 from competitor_agent.domain_types.report import ComparisonReport, CompetitorReport, DimensionResult
 from competitor_agent.observability.logger import get_logger
 
@@ -67,19 +68,72 @@ class MarkdownRenderer:
         lines.append("")
         lines.append(result.summary or "（无结论）")
         lines.append("")
-        if result.details:
-            lines.append("明细:")
-            lines.append("")
-            lines.append("```")
-            lines.append(str(result.details)[:1000])
-            lines.append("```")
-            lines.append("")
+
+        if result.dimension == "pricing":
+            profile = PricingProfile.from_dict(result.details.get("pricing")) if isinstance(result.details, dict) else None
+            if profile is not None and profile.has_pricing_data:
+                self._render_pricing(lines, profile)
+            else:
+                self._render_details_blob(lines, result.details)
+        else:
+            self._render_details_blob(lines, result.details)
+
         lines.append(f"置信度: `{result.confidence:.2f}`")
         if result.evidence:
             urls = ", ".join(ev.url for ev in result.evidence if ev.url)
             if urls:
                 lines.append(f"证据: {urls}")
         lines.append("")
+
+    def _render_details_blob(self, lines: list[str], details: object) -> None:
+        if not details:
+            return
+        lines.append("明细:")
+        lines.append("")
+        lines.append("```")
+        lines.append(str(details)[:1000])
+        lines.append("```")
+        lines.append("")
+
+    def _render_pricing(self, lines: list[str], profile: PricingProfile) -> None:
+        """渲染定价档位表 + 按量计费表 + 成本场景表（设计文档 27 §3.2）。"""
+        lines.append("#### 定价档位")
+        lines.append("")
+        lines.append("| 档位 | 计划 | 月付 (USD) | 年付 (USD) | 限额 | 询价 |")
+        lines.append("|------|------|-----------|-----------|------|------|")
+        for plan in profile.plans:
+            limits = "; ".join(f"{k}: {v}" for k, v in plan.limits.items()) or "-"
+            lines.append(
+                f"| {plan.tier} | {plan.name or '-'} | {_fmt_money(plan.monthly_price_usd)} | "
+                f"{_fmt_money(plan.annual_price_usd)} | {limits} | "
+                f"{'需询价' if plan.requires_quote else '-'} |"
+            )
+        lines.append("")
+
+        if profile.usage is not None and (
+            profile.usage.per_unit_usd is not None or profile.usage.model_tiers or profile.usage.included_units is not None
+        ):
+            lines.append("#### 按量计费")
+            lines.append("")
+            lines.append("| 单位 | 单价 (USD) | 档内包含 | 模型档位表 |")
+            lines.append("|------|-----------|---------|-----------|")
+            tiers = "；".join(f"{t} ${_fmt_g(v)}" for t, v in sorted(profile.usage.model_tiers.items())) or "-"
+            lines.append(
+                f"| {profile.usage.unit} | {_fmt_money(profile.usage.per_unit_usd)} | "
+                f"{profile.usage.included_units if profile.usage.included_units is not None else '-'} | {tiers} |"
+            )
+            lines.append("")
+
+        if profile.cost_scenarios:
+            lines.append("#### 成本场景估算（月成本 USD，按 30 天）")
+            lines.append("")
+            lines.append("| 场景 | 每日用量 | 月成本 |")
+            lines.append("|------|---------|--------|")
+            for scenario, cost in profile.cost_scenarios.items():
+                daily = {"light": 30, "medium": 100, "heavy": 1000}.get(scenario, "-")
+                val = _fmt_money(cost) if cost is not None else "需询价/无法估算"
+                lines.append(f"| {scenario} | {daily} 次/天 | {val} |")
+            lines.append("")
 
     def render_timeline(self, events: Sequence[object]) -> str:
         """渲染竞品时间线 Markdown 段落（设计文档 26 §3.4）。
@@ -186,11 +240,23 @@ class MarkdownRenderer:
         return "\n".join(lines)
 
 
-def _fmt_confidence(result: DimensionResult | None) -> str:
-    if result is None:
-        return "N/A"
-    label = _STATUS_LABEL.get(result.status, "")
-    return f"{label} {result.confidence:.2f}" if label else f"{result.confidence:.2f}"
+def _fmt_money(value: float | None) -> str:
+    """金额渲染：None → '-'（未披露）；数字 → $N 精简格式。"""
+    if value is None:
+        return "-"
+    return f"${_fmt_g(value)}"
+
+
+def _fmt_g(value: float) -> str:
+    return f"{value:g}"
+
+
+def _truncate(text: str, limit: int = 80) -> str:
+    """截断长文本为一行（超限加省略号）"""
+    if not text:
+        return ""
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[:limit] + "…"
 
 
 def _best_for_dim(
@@ -215,9 +281,8 @@ def _best_for_dim(
     return best if best is not None else ("", 0.0, None, "")
 
 
-def _truncate(text: str, limit: int = 80) -> str:
-    """截断长文本为一行（超限加省略号）"""
-    if not text:
-        return ""
-    text = " ".join(text.split())
-    return text if len(text) <= limit else text[:limit] + "…"
+def _fmt_confidence(result: DimensionResult | None) -> str:
+    if result is None:
+        return "N/A"
+    label = _STATUS_LABEL.get(result.status, "")
+    return f"{label} {result.confidence:.2f}" if label else f"{result.confidence:.2f}"
