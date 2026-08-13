@@ -1,4 +1,8 @@
 """collector/spa_extractor.py 单测：注入式渲染钩子，无需真实浏览器"""
+import pytest
+
+pytest.importorskip("bs4")  # bs4 为可选依赖，缺失时跳过本组测试
+
 from competitor_agent.collector.spa_extractor import SpaExtractor
 from competitor_agent.domain_types import InfoGap
 from competitor_agent.interfaces.context import SourceContext

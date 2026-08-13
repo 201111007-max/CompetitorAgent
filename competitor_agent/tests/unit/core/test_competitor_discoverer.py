@@ -69,6 +69,28 @@ class TestDiscoverer:
         comps = d.discover("x")
         assert len(comps) == 1
 
+    def test_on_candidate_callback_per_candidate(self):
+        """每发现一个候选即回调一次（供 Web SSE 实时推送）。"""
+        d = CompetitorDiscoverer(
+            use_llm=False,
+            web_tool=lambda task: [
+                {"name": "alpha", "home": "https://alpha.dev"},
+                {"name": "beta", "home": "https://beta.dev"},
+            ],
+        )
+        pushed: list[str] = []
+        comps = d.discover("all agents", on_candidate=pushed.append)
+        assert pushed == ["alpha", "beta"]
+        assert [c.name for c in comps] == ["alpha", "beta"]
+
+    def test_on_candidate_callback_fallback_list(self):
+        """无 web_tool：兜底清单也逐候选回调。"""
+        d = CompetitorDiscoverer(use_llm=False)
+        pushed: list[str] = []
+        comps = d.discover("所有 AI coding agent", on_candidate=pushed.append)
+        assert pushed
+        assert [c.name for c in comps] == pushed
+
 
 class TestJsonLoadsArray:
     def test_plain_array(self):

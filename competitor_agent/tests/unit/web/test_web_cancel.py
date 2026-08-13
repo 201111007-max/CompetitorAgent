@@ -46,21 +46,21 @@ class SlowCancelAPI:
         set_cancel(session_id)
 
 
-@pytest.mark.asyncio
-async def test_web_cancel_ends_sse_with_cancelled_event(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_web_cancel_ends_sse_with_cancelled_event(monkeypatch: pytest.MonkeyPatch) -> None:
+    """不依赖 pytest-asyncio：用 asyncio.run 直接驱动协程。"""
     monkeypatch.setattr(web_app, "CompetitorAnalysisAPI", SlowCancelAPI)
     sid = "sess_e2e_gen"
     web_app._sessions[sid] = {"task": "分析 Cursor", "cancelled": False}
     SlowCancelAPI.started.clear()
 
-    sse_lines: list[str] = []
+    async def _run() -> list[str]:
+        sse_lines: list[str] = []
 
-    async def consume() -> None:
-        async for line in web_app._event_generator(sid, "分析 Cursor"):
-            sse_lines.append(line)
+        async def consume() -> None:
+            async for line in web_app._event_generator(sid, "分析 Cursor"):
+                sse_lines.append(line)
 
-    task = asyncio.create_task(consume())
-    try:
+        task = asyncio.create_task(consume())
         deadline = time.time() + 10
         while time.time() < deadline and not SlowCancelAPI.started.is_set():
             await asyncio.sleep(0.01)
@@ -80,6 +80,10 @@ async def test_web_cancel_ends_sse_with_cancelled_event(monkeypatch: pytest.Monk
         assert any("session_started" in k for k in kinds), "SSE 未收到 session_started 事件"
         assert "cancelled" in kinds, "SSE 未收到 cancelled 事件（取消未真正中断分析）"
         assert "report" not in kinds, "取消后不应再推送正常 report 完成事件"
+        return kinds
+
+    try:
+        asyncio.run(_run())
     finally:
         clear_cancel(sid)
         web_app._sessions.pop(sid, None)

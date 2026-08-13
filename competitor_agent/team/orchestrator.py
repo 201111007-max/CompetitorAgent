@@ -69,9 +69,13 @@ class TeamOrchestrator:
     def bus(self) -> MessageBus:
         return self._bus
 
-    def run(self, task: str) -> CompetitorReport:
-        """执行一条竞品分析任务，产出草稿报告（事件驱动 + 状态决策）。"""
-        strategy = self._planner.plan(task, memory=self._memory)
+    def run(self, task: str, strategy: CompetitorStrategy | None = None) -> CompetitorReport:
+        """执行一条竞品分析任务，产出草稿报告（事件驱动 + 状态决策）。
+
+        strategy 缺省时内部规划（保持旧调用契约）；由外层统一规划时传入复用，
+        使 team 与 single 共享同一策略与规划埋点（设计文档 18）。
+        """
+        strategy = strategy or self._planner.plan(task, memory=self._memory)
         if self._is_cancelled():
             logger.info("会话 %s 已取消，提前终止多 Agent 流水线", self._session_id)
             return self._partial_report(strategy, [], "分析已取消")

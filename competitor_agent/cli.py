@@ -24,6 +24,8 @@ from competitor_agent.core.task_parser import ResolutionDecision, parse_task
 from competitor_agent.domain_types.report import ComparisonReport, CompetitorReport
 from competitor_agent.facade.api import CompetitorAnalysisAPI
 from competitor_agent.llm.client import LLMClient
+from competitor_agent.observability.logger import setup_logging
+from competitor_agent.secret_vault import get_data_dir
 
 PROMPT = "competitor> "
 
@@ -201,6 +203,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    setup_logging(level=load_config().observability.log_level, log_dir=get_data_dir() / "logs")
     api = _make_api()
     llm = LLMClient(model=load_config().model, base_url=load_config().api_base_url)
     use_llm = True
