@@ -289,3 +289,42 @@ python -m competitor_agent.cli benchmark
 
 `tests/evaluation/test_failure_stats.py`：classify_case 5 类场景 + 优先级 + 全命中空、
 `_classify_failures` 聚合计数/去重、自定义 fixtures 集成（真实链路 mock LLM + 固定页面）、默认 38 用例报告含分布表与 CSV failure 行。
+
+---
+
+## 10. 真实 LLM 评测（设计文档 37）
+
+回答「评测是不是自证」：mock（`BenchmarkMockLLM` 确定性解析）验证的是 **harness 自洽**，
+`--llm real` 产出的才是**真实模型端到端质量**——简历/面试说"字段准确率 90%+"时能拿出真实数据。
+
+### 10.1 命令与前置
+
+```bash
+# 前置：配置 API Key（OPENAI_API_KEY / DEEPSEEK_API_KEY / LLM_API_KEY），否则 --llm real 明确报错不回退 mock
+python -m competitor_agent.evaluation.benchmark --llm real --tag normal --cost-limit 1.0 \
+  --out reports/benchmark_real_<date>.csv --report reports/benchmark_real_<date>.md
+
+# 全量 38 用例（成本更高）；无 --tag 默认全量
+python -m competitor_agent.evaluation.benchmark --llm real
+
+# CLI 透传
+python -m competitor_agent.cli benchmark --llm real --tag normal --cost-limit 1.0
+```
+
+- 缺省输出：real 落 `reports/benchmark_real_<date>.csv/.md`（mock 落 `reports/benchmark_<date>.csv/.md`）。
+- **口径**：real 报告内嵌同子集 mock 基线「mock vs real」对比段（mock=harness 回归，real=真实质量）；
+  真实幻觉率/成本以 real 列为准，mock 列是"链路正确"的自洽基线。
+- **成本核算**：复用 `llm._log_call` 的 `cost_usd` 累计（`LLMClient.total_cost_usd` 跨 case 共享实例累计），
+  报告含单用例成本（`per_case_cost`）与总成本（`cost_usd`），CSV 含 `cost_usd`/`cost.case.<id>` 行。
+
+### 10.2 成本护栏（`--cost-limit`）
+
+- real 模式默认 `cost_limit_usd = 1.0`；累计成本达到上限即中止，未运行 case 记 `budget_exhausted`
+  （复用设计文档 31 失败分类），报告 `budget_aborted=True` 并标注「⚠️ 预算中止」。
+- 先用 `--tag normal` 控制成本，再按需扩到全量。
+
+### 10.3 验证
+
+`tests/evaluation/test_real_evaluation.py`：报告字段（llm_mode/cost_usd/per_case_cost）、共享实例成本累计、
+`--tag` 子集过滤、成本护栏中止（budget_exhausted）、mock/real 渲染分支 + mock vs real 对比段、CSV 成本列；
+real 冒烟在无 Key 时 `skipif`（不卡 CI）。mock 评测输出与既有断言兼容（回归不变）。
