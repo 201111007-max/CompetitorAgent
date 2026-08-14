@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -15,7 +16,7 @@ from competitor_agent.domain_types.report import DimensionResult
 from competitor_agent.interfaces.context import AnalysisContext
 from competitor_agent.interfaces.memory import IFourLayerMemory
 from competitor_agent.team.base_agent import AgentContext, AgentResult, AgentStatus, BaseAgent
-from competitor_agent.team.message_bus import T_ANALYZED, MessageBus
+from competitor_agent.team.message_bus import Envelope, T_ANALYZED, MessageBus
 
 logger = logging.getLogger("competitor_agent.team.analyzer_agent")
 
@@ -58,19 +59,41 @@ class AnalyzerAgent(BaseAgent):
     def analyze(self, competitor_name: str, observations: list[Observation]) -> list[DimensionResult]:
         results: list[DimensionResult] = []
         for obs in observations:
-            analyzer = self._registry.get(obs.gap_field)
-            result = analyzer.analyze(
-                obs,
-                InfoGap(field=obs.gap_field),
-                AnalysisContext(
-                    competitor_name=competitor_name,
-                    dimension=analyzer.dimension,
-                    rag_context=self._retrieve_rag(competitor_name, obs.gap_field),
-                ),
-            )
-            results.append(result)
+            results.append(self.analyze_observation(competitor_name, obs))
         self._bus.publish(T_ANALYZED, {"competitor": competitor_name, "results": results})
         return results
+
+    def analyze_observation(
+        self, competitor_name: str, obs: Observation
+    ) -> DimensionResult:
+        """单缺口分析（供串行循环与异步并行编排复用，无总线副作用）"""
+        analyzer = self._registry.get(obs.gap_field)
+        return analyzer.analyze(
+            obs,
+            InfoGap(field=obs.gap_field),
+            AnalysisContext(
+                competitor_name=competitor_name,
+                dimension=analyzer.dimension,
+                rag_context=self._retrieve_rag(competitor_name, obs.gap_field),
+            ),
+        )
+
+    async def _handle_async(self, env: Envelope) -> DimensionResult | None:
+        """异步订阅者（设计文档 33 §3.1）：处理单观测分析请求并返回结论。
+
+        to_thread 让同步分析在线程池中真正并行，事件循环不被阻塞。
+        """
+        payload = env.payload
+        obs = payload.get("observation")
+        if obs is None:
+            return None
+        try:
+            return await asyncio.to_thread(
+                self.analyze_observation, payload.get("competitor", ""), obs
+            )
+        except Exception as exc:  # noqa: BLE001 —— 单缺口分析失败降级，不阻塞流水线
+            logger.warning("异步分析失败: %s: %s", obs.gap_field, exc)
+            return None
 
     def _retrieve_rag(self, competitor: str, dimension: str) -> str:
         """检索知识库相关片段，拼成可注入的文本（含来源）"""

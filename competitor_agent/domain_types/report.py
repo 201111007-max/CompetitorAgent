@@ -23,6 +23,7 @@ class DimensionResult:
     evidence: list[SourceEvidence] = field(default_factory=list)
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     status: ResultStatus = ResultStatus.PARTIAL
+    conflict_evidence: list[str] = field(default_factory=list)  # 仲裁丢弃的其他来源（设计文档 33）
 
 
 @dataclass

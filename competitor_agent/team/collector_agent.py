@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -20,7 +21,7 @@ from competitor_agent.interfaces.collector import ICompetitorDataSource
 from competitor_agent.interfaces.exceptions import DataSourceUnavailableError
 from competitor_agent.interfaces.memory import IFourLayerMemory
 from competitor_agent.team.base_agent import AgentContext, AgentResult, AgentStatus, BaseAgent
-from competitor_agent.team.message_bus import T_COLLECTED, MessageBus
+from competitor_agent.team.message_bus import Envelope, T_COLLECTED, MessageBus
 
 logger = logging.getLogger("competitor_agent.team.collector_agent")
 
@@ -96,6 +97,22 @@ class CollectorAgent(BaseAgent):
             )
         except Exception:  # noqa: BLE001 — 摄入失败不影响主流程
             logger.warning("知识库摄入失败: %s/%s", competitor, dimension)
+
+    async def _handle_async(self, env: Envelope) -> dict[str, Any] | None:
+        """异步订阅者（设计文档 33 §3.1）：响应采集请求并返回观测列表。"""
+        strategy = env.payload.get("strategy")
+        if strategy is None:
+            return None
+        try:
+            observations = await asyncio.to_thread(self.collect, strategy)
+        except Exception as exc:  # noqa: BLE001 —— 采集失败降级，不阻塞流水线
+            logger.warning("异步采集失败: %s", exc)
+            return None
+        return {
+            "competitor": strategy.competitor.name,
+            "observations": observations,
+            "sources_tried": [g.sources_tried for g in strategy.gaps],
+        }
 
     def process(self, strategy: CompetitorStrategy) -> list[Observation]:
         """总线驱动入口（供 Orchestrator 调用）"""
