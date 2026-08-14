@@ -15,6 +15,7 @@ import argparse
 import json
 import re
 import sys
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,11 +24,13 @@ from typing import Any, Callable
 from competitor_agent.domain_types.enums import ObservationStatus
 from competitor_agent.domain_types.observation import Observation, SourceEvidence
 from competitor_agent.evaluation.accuracy_eval import AccuracyEvaluator, AccuracyMetrics, EvalCase
+from competitor_agent.evaluation.failure import FailureRecord, FailureType, classify_case
 from competitor_agent.evaluation.strategy_eval import StrategyCase, StrategyEvaluator, StrategyMetrics
 from competitor_agent.facade.api import CompetitorAnalysisAPI
 from competitor_agent.interfaces.context import SourceContext
 from competitor_agent.interfaces.exceptions import DataSourceUnavailableError
 from competitor_agent.llm.client import LLMClient
+from competitor_agent.memory.timeline_memory import TimelineMemory
 
 FIXTURES_DIR = Path(__file__).resolve().parent.parent / "tests" / "evaluation" / "fixtures"
 
@@ -35,7 +38,8 @@ ACCURACY_FIXTURE = "accuracy_cases.json"
 STRATEGY_FIXTURE = "strategy_cases.json"
 
 # 评测 harness 版本：分数 = benchmark + subset + harness。任何评测输出必须带此版本号。
-HARNESS_VERSION = "0.4.0"
+# 0.4.0 → 0.5.0：新增失败类型分类与聚合（设计文档 31）。
+HARNESS_VERSION = "0.5.0"
 
 # 单次采集/工具的估算成本（与主流程 IterationBudget 单次 0.01 对齐）
 UNIT_COST = 0.01
@@ -95,6 +99,9 @@ class BenchmarkReport:
     # 设计文档 29：按维度拆分指标（生态/口碑/时间线覆盖盲区可独立门禁）
     accuracy_by_dimension: dict[str, float] = field(default_factory=dict)
     hallucination_by_dimension: dict[str, float] = field(default_factory=dict)
+    # 设计文档 31：失败类型统计——{type: count} + 逐条样本
+    failure_stats: dict[str, int] = field(default_factory=dict)
+    failure_records: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -117,6 +124,8 @@ class BenchmarkReport:
                 "avg_source_rank": self.strategy.avg_source_rank,
             },
             "confusion_matrix": self.confusion_matrix,
+            "failure_stats": self.failure_stats,
+            "failure_records": self.failure_records,
         }
 
 
@@ -499,12 +508,15 @@ def build_benchmark_api(
     enable_memory: bool = True,
     memory: object | None = None,
     rag_store: object | None = None,
+    timeline: object | None = None,
 ) -> CompetitorAnalysisAPI:
     """按用例配置构建 API：mock 用确定性 MockLLM（无 Key、无网络），real 用真实 LLMClient，
     rules 用纯规则降级（use_llm=False，设计文档 30 的 no-llm-rule 消融变体）。
 
     enable_rag / enable_memory：消融开关（设计文档 30），透传给 API 门控知识库/记忆。
     memory / rag_store：注入共享记忆与知识库实例（跨用例累积，消融差分可测）。
+    timeline：默认注入每 case 独立的空时间线存储，保证「首轮无基线不产生事件」
+    （设计文档 26/29 边界）不受外部共享时间线状态污染——失败统计可信且可复现。
     """
     llm: LLMClient | None = None
     use_llm = False
@@ -518,6 +530,8 @@ def build_benchmark_api(
         page=getattr(case, "page", ""),
         fail_urls=set(getattr(case, "fail_urls", None) or ()),
     )
+    if timeline is None:
+        timeline = TimelineMemory(data_dir=Path(tempfile.mkdtemp(prefix="benchmark_timeline_")))
     return CompetitorAnalysisAPI(
         extractor=extractor,
         llm=llm,
@@ -528,6 +542,7 @@ def build_benchmark_api(
         enable_memory=enable_memory,
         memory=memory,  # type: ignore[arg-type]
         rag_store=rag_store,
+        timeline=timeline,  # type: ignore[arg-type]
     )
 
 
@@ -555,10 +570,14 @@ class Benchmark:
         acc_cases = self._load_accuracy(self._dir / ACCURACY_FIXTURE)
         strat_cases = self._load_strategy(self._dir / STRATEGY_FIXTURE)
 
+        # 逐 case 的真实报告（供设计文档 31 失败归类取证据/状态）
+        reports_by_case: dict[str, object] = {}
+
         # 字段真实评测：逐 case 调用 api.analyze() → 从真实报告提取 prediction
         acc_eval_cases: list[EvalCase] = []
         for case in acc_cases:
             report = self._analyze(case)
+            reports_by_case[case.case_id or case.task] = report
             prediction = extract_prediction(report, case.dimension, case.ground_truth)
             acc_eval_cases.append(
                 EvalCase(
@@ -577,6 +596,7 @@ class Benchmark:
         strat_eval_cases: list[StrategyCase] = []
         for case in strat_cases:
             report = self._analyze(case)
+            reports_by_case[case.case_id or case.task] = report
             urls, cost, complete = extract_strategy(report, case.best_url, case.fail_urls)
             strat_eval_cases.append(
                 StrategyCase(
@@ -602,6 +622,11 @@ class Benchmark:
             accuracy_by_dimension[dim] = m.field_accuracy
             hallucination_by_dimension[dim] = m.hallucination_rate
 
+        # 设计文档 31：失败类型聚合（未命中 case 归入五类之一）
+        failure_stats, failure_records = _classify_failures(
+            acc_eval_cases, strat_eval_cases, reports_by_case
+        )
+
         return BenchmarkReport(
             accuracy=accuracy,
             strategy=self._strat.evaluate(strat_eval_cases),
@@ -611,6 +636,8 @@ class Benchmark:
             confusion_matrix=self._confusion_matrix(strat_eval_cases),
             accuracy_by_dimension=accuracy_by_dimension,
             hallucination_by_dimension=hallucination_by_dimension,
+            failure_stats=failure_stats,
+            failure_records=failure_records,
         )
 
     def _analyze(self, case: object) -> object:
@@ -678,6 +705,76 @@ class Benchmark:
         return matrix
 
 
+def _evidence_urls(report: object | None) -> list[str]:
+    """从报告维度结果收集证据 URL（去重保序）"""
+    urls: list[str] = []
+    if report is None:
+        return urls
+    for result in getattr(report, "dimension_results", None) or []:
+        for evidence in getattr(result, "evidence", None) or []:
+            url = getattr(evidence, "url", "")
+            if url and url not in urls:
+                urls.append(url)
+    return urls
+
+
+def _classify_failures(
+    acc_eval_cases: list[EvalCase],
+    strat_eval_cases: list[StrategyCase],
+    reports_by_case: dict[str, object],
+) -> tuple[dict[str, int], list[dict[str, Any]]]:
+    """设计文档 31 §3.2：聚合失败类型 → (failure_stats, failure_records)。
+
+    - accuracy 未命中 case（字段不全命中）→ classify_case 归入五类；
+    - strategy 未命中 case（hit=False）→ 无有效源 → SOURCE_UNAVAILABLE，
+      有源但未选最优 → PARSE_FAILURE；
+    - 按 (case_id, type) 去重，计数 + 占比在渲染层计算。
+    """
+    records: list[FailureRecord] = []
+    for case in acc_eval_cases:
+        report = reports_by_case.get(case.case_id) or reports_by_case.get(case.task)
+        records.extend(classify_case(case, case.prediction, case.ground_truth, report))
+    for case in strat_eval_cases:
+        if case.best_source in case.chosen_sources:
+            continue
+        report = reports_by_case.get(case.case_id) or reports_by_case.get(case.task)
+        urls = _evidence_urls(report)
+        if not case.chosen_sources:
+            records.append(
+                FailureRecord(
+                    case.case_id,
+                    "",
+                    FailureType.SOURCE_UNAVAILABLE,
+                    "降级链全灭，无有效数据源（源抓取失败/BLOCKED）",
+                    urls,
+                )
+            )
+        else:
+            records.append(
+                FailureRecord(
+                    case.case_id,
+                    "",
+                    FailureType.PARSE_FAILURE,
+                    "有源但未命中标注最优源",
+                    urls,
+                )
+            )
+
+    seen: set[tuple[str, str]] = set()
+    unique: list[FailureRecord] = []
+    for rec in records:
+        key = (rec.case_id, rec.failure_type.value)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(rec)
+
+    stats: dict[str, int] = {}
+    for rec in unique:
+        stats[rec.failure_type.value] = stats.get(rec.failure_type.value, 0) + 1
+    return stats, [r.to_dict() for r in unique]
+
+
 # ── 报告输出（CSV / Markdown）─────────────────────────────────────────
 
 
@@ -695,6 +792,10 @@ def _write_csv(report: BenchmarkReport, out: Path) -> None:
     for k, v in strat.items():
         rows.append([report.harness_version, f"strategy.{k}", str(v)])
     rows.append([report.harness_version, "trace_completeness", str(report.trace_completeness)])
+    # 设计文档 31：失败类型统计（逐类计数 + 总计）
+    for ftype in sorted(report.failure_stats):
+        rows.append([report.harness_version, f"failure.{ftype}", str(report.failure_stats[ftype])])
+    rows.append([report.harness_version, "failure.total", str(sum(report.failure_stats.values()))])
     out.write_text("\n".join(",".join(r) for r in rows) + "\n", encoding="utf-8")
 
 
@@ -759,6 +860,26 @@ def _write_markdown(report: BenchmarkReport, out: Path) -> None:
         for chosen, count in row.items():
             lines.append(f"  - {chosen}: {count}")
 
+    lines.append("\n## 失败类型分布（设计文档 31）")
+    if report.failure_stats:
+        total = sum(report.failure_stats.values())
+        lines.append("\n| 类型 | 计数 | 占比 |")
+        lines.append("|------|------|------|")
+        for ftype in sorted(report.failure_stats, key=lambda t: -report.failure_stats[t]):
+            count = report.failure_stats[ftype]
+            lines.append(f"| {ftype} | {count} | {count / total:.1%} |")
+        lines.append("\n### 失败样本")
+        lines.append("\n| case | 维度 | 类型 | 原因 | 证据 |")
+        lines.append("|------|------|------|------|------|")
+        for rec in report.failure_records:
+            urls = "<br>".join(rec.get("evidence_urls", []) or ["—"])
+            lines.append(
+                f"| {rec.get('case_id', '')} | {rec.get('dimension', '') or '—'} | "
+                f"{rec.get('failure_type', '')} | {rec.get('detail', '')} | {urls} |"
+            )
+    else:
+        lines.append("\n- 无失败（全量命中）")
+
     lines.append("\n> 分数有效范围：harness v" + report.harness_version + "，改 fixture/依赖/harness 需更新版本号。")
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -800,8 +921,11 @@ __all__ = [
     "BenchmarkMockLLM",
     "BenchmarkReport",
     "BenchStrategyCase",
+    "classify_case",
     "extract_prediction",
     "extract_strategy",
+    "FailureRecord",
+    "FailureType",
     "HARNESS_VERSION",
     "real_trace",
     "STRATEGY_FIXTURE",

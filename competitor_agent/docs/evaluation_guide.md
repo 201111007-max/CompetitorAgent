@@ -162,7 +162,7 @@ strategy case（策略/降级：`best_url` 标任务应首选（或降级后应�
 
 > 当前 38 条（27 accuracy + 11 strategy），真实执行版，满足设计文档 §5 的 ≥20 最小集。
 > 门禁含维度拆分：新维度（ecosystem/sentiment/roadmap）字段准确率 ≥ 0.80、生态/口碑空数据幻觉率 ≤ 0.02。
-> 每个分数必须附带 harness 版本号（benchmark + subset + harness，当前 v0.4.0）。
+> 每个分数必须附带 harness 版本号（benchmark + subset + harness，当前 v0.5.0）。
 
 ---
 
@@ -253,3 +253,39 @@ python -m competitor_agent.cli benchmark
 - 预置知识库含答案而页面无答案 → `full` 从片段命中、`no-rag` 缺失；
 - 前一用例摄入片段 → 后一用例（页面无答案）经 RAG 检索命中；
 - `enable_memory=False` 时记忆零写入（无 archive/skill/outcome）。
+
+---
+
+## 9. 失败类型统计（设计文档 31）
+
+回答「这个 case 为什么没命中？」，支撑归因优化与简历/面试的"失败类型统计"证据。
+
+### 9.1 五类失败（`evaluation/failure.py` `FailureType`）
+
+| 类型 | 判定 | 对应底层信号 |
+|------|------|-------------|
+| `source_unavailable` | 源抓取失败 / 降级链全灭 / BLOCKED；strategy miss 且无有效源 | `DataSourceUnavailableError`、fail_urls 全灭、`BLOCKED` |
+| `hallucination` | 预测字段无真值支持（命中现有幻觉判定） | `hallucination_instances` |
+| `no_data` | 源有响应但内容不含目标信息（预测全空 → 低置信/`[N/A]`，不编造） | 低置信 `[PARTIAL]` / `[N/A]` |
+| `parse_failure` | 有内容但抽取/归一化错误（预测非空但 F1<1 且非幻觉）；strategy miss 但有源未选最优 | prediction 非空但 F1<1 |
+| `budget_exhausted` | 预算 / 迭代耗尽提前终止 | `terminal_state` / 预算触停 |
+
+`classify_case(case, prediction, ground_truth, report, status_hints)` 判定优先级：
+**幻觉 > 预算触停 > 源不可用/BLOCKED > 无数据 > 解析错误**；全部字段命中返回空。
+判定口径复用 `accuracy_eval` 归一化（`_normalize`/`_tokens`），与 `hallucination_instances` 一一对应。
+`status_hints` 提供分类无法自行推导的信号：`budget_exhausted` / `source_unavailable` / `blocked`。
+
+### 9.2 聚合与报告
+
+- `Benchmark.run()` 对 accuracy 未命中 case（`classify_case`）+ strategy miss case（无有效源 → `SOURCE_UNAVAILABLE`、有源未选最优 → `PARSE_FAILURE`）
+  按 `(case_id, type)` 去重聚合 → `BenchmarkReport.failure_stats`（type→count）+ `failure_records`（逐条样本，含 case/dimension/type/detail/evidence_urls）。
+- `to_dict()` 同步携带两字段（供设计文档 28 结构化导出复用）。
+- Markdown 报告新增「## 失败类型分布」：`| 类型 | 计数 | 占比 |` + 逐 case 样本表（证据 URL 可回溯）；CSV 增 `failure.{type}` 与 `failure.total` 行。
+
+### 9.3 确定性护栏
+
+`build_benchmark_api` 注入每 case 独立的空 `TimelineMemory`（临时目录）——「首轮无基线不产生事件」边界
+（设计文档 26/29）不受外部共享时间线状态污染，失败统计可信可复现。
+
+`tests/evaluation/test_failure_stats.py`：classify_case 5 类场景 + 优先级 + 全命中空、
+`_classify_failures` 聚合计数/去重、自定义 fixtures 集成（真实链路 mock LLM + 固定页面）、默认 38 用例报告含分布表与 CSV failure 行。

@@ -37,7 +37,7 @@
 | `28_structured_export_design.md` | §12.3 #8：输出仅 Markdown（结构化导出+定时+告警） | P2 | ✅ 已实现 |
 | `29_evaluation_coverage_design.md` | §12.3 #9：评测盲区（生态/口碑/时间线覆盖） | P2 | ✅ 已实现 |
 | `30_ablation_comparison_design.md` | §12.3 #10：无对比/消融实验（有无 RAG/rerank/memory） | P2 | ✅ 已实现 |
-| `31_failure_stats_design.md` | §12.3 #11：无失败类型统计（五类分类+聚合分布） | P2 | ⏳ 待办 |
+| `31_failure_stats_design.md` | §12.3 #11：无失败类型统计（五类分类+聚合分布） | P2 | ✅ 已实现 |
 
 > **问题 1 修复说明**：多 Agent 已接入主流程。`CompetitorAnalysisAPI.analyze()` 新增 `mode` 参数（`single` / `team`，**默认 `team`**），`mode="team"` 时走事件驱动 + 状态决策的多 Agent 流水线（Collector→Analyzer→Validator→Reporter，支持 SUCCESS/RETRY/DEGRADED/FAILED 决策）。CLI 新增 `--mode` 选项。全量 312 个测试通过。
 
@@ -99,6 +99,8 @@
 
 > **设计文档 30 修复说明**：消融/对比实验已落地。① **组件开关**：`CompetitorAnalysisAPI(enable_rag=True, enable_memory=True)` —— `enable_memory=False` 时 `self._memory=None` 门控全部记忆副作用（选源成功率/技能沉淀/会话归档），下游各组件 `if self._memory is None` 优雅跳过；`enable_rag=False` 时 `store/ingester/retriever` 全为 None，`GapExecutor`/`CollectorAgent`/`AnalyzerAgent` 均跳过摄入与检索。② **消融运行器** `evaluation/ablation.py`：`AblationVariant`（name + enable_rag/enable_memory/use_llm）+ `DEFAULT_VARIANTS` 5 变体（full / no-rag / no-memory / no-rag+no-memory / no-llm-rule 纯规则降级）；`AblationRunner` 逐变体跑真实 `Benchmark` 用例，每变体独立目录的共享 `FourLayerMemory`（跨用例累积技能/成功率）与 `CompetitorStore`（跨用例累积可检索片段），使 RAG/记忆差分可测；`render_ablation_table` 对比表每行标粗最优（幻觉率/命中排名取小）+ 「幻觉率差分 vs full」门禁标注 `[OK]/[WARN]`；`write_ablation_report` 落盘 `reports/ablation/ablation_<date>.md/.json`。③ **CLI**：`benchmark --ablate` 触发 5 变体全跑 + 落盘（`cli.py::_run_benchmark`）。④ **差分集成测试**：`test_ablation.py` 12 条——开关门控（`enable_rag=False` 无知识库、`enable_memory=False` 零记忆副作用）、Runner 汇总/默认矩阵/空 fixture、渲染表头与最优标粗、JSON schema、RAG 差分（预置知识库含答案而页面无答案 → full 命中 `$20/month` / no-rag 缺失；前一用例摄入片段被后一用例检索命中）、CLI `--ablate` 透传。⑤ **首份报告**（38 用例）：字段准确率 full/no-rag/no-memory/no-rag+no-memory 均 **1.0000**、no-llm-rule **0.8113**；幻觉率四变体 **0.0000**、no-llm-rule **0.0667**；工具选择准确率与成本效率无记忆变体（0.9091 / 80.0）优于记忆变体（0.4545 / 48.18）——因记忆成功率信任提升重排选源（`_record_memory_success` 按 `sources_tried[-1]` 记账），属真实记忆效应而非开关故障，RAG/记忆收益由专用差分测试独立证明。harness 版本 0.4.0。全量 **618 passed / 3 skipped**（1 环境性失败同前：本机已装 playwright）。
 
+> **设计文档 31 修复说明**：失败类型统计已落地。① **失败分类** `evaluation/failure.py`：`FailureType` 五类（`source_unavailable` 源抓取失败/降级全灭/BLOCKED、`hallucination` 预测无真值支持、`no_data` 源有响应但页面无目标信息、`parse_failure` 有内容但抽取/归一化错误、`budget_exhausted` 预算触停）+ `FailureRecord`（case_id/dimension/type/detail/evidence_urls）+ `classify_case`（优先级：幻觉 > 预算 > 源不可用 > 无数据 > 解析错误；全命中返回空；判定口径复用 `accuracy_eval` 归一化，与 `hallucination_instances` 一一对应）。② **聚合**：`Benchmark.run()` 逐 case 保留真实报告 → `_classify_failures`（accuracy 未命中 case 归类 + strategy miss case——无有效源 → `SOURCE_UNAVAILABLE`、有源未选最优 → `PARSE_FAILURE`——按 (case_id, type) 去重）→ `BenchmarkReport.failure_stats`（type→count）+ `failure_records`（逐条样本，`to_dict` 同步携带，供结构化导出复用）。③ **渲染/导出**：`_write_markdown` 增「## 失败类型分布」表（类型/计数/占比 + 逐 case 样本表含证据 URL）；`_write_csv` 增 `failure.{type}` 与 `failure.total` 行。④ **时间线隔离加固**：`build_benchmark_api` 注入每 case 独立的空 `TimelineMemory`（临时目录），保证「首轮无基线不产生事件」边界（设计文档 26/29）不受外部共享时间线状态污染——失败统计可信可复现。⑤ **测试** `test_failure_stats.py` 19 条：classify_case 5 类场景 + 优先级 + 全命中空 + 证据收集、`_classify_failures` 聚合计数/去重/空、自定义 fixtures 集成（真实链路 mock LLM + 固定页面 → `{hallucination:1, no_data:1, parse_failure:2}`）、默认 38 用例报告含分布表与 CSV failure 行。⑥ **首份分布**（默认 38 用例 mock）：`failure_stats={parse_failure:1}`——唯一确定性失败为有意 miss 的 `cursor_rumor_miss_2026`（有源未选最优），accuracy 全命中。harness 版本 **0.4.0 → 0.5.0**。
+
 ## 设计文档统一模板
 
 每个设计文档包含以下章节：
@@ -131,9 +133,10 @@
 - **设计文档 28 §12.3 #8 结构化导出 + 定时 + 告警**：已实现（见上方修复说明）——`report_exporter` 竞品/对比矩阵 JSON 导出（schema v1.0.0）+ `run_scheduled` 定时重爬（TTL 过滤）+ `alerting` 异动告警（Console/FileAlertSink）+ CLI `schedule`。
 - **设计文档 29 §12.3 #9 评测盲区覆盖**：已实现（见上方修复说明）——`DIMENSION_KINDS` 扩展 ecosystem/sentiment/roadmap + `extract_prediction` 新分支 + `BenchmarkMockLLM` 生态/口碑确定性解析 + 10 accuracy / 2 strategy 新用例（含空数据护栏）+ `BenchmarkReport` 按维度指标/逐 case 明细 + 评测指南同步，harness v0.4.0。
 - **设计文档 30 §12.3 #10 消融/对比实验**：已实现（见上方修复说明）——`enable_rag`/`enable_memory` 组件开关（默认开，行为不变）+ `evaluation/ablation.py`（`AblationRunner` 逐变体跑真实用例、按变体隔离/累积共享记忆与知识库）+ 5 变体对比表（full/no-rag/no-memory/no-rag+no-memory/no-llm-rule）+ CLI `benchmark --ablate` 落盘 `reports/ablation/`；首份报告 38 用例：字段准确率 4 变体 1.0、no-llm-rule 0.8113；幻觉率 4 变体 0、no-llm-rule 0.0667。RAG/记忆差分由专用集成测试证明（预置知识库 full 命中/no-rag 缺失、跨用例累积）。
+- **设计文档 31 §12.3 #11 失败类型统计**：已实现（见上方修复说明）——`FailureType` 五类分类 + `classify_case`（复用 accuracy_eval 判定口径）+ `Benchmark.run()` 聚合 `failure_stats`/`failure_records`（accuracy miss + strategy miss 归类去重）+ 分布报告（Markdown 表 + CSV failure 行 + `to_dict` 携带）+ `build_benchmark_api` 时间线隔离加固；首份分布（38 用例）：`{parse_failure:1}`——唯一失败为有意 miss 的 rumor case，accuracy 全命中。harness v0.5.0。
 - 全量测试通过（618 passed, 3 skipped；1 环境性失败同前：本机已装 playwright）。
 
 ### 待办（下一步按序实施，均已有设计文档）
-1. **§12.3 #11 失败类型统计**（`31_failure_stats_design.md`，P2，约 0.5-1 天）——`FailureType` 五类分类 + `BenchmarkReport.failure_stats` 聚合 + 分布报告（归因与简历证据）。
+- 无——§12.1-12.3 / §13-15 全部待办均已按设计文档实现。
 
-> 依赖顺序建议：23（多源路由，底层）→ 24（分析器）→ 25（榜单，复用 23 的 provider）→ 26（时间线，复用 23 的 Releases）→ 27（定价，独立）→ 28（导出，复用 26/27）→ 29（评测，依赖 24/25/26 的结构化产出）。23-26 是产品差异化主线，27-29 是可信度与交付增强；**30/31 为简历/面试达标补充**，仅依赖已就绪的 `evaluation/benchmark.py`（真实执行版），可随时穿插实现。
+> 依赖顺序建议：23（多源路由，底层）→ 24（分析器）→ 25（榜单，复用 23 的 provider）→ 26（时间线，复用 23 的 Releases）→ 27（定价，独立）→ 28（导出，复用 26/27）→ 29（评测，依赖 24/25/26 的结构化产出）→ 30/31（简历/面试达标补充，依赖已就绪的 `evaluation/benchmark.py` 真实执行版）。已全部完成。
