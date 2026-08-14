@@ -100,6 +100,9 @@ class CompetitorAnalysisAPI:
         config: AppConfig | None = None,
         web_tool: Callable[[str], list[dict]] | None = None,
         timeline: TimelineMemory | None = None,
+        enable_rag: bool = True,  # 设计文档 30：消融开关（默认开启，行为不变）
+        enable_memory: bool = True,  # 设计文档 30：消融开关（默认开启，行为不变）
+        rag_store: object | None = None,  # 设计文档 30：消融可注入共享知识库实例
     ) -> None:
         # 配置注入：显式参数优先，其次 config，最后默认值
         cfg = config or load_config()
@@ -109,15 +112,17 @@ class CompetitorAnalysisAPI:
         self._llm = llm
         self._use_llm = use_llm
         self._event_sink = event_sink
-        self._memory = memory
+        # enable_memory=False：门控全部记忆副作用（set_success_rates / _apply_memory_boost /
+        # record_skill / record_outcome / archive_session），下游均判 `self._memory is None`
+        self._memory = memory if enable_memory else None
 
         self._planner = StrategicPlanner(llm=llm, use_llm=use_llm)
         # 外部源提供方（设计文档 23）：按 config 构造；主开关默认关闭（无网络/无 Key 不触发真实网络）
         providers = build_providers(cfg.collector)
         self._providers: dict[str, object] = {p.kind: p for p in providers}
         self._selector = SourceSelector(providers=providers)
-        if memory is not None:
-            self._selector.set_success_rates(memory.source_success_rates())
+        if self._memory is not None:
+            self._selector.set_success_rates(self._memory.source_success_rates())
         self._extractor = extractor or WebExtractor()
         self._analyzers = AnalyzerRegistry(llm=llm, use_llm=use_llm)
         # 新鲜度 TTL（设计文档 26）：build() 为报告计算 freshness 元数据
@@ -128,13 +133,19 @@ class CompetitorAnalysisAPI:
         self._timeline = timeline or TimelineMemory()
 
         # RAG 知识库：采集后摄入 + 分析前检索注入（外部事实依据，降低幻觉）
-        from competitor_agent.knowledge_base.competitor_store import CompetitorStore
-        from competitor_agent.knowledge_base.ingester import Ingester
-        from competitor_agent.knowledge_base.retriever import Retriever
+        # enable_rag=False：不组装知识库，GapExecutor/分析器对 None 走"跳过摄入/跳过检索"路径
+        if enable_rag:
+            from competitor_agent.knowledge_base.competitor_store import CompetitorStore
+            from competitor_agent.knowledge_base.ingester import Ingester
+            from competitor_agent.knowledge_base.retriever import Retriever
 
-        self._store = CompetitorStore()
-        self._ingester = Ingester(store=self._store)
-        self._retriever = Retriever(store=self._store)
+            self._store = rag_store or CompetitorStore()
+            self._ingester = Ingester(store=self._store)
+            self._retriever = Retriever(store=self._store)
+        else:
+            self._store = None
+            self._ingester = None
+            self._retriever = None
 
         # 竞品发现器（设计文档 20）：仅 DISCOVERY 意图时被调用，web_tool 可注入
         self._discoverer = CompetitorDiscoverer(llm=llm, use_llm=use_llm, web_tool=web_tool)

@@ -226,6 +226,15 @@ class TestMain:
 
         assert main(["benchmark"]) == 0
 
+    def test_main_benchmark_ablate_subcommand(self, monkeypatch, capsys):
+        """--ablate 应透传给 _run_benchmark（触发消融对比，设计文档 30）。"""
+        calls = []
+        monkeypatch.setattr("competitor_agent.cli._run_benchmark", lambda a: calls.append(a))
+        from competitor_agent.cli import main
+
+        assert main(["benchmark", "--ablate"]) == 0
+        assert calls == [" --ablate"]
+
 
 class TestCompareRepl:
     def test_compare_two(self, capsys):

@@ -492,8 +492,20 @@ def real_trace(report: object) -> list[dict[str, Any]]:
 # ── API 工厂：mock / real LLM + 确定性采集 ────────────────────────────
 
 
-def build_benchmark_api(case: object, llm_mode: str = "mock") -> CompetitorAnalysisAPI:
-    """按用例配置构建 API：mock 用确定性 MockLLM（无 Key、无网络），real 用真实 LLMClient。"""
+def build_benchmark_api(
+    case: object,
+    llm_mode: str = "mock",
+    enable_rag: bool = True,
+    enable_memory: bool = True,
+    memory: object | None = None,
+    rag_store: object | None = None,
+) -> CompetitorAnalysisAPI:
+    """按用例配置构建 API：mock 用确定性 MockLLM（无 Key、无网络），real 用真实 LLMClient，
+    rules 用纯规则降级（use_llm=False，设计文档 30 的 no-llm-rule 消融变体）。
+
+    enable_rag / enable_memory：消融开关（设计文档 30），透传给 API 门控知识库/记忆。
+    memory / rag_store：注入共享记忆与知识库实例（跨用例累积，消融差分可测）。
+    """
     llm: LLMClient | None = None
     use_llm = False
     if llm_mode == "mock":
@@ -512,6 +524,10 @@ def build_benchmark_api(case: object, llm_mode: str = "mock") -> CompetitorAnaly
         use_llm=use_llm,
         max_iterations=8,
         cost_limit=1.0,
+        enable_rag=enable_rag,
+        enable_memory=enable_memory,
+        memory=memory,  # type: ignore[arg-type]
+        rag_store=rag_store,
     )
 
 
