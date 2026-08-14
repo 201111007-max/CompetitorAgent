@@ -39,7 +39,8 @@ STRATEGY_FIXTURE = "strategy_cases.json"
 
 # 评测 harness 版本：分数 = benchmark + subset + harness。任何评测输出必须带此版本号。
 # 0.4.0 → 0.5.0：新增失败类型分类与聚合（设计文档 31）。
-HARNESS_VERSION = "0.5.0"
+# 0.5.0 → 0.6.0：新增真实 LLM 评测报告字段（llm_mode / cost_usd / per_case_cost，设计文档 37）。
+HARNESS_VERSION = "0.6.0"
 
 # 单次采集/工具的估算成本（与主流程 IterationBudget 单次 0.01 对齐）
 UNIT_COST = 0.01
@@ -102,6 +103,12 @@ class BenchmarkReport:
     # 设计文档 31：失败类型统计——{type: count} + 逐条样本
     failure_stats: dict[str, int] = field(default_factory=dict)
     failure_records: list[dict[str, Any]] = field(default_factory=list)
+    # 设计文档 37：真实 LLM 评测报告——模式标注 + 成本核算 + 成本护栏中止
+    llm_mode: str = "mock"  # "mock" / "real"
+    cost_usd: float = 0.0  # 累计 LLM 调用成本（复用 llm._log_call 的 cost_usd）
+    per_case_cost: dict[str, float] = field(default_factory=dict)  # case_id/task → cost
+    cost_limit_usd: float | None = None  # 真实评测成本护栏上限（None=不限）
+    budget_aborted: bool = False  # 是否因成本护栏超限中止
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -109,6 +116,11 @@ class BenchmarkReport:
             "n_cases": self.n_cases,
             "trace_completeness": self.trace_completeness,
             "fixtures": self.loaded_fixtures,
+            "llm_mode": self.llm_mode,
+            "cost_usd": self.cost_usd,
+            "cost_limit_usd": self.cost_limit_usd,
+            "budget_aborted": self.budget_aborted,
+            "per_case_cost": self.per_case_cost,
             "accuracy": {
                 "field_accuracy": self.accuracy.field_accuracy,
                 "hallucination_rate": self.accuracy.hallucination_rate,
@@ -501,9 +513,28 @@ def real_trace(report: object) -> list[dict[str, Any]]:
 # ── API 工厂：mock / real LLM + 确定性采集 ────────────────────────────
 
 
+def build_real_llm() -> LLMClient:
+    """按 LLMConfig 构造真实 LLMClient（重试/fallback/超时来自设计文档 36）。
+
+    供 `--llm real` 使用：主流程配置生效，跨 case 复用同一实例（连接复用 + 成本累计）。
+    无 Key 时不报错（真正调用时才抛 LLMUnavailableError），由调用方前置校验。
+    """
+    from competitor_agent.config.loader import load_config
+
+    cfg = load_config()
+    return LLMClient(
+        model=cfg.llm.model,
+        base_url=cfg.llm.api_base_url,
+        fallback_models=cfg.llm.fallback_models,
+        timeout=cfg.llm.timeout,
+        max_retries=cfg.llm.max_retries,
+    )
+
+
 def build_benchmark_api(
     case: object,
     llm_mode: str = "mock",
+    llm: LLMClient | None = None,
     enable_rag: bool = True,
     enable_memory: bool = True,
     memory: object | None = None,
@@ -513,18 +544,24 @@ def build_benchmark_api(
     """按用例配置构建 API：mock 用确定性 MockLLM（无 Key、无网络），real 用真实 LLMClient，
     rules 用纯规则降级（use_llm=False，设计文档 30 的 no-llm-rule 消融变体）。
 
+    llm：共享 LLMClient 实例（real 模式跨 case 复用，连接复用 + 成本累计；设计文档 37）。
+      为 None 时按 llm_mode 默认构造（mock=确定性 MockLLM；real=按 LLMConfig 构造）。
+
     enable_rag / enable_memory：消融开关（设计文档 30），透传给 API 门控知识库/记忆。
     memory / rag_store：注入共享记忆与知识库实例（跨用例累积，消融差分可测）。
     timeline：默认注入每 case 独立的空时间线存储，保证「首轮无基线不产生事件」
     （设计文档 26/29 边界）不受外部共享时间线状态污染——失败统计可信且可复现。
     """
-    llm: LLMClient | None = None
     use_llm = False
-    if llm_mode == "mock":
-        llm = LLMClient(call_func=BenchmarkMockLLM().complete)
-        use_llm = True
-    elif llm_mode == "real":
-        llm = LLMClient()
+    if llm is None:
+        if llm_mode == "mock":
+            llm = LLMClient(call_func=BenchmarkMockLLM().complete)
+            use_llm = True
+        elif llm_mode == "real":
+            llm = build_real_llm()
+            use_llm = True
+    else:
+        # 显式注入的共享实例（real 复用 / 测试注入）
         use_llm = True
     extractor = BenchmarkExtractor(
         page=getattr(case, "page", ""),
@@ -559,24 +596,51 @@ class Benchmark:
         build_api: Callable[[object], CompetitorAnalysisAPI] | None = None,
         accuracy_eval: AccuracyEvaluator | None = None,
         strategy_eval: StrategyEvaluator | None = None,
+        llm: LLMClient | None = None,
+        tag: str | None = None,
+        cost_limit_usd: float | None = None,
     ) -> None:
         self._dir = fixtures_dir or FIXTURES_DIR
         self._llm_mode = llm_mode
-        self._build_api = build_api or (lambda case: build_benchmark_api(case, llm_mode=self._llm_mode))
+        self._llm = llm
+        self._tag = tag
+        self._cost_limit_usd = cost_limit_usd
+        if build_api is None:
+            if llm is not None:
+                self._build_api = lambda case: build_benchmark_api(case, llm_mode=self._llm_mode, llm=llm)
+            else:
+                self._build_api = lambda case: build_benchmark_api(case, llm_mode=self._llm_mode)
+        else:
+            self._build_api = build_api
         self._accuracy = accuracy_eval or AccuracyEvaluator()
         self._strat = strategy_eval or StrategyEvaluator()
 
     def run(self) -> BenchmarkReport:
         acc_cases = self._load_accuracy(self._dir / ACCURACY_FIXTURE)
         strat_cases = self._load_strategy(self._dir / STRATEGY_FIXTURE)
+        if self._tag:
+            acc_cases = [c for c in acc_cases if self._tag in c.tags]
+            strat_cases = [c for c in strat_cases if self._tag in c.tags]
 
         # 逐 case 的真实报告（供设计文档 31 失败归类取证据/状态）
         reports_by_case: dict[str, object] = {}
 
+        # 设计文档 37：真实评测成本核算 + 成本护栏（复用 llm._log_call 的 cost_usd 累计）
+        total_cost = 0.0
+        per_case_cost: dict[str, float] = {}
+        budget_aborted = False
+
         # 字段真实评测：逐 case 调用 api.analyze() → 从真实报告提取 prediction
         acc_eval_cases: list[EvalCase] = []
         for case in acc_cases:
+            if self._budget_exceeded(total_cost):
+                budget_aborted = True
+                break
+            before = self._cost_now()
             report = self._analyze(case)
+            cost = round(self._cost_now() - before, 6)
+            total_cost = round(total_cost + cost, 6)
+            per_case_cost[case.case_id or case.task] = cost
             reports_by_case[case.case_id or case.task] = report
             prediction = extract_prediction(report, case.dimension, case.ground_truth)
             acc_eval_cases.append(
@@ -595,7 +659,14 @@ class Benchmark:
         # 策略真实评测：真实证据（选中/降级 URL）反推命中与成本
         strat_eval_cases: list[StrategyCase] = []
         for case in strat_cases:
+            if self._budget_exceeded(total_cost):
+                budget_aborted = True
+                break
+            before = self._cost_now()
             report = self._analyze(case)
+            cost = round(self._cost_now() - before, 6)
+            total_cost = round(total_cost + cost, 6)
+            per_case_cost[case.case_id or case.task] = cost
             reports_by_case[case.case_id or case.task] = report
             urls, cost, complete = extract_strategy(report, case.best_url, case.fail_urls)
             strat_eval_cases.append(
@@ -627,6 +698,21 @@ class Benchmark:
             acc_eval_cases, strat_eval_cases, reports_by_case
         )
 
+        # 设计文档 37：成本护栏中止——未运行的 case 记 budget_exhausted 失败（复用 31 分类）
+        if budget_aborted:
+            failure_records.append(
+                {
+                    "case_id": "(budget_aborted)",
+                    "dimension": "",
+                    "failure_type": FailureType.BUDGET_EXHAUSTED.value,
+                    "detail": f"评测成本护栏中止：累计 ${total_cost:.6f} 达到上限 ${self._cost_limit_usd:.6f}",
+                    "evidence_urls": [],
+                }
+            )
+            failure_stats[FailureType.BUDGET_EXHAUSTED.value] = (
+                failure_stats.get(FailureType.BUDGET_EXHAUSTED.value, 0) + 1
+            )
+
         return BenchmarkReport(
             accuracy=accuracy,
             strategy=self._strat.evaluate(strat_eval_cases),
@@ -638,7 +724,22 @@ class Benchmark:
             hallucination_by_dimension=hallucination_by_dimension,
             failure_stats=failure_stats,
             failure_records=failure_records,
+            llm_mode=self._llm_mode,
+            cost_usd=total_cost,
+            per_case_cost=per_case_cost,
+            cost_limit_usd=self._cost_limit_usd,
+            budget_aborted=budget_aborted,
         )
+
+    def _budget_exceeded(self, total_cost: float) -> bool:
+        """成本护栏：累计成本达到上限即中止（仅 real 模式启用成本护栏）。"""
+        if self._cost_limit_usd is None:
+            return False
+        return total_cost >= self._cost_limit_usd
+
+    def _cost_now(self) -> float:
+        """当前累计 LLM 成本（设计文档 37：共享实例累计；无共享实例则 0）。"""
+        return self._llm.total_cost_usd if self._llm is not None else 0.0
 
     def _analyze(self, case: object) -> object:
         api = self._build_api(case)
@@ -778,10 +879,11 @@ def _classify_failures(
 # ── 报告输出（CSV / Markdown）─────────────────────────────────────────
 
 
-def _write_csv(report: BenchmarkReport, out: Path) -> None:
+def _write_csv(report: BenchmarkReport, out: Path, mock_report: BenchmarkReport | None = None) -> None:
     rows = [["harness_version", "metric", "value"]]
     acc = report.to_dict()["accuracy"]
     strat = report.to_dict()["strategy"]
+    rows.append([report.harness_version, "llm_mode", report.llm_mode])
     for k, v in acc.items():
         if k not in ("hallucination_instances", "per_case"):
             rows.append([report.harness_version, f"accuracy.{k}", str(v)])
@@ -792,28 +894,67 @@ def _write_csv(report: BenchmarkReport, out: Path) -> None:
     for k, v in strat.items():
         rows.append([report.harness_version, f"strategy.{k}", str(v)])
     rows.append([report.harness_version, "trace_completeness", str(report.trace_completeness)])
+    # 设计文档 37：成本核算 + 模式标注
+    rows.append([report.harness_version, "cost_usd", str(report.cost_usd)])
+    if report.cost_limit_usd is not None:
+        rows.append([report.harness_version, "cost_limit_usd", str(report.cost_limit_usd)])
+    rows.append([report.harness_version, "budget_aborted", str(report.budget_aborted)])
+    for case_id, cost in report.per_case_cost.items():
+        rows.append([report.harness_version, f"cost.case.{case_id}", str(cost)])
     # 设计文档 31：失败类型统计（逐类计数 + 总计）
     for ftype in sorted(report.failure_stats):
         rows.append([report.harness_version, f"failure.{ftype}", str(report.failure_stats[ftype])])
     rows.append([report.harness_version, "failure.total", str(sum(report.failure_stats.values()))])
+    # 设计文档 37：mock vs real 对比（real 报告内嵌 mock 基线，直答"评测是不是自证"）
+    if mock_report is not None and mock_report.llm_mode != report.llm_mode:
+        rows.append([report.harness_version, "vs.mock.accuracy.field_accuracy", str(mock_report.accuracy.field_accuracy)])
+        rows.append([report.harness_version, "vs.mock.accuracy.hallucination_rate", str(mock_report.accuracy.hallucination_rate)])
+        rows.append([report.harness_version, "vs.mock.strategy.tool_selection_accuracy", str(mock_report.strategy.tool_selection_accuracy)])
+        rows.append([report.harness_version, "vs.mock.cost_usd", str(mock_report.cost_usd)])
     out.write_text("\n".join(",".join(r) for r in rows) + "\n", encoding="utf-8")
 
 
-def _write_markdown(report: BenchmarkReport, out: Path) -> None:
-    """评测报告：均值 + 逐 case 明细 + 幻觉实例清单 + 混淆矩阵 + harness 版本号"""
+def _write_markdown(
+    report: BenchmarkReport,
+    out: Path,
+    mock_report: BenchmarkReport | None = None,
+) -> None:
+    """评测报告：均值 + 逐 case 明细 + 幻觉实例清单 + 混淆矩阵 + harness 版本号 + 成本/对比"""
     lines: list[str] = []
     lines.append(f"# Benchmark Report — harness v{report.harness_version}")
     lines.append(f"\n> generated: {datetime.now(timezone.utc).isoformat(timespec='seconds')}")
     lines.append(f"> fixtures: {', '.join(report.loaded_fixtures)} | cases: {report.n_cases} | trace completeness: {report.trace_completeness:.0%}")
+    lines.append(f"> llm_mode: {report.llm_mode} | 累计成本: ${report.cost_usd:.6f} | 成本护栏: "
+                 f"{'$' + f'{report.cost_limit_usd:.6f}' if report.cost_limit_usd is not None else '不限'}"
+                 f"{' | ⚠️ 预算中止' if report.budget_aborted else ''}")
     lines.append("\n## 指标汇总")
     lines.append("\n| 指标 | 值 |")
     lines.append("|------|----|")
+    lines.append(f"| LLM 模式 | {report.llm_mode} |")
     lines.append(f"| 字段准确率 | {report.accuracy.field_accuracy:.4f} |")
     lines.append(f"| 幻觉率 | {report.accuracy.hallucination_rate:.4f} |")
     lines.append(f"| F1 | {report.accuracy.f1:.4f} |")
     lines.append(f"| 工具选择准确率 | {report.strategy.tool_selection_accuracy:.4f} |")
     lines.append(f"| 成本效率 | {report.strategy.cost_efficiency:.4f} |")
     lines.append(f"| 平均命中排名 | {report.strategy.avg_source_rank:.2f} |")
+    lines.append(f"| 累计成本(USD) | {report.cost_usd:.6f} |")
+
+    # 设计文档 37：mock vs real 对比段（real 报告内嵌 mock 基线，直答"评测是不是自证"）
+    if mock_report is not None and mock_report.llm_mode != report.llm_mode:
+        lines.append("\n## mock vs real 对比（设计文档 37：真实质量 vs 确定性回归）")
+        lines.append("\n> 口径：mock=harness 自洽（确定性回归，证明链路正确）；real=真实模型端到端质量（回答面试被追问）。")
+        lines.append("\n| 指标 | mock | real | 差异 |")
+        lines.append("|------|------|------|------|")
+        for label, m_key, r_key in (
+            ("字段准确率", mock_report.accuracy.field_accuracy, report.accuracy.field_accuracy),
+            ("幻觉率", mock_report.accuracy.hallucination_rate, report.accuracy.hallucination_rate),
+            ("F1", mock_report.accuracy.f1, report.accuracy.f1),
+            ("工具选择准确率", mock_report.strategy.tool_selection_accuracy, report.strategy.tool_selection_accuracy),
+            ("成本效率", mock_report.strategy.cost_efficiency, report.strategy.cost_efficiency),
+            ("累计成本(USD)", mock_report.cost_usd, report.cost_usd),
+        ):
+            diff = r_key - m_key
+            lines.append(f"| {label} | {m_key:.4f} | {r_key:.4f} | {diff:+.4f} |")
 
     if report.accuracy_by_dimension:
         lines.append("\n## 按维度字段准确率（设计文档 29：生态/口碑/时间线覆盖盲区）")
@@ -825,11 +966,13 @@ def _write_markdown(report: BenchmarkReport, out: Path) -> None:
             )
 
     lines.append("\n## 逐 case 明细（accuracy）")
-    lines.append("\n| case | dimension | field_accuracy | hallucination_rate |")
-    lines.append("|------|-----------|----------------|--------------------|")
+    lines.append("\n| case | dimension | field_accuracy | hallucination_rate | cost_usd |")
+    lines.append("|------|-----------|----------------|--------------------|----------|")
     for pc in report.accuracy.per_case:
+        cost = report.per_case_cost.get(pc["case_id"] or pc["task"], 0.0)
         lines.append(
-            f"| {pc['case_id'] or pc['task']} | {pc['dimension']} | {pc['field_accuracy']:.4f} | {pc['hallucination_rate']:.4f} |"
+            f"| {pc['case_id'] or pc['task']} | {pc['dimension']} | {pc['field_accuracy']:.4f} | "
+            f"{pc['hallucination_rate']:.4f} | {cost:.6f} |"
         )
 
     lines.append("\n## 逐 case 明细（strategy）")
@@ -890,22 +1033,54 @@ def main(argv: list[str] | None = None) -> int:
         "--llm",
         choices=["mock", "real"],
         default="mock",
-        help="LLM 模式：mock=确定性评测（CI/无 Key），real=真实 LLM（评估真实质量）",
+        help="LLM 模式：mock=确定性评测（CI/无 Key），real=真实 LLM（评估真实质量，需配置 API Key）",
     )
-    parser.add_argument("--out", type=Path, default=Path("reports/benchmark.csv"), help="CSV 输出路径")
-    parser.add_argument("--report", type=Path, default=Path("reports/benchmark.md"), help="Markdown 报告路径")
+    parser.add_argument(
+        "--tag",
+        default=None,
+        help="按 tag 过滤用例子集（如 normal）控制成本；缺省全量",
+    )
+    parser.add_argument(
+        "--cost-limit",
+        type=float,
+        default=None,
+        dest="cost_limit",
+        help="真实评测成本护栏上限（美元），缺省 real 模式 $1.0；超限中止并标注预算中止",
+    )
+    parser.add_argument("--out", type=Path, default=None, help="CSV 输出路径（缺省 reports/benchmark[_real]_<date>.csv）")
+    parser.add_argument("--report", type=Path, default=None, help="Markdown 报告路径（缺省 reports/benchmark[_real]_<date>.md）")
     args = parser.parse_args(argv)
 
-    report = Benchmark(llm_mode=args.llm).run()
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.report.parent.mkdir(parents=True, exist_ok=True)
-    _write_csv(report, args.out)
-    _write_markdown(report, args.report)
-    print(f"n_cases={report.n_cases} trace={report.trace_completeness:.0%} field_acc={report.accuracy.field_accuracy:.4f} "
+    # 设计文档 37 §4：real 无 Key 明确报错，不静默回退 mock（防误读 mock 数字）
+    if args.llm == "real" and not LLMClient.has_api_key():
+        print("真实 LLM 评测需要配置 API Key（OPENAI_API_KEY / DEEPSEEK_API_KEY / LLM_API_KEY）。请配置后重试，勿静默回退 mock。")
+        return 2
+
+    date = datetime.now(timezone.utc).strftime("%Y%m%d")
+    if args.llm == "real":
+        shared_llm = build_real_llm()
+        cost_limit = args.cost_limit if args.cost_limit is not None else 1.0
+        # real 报告内嵌 mock 基线：同子集跑一遍 mock（确定性、零成本）供对比
+        mock_report = Benchmark(llm_mode="mock", tag=args.tag).run()
+        report = Benchmark(llm_mode="real", llm=shared_llm, tag=args.tag, cost_limit_usd=cost_limit).run()
+        out = args.out or Path(f"reports/benchmark_real_{date}.csv")
+        report_path = args.report or Path(f"reports/benchmark_real_{date}.md")
+    else:
+        mock_report = None
+        report = Benchmark(llm_mode="mock", tag=args.tag).run()
+        out = args.out or Path(f"reports/benchmark_{date}.csv")
+        report_path = args.report or Path(f"reports/benchmark_{date}.md")
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    _write_csv(report, out, mock_report=mock_report)
+    _write_markdown(report, report_path, mock_report=mock_report)
+    print(f"n_cases={report.n_cases} llm_mode={report.llm_mode} cost=${report.cost_usd:.6f} "
+          f"field_acc={report.accuracy.field_accuracy:.4f} "
           f"halluc={report.accuracy.hallucination_rate:.4f} tool_sel={report.strategy.tool_selection_accuracy:.4f} "
           f"cost_eff={report.strategy.cost_efficiency:.4f} harness_v{report.harness_version}")
-    print(f"csv: {args.out}")
-    print(f"report: {args.report}")
+    print(f"csv: {out}")
+    print(f"report: {report_path}")
     return 0
 
 
@@ -921,6 +1096,8 @@ __all__ = [
     "BenchmarkMockLLM",
     "BenchmarkReport",
     "BenchStrategyCase",
+    "build_benchmark_api",
+    "build_real_llm",
     "classify_case",
     "extract_prediction",
     "extract_strategy",

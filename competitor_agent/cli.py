@@ -180,14 +180,13 @@ def _run_resume(api: CompetitorAnalysisAPI, args: str) -> None:
 def _run_benchmark(args: str) -> None:
     from pathlib import Path
 
-    from competitor_agent.evaluation.benchmark import Benchmark
+    from competitor_agent.evaluation.benchmark import main as benchmark_main
 
-    ablate = "--ablate" in args.split()
-    report = Benchmark().run()
-    print(f"n_cases={report.n_cases} field_acc={report.accuracy.field_accuracy:.4f} "
-          f"halluc={report.accuracy.hallucination_rate:.4f} "
-          f"tool_sel={report.strategy.tool_selection_accuracy:.4f} "
-          f"cost_eff={report.strategy.cost_efficiency:.4f}")
+    tokens = args.split()
+    ablate = "--ablate" in tokens
+    tokens = [t for t in tokens if t != "--ablate"]
+    # 设计文档 37：透传 --llm/--tag/--cost-limit 给 evaluation.benchmark.main
+    exit_code = benchmark_main(tokens)
     if ablate:
         # 设计文档 30：消融/对比实验——5 组变体全跑 + 落盘 reports/ablation/
         from competitor_agent.evaluation.ablation import (
@@ -201,6 +200,8 @@ def _run_benchmark(args: str) -> None:
         print(render_ablation_table(results))
         for p in paths:
             print(f"ablation: {p}")
+    if exit_code:
+        raise SystemExit(exit_code)
 
 
 def _run_help(args: str) -> None:
@@ -290,8 +291,11 @@ def build_parser() -> argparse.ArgumentParser:
     schedule_p = sub.add_parser("schedule", help="定时调度轮：重爬过期竞品 + 结构化导出 + 异动告警（设计文档 28）")
     schedule_p.add_argument("--competitors", default=None, help="目标竞品（逗号分隔）；缺省用跟踪竞品")
 
-    benchmark_p = sub.add_parser("benchmark", help="运行评测基准（--ablate 追加消融对比，设计文档 30）")
+    benchmark_p = sub.add_parser("benchmark", help="运行评测基准（--ablate 追加消融对比，设计文档 30；--llm real 真实质量评测，设计文档 37）")
     benchmark_p.add_argument("--ablate", action="store_true", help="追加 5 组消融变体（full/no-rag/no-memory/no-rag+no-memory/no-llm-rule）并落盘 reports/ablation/")
+    benchmark_p.add_argument("--llm", choices=["mock", "real"], default="mock", help="LLM 模式：mock=确定性评测（默认），real=真实 LLM（需配置 API Key）")
+    benchmark_p.add_argument("--tag", default=None, help="按 tag 过滤用例子集（如 normal）控制成本")
+    benchmark_p.add_argument("--cost-limit", type=float, default=None, dest="cost_limit", help="真实评测成本护栏上限（美元），缺省 real 模式 $1.0")
     return parser
 
 
@@ -332,7 +336,14 @@ def main(argv: list[str] | None = None) -> int:
         _run_schedule(api, args.competitors or "")
         return 0
     if args.command == "benchmark":
-        _run_benchmark(" --ablate" if args.ablate else "")
+        parts = ["--ablate"] if args.ablate else []
+        if args.llm != "mock":
+            parts += ["--llm", args.llm]
+        if args.tag:
+            parts += ["--tag", args.tag]
+        if args.cost_limit is not None:
+            parts += ["--cost-limit", str(args.cost_limit)]
+        _run_benchmark(" ".join(parts))
         return 0
 
     # 无子命令 → 交互 REPL
