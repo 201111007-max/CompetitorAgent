@@ -82,6 +82,13 @@ class LLMClient:
         # 显式传入优先，否则读环境变量（不明文硬编码）
         self._api_key = api_key or self._read_env_key()
         self._base_url = base_url or os.getenv(_BASE_URL_ENV)
+        # 累计调用成本（设计文档 37：真实评测报告成本核算，复用 _log_call 的 cost_usd）
+        self.total_cost_usd = 0.0
+
+    @staticmethod
+    def has_api_key() -> bool:
+        """是否有可用的 API Key（真实评测前置校验，设计文档 37）。"""
+        return LLMClient._read_env_key() is not None
 
     @staticmethod
     def _read_env_key() -> str | None:
@@ -224,6 +231,7 @@ class LLMClient:
             + completion_tokens / 1000 * _PRICING_PER_1K["output"],
             6,
         )
+        self.total_cost_usd = round(self.total_cost_usd + cost_usd, 6)
         emit_session_event(
             "llm.call", "llm",
             f"LLM 调用完成 {final_model or self._model}（{prompt_tokens}+{completion_tokens} tokens, "

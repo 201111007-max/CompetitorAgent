@@ -233,7 +233,16 @@ class TestMain:
         from competitor_agent.cli import main
 
         assert main(["benchmark", "--ablate"]) == 0
-        assert calls == [" --ablate"]
+        assert calls == ["--ablate"]
+
+    def test_main_benchmark_llm_real_passthrough(self, monkeypatch):
+        """--llm real/--tag/--cost-limit 应透传给 _run_benchmark（设计文档 37）。"""
+        calls = []
+        monkeypatch.setattr("competitor_agent.cli._run_benchmark", lambda a: calls.append(a))
+        from competitor_agent.cli import main
+
+        assert main(["benchmark", "--llm", "real", "--tag", "normal", "--cost-limit", "0.5"]) == 0
+        assert calls == ["--llm real --tag normal --cost-limit 0.5"]
 
 
 class TestCompareRepl:
