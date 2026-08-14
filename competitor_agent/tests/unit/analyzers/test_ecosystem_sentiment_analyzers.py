@@ -86,10 +86,16 @@ class TestEcosystemAnalyzer:
             )
 
         a = EcosystemAnalyzer(llm=LLMClient(call_func=fake_llm))
-        result = a.analyze(_obs("text", "ecosystem"), InfoGap(field="ecosystem"), AnalysisContext())
+        # 原文包含 fake_llm 输出的实体数值（count/stars/commits_30d），真值校验应一致 → 不惩罚
+        obs = _obs(
+            "mcp-x vendor 1p via docs\nplugin count 3, plugin-a\n"
+            "vscode, jira\nStars: 100\ncommit 30d 5",
+            "ecosystem",
+        )
+        result = a.analyze(obs, InfoGap(field="ecosystem"), AnalysisContext())
         assert result.details["mcp_servers"][0]["name"] == "mcp-x"
         assert result.details["repo_activity"]["commits_30d"] == 5
-        assert result.confidence == 0.9
+        assert result.confidence == 0.9  # 数值与原文一致，未触发惩罚
 
 
 class TestSentimentAnalyzer:

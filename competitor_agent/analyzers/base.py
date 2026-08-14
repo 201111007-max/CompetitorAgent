@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from competitor_agent.agent.prompts.trust_boundary import detect_injection, wrap_untrusted
@@ -20,6 +21,60 @@ from competitor_agent.llm.client import LLMClient
 from competitor_agent.observability.logger import get_logger
 
 logger = get_logger("analyzers.base")
+
+# 真值校验（设计文档 34 §2.4）：details 中"应可回溯到原文"的数值字段键名。
+# 只核对这些实体型数值（价格/单价/数量/得分/计数），
+# 比例型（polarity_ratio 的 pos/neg/neu）与 0 值缺省由计算/缺失语义豁免，避免误伤。
+_VERIFY_NUMERIC_KEYS = frozenset(
+    {
+        "monthly_price_usd",
+        "annual_price_usd",
+        "per_unit_price",
+        "per_unit_usd",
+        "stars",
+        "commits_30d",
+        "count",
+        "score",
+    }
+)
+
+
+def _num_str(value: float) -> str:
+    """数值 → 用于原文匹配的字符串（20.0 → "20"）。"""
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
+def _count_numeric_conflicts(details: Any, raw_text: str) -> int:
+    """details 中实体数值与原文证据交叉核对：值应出现在原文（忽略标点差异）。
+
+    返回冲突数：声称自原文的数值（非 0）在原文里找不到 → 计数冲突。
+    """
+    if not isinstance(details, dict):
+        return 0
+    text = (raw_text or "").lower()
+    text_flat = text.replace(",", "")  # "12,000 stars" ↔ 12000 视作一致
+    conflicts = 0
+    stack: list[Any] = [details]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if (
+                    key in _VERIFY_NUMERIC_KEYS
+                    and isinstance(value, (int, float))
+                    and not isinstance(value, bool)
+                    and value != 0
+                ):
+                    needle = _num_str(value)
+                    if needle not in text and needle not in text_flat:
+                        conflicts += 1
+                elif isinstance(value, (dict, list)):
+                    stack.append(value)
+        elif isinstance(node, list):
+            stack.extend(item for item in node if isinstance(item, (dict, list)))
+    return conflicts
 
 
 class BaseCompetitorAnalyzer:
@@ -56,8 +111,29 @@ class BaseCompetitorAnalyzer:
     def _build_prompt(self, observation: Observation, gap: InfoGap) -> list[dict[str, str]]:
         raise NotImplementedError
 
-    def _parse_result(self, text: str) -> dict[str, Any]:
-        raise NotImplementedError
+    def _parse_result(self, text: str, schema: dict[str, Any] | None = None) -> dict[str, Any]:
+        """解析 LLM 输出（设计文档 34 后由 ``complete_json`` 内部承担，此处保留为兼容钩子）"""
+        return json.loads(text)
+
+    def _schema_for(self, gap: InfoGap) -> dict[str, Any]:
+        """按维度返回 JSON Schema（设计文档 34 §3.2）。
+
+        子类覆盖 ``_details_properties`` 声明 details 结构；顶层 summary/details/confidence
+        为各维度统一必备键。返回 dict 传给 ``LLMClient.complete_json`` 做结构约束 + 修复重试。
+        """
+        return {
+            "type": "object",
+            "required": ["summary", "details", "confidence"],
+            "properties": {
+                "summary": {"type": "string"},
+                "confidence": {"type": "number"},
+                "details": {"type": "object", "properties": self._details_properties()},
+            },
+        }
+
+    def _details_properties(self) -> dict[str, Any]:
+        """details 结构声明（子类覆盖，对齐评测 extract_prediction 的抽取键命名空间）"""
+        return {}
 
     def _analyze_with_llm(
         self,
@@ -76,9 +152,34 @@ class BaseCompetitorAnalyzer:
         messages = self._build_prompt(observation, gap)
         if context.rag_context:
             messages = self._inject_rag_context(messages, context.rag_context)
-        text = self._llm.complete(messages)
-        parsed = self._parse_result(text)
-        return self._make_result(observation, gap, parsed, confidence=parsed.get("confidence", 0.7))
+        parsed = self._llm.complete_json(messages, schema=self._schema_for(gap))
+        confidence = float(parsed.get("confidence", 0.7))
+        status = ResultStatus.COMPLETE
+        adjusted = self._verify_details(parsed, observation)
+        if adjusted is not None and adjusted < confidence:
+            confidence = adjusted
+            if confidence < 0.5:
+                status = ResultStatus.PARTIAL
+        return self._make_result(observation, gap, parsed, confidence=confidence, status=status)
+
+    def _verify_details(self, parsed: dict[str, Any], observation: Observation) -> float | None:
+        """真值校验（设计文档 34 §2.4）：details 数值字段与原文证据交叉核对。
+
+        冲突 → 置信度下调（每处 -0.15，下限 0.1）；无冲突返回 None（不调整）。
+        """
+        conflicts = _count_numeric_conflicts(parsed.get("details", {}), observation.raw_text)
+        if not conflicts:
+            return None
+        base = float(parsed.get("confidence", 0.7))
+        adjusted = max(0.1, base - 0.15 * conflicts)
+        logger.info(
+            "证据交叉核对发现 %d 处数值与原文不符，置信度 %.2f → %.2f: field=%s",
+            conflicts,
+            base,
+            adjusted,
+            observation.gap_field,
+        )
+        return adjusted
 
     def _inject_rag_context(
         self, messages: list[dict[str, str]], rag_context: str
