@@ -216,5 +216,137 @@
     "ground_truth": {
       "agent": "false"
     }
+  },
+  {
+    "case_id": "cursor_ecosystem_mcp_ide_2026",
+    "competitor": "cursor",
+    "dimension": "ecosystem",
+    "task": "只分析 cursor 的生态",
+    "tags": ["ecosystem", "normal"],
+    "mode": "single",
+    "page": "MCP server: GitHub integration\nMCP server: Slack integration\nSupports VSCode and JetBrains IDE plugins.",
+    "ground_truth": {
+      "mcp_servers": 2,
+      "vscode": "true",
+      "jetbrains": "true"
+    }
+  },
+  {
+    "case_id": "claude_code_ecosystem_plugins_2026",
+    "competitor": "claude-code",
+    "dimension": "ecosystem",
+    "task": "只分析 claude-code 的生态",
+    "tags": ["ecosystem", "normal"],
+    "mode": "single",
+    "page": "Plugin A available\nPlugin B available\nPlugin C available",
+    "ground_truth": {
+      "plugins": 3
+    }
+  },
+  {
+    "case_id": "copilot_ecosystem_ide_only_2026",
+    "competitor": "copilot",
+    "dimension": "ecosystem",
+    "task": "只看 copilot 的生态",
+    "tags": ["ecosystem", "boundary"],
+    "mode": "single",
+    "page": "Supports VSCode and terminal.",
+    "ground_truth": {
+      "mcp_servers": 0,
+      "vscode": "true",
+      "terminal": "true"
+    }
+  },
+  {
+    "case_id": "codex_ecosystem_no_data_2026",
+    "competitor": "codex",
+    "dimension": "ecosystem",
+    "task": "只分析 codex 的生态",
+    "tags": ["ecosystem", "safety", "empty_signal"],
+    "mode": "single",
+    "page": "Codex is fast and reliable.",
+    "ground_truth": {
+      "mcp_servers": 0,
+      "vscode": "false"
+    }
+  },
+  {
+    "case_id": "cursor_sentiment_positive_2026",
+    "competitor": "cursor",
+    "dimension": "sentiment",
+    "task": "只分析 cursor 的口碑",
+    "tags": ["sentiment", "normal"],
+    "mode": "single",
+    "page": "Users love the fast autocomplete.\nGreat IDE experience.\nHighly recommended.",
+    "ground_truth": {
+      "polarity": "pos",
+      "positive": "true"
+    }
+  },
+  {
+    "case_id": "codex_sentiment_negative_2026",
+    "competitor": "codex",
+    "dimension": "sentiment",
+    "task": "只分析 codex 的口碑",
+    "tags": ["sentiment", "normal"],
+    "mode": "single",
+    "page": "Terrible latency, slow and buggy.\nMany complaints about crashes.",
+    "ground_truth": {
+      "polarity": "neg",
+      "negative": "true"
+    }
+  },
+  {
+    "case_id": "copilot_sentiment_mixed_2026",
+    "competitor": "copilot",
+    "dimension": "sentiment",
+    "task": "只看 copilot 的口碑",
+    "tags": ["sentiment", "boundary"],
+    "mode": "single",
+    "page": "Some love the integration.\nOthers think it is bad.",
+    "ground_truth": {
+      "polarity": "neu",
+      "positive": "true",
+      "negative": "true"
+    }
+  },
+  {
+    "case_id": "cursor_sentiment_single_signal_2026",
+    "competitor": "cursor",
+    "dimension": "sentiment",
+    "task": "只分析 cursor 的口碑",
+    "tags": ["sentiment", "boundary", "low_signal"],
+    "mode": "single",
+    "page": "Many users find it great.",
+    "ground_truth": {
+      "polarity": "pos",
+      "positive": "true"
+    }
+  },
+  {
+    "case_id": "codex_sentiment_no_data_2026",
+    "competitor": "codex",
+    "dimension": "sentiment",
+    "task": "只分析 codex 的口碑",
+    "tags": ["sentiment", "safety", "empty_signal"],
+    "mode": "single",
+    "page": "The product ships regular updates.",
+    "ground_truth": {
+      "polarity": "neu",
+      "positive": "false",
+      "negative": "false"
+    }
+  },
+  {
+    "case_id": "timeline_first_run_no_events_2026",
+    "competitor": "aider",
+    "dimension": "roadmap",
+    "task": "只分析 aider 的定价",
+    "tags": ["roadmap", "boundary", "timeline"],
+    "mode": "single",
+    "page": "Pro $25/month",
+    "ground_truth": {
+      "has_events": "false"
+    }
   }
 ]

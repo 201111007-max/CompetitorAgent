@@ -58,6 +58,43 @@ class TestRealExecutionGates:
         assert report.trace_completeness == 1.0
 
 
+class TestDesign29NewDimensionGates:
+    """设计文档 29：生态/口碑/时间线覆盖盲区门禁"""
+
+    def test_new_dimension_coverage(self):
+        """新维度 fixture 被发现：生态 ≥3 / 口碑 ≥4 / 时间线 ≥1 / 空数据 ≥2"""
+        b = Benchmark()
+        acc = b._load_accuracy(b._dir / ACCURACY_FIXTURE)
+        tags = [t for c in acc for t in c.tags]
+        assert tags.count("ecosystem") >= 3
+        assert tags.count("sentiment") >= 4
+        assert tags.count("roadmap") >= 1
+        assert tags.count("empty_signal") >= 2
+
+    def test_new_dimension_accuracy_gate(self):
+        """新维度字段准确率 ≥ 0.80（设计文档 29 §4）"""
+        report = Benchmark().run()
+        for dim in ("ecosystem", "sentiment", "roadmap"):
+            if dim in report.accuracy_by_dimension:
+                assert report.accuracy_by_dimension[dim] >= 0.80
+
+    def test_empty_signal_no_fabrication(self):
+        """生态/口碑空数据不得编造：empty_signal 用例字段准确率 100%、幻觉率 0"""
+        report = Benchmark().run()
+        b = Benchmark()
+        empty_ids = {
+            c.case_id
+            for c in b._load_accuracy(b._dir / ACCURACY_FIXTURE)
+            if "empty_signal" in c.tags
+        }
+        assert empty_ids, "缺少空数据护栏用例"
+        empty_cases = [pc for pc in report.accuracy.per_case if pc["case_id"] in empty_ids]
+        assert len(empty_cases) == len(empty_ids)
+        for pc in empty_cases:
+            assert pc["field_accuracy"] == 1.0, f"{pc['case_id']} 空数据产生了具体结论（编造）"
+            assert pc["hallucination_rate"] == 0.0, f"{pc['case_id']} 空数据存在幻觉"
+
+
 def test_report_carries_harness_version():
     report = Benchmark().run()
     assert report.harness_version == HARNESS_VERSION

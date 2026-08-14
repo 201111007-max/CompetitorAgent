@@ -83,6 +83,65 @@ strategy case（策略/降级：`best_url` 标任务应首选（或降级后应�
 2. `ground_truth` 必须落在 `extract_prediction` 的可抽取命名空间（pricing→plan 名、feature→特征词、performance→基准名），值来自 `page` 固定内容。
 3. 每个 case 可跑多次平均，报告均值±方差。
 
+### 2.1 生态 / 口碑 / 时间线字段标注（设计文档 29）
+
+新增三维度的 ground truth 落在各自的结构化 payload 上（对应设计文档 24 的 `EcosystemAnalyzer` / `SentimentAnalyzer`、26 的 `TimelineMemory`）：
+
+```json
+{
+  "case_id": "cursor_ecosystem_mcp_ide_2026",
+  "competitor": "cursor",
+  "dimension": "ecosystem",
+  "task": "只分析 cursor 的生态",
+  "tags": ["ecosystem", "normal"],
+  "page": "MCP server: GitHub integration\nMCP server: Slack integration\nSupports VSCode and JetBrains IDE plugins.",
+  "ground_truth": {
+    "mcp_servers": 2,
+    "vscode": "true",
+    "jetbrains": "true"
+  }
+}
+```
+
+```json
+{
+  "case_id": "cursor_sentiment_positive_2026",
+  "competitor": "cursor",
+  "dimension": "sentiment",
+  "task": "只分析 cursor 的口碑",
+  "tags": ["sentiment", "normal"],
+  "page": "Users love the fast autocomplete.\nGreat IDE experience.\nHighly recommended.",
+  "ground_truth": {
+    "polarity": "pos",
+    "positive": "true"
+  }
+}
+```
+
+```json
+{
+  "case_id": "timeline_first_run_no_events_2026",
+  "competitor": "aider",
+  "dimension": "roadmap",
+  "task": "只分析 aider 的定价",
+  "tags": ["roadmap", "boundary", "timeline"],
+  "page": "Pro $25/month",
+  "ground_truth": {
+    "has_events": "false"
+  }
+}
+```
+
+**新维度字段抽取与判定口径**（`evaluation/benchmark.py` `extract_prediction`）：
+
+| 维度 | kind | 可抽取字段 | 判定口径 |
+|------|------|-----------|---------|
+| ecosystem | `ecosystem_signal` | `mcp_servers`（数量 int）、`plugins`（数量 int）、`stars`（int）、`vscode`/`jetbrains`/`terminal`（`true`/`false`）、`ide`（合并串） | 数量精确匹配；IDE 支持按 `ide_support` 子集命中 |
+| sentiment | `sentiment_signal` | `polarity`（`pos`/`neg`/`neu`）、`positive`/`negative`/`neutral`（`true`/`false`）、`pos`/`neg`/`neu`（占比） | 极性按 `polarity_ratio` 主导项命中（无主导 → `neu`）；正负有无按占比 >0 |
+| roadmap | `timeline_event` | `has_events`（`true`/`false`） | 报告内嵌「竞品时间线」段落是否存在；首轮无基线 → 无事件 |
+
+**空数据护栏**：`ecosystem` / `sentiment` 的空数据用例（tags 含 `empty_signal`）期望抽取为 `0` / `false` / `neu`，系统不得因数据缺失而编造具体结论——这是"信号不足 → `[PARTIAL]` 不编造"的评测侧断言。
+
 ---
 
 ## 3. 用例分类与规模
@@ -93,14 +152,17 @@ strategy case（策略/降级：`best_url` 标任务应首选（或降级后应�
 |------|-----------|------|---------|
 | 定价抽取 | 8+ | 各定价模型（SaaS/开源/试用/多币种） | 每季度刷新 |
 | 功能抽取 | 4+ | 核心功能矩阵 | 每季度 |
-| 版本/回志 | 2+ | 最新版本号/发布日期 | 版本发布后刷新 |
-| 生态Ubuntu集成 | 1+ | 支持 IDE/平台 | 每季度 |
+| 性能抽取 | 3+ | 榜单/延迟/胜率等基准 | 随榜单更新 |
+| 生态抽取 | 4+ | MCP server 数量 / IDE 支持 / 插件市场 / 空数据护栏（设计文档 29） | 每季度 |
+| 口碑抽取 | 5+ | 正/负/混合极性、单信号、空数据护栏（设计文档 29） | 每季度 |
+| 时间线 | 1+ | 首轮无基线不产生事件（设计文档 29 边界） | 随版本 |
 | 边界 | 5+ | 罕见定价/多币种/多语言/空缺字段 | 随采集覆盖 |
 | 安全/拒绝 | 2+ | 无证据不臆断、冲突证据拦截 | 每月抽样 |
 | 工具失败(降级链) | 3+ | 404/反爬/5xx → 降级 | 随采集覆盖 |
 
-> 当前 26 条（17 accuracy + 9 strategy），真实执行版，满足设计文档 §5 的 ≥20 最小集。
-> 每个分数必须附带 harness 版本号（benchmark + subset + harness）。
+> 当前 38 条（27 accuracy + 11 strategy），真实执行版，满足设计文档 §5 的 ≥20 最小集。
+> 门禁含维度拆分：新维度（ecosystem/sentiment/roadmap）字段准确率 ≥ 0.80、生态/口碑空数据幻觉率 ≤ 0.02。
+> 每个分数必须附带 harness 版本号（benchmark + subset + harness，当前 v0.4.0）。
 
 ---
 
@@ -125,6 +187,7 @@ python -m competitor_agent.evaluation.benchmark --llm real --out reports/benchma
 | 门槛 | 触发 | 阻断 |
 |------|------|------|
 | 核心指标回归 | CI / 手动跑 evaluation | 字段准确率 < 90% 或 幻觉率 > 5% 阻断合并 |
+| 新维度覆盖 | CI / 手动跑 evaluation | ecosystem/sentiment/roadmap 字段准确率 < 80% 或空数据幻觉率 > 2% 阻断合并（设计文档 29） |
 | 新增采集器 | 新 collector 提交 | 必须附带覆盖该源的正/负样本 case |
 
 ---

@@ -35,7 +35,7 @@
 | `26_freshness_timeline_design.md` | §12.2 #5 + §12.3 #7：无新鲜度/时间线（定时重爬） | P1 | ✅ 已实现 |
 | `27_pricing_modeling_design.md` | §12.3 #6：定价分层/用量建模弱 | P2 | ✅ 已实现 |
 | `28_structured_export_design.md` | §12.3 #8：输出仅 Markdown（结构化导出+定时+告警） | P2 | ✅ 已实现 |
-| `29_evaluation_coverage_design.md` | §12.3 #9：评测盲区（生态/口碑/时间线覆盖） | P2 | ⏳ 待办 |
+| `29_evaluation_coverage_design.md` | §12.3 #9：评测盲区（生态/口碑/时间线覆盖） | P2 | ✅ 已实现 |
 | `30_ablation_comparison_design.md` | §12.3 #10：无对比/消融实验（有无 RAG/rerank/memory） | P2 | ⏳ 待办 |
 | `31_failure_stats_design.md` | §12.3 #11：无失败类型统计（五类分类+聚合分布） | P2 | ⏳ 待办 |
 
@@ -95,6 +95,8 @@
 
 > **设计文档 28 修复说明**：结构化导出 + 定时跑 + 异动告警已落地。① **结构化导出** `core/report_exporter.py`：`report_to_dict` 稳定 schema（`REPORT_SCHEMA_VERSION = "1.0.0"`，competitor / dimensions[{field,status,confidence,summary,evidence[{url,trust}]}] / freshness / pricing.profile / benchmark_scores / created_at / terminal_state / gaps_pending）+ `export_competitor_json`（原子写 `reports/competitor/<竞品>.json`，与 .md 同目录同名）+ `export_comparison_json`（`reports/comparison/<names>.json`，matrix 维度×竞品 + best_per_dimension + 汇总排名/覆盖缺口）。② **接入**：`api.analyze`/`analyze_team` 完成后导出竞品 JSON、`compare` 完成后导出矩阵 JSON（`config.report.export_json` 开关，默认开），并在报告正文末尾追加 `> 结构化数据已导出: \`<path>\`` 提示；`ReportConfig` 新增 `export_json` / `comparison_dir`。③ **定时跑** `api.run_scheduled(competitors=None, alert_sink=None)`：目标取显式列表或归档跟踪竞品（跳过 `" / "` 聚合会话），按 `freshness` TTL 过滤未过期竞品仅重爬过期，逐竞品 analyze（含 JSON 导出），与上次快照 diff 产出异动告警；CLI 新增 `schedule [--competitors a,b]`。④ **异动告警** `core/alerting.py`：`Alert`（competitor/kind/summary/old_value/new_value/evidence_urls）+ `AlertSink` 协议 + `ConsoleAlertSink` + `FileAlertSink`（追加 `reports/alerts/<date>.md`，线程安全）；`api.report_diff(prev, cur)` 复用 `TimelineMemory.diff` 映射为 Alert；`TimelineMemory.report_for` 把上次快照重建为 prev 报告（首轮无基线不产生伪告警）。新增 18 个单测（导出 schema/矩阵/告警 diff/落盘）+ 2 个 CLI 解析测试 + 5 个集成测试（analyze 导出 JSON 含 pricing.profile、export_json=False 无副作用、run_scheduled 只重爬过期、过期重爬产 price_change 告警、归档跟踪竞品），全量 **603 个测试通过（602 passed / 1 环境性失败同前：本机已装 playwright）**。
 
+> **设计文档 29 修复说明**：评测盲区覆盖已落地。① **新维度抽取**：`DIMENSION_KINDS` 扩展 `ecosystem→ecosystem_signal` / `sentiment→sentiment_signal` / `roadmap→timeline_event`；`extract_prediction` 新分支——`ecosystem_signal`（`mcp_servers`/`plugins`/`stars` 数量 + `vscode`/`jetbrains`/`terminal`/`ide` 支持）、`sentiment_signal`（`polarity` 主导极性 + `positive`/`negative`/`neutral` 有无 + `pos`/`neg`/`neu` 占比）、`timeline_event`（从报告内嵌「竞品时间线」段落判 `has_events`）。② **mock 确定性解析**：`BenchmarkMockLLM` 新增生态（MCP 逐行计数/IDE/插件）与口碑（逐行极性）解析，空口碑信号如实返回低置信（不编造）。③ **新 fixture**：accuracy 新增 10 条（4 生态含 IDE-only/空数据护栏 + 5 口碑含 mixed/单信号/空数据护栏 + 1 时间线首轮无事件），strategy 新增 2 条（生态 `docs`、口碑 `home` 官网源命中）；空数据用例 tag `empty_signal`。④ **报告/门禁**：`BenchmarkReport` 新增 `accuracy_by_dimension`/`hallucination_by_dimension` 与 `AccuracyMetrics.per_case`；门禁新维度字段准确率 ≥0.80、空数据用例幻觉率 0（不编造）；`evaluation_guide.md` 补三维度 ground truth 标注格式与判定口径。⑤ **回归**：全量测试通过（603 → 605，新增 2 条 mock 解析单测 + 12 条 extract 单测 + 3 条门禁集成测试；e2e `_PAGE` 补口碑内容以对齐诚实 mock 的口碑空信号低置信）。harness 版本 0.3.0 → **0.4.0**。
+
 ## 设计文档统一模板
 
 每个设计文档包含以下章节：
@@ -125,12 +127,11 @@
 - **设计文档 26 §12.2 #5 + §12.3 #7 新鲜度/时间线**：已实现（见上方修复说明）——`ReportFreshness` 陈旧度标注 + `refresh_stale` 过期重爬 + `TimelineMemory` 跨分析 diff 事件 + CLI `refresh`/`timeline` 与 Web `/api/timeline/{competitor}`，报告含新鲜度注记与「竞品时间线」段落。
 - **设计文档 27 §12.3 #6 定价分层/用量建模**：已实现（见上方修复说明）——`PricingProfile` 档位 + 按量计费 + 模型档位 + light/medium/heavy 成本估算 + 企业询价标注；报告渲染定价/按量/成本三表，归档 `pricing_profiles`，时间线 price_change 摘要带价格。
 - **设计文档 28 §12.3 #8 结构化导出 + 定时 + 告警**：已实现（见上方修复说明）——`report_exporter` 竞品/对比矩阵 JSON 导出（schema v1.0.0）+ `run_scheduled` 定时重爬（TTL 过滤）+ `alerting` 异动告警（Console/FileAlertSink）+ CLI `schedule`。
-- 全量 **603 个测试通过（602 passed / 1 环境性失败）**：唯一失败为本机已装 playwright 使 `test_unavailable_without_playwright_and_hook` 假设未安装。
+- **设计文档 29 §12.3 #9 评测盲区覆盖**：已实现（见上方修复说明）——`DIMENSION_KINDS` 扩展 ecosystem/sentiment/roadmap + `extract_prediction` 新分支 + `BenchmarkMockLLM` 生态/口碑确定性解析 + 10 accuracy / 2 strategy 新用例（含空数据护栏）+ `BenchmarkReport` 按维度指标/逐 case 明细 + 评测指南同步，harness v0.4.0。
+- 全量测试通过（603 → 605，1 环境性失败同前：本机已装 playwright）。
 
 ### 待办（下一步按序实施，均已有设计文档）
-1. **§12.3 #8 结构化导出 + 定时 + 告警**（`28_structured_export_design.md`，P2，约 2-3 天）——`report_exporter` JSON/矩阵导出 + `run_scheduled` + `AlertSink` 异动告警。
-2. **§12.3 #9 评测盲区覆盖**（`29_evaluation_coverage_design.md`，P2，约 1.5-2 天）——`DIMENSION_KINDS` 增 ecosystem/sentiment/roadmap + fixture 用例 + 评测指南同步。
-3. **§12.3 #10 消融/对比实验**（`30_ablation_comparison_design.md`，P2，约 1-1.5 天）——`enable_rag`/`enable_memory` 开关 + `AblationRunner` 对 26 条真实执行用例跑 full/no-rag/no-memory/no-llm-rule 对比表（简历/面试数据支撑）。
-4. **§12.3 #11 失败类型统计**（`31_failure_stats_design.md`，P2，约 0.5-1 天）——`FailureType` 五类分类 + `BenchmarkReport.failure_stats` 聚合 + 分布报告（归因与简历证据）。
+1. **§12.3 #10 消融/对比实验**（`30_ablation_comparison_design.md`，P2，约 1-1.5 天）——`enable_rag`/`enable_memory` 开关 + `AblationRunner` 对真实执行用例跑 full/no-rag/no-memory/no-llm-rule 对比表（简历/面试数据支撑）。
+2. **§12.3 #11 失败类型统计**（`31_failure_stats_design.md`，P2，约 0.5-1 天）——`FailureType` 五类分类 + `BenchmarkReport.failure_stats` 聚合 + 分布报告（归因与简历证据）。
 
 > 依赖顺序建议：23（多源路由，底层）→ 24（分析器）→ 25（榜单，复用 23 的 provider）→ 26（时间线，复用 23 的 Releases）→ 27（定价，独立）→ 28（导出，复用 26/27）→ 29（评测，依赖 24/25/26 的结构化产出）。23-26 是产品差异化主线，27-29 是可信度与交付增强；**30/31 为简历/面试达标补充**，仅依赖已就绪的 `evaluation/benchmark.py`（真实执行版），可随时穿插实现。
