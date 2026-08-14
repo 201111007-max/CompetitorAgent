@@ -1,6 +1,6 @@
 # 已知问题设计文档目录
 
-> 本目录为 `implementation_plan.md` 第 11 节「已知问题与待改进项」以及第 13-15 节 P0 待办中每项对应的**设计文档**。
+> 本目录为 `implementation_plan.md` 第 11 节「已知问题与待改进项」、第 13-15 节 P0 待办以及第 16 节「深度补充分析」中每项对应的**设计文档**。
 > 每个文档描述问题的现状、目标设计、模块/接口、接入方式、验证方式与实现优先级。
 
 ## 文档索引
@@ -38,6 +38,12 @@
 | `29_evaluation_coverage_design.md` | §12.3 #9：评测盲区（生态/口碑/时间线覆盖） | P2 | ✅ 已实现 |
 | `30_ablation_comparison_design.md` | §12.3 #10：无对比/消融实验（有无 RAG/rerank/memory） | P2 | ✅ 已实现 |
 | `31_failure_stats_design.md` | §12.3 #11：无失败类型统计（五类分类+聚合分布） | P2 | ✅ 已实现 |
+| `32_rag_vector_retrieval_design.md` | §16.1 RAG：纯词袋检索，向量化未实现（深度补充） | P2 | 📋 已设计，待实现 |
+| `33_team_async_orchestration_design.md` | §16.1 多 Agent：顺序流水线非真协作（深度补充） | P2 | 📋 已设计，待实现 |
+| `34_analyzer_structured_extraction_design.md` | §16.1 分析器：LLM 一次调用+关键词兜底（深度补充） | P2 | 📋 已设计，待实现 |
+| `35_memory_compression_design.md` | §16.1 记忆：四层=JSON 计数，无摘要/向量召回（深度补充） | P3 | 📋 已设计，待实现 |
+| `36_llm_reliability_design.md` | §16.1 LLM 层：单次调用无重试/多模型 fallback（深度补充） | P2 | 📋 已设计，待实现 |
+| `37_real_llm_evaluation_design.md` | §16.1 评测：真实 LLM 质量未量化（深度补充） | P2 | 📋 已设计，待实现 |
 
 > **问题 1 修复说明**：多 Agent 已接入主流程。`CompetitorAnalysisAPI.analyze()` 新增 `mode` 参数（`single` / `team`，**默认 `team`**），`mode="team"` 时走事件驱动 + 状态决策的多 Agent 流水线（Collector→Analyzer→Validator→Reporter，支持 SUCCESS/RETRY/DEGRADED/FAILED 决策）。CLI 新增 `--mode` 选项。全量 312 个测试通过。
 
@@ -137,6 +143,13 @@
 - 全量测试通过（618 passed, 3 skipped；1 环境性失败同前：本机已装 playwright）。
 
 ### 待办（下一步按序实施，均已有设计文档）
-- 无——§12.1-12.3 / §13-15 全部待办均已按设计文档实现。
+- §12.1-12.3 / §13-15 全部待办均已按设计文档实现（01-31 ✅）。
+- **深度补充（32-37，对应 implementation_plan.md §16）**：已设计待实现，按"面试被问概率 × 补齐成本"排序：
+  1. **32 RAG 真向量检索**（高）——chromadb 已有依赖与接口，性价比最高；
+  2. **36 LLM 层可靠性**（中）→ **37 真实 LLM 评测**（高）——先稳链路再出真实质量报告，补上"评测只测了 mock"的信任环；
+  3. **33 多 Agent 真协作**（中高）——消除"名不副实"隐患（或按路线 2 明确降级叙事）；
+  4. **34 分析器结构化抽取**（中）——schema 约束 + 修复重试，与 36 共享 `complete_json`；
+  5. **35 记忆摘要压缩**（中低）——深度加分项，复用 32 的召回基建。
 
 > 依赖顺序建议：23（多源路由，底层）→ 24（分析器）→ 25（榜单，复用 23 的 provider）→ 26（时间线，复用 23 的 Releases）→ 27（定价，独立）→ 28（导出，复用 26/27）→ 29（评测，依赖 24/25/26 的结构化产出）→ 30/31（简历/面试达标补充，依赖已就绪的 `evaluation/benchmark.py` 真实执行版）。已全部完成。
+> 深度补充顺序：32 → 36 → 37 → 33 → 34 → 35（32 与 35 共享召回基建，36 与 34 共享 `complete_json`，37 依赖 36）。
