@@ -15,6 +15,7 @@
 - M3 并行执行：`core/subagent.py` + `core/parallel_runner.py`（ThreadPoolExecutor + 共享预算 + 稳定合并）。
 - M7 结构化导出 + 定时调度轮 + 异动告警（设计文档 28）：`core/report_exporter.py`（竞品 JSON schema v1.0.0 / 对比矩阵 JSON）、`facade/api.py`（`run_scheduled` 按 TTL 定时重爬）、`core/alerting.py`（`ConsoleAlertSink` / `FileAlertSink`，时间线 diff → 异动告警）、CLI `schedule` 子命令。
 - M8 评测盲区覆盖（设计文档 29）：`evaluation/benchmark.py` `DIMENSION_KINDS` 扩展 ecosystem/sentiment/roadmap 三维度（`extract_prediction` 新分支 `ecosystem_signal` / `sentiment_signal` / `timeline_event`，`BenchmarkMockLLM` 生态/口碑确定性解析），`BenchmarkReport` 新增按维度字段准确率/幻觉率与逐 case 明细，新增 10 条 accuracy（含生态/口碑空数据护栏）+ 2 条 strategy 用例，harness 版本 0.3.0 → 0.4.0。
+- M9 消融/对比实验（设计文档 30）：`facade/api.py` `CompetitorAnalysisAPI` 新增 `enable_rag`/`enable_memory` 组件开关（默认开启行为不变，`enable_memory=False` 门控全部记忆副作用、`enable_rag=False` 门控 store/ingester/retriever）；`evaluation/ablation.py` `AblationRunner` 对真实执行用例逐变体跑 5 组对比（full / no-rag / no-memory / no-rag+no-memory / no-llm-rule 纯规则降级），按变体隔离并累积共享记忆与知识库（RAG/记忆差分可测），`render_ablation_table` 对比表（每行标粗最优 + 幻觉率差分门禁）+ `write_ablation_report` 落盘 `reports/ablation/`；CLI `benchmark --ablate`；12 条消融测试（开关门控 / Runner / 渲染 / RAG 差分集成）。
 
 ### Fixed
 - （暂无）

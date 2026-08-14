@@ -209,3 +209,47 @@ python -m competitor_agent.evaluation.benchmark --llm real --out reports/benchma
 - 均值/方差
 - 幻觉实例清单（审计通过/失败）
 - 工具选择混淆矩阵（可选）
+
+---
+
+## 8. 消融 / 对比实验（设计文档 30）
+
+回答「加 RAG / 加记忆到底有没有用、规则降级 vs LLM 差多少」——对同一批确定性用例
+逐变体跑真实执行链路，产出「变体 × 指标」对比表。
+
+### 8.1 运行
+
+```bash
+# 5 变体全跑 + 落盘 reports/ablation/ablation_<date>.md/.json
+python -m competitor_agent.cli benchmark --ablate
+
+# 仅跑默认评测（不加消融）
+python -m competitor_agent.cli benchmark
+```
+
+### 8.2 变体矩阵
+
+| 变体 | enable_rag | enable_memory | use_llm | 说明 |
+|------|:---:|:---:|:---:|------|
+| full | ✅ | ✅ | ✅ | 完整链路（默认行为） |
+| no-rag | ❌ | ✅ | ✅ | 关知识库检索 |
+| no-memory | ✅ | ❌ | ✅ | 关四层记忆副作用 |
+| no-rag+no-memory | ❌ | ❌ | ✅ | 双关 |
+| no-llm-rule | ✅ | ✅ | ❌ | 纯规则降级（无 LLM） |
+
+每变体用独立目录的共享 `FourLayerMemory` 与 `CompetitorStore`（跨用例累积），
+使 RAG / 记忆差分可测（no-rag 检索不到先前摄入片段、no-memory 无成功率/技能累积）。
+
+### 8.3 读表口径
+
+- 对比表每行标粗最优；幻觉率与平均命中排名**越小越好**，其余越高越好。
+- 「幻觉率差分 vs full」段落为门禁标注：`[OK]` = 不差于 full，`[WARN]` = 劣于 full。
+- 工具选择/成本效率在无记忆变体下可能更优——这是记忆成功率信任提升重排选源（`_record_memory_success`
+  按 `sources_tried[-1]` 记账）带来的真实记忆效应，需结合差分集成测试解读，而非开关故障。
+
+### 8.4 差分测试（RAG/记忆收益的独立证据）
+
+`tests/evaluation/test_ablation.py`：
+- 预置知识库含答案而页面无答案 → `full` 从片段命中、`no-rag` 缺失；
+- 前一用例摄入片段 → 后一用例（页面无答案）经 RAG 检索命中；
+- `enable_memory=False` 时记忆零写入（无 archive/skill/outcome）。
