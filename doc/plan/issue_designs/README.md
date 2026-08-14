@@ -43,7 +43,7 @@
 | `34_analyzer_structured_extraction_design.md` | §16.1 分析器：LLM 一次调用+关键词兜底（深度补充） | P2 | 📋 已设计，待实现 |
 | `35_memory_compression_design.md` | §16.1 记忆：四层=JSON 计数，无摘要/向量召回（深度补充） | P3 | 📋 已设计，待实现 |
 | `36_llm_reliability_design.md` | §16.1 LLM 层：单次调用无重试/多模型 fallback（深度补充） | P2 | ✅ 已实现 |
-| `37_real_llm_evaluation_design.md` | §16.1 评测：真实 LLM 质量未量化（深度补充） | P2 | 📋 已设计，待实现 |
+| `37_real_llm_evaluation_design.md` | §16.1 评测：真实 LLM 质量未量化（深度补充） | P2 | ✅ 已实现 |
 
 > **问题 1 修复说明**：多 Agent 已接入主流程。`CompetitorAnalysisAPI.analyze()` 新增 `mode` 参数（`single` / `team`，**默认 `team`**），`mode="team"` 时走事件驱动 + 状态决策的多 Agent 流水线（Collector→Analyzer→Validator→Reporter，支持 SUCCESS/RETRY/DEGRADED/FAILED 决策）。CLI 新增 `--mode` 选项。全量 312 个测试通过。
 
@@ -111,6 +111,8 @@
 
 > **设计文档 36 修复说明**：LLM 层可靠性已落地。① **重试与退避** `llm/client.py`：`LLMClient` 新增 `fallback_models`/`timeout`/`max_retries`/`backoff` 参数；`complete` 内 `_attempt_models` 逐模型 × 逐次重试——可重试错误（`_should_retry`：429/408/5xx 状态码或异常类名含 ratelimit/connection/timeout/internalserver）指数退避（1s、2s、4s…+ 抖动）重试 ≤`max_retries`；**不可重试（401/400/404）立即抛**不浪费重试；主模型重试耗尽自动切 `fallback_models` 链；**全灭抛 `LLMUnavailableError`** 降级规则（语义不变，仅触发频率更低）。② **超时**：SDK 路径每次调用透传 `timeout`（连接+读）。③ **调用日志** `_log_call` 增 `attempts`/`final_model`/`retried`/`timed_out` 字段（脱敏，不落 prompt/密钥）。④ **配置** `config/loader.py`：`LLMConfig` 增 `fallback_models`（默认空）/`timeout`（默认 None）/`max_retries`（默认 3），并正式接入 `AppConfig.llm` + `load_config` 解析 `llm` section（此前 LLMConfig 是未接线的死配置）；`review_config.yaml` 增 `llm` section（api_base_url/model/fallback_models/timeout:120/max_retries:3）。⑤ **接线**：`cli.py`（`_build_llm`）/`web_app.py` 构造 `LLMClient` 改读 `cfg.llm`，业务代码零改动透明生效；`call_func` 注入路径（测试/mock）完全兼容。新增 `tests/unit/llm/test_client_reliability.py` 11 条（重试后成功 attempts=3、连续失败抛错、401/普通异常不重试立即抛、fallback 成功 final_model/全灭、TimeoutError 重试且 timed_out 标记、LLMConfig 默认与 YAML 解析叠加）。全量 676 个测试通过（675 passed / 1 环境性失败同前：本机已装 playwright）。
 
+> **设计文档 37 修复说明**：真实 LLM 评测已落地。① **真实质量报告**：`evaluation/benchmark.py` 增 `build_real_llm()`（按 `LLMConfig` 构造，重试/fallback/超时来自设计文档 36）与共享实例注入（`Benchmark(llm=..., llm_mode="real")` 跨 case 复用连接 + 成本累计）；`--llm real` 对每个 case 真实调用、逐 case 抽取评测，产出字段准确率/幻觉率/工具选择/成本效率/失败分布。② **报告字段**：`BenchmarkReport` 增 `llm_mode`/`cost_usd`/`per_case_cost`/`cost_limit_usd`/`budget_aborted`（`to_dict` 同步携带）；`_write_markdown`/`_write_csv` 输出模式标注 + 成本列（accuracy 逐 case 加 cost_usd 列、CSV 增 `cost_usd`/`cost.case.<id>`/`budget_aborted` 行）。③ **成本核算**：`LLMClient` 增 `total_cost_usd` 累计（复用 `_log_call` 的 cost_usd，含估算 token 成本），共享实例跨 case 累加即单用例/总成本。④ **mock vs real 对比**：real 报告内嵌同子集 mock 基线「mock vs real」对比段（mock=harness 自洽、real=真实质量，逐指标列差异，直答"评测是不是自证"），CSV 增 `vs.mock.*` 行。⑤ **成本护栏** `--cost-limit`：real 模式默认 $1.0，累计成本达上限即中止并记 `budget_exhausted` 失败（复用设计文档 31 分类），报告标注「⚠️ 预算中止」。⑥ **子集过滤** `--tag normal`：先跑 normal 子集控制成本，缺省全量 38 用例。⑦ **无 Key 明确报错**：`--llm real` 无 API Key 返回退出码 2 并提示配置，**不静默回退 mock**（防误读 mock 数字）。⑧ **接线**：`benchmark.main` 增 `--tag`/`--cost-limit`/real 落盘 `reports/benchmark_real_<date>`；CLI `benchmark` 子命令增 `--llm`/`--tag`/`--cost-limit` 透传；harness 版本 0.5.0 → **0.6.0**。⑨ **测试** `tests/evaluation/test_real_evaluation.py` 18 条（报告字段/to_dict、共享实例成本累计、mock 无共享成本 0、tag 过滤计数、成本护栏中止/不限/合理限、mock/real 渲染分支 + mock vs real 段、CSV 模式/成本/vs 行、real 冒烟 skipif 无 Key、`build_benchmark_api` 复用注入实例、mock 回归 1.0/0.0/tool≥0.85/trace=1.0）。全量 695 个测试通过（694 passed / 1 环境性失败同前：本机已装 playwright）。
+
 ## 设计文档统一模板
 
 每个设计文档包含以下章节：
@@ -164,12 +166,11 @@
 **收尾（已完成）**：① 表 32 行状态已改 ✅ 并追加正式修复说明；② 设计文档 32 §3.1 后端描述已同步为"chromadb 集合 + 可插拔嵌入（含内置 hash 离线兜底）"。
 
 ### 待办（下一步按序实施，均已有设计文档）
-- §12.1-12.3 / §13-15 全部待办均已按设计文档实现（01-31 ✅）；深度补充 **32（RAG 向量检索）✅**、**36（LLM 层可靠性）✅** 已实现（见上方修复说明）。
-- **深度补充剩余（32-37 已完成 2 项，对应 implementation_plan.md §16）**：按"面试被问概率 × 补齐成本"排序：
-  1. **37 真实 LLM 评测**（高）——36 已稳定 LLM 链路，出真实质量报告补上"评测只测了 mock"的信任环；
-  2. **33 多 Agent 真协作**（中高）——消除"名不副实"隐患（或按路线 2 明确降级叙事）；
-  3. **34 分析器结构化抽取**（中）——schema 约束 + 修复重试，与 36 共享 `complete_json`；
-  4. **35 记忆摘要压缩**（中低）——深度加分项，复用 32 的召回基建。
+- §12.1-12.3 / §13-15 全部待办均已按设计文档实现（01-31 ✅）；深度补充 **32（RAG 向量检索）✅**、**36（LLM 层可靠性）✅**、**37（真实 LLM 评测）✅** 已实现（见上方修复说明）。
+- **深度补充剩余（32-37 已完成 3 项，对应 implementation_plan.md §16）**：按"面试被问概率 × 补齐成本"排序：
+  1. **33 多 Agent 真协作**（中高）——消除"名不副实"隐患（或按路线 2 明确降级叙事）；
+  2. **34 分析器结构化抽取**（中）——schema 约束 + 修复重试，与 36 共享 `complete_json`；
+  3. **35 记忆摘要压缩**（中低）——深度加分项，复用 32 的召回基建。
 
 > 依赖顺序建议：23（多源路由，底层）→ 24（分析器）→ 25（榜单，复用 23 的 provider）→ 26（时间线，复用 23 的 Releases）→ 27（定价，独立）→ 28（导出，复用 26/27）→ 29（评测，依赖 24/25/26 的结构化产出）→ 30/31（简历/面试达标补充，依赖已就绪的 `evaluation/benchmark.py` 真实执行版）。已全部完成。
-> 深度补充顺序：32 → 36 → 37 → 33 → 34 → 35（32 与 35 共享召回基建，36 与 34 共享 `complete_json`，37 依赖 36）。**32 ✅、36 ✅ 已完成，下一步 37 真实 LLM 评测。**
+> 深度补充顺序：32 → 36 → 37 → 33 → 34 → 35（32 与 35 共享召回基建，36 与 34 共享 `complete_json`，37 依赖 36）。**32 ✅、36 ✅、37 ✅ 已完成，下一步 33 多 Agent 真协作。**
