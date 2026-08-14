@@ -4,6 +4,8 @@
 > 触发：2026-08-14 深度复查——`TeamOrchestrator.run()` 是逐步同步调用（orchestrator.py:100-132），
 > MessageBus 仅作事后记录（analyzer_agent.py:72），"事件驱动/多 Agent"名不副实；简历/面试深挖易崩。
 > 依赖：`team/message_bus.py`、`team/orchestrator.py`、`core/parallel_runner.py`、`facade/api.py`。
+>
+> **实现状态（2026-08-14）**：按路线 1 真异步协作落地 ✅。`MessageBus` 增 `subscribe_async`/`publish_async`（await_result/超时 DEGRADED）；`TeamOrchestrator.run_async` 并行编排（Collector 总线驱动 → Analyzer 按缺口并行 → Validator 仲裁 → Reporter）；`FactValidator.arbitrate` 冲突仲裁（`DimensionResult.conflict_evidence`）；`api.analyze_team_async` 可选 async 入口。详见 `doc/plan/issue_designs/README.md` 设计文档 33 修复说明。
 
 ## 1. 问题现状
 
