@@ -17,7 +17,7 @@ import argparse
 import sys
 from typing import NoReturn
 
-from competitor_agent.config.loader import load_config
+from competitor_agent.config.loader import AppConfig, load_config
 from competitor_agent.core.command_registry import command_dispatch
 from competitor_agent.core.input_sanitizer import sanitize_task
 from competitor_agent.core.task_parser import ResolutionDecision, parse_task
@@ -30,8 +30,20 @@ from competitor_agent.secret_vault import get_data_dir
 PROMPT = "competitor> "
 
 
+def _build_llm(cfg: AppConfig) -> LLMClient:
+    """按 LLMConfig 构造带重试/fallback/超时的 LLMClient（设计文档 36）"""
+    return LLMClient(
+        model=cfg.llm.model,
+        base_url=cfg.llm.api_base_url,
+        fallback_models=cfg.llm.fallback_models,
+        timeout=cfg.llm.timeout,
+        max_retries=cfg.llm.max_retries,
+    )
+
+
 def _make_api() -> CompetitorAnalysisAPI:
-    return CompetitorAnalysisAPI(llm=LLMClient(model=load_config().model, base_url=load_config().api_base_url), use_llm=True, config=load_config())
+    cfg = load_config()
+    return CompetitorAnalysisAPI(llm=_build_llm(cfg), use_llm=True, config=cfg)
 
 
 def _print_report(report: CompetitorReport) -> None:
@@ -288,7 +300,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     setup_logging(level=load_config().observability.log_level, log_dir=get_data_dir() / "logs")
     api = _make_api()
-    llm = LLMClient(model=load_config().model, base_url=load_config().api_base_url)
+    llm = _build_llm(load_config())
     use_llm = True
 
     if args.resume_id:
