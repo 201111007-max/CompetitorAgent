@@ -87,7 +87,7 @@ class TestBenchmark:
     def test_runs_against_real_fixtures(self):
         b = Benchmark()
         report = b.run()
-        assert report.n_cases == 26  # 17 accuracy + 9 strategy（真实执行版 fixture）
+        assert report.n_cases == 38  # 27 accuracy + 11 strategy（设计文档 29 增生态/口碑/时间线）
         assert report.loaded_fixtures == [ACCURACY_FIXTURE, STRATEGY_FIXTURE]
         assert report.accuracy.field_accuracy > 0.9  # 真实输出经 mock 抽取后仍达门禁
         assert 0.0 < report.strategy.tool_selection_accuracy <= 1.0

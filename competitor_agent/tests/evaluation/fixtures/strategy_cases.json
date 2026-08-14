@@ -97,5 +97,27 @@
     "page": "Pro $20/month",
     "fail_urls": [],
     "best_url": "https://example.com/rumor-pricing"
+  },
+  {
+    "case_id": "cursor_ecosystem_web_2026",
+    "competitor": "cursor",
+    "dimension": "ecosystem",
+    "task": "只分析 cursor 的生态",
+    "tags": ["ecosystem", "normal"],
+    "mode": "single",
+    "page": "MCP server: GitHub integration\nSupports VSCode.",
+    "fail_urls": [],
+    "best_url": "https://docs.cursor.com"
+  },
+  {
+    "case_id": "cursor_sentiment_web_2026",
+    "competitor": "cursor",
+    "dimension": "sentiment",
+    "task": "只分析 cursor 的口碑",
+    "tags": ["sentiment", "normal"],
+    "mode": "single",
+    "page": "Users love it.",
+    "fail_urls": [],
+    "best_url": "https://www.cursor.com"
   }
 ]

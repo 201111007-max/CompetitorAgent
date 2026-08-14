@@ -35,16 +35,20 @@ ACCURACY_FIXTURE = "accuracy_cases.json"
 STRATEGY_FIXTURE = "strategy_cases.json"
 
 # 评测 harness 版本：分数 = benchmark + subset + harness。任何评测输出必须带此版本号。
-HARNESS_VERSION = "0.3.0"
+HARNESS_VERSION = "0.4.0"
 
 # 单次采集/工具的估算成本（与主流程 IterationBudget 单次 0.01 对齐）
 UNIT_COST = 0.01
 
 # 维度 → 默认字段抽取方式（设计文档 §3.1：extract_prediction 按维度抽取可比对字段）
+# 设计文档 29：扩展 ecosystem / sentiment / roadmap（timeline）三维度覆盖
 DIMENSION_KINDS: dict[str, str] = {
     "pricing": "plan_price",
     "feature": "feature_present",
     "performance": "benchmark_score",
+    "ecosystem": "ecosystem_signal",
+    "sentiment": "sentiment_signal",
+    "roadmap": "timeline_event",
 }
 
 
@@ -88,6 +92,9 @@ class BenchmarkReport:
     harness_version: str = HARNESS_VERSION
     trace_completeness: float = 0.0  # 有完整 trace（真实证据）的 case / 总 case
     confusion_matrix: dict[str, dict[str, int]] = field(default_factory=dict)
+    # 设计文档 29：按维度拆分指标（生态/口碑/时间线覆盖盲区可独立门禁）
+    accuracy_by_dimension: dict[str, float] = field(default_factory=dict)
+    hallucination_by_dimension: dict[str, float] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -100,7 +107,10 @@ class BenchmarkReport:
                 "hallucination_rate": self.accuracy.hallucination_rate,
                 "f1": self.accuracy.f1,
                 "hallucination_instances": self.accuracy.hallucination_instances,
+                "per_case": self.accuracy.per_case,
             },
+            "accuracy_by_dimension": self.accuracy_by_dimension,
+            "hallucination_by_dimension": self.hallucination_by_dimension,
             "strategy": {
                 "tool_selection_accuracy": self.strategy.tool_selection_accuracy,
                 "cost_efficiency": self.strategy.cost_efficiency,
@@ -164,6 +174,11 @@ class BenchmarkMockLLM:
         "support", "integration", "cli", "agent", "terminal", "multimodal",
         "rag", "mcp", "code", "review", "deploy", "token",
     )
+    # 生态 / 口碑信号标记（对齐 analyzer 的规则降级关键词，保证确定性）
+    _IDE_MARKERS = ("vscode", "jetbrains", "terminal")
+    _PLUGIN_MARKERS = ("plugin", "extension", "marketplace")
+    _POSITIVE_MARKERS = ("love", "great", "awesome", "fast", "recommend", "best", "好用", "好评", "推荐", "喜欢")
+    _NEGATIVE_MARKERS = ("bug", "slow", "bad", "terrible", "crash", "worse", "难用", "差评", "吐槽", "失望", "贵", "限制")
     _RAG_MARKER = "[知识库参考片段"
 
     def complete(self, messages: list[dict[str, str]], model: str | None = None) -> str:
@@ -188,6 +203,17 @@ class BenchmarkMockLLM:
             benchmarks = self._benchmarks(user)
             return json.dumps(
                 {"summary": f"检测到 {len(benchmarks)} 条性能记录", "details": {"benchmarks": benchmarks}, "confidence": 0.8}
+            )
+        if "生态" in system:
+            details = self._ecosystem(user)
+            return json.dumps(
+                {"summary": f"生态盘点：MCP {len(details['mcp_servers'])} 个、插件 {details['plugins']['count']} 条、IDE {', '.join(details['ide_support']) or '未知'}",
+                 "details": details, "confidence": 0.7}
+            )
+        if "口碑" in system:
+            details, confidence = self._sentiment(user)
+            return json.dumps(
+                {"summary": details["verdict"], "details": details, "confidence": confidence}
             )
         return json.dumps({"summary": user[:120], "details": {}, "confidence": 0.5})
 
@@ -236,6 +262,76 @@ class BenchmarkMockLLM:
                 out.append({"name": name.strip().lower(), "score": score.strip()})
         return out
 
+    @classmethod
+    def _ecosystem(cls, text: str) -> dict[str, Any]:
+        """生态信号：MCP server 逐行计数 / IDE 支持 / 插件行。输出对齐 EcosystemAnalyzer details 契约。"""
+        mcp_servers: list[dict[str, str]] = []
+        ide_support: list[str] = []
+        plugins: list[str] = []
+        for line in text.splitlines():
+            low = line.lower()
+            if "mcp server" in low or "mcp_server" in low:
+                mcp_servers.append({"name": line.strip()[:80], "vendor": "", "discoverable_via": "benchmark"})
+            for marker in cls._IDE_MARKERS:
+                if marker in low and marker not in ide_support:
+                    ide_support.append(marker)
+            if any(m in low for m in cls._PLUGIN_MARKERS):
+                plugins.append(line.strip()[:80])
+        return {
+            "mcp_servers": mcp_servers[:10],
+            "plugins": {"count": len(plugins), "rating": 0, "top": plugins[:5]},
+            "ide_support": ide_support,
+            "integrations": [],
+            "repo_activity": {"stars": 0, "last_release": "", "commits_30d": 0},
+        }
+
+    @classmethod
+    def _sentiment(cls, text: str) -> tuple[dict[str, Any], float]:
+        """口碑信号：按行判极性（对齐 SentimentAnalyzer 规则），信号不足 → 低置信不编造。"""
+        signals: list[dict[str, str]] = []
+        positives: list[str] = []
+        negatives: list[str] = []
+        for line in text.splitlines():
+            if len(line) > 200:
+                continue
+            low = line.lower()
+            has_pos = any(m in low for m in cls._POSITIVE_MARKERS)
+            has_neg = any(m in low for m in cls._NEGATIVE_MARKERS)
+            if not (has_pos or has_neg):
+                continue
+            polarity = "neu"
+            if has_pos and not has_neg:
+                polarity = "pos"
+            elif has_neg and not has_pos:
+                polarity = "neg"
+            signals.append({"polarity": polarity, "quote": line.strip()[:120], "source_url": ""})
+            if polarity == "pos":
+                positives.append(line.strip()[:80])
+            elif polarity == "neg":
+                negatives.append(line.strip()[:80])
+        pos_c = sum(1 for s in signals if s["polarity"] == "pos")
+        neg_c = sum(1 for s in signals if s["polarity"] == "neg")
+        neu_c = len(signals) - pos_c - neg_c
+        total = len(signals)
+        if total:
+            ratio = {"pos": round(pos_c / total, 2), "neg": round(neg_c / total, 2), "neu": round(neu_c / total, 2)}
+            verdict = f"社区口碑以{'正面' if pos_c >= neg_c else '负面'}为主（{pos_c}正/{neg_c}负/{neu_c}中）"
+            confidence = 0.6 if total >= 3 else 0.5
+        else:
+            ratio = {"pos": 0.0, "neg": 0.0, "neu": 0.0}
+            verdict = "社区信号不足，无法形成可靠口碑结论（不编造）"
+            confidence = 0.1
+        return (
+            {
+                "signals": signals[:20],
+                "positives": list(dict.fromkeys(positives))[:5],
+                "negatives": list(dict.fromkeys(negatives))[:5],
+                "polarity_ratio": ratio,
+                "verdict": verdict,
+            },
+            confidence,
+        )
+
 
 # ── 字段抽取：从真实报告提取可比对字段（设计文档 §3.1） ──────────────
 
@@ -277,13 +373,67 @@ def _benchmark_score(details: dict[str, Any], term: str) -> str:
     return ""
 
 
-def _extract_field(kind: str, details: dict[str, Any], key: str) -> str:
+def _ecosystem_signal(details: dict[str, Any], key: str) -> Any:
+    """生态信号（设计文档 24 的 EcosystemAnalyzer details）：MCP 数量 / IDE 支持 / 插件市场"""
+    if key == "mcp_servers":
+        return len(details.get("mcp_servers") or [])
+    if key == "plugins":
+        return (details.get("plugins") or {}).get("count", 0)
+    if key == "stars":
+        return (details.get("repo_activity") or {}).get("stars", 0)
+    if key in ("vscode", "jetbrains", "terminal"):
+        ide = [str(i).lower() for i in (details.get("ide_support") or [])]
+        return "true" if key in ide else "false"
+    if key == "ide":
+        return " ".join(str(i) for i in (details.get("ide_support") or []))
+    return ""
+
+
+def _sentiment_signal(details: dict[str, Any], key: str) -> Any:
+    """口碑信号（设计文档 24 的 SentimentAnalyzer details）：极性主导 / 正负信号有无"""
+    ratio = details.get("polarity_ratio") or {}
+    if key == "polarity":
+        pos = float(ratio.get("pos") or 0.0)
+        neg = float(ratio.get("neg") or 0.0)
+        neu = float(ratio.get("neu") or 0.0)
+        if pos > neg and pos > neu:
+            return "pos"
+        if neg > pos and neg > neu:
+            return "neg"
+        return "neu"
+    if key == "positive":
+        return "true" if (ratio.get("pos") or 0) > 0 else "false"
+    if key == "negative":
+        return "true" if (ratio.get("neg") or 0) > 0 else "false"
+    if key == "neutral":
+        return "true" if (ratio.get("neu") or 0) > 0 else "false"
+    if key in ("pos", "neg", "neu"):
+        return ratio.get(key, 0.0)
+    return ""
+
+
+def _timeline_event(report: object, key: str) -> str:
+    """时间线事件（设计文档 26）：从报告内嵌「竞品时间线」段落判断是否有事件。
+
+    首轮分析无基线 → 不产生事件 → 无该段落（防噪声，设计文档 29 边界用例）。
+    """
+    if key != "has_events":
+        return ""
+    markdown = str(getattr(report, "markdown_report", "") or "")
+    return "true" if "## 竞品时间线" in markdown else "false"
+
+
+def _extract_field(kind: str, details: dict[str, Any], key: str) -> Any:
     if kind == "plan_price":
         return _plan_price(details, key)
     if kind == "feature_present":
         return _feature_present(details, key)
     if kind == "benchmark_score":
         return _benchmark_score(details, key)
+    if kind == "ecosystem_signal":
+        return _ecosystem_signal(details, key)
+    if kind == "sentiment_signal":
+        return _sentiment_signal(details, key)
     return ""
 
 
@@ -295,6 +445,9 @@ def extract_prediction(report: object, dimension: str, ground_truth: dict[str, A
     )
     details: dict[str, Any] = result.details if result is not None else {}
     kind = DIMENSION_KINDS.get(dimension, "summary")
+    if kind == "timeline_event":
+        # 时间线事件需要整份报告（内嵌段落），而非单维度 details
+        return {key: _timeline_event(report, key) for key in ground_truth}
     return {key: _extract_field(kind, details, key) for key in ground_truth}
 
 
@@ -423,13 +576,25 @@ class Benchmark:
                 )
             )
 
+        accuracy = self._accuracy.evaluate(acc_eval_cases)
+        # 设计文档 29：按维度拆分字段准确率与幻觉率（生态/口碑/时间线覆盖盲区独立门禁）
+        accuracy_by_dimension: dict[str, float] = {}
+        hallucination_by_dimension: dict[str, float] = {}
+        for dim in dict.fromkeys(c.dimension for c in acc_eval_cases):
+            grouped = [c for c in acc_eval_cases if c.dimension == dim]
+            m = self._accuracy.evaluate(grouped)
+            accuracy_by_dimension[dim] = m.field_accuracy
+            hallucination_by_dimension[dim] = m.hallucination_rate
+
         return BenchmarkReport(
-            accuracy=self._accuracy.evaluate(acc_eval_cases),
+            accuracy=accuracy,
             strategy=self._strat.evaluate(strat_eval_cases),
             n_cases=len(acc_cases) + len(strat_cases),
             loaded_fixtures=[ACCURACY_FIXTURE, STRATEGY_FIXTURE],
             trace_completeness=self._trace_completeness(acc_eval_cases, strat_eval_cases),
             confusion_matrix=self._confusion_matrix(strat_eval_cases),
+            accuracy_by_dimension=accuracy_by_dimension,
+            hallucination_by_dimension=hallucination_by_dimension,
         )
 
     def _analyze(self, case: object) -> object:
@@ -505,8 +670,12 @@ def _write_csv(report: BenchmarkReport, out: Path) -> None:
     acc = report.to_dict()["accuracy"]
     strat = report.to_dict()["strategy"]
     for k, v in acc.items():
-        if k != "hallucination_instances":
+        if k not in ("hallucination_instances", "per_case"):
             rows.append([report.harness_version, f"accuracy.{k}", str(v)])
+    for dim, v in report.accuracy_by_dimension.items():
+        rows.append([report.harness_version, f"accuracy_by_dimension.{dim}", str(v)])
+    for dim, v in report.hallucination_by_dimension.items():
+        rows.append([report.harness_version, f"hallucination_by_dimension.{dim}", str(v)])
     for k, v in strat.items():
         rows.append([report.harness_version, f"strategy.{k}", str(v)])
     rows.append([report.harness_version, "trace_completeness", str(report.trace_completeness)])
@@ -528,6 +697,23 @@ def _write_markdown(report: BenchmarkReport, out: Path) -> None:
     lines.append(f"| 工具选择准确率 | {report.strategy.tool_selection_accuracy:.4f} |")
     lines.append(f"| 成本效率 | {report.strategy.cost_efficiency:.4f} |")
     lines.append(f"| 平均命中排名 | {report.strategy.avg_source_rank:.2f} |")
+
+    if report.accuracy_by_dimension:
+        lines.append("\n## 按维度字段准确率（设计文档 29：生态/口碑/时间线覆盖盲区）")
+        lines.append("\n| 维度 | 字段准确率 | 幻觉率 |")
+        lines.append("|------|-----------|--------|")
+        for dim in report.accuracy_by_dimension:
+            lines.append(
+                f"| {dim} | {report.accuracy_by_dimension[dim]:.4f} | {report.hallucination_by_dimension.get(dim, 0.0):.4f} |"
+            )
+
+    lines.append("\n## 逐 case 明细（accuracy）")
+    lines.append("\n| case | dimension | field_accuracy | hallucination_rate |")
+    lines.append("|------|-----------|----------------|--------------------|")
+    for pc in report.accuracy.per_case:
+        lines.append(
+            f"| {pc['case_id'] or pc['task']} | {pc['dimension']} | {pc['field_accuracy']:.4f} | {pc['hallucination_rate']:.4f} |"
+        )
 
     lines.append("\n## 逐 case 明细（strategy）")
     lines.append("\n| task | hit | rank | cost | efficiency |")

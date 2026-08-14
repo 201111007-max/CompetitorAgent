@@ -26,7 +26,8 @@ _PAGE = (
     "Cursor is an AI code editor by Anysphere.\n"
     "Pro $20/month\nTeam $40/month\n\n"
     "Supports MCP integration and agent mode.\n\n"
-    "swe-bench: 45%"
+    "swe-bench: 45%\n\n"
+    "Great community reviews.\nLoved by developers."
 )
 
 _LLM_KEY_ENVS = ("OPENAI_API_KEY", "DEEPSEEK_API_KEY", "LLM_API_KEY")

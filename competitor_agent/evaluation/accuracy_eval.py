@@ -34,6 +34,8 @@ class AccuracyMetrics:
     f1: float = 0.0
     per_field: dict[str, dict[str, float]] = field(default_factory=dict)
     hallucination_instances: list[dict[str, Any]] = field(default_factory=list)
+    # 逐 case 明细（设计文档 29：空数据"不编造"护栏按 case 独立门禁）
+    per_case: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _normalize(value: Any) -> str:
@@ -85,8 +87,13 @@ class AccuracyEvaluator:
         total_pred = 0
         supported = 0
         hallucination_instances: list[dict[str, Any]] = []
+        per_case: list[dict[str, Any]] = []
 
         for case in cases:
+            case_hits = 0
+            case_fields = 0
+            case_pred = 0
+            case_supported = 0
             for field_name, truth in case.ground_truth.items():
                 pred = case.prediction.get(field_name, "")
                 np_ = _normalize(pred)
@@ -101,11 +108,16 @@ class AccuracyEvaluator:
                 pf["hits"] += 1.0 if is_match else 0.0
                 pf["f1"] += _f1(np_, nt)
 
+                case_fields += 1
+                case_hits += 1.0 if is_match else 0.0
+
                 # 幻觉：预测了"真值里 token 完全没有"的字段
                 if pred:
                     total_pred += 1
+                    case_pred += 1
                     if np_ and set(np_.split()) & _tokens(nt):
                         supported += 1
+                        case_supported += 1
                     else:
                         hallucination_instances.append(
                             {
@@ -116,6 +128,16 @@ class AccuracyEvaluator:
                                 "ground_truth": truth,
                             }
                         )
+
+            per_case.append(
+                {
+                    "case_id": case.case_id,
+                    "task": case.task,
+                    "dimension": case.dimension,
+                    "field_accuracy": round(case_hits / case_fields, 4) if case_fields else 1.0,
+                    "hallucination_rate": round((case_pred - case_supported) / case_pred, 4) if case_pred else 0.0,
+                }
+            )
 
         if not field_scores:
             return AccuracyMetrics()
@@ -134,6 +156,7 @@ class AccuracyEvaluator:
             f1=round(sum(f1s) / len(f1s), 4),
             per_field=per_field_summary,
             hallucination_instances=hallucination_instances,
+            per_case=per_case,
         )
 
 

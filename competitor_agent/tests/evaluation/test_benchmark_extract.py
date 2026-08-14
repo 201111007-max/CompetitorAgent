@@ -62,6 +62,57 @@ class TestExtractPrediction:
         assert pred == {"pro": ""}
 
 
+class TestExtractNewDimensions:
+    """设计文档 29：生态 / 口碑 / 时间线新维度字段抽取"""
+
+    def test_ecosystem_mcp_count_and_ide(self):
+        report = _report_with("ecosystem", {"mcp_servers": [{"name": "a"}, {"name": "b"}], "ide_support": ["vscode", "jetbrains"]})
+        pred = extract_prediction(report, "ecosystem", {"mcp_servers": 2, "vscode": "true", "jetbrains": "true"})
+        assert pred == {"mcp_servers": 2, "vscode": "true", "jetbrains": "true"}
+
+    def test_ecosystem_plugin_count(self):
+        report = _report_with("ecosystem", {"plugins": {"count": 3, "rating": 4.8, "top": ["a", "b", "c"]}})
+        pred = extract_prediction(report, "ecosystem", {"plugins": 3})
+        assert pred == {"plugins": 3}
+
+    def test_ecosystem_empty_payload_no_fabrication(self):
+        report = _report_with("ecosystem", {"mcp_servers": [], "ide_support": []})
+        pred = extract_prediction(report, "ecosystem", {"mcp_servers": 0, "vscode": "false"})
+        assert pred == {"mcp_servers": 0, "vscode": "false"}
+
+    def test_sentiment_positive_polarity(self):
+        report = _report_with("sentiment", {"polarity_ratio": {"pos": 1.0, "neg": 0.0, "neu": 0.0}})
+        pred = extract_prediction(report, "sentiment", {"polarity": "pos", "positive": "true"})
+        assert pred == {"polarity": "pos", "positive": "true"}
+
+    def test_sentiment_negative_polarity(self):
+        report = _report_with("sentiment", {"polarity_ratio": {"pos": 0.0, "neg": 0.8, "neu": 0.2}})
+        pred = extract_prediction(report, "sentiment", {"polarity": "neg", "negative": "true"})
+        assert pred == {"polarity": "neg", "negative": "true"}
+
+    def test_sentiment_mixed_neutral_polarity(self):
+        report = _report_with("sentiment", {"polarity_ratio": {"pos": 0.5, "neg": 0.5, "neu": 0.0}})
+        pred = extract_prediction(report, "sentiment", {"polarity": "neu", "positive": "true", "negative": "true"})
+        assert pred == {"polarity": "neu", "positive": "true", "negative": "true"}
+
+    def test_sentiment_empty_payload_no_fabrication(self):
+        report = _report_with("sentiment", {"polarity_ratio": {"pos": 0.0, "neg": 0.0, "neu": 0.0}})
+        pred = extract_prediction(report, "sentiment", {"polarity": "neu", "positive": "false", "negative": "false"})
+        assert pred == {"polarity": "neu", "positive": "false", "negative": "false"}
+
+    def test_timeline_no_events_on_first_run(self):
+        report = _report_with("pricing", {"plans": []})
+        report.markdown_report = "# cursor\n\n## 定价\n...no timeline section"
+        pred = extract_prediction(report, "roadmap", {"has_events": "false"})
+        assert pred == {"has_events": "false"}
+
+    def test_timeline_events_when_section_present(self):
+        report = _report_with("pricing", {"plans": []})
+        report.markdown_report = "# cursor\n\n## 竞品时间线\n| 日期 | 类型 | 变化 | 证据 |"
+        pred = extract_prediction(report, "roadmap", {"has_events": "true"})
+        assert pred == {"has_events": "true"}
+
+
 class TestBenchmarkMockLLM:
     def test_pricing_plans_parsed(self):
         out = json.loads(BenchmarkMockLLM().complete([
@@ -102,6 +153,31 @@ class TestBenchmarkMockLLM:
         ]))
         assert out["competitors"] == []
         assert out["dimensions"] is None
+
+    def test_ecosystem_signals_collected(self):
+        out = json.loads(BenchmarkMockLLM().complete([
+            {"role": "system", "content": "你是竞品生态分析师…盘点生态能力…"},
+            {"role": "user", "content": "MCP server: GitHub integration\nMCP server: Slack integration\nSupports VSCode and JetBrains IDE plugins."},
+        ]))
+        details = out["details"]
+        assert len(details["mcp_servers"]) == 2
+        assert "vscode" in details["ide_support"]
+        assert "jetbrains" in details["ide_support"]
+
+    def test_sentiment_polarity_parsed(self):
+        out = json.loads(BenchmarkMockLLM().complete([
+            {"role": "system", "content": "你是竞品社区口碑分析师…提取口碑信号…"},
+            {"role": "user", "content": "Some love the integration.\nOthers think it is bad."},
+        ]))
+        assert out["details"]["polarity_ratio"] == {"pos": 0.5, "neg": 0.5, "neu": 0.0}
+
+    def test_sentiment_empty_low_confidence(self):
+        out = json.loads(BenchmarkMockLLM().complete([
+            {"role": "system", "content": "你是竞品社区口碑分析师…提取口碑信号…"},
+            {"role": "user", "content": "The product ships regular updates."},
+        ]))
+        assert out["details"]["polarity_ratio"] == {"pos": 0.0, "neg": 0.0, "neu": 0.0}
+        assert out["confidence"] < 0.5
 
 
 class TestExtractStrategy:
