@@ -4,6 +4,8 @@
 > 触发：2026-08-14 深度复查——各分析器仅 `_build_prompt`/`_parse_result`/`_rule_extract` 三件套（各几十行），
 > LLM 路径（base.py:62-81）是"包原文 → 一次 complete → `json.loads`"，无链式推理/多轮验证/结构化约束，`json.loads` 解析 LLM 输出易碎。
 > 依赖：`analyzers/base.py`、`analyzers/registry.py`、`llm/client.py`、`agent/prompts/trust_boundary.py`。
+>
+> **实现状态（2026-08-14）**：已落地 ✅。`LLMClient.complete_json` 增 `schema`（JSON Schema 子集校验）+ `retries=2` 修复重试（错误回灌 prompt）；`BaseCompetitorAnalyzer._analyze_with_llm` 走 `complete_json(messages, schema=_schema_for(gap))` + 真值校验 `_verify_details`（数值与原文交叉核对，冲突降置信度 `[PARTIAL]`）；五个维度 `_details_properties` 与评测 `extract_prediction` 抽取键对齐。详见 `doc/plan/issue_designs/README.md` 设计文档 34 修复说明。
 
 ## 1. 问题现状
 
