@@ -22,9 +22,17 @@ class Retriever:
         competitor: str,
         dimension: str = "",
         top_k: int = 5,
+        strategy: str = "hybrid",
     ) -> list[TextChunk]:
-        """检索与查询最相关的文档片段（同竞品优先）"""
-        scored = self._store.search(query, top_k=top_k * 3)
+        """检索与查询最相关的文档片段（同竞品优先）。
+
+        strategy="hybrid"（默认）：词袋+向量混合融合；向量层不可用时自动降级词袋。
+        strategy="lexical"：纯词袋（消融对比用）。
+        """
+        if strategy == "lexical":
+            scored = self._store.search(query, top_k=top_k * 3)
+        else:
+            scored = [(c, s) for c, s, _src in self._store.search_hybrid(query, top_k=top_k * 3)]
         # 竞品过滤：优先同竞品，不足时放宽到全局
         same = [(c, s) for c, s in scored if c.competitor == competitor]
         others = [(c, s) for c, s in scored if c.competitor != competitor]
