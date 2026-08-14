@@ -40,7 +40,7 @@
 | `31_failure_stats_design.md` | §12.3 #11：无失败类型统计（五类分类+聚合分布） | P2 | ✅ 已实现 |
 | `32_rag_vector_retrieval_design.md` | §16.1 RAG：纯词袋检索，向量化未实现（深度补充） | P2 | ✅ 已实现 |
 | `33_team_async_orchestration_design.md` | §16.1 多 Agent：顺序流水线非真协作（深度补充） | P2 | ✅ 已实现 |
-| `34_analyzer_structured_extraction_design.md` | §16.1 分析器：LLM 一次调用+关键词兜底（深度补充） | P2 | 📋 已设计，待实现 |
+| `34_analyzer_structured_extraction_design.md` | §16.1 分析器：LLM 一次调用+关键词兜底（深度补充） | P2 | ✅ 已实现 |
 | `35_memory_compression_design.md` | §16.1 记忆：四层=JSON 计数，无摘要/向量召回（深度补充） | P3 | 📋 已设计，待实现 |
 | `36_llm_reliability_design.md` | §16.1 LLM 层：单次调用无重试/多模型 fallback（深度补充） | P2 | ✅ 已实现 |
 | `37_real_llm_evaluation_design.md` | §16.1 评测：真实 LLM 质量未量化（深度补充） | P2 | ✅ 已实现 |
@@ -115,6 +115,8 @@
 
 > **设计文档 33 修复说明**：多 Agent 真协作已落地。① **MessageBus 异步增强**（`team/message_bus.py`）：新增 `subscribe_async(topic, coro)` 异步订阅者 + `publish_async(topic, payload, await_result=True, timeout=...)`——`await_result=True` 返回订阅者产出（编排器 `asyncio.gather` 并行等待收集），超时/异常订阅者记 `DegradedNotice`（`bus.degraded()` 可审计）并返回 None，**不阻塞流水线**；同步 `publish` 完全保留（既有阶段埋点兼容）。② **`TeamOrchestrator.run_async`**（`team/orchestrator.py`）：Collector 经总线**请求/响应**采集（`_collect_async`，失败按剩余重试次数重发）→ Analyzer 按缺口**并行**分析（`asyncio.Semaphore` 限流 `max_parallel` + `to_thread` 线程池，事件循环不阻塞）→ Validator 仲裁 + 事实校验 → Reporter 收口；取消（`is_cancelled`）贯穿各 await 边界，超时记 DEGRADED。同步 `run()` 保留（回归安全网），但 Validator 步骤**同样应用仲裁**（语义与 run_async 对齐，消除 `FallbackAnalyzer` 将 roadmap 标为 feature 造成的同维度重复）。③ **Validator 仲裁**（`team/validator_agent.py`）：`FactValidator.arbitrate(results) -> dict[str, DimensionResult]` 同维度多来源按 **置信度 > 证据源 trust > 时间新鲜度** 取优，被丢弃候选保留为 `DimensionResult.conflict_evidence`（新字段，不静默丢弃），`ReporterAgent` 渲染「## 多来源仲裁备注」。④ **可选项 async 入口**：`CompetitorAnalysisAPI.analyze_team_async(task, max_parallel=...)` 与 `analyze_team` 同一 `_begin_team`/`_finish_team` 骨架（规划埋点/预算/checkpoint/记忆沉淀/取消转 CancelledResult 完全一致），默认入口仍为同步。⑤ **并发安全**：`LLMClient.total_cost_usd` 累计加锁（并行分析多线程原子累加）。新增 8（MessageBus async：异步订阅/await_result 产出/超时 DEGRADED/订阅者异常/无订阅者/同步兼容/gather 并行/通配）+6（arbitrate：单源原样/置信度取优/trust 破平/证据保留/多维度独立/时间新鲜度）+7（并行编排集成：完整报告/与串行维度与证据 URL 一致/慢 LLM 并行提速/API async 端到端/仲裁报告标注/orch 层与 facade 层取消）共 21 个测试。全量 **716 个测试通过**（715 passed / 1 环境性失败同前：本机已装 playwright）。
 
+> **设计文档 34 修复说明**：分析器结构化抽取已落地。① **`complete_json` 结构化补全**（`llm/client.py`）：新增 `schema` 参数（JSON Schema 子集：`type`/`required`/`properties`/`items`/`enum`，`null` 对任意类型放行）+ `retries=2` 修复重试——解析失败/schema 校验失败把**错误信息回灌 prompt** 重试（≤2 次），耗尽抛 `LLMUnavailableError` 降级规则；SDK 路径附带 `response_format={"type":"json_object"}` 软约束（注入 call_func 路径透传不动，mock 兼容）；`schema=None` 保持旧语义仅 `json.loads`。② **`BaseCompetitorAnalyzer`**：`_analyze_with_llm` 改走 `complete_json(messages, schema=self._schema_for(gap))`（保留 `detect_injection` 注入防护）；新增 `_schema_for(gap)` 顶层统一 `summary/details/confidence` 必备键 + `_details_properties()` 按维度声明 details 结构；新增 **真值校验 `_verify_details`**——details 实体数值（`_VERIFY_NUMERIC_KEYS`：价格/单价/数量/得分/计数，0 值缺省与比例型豁免）与 `observation.raw_text` 原文交叉核对（忽略逗号差异，`12,000`↔`12000`），每处冲突置信度 -0.15（下限 0.1）、<0.5 转 `[PARTIAL]`。③ **五个维度 schema**（pricing `plans/usage`、feature `features`、performance `benchmarks`、ecosystem `mcp_servers/plugins/ide_support/integrations/repo_activity`、sentiment `signals/polarity_ratio/verdict`）与评测 `extract_prediction` 抽取键命名空间对齐（plans 元素仅约束 object，兼容 LLM 契约键与 mock/规则兼容键）；各子类裸 `json.loads` 的 `_parse_result` 删除（基类保留 `(text, schema)` 兼容钩子）。④ **测试** 22 条：`tests/unit/llm/test_complete_json_schema.py` 11（合法通过、缺必填重试耗尽、非法 JSON/类型错修复重试、错误回灌含 `$.confidence`、enum 失败、null 放行、数组 items 校验、boolean≠number、retries=0/恢复）+ `tests/unit/analyzers/test_structured_extraction.py` 11（schema 与评测键对齐、编造数值→惩罚→[PARTIAL]、一致→COMPLETE、0 值不罚、千分位一致、类型错修复非降级、schema 耗尽降级规则）；既有 `test_llm_path_structured` 更新为原文含数值（一致不罚）。全量 **738 个测试通过**（737 passed / 1 环境性失败同前：本机已装 playwright）。
+
 ## 设计文档统一模板
 
 每个设计文档包含以下章节：
@@ -159,6 +161,14 @@
 - `facade/api.py`：`analyze_team_async` 可选 async 入口（与 `analyze_team` 共享 `_begin_team`/`_finish_team`）；`LLMClient.total_cost_usd` 加锁线程安全。
 - 测试：`test_message_bus_async.py` 8 + `test_arbitrate.py` 6 + `test_team_async_flow.py` 7（并行与串行维度/证据 URL 一致、慢 LLM 并行提速、仲裁标注、两层取消）。全量 **716 个测试通过**（715 passed / 1 环境性失败同前）。
 
+### 设计文档 34（分析器结构化抽取）已完成（2026-08-14）
+
+**已实现**：
+- `llm/client.py`：`complete_json` 增 `schema`（JSON Schema 子集校验）+ `retries=2` 修复重试（错误回灌 prompt，耗尽抛 `LLMUnavailableError`）；SDK 路径附 `response_format` 软约束；`schema=None` 保持旧语义。
+- `analyzers/base.py`：`_analyze_with_llm` 走 `complete_json(messages, schema=self._schema_for(gap))`；新增 `_schema_for`（顶层统一键）+ `_details_properties`（按维度声明）+ **真值校验 `_verify_details`**（实体数值与原文交叉核对，冲突降置信度 <0.5 → `[PARTIAL]`）。
+- 五个维度 `_details_properties` 与评测 `extract_prediction` 抽取键对齐（pricing/feature/performance/ecosystem/sentiment）；删除各子类裸 `json.loads` 的 `_parse_result`（基类保留兼容钩子）。
+- 测试：`test_complete_json_schema.py` 11 + `test_structured_extraction.py` 11（schema 对齐、校验惩罚、修复重试、耗尽降级）。全量 **738 个测试通过**（737 passed / 1 环境性失败同前）。
+
 ### 设计文档 32（RAG 真向量检索）已完成（2026-08-14）
 
 **已实现**：
@@ -177,10 +187,9 @@
 **收尾（已完成）**：① 表 32 行状态已改 ✅ 并追加正式修复说明；② 设计文档 32 §3.1 后端描述已同步为"chromadb 集合 + 可插拔嵌入（含内置 hash 离线兜底）"。
 
 ### 待办（下一步按序实施，均已有设计文档）
-- §12.1-12.3 / §13-15 全部待办均已按设计文档实现（01-31 ✅）；深度补充 **32（RAG 向量检索）✅**、**36（LLM 层可靠性）✅**、**37（真实 LLM 评测）✅**、**33（多 Agent 真协作）✅** 已实现（见上方修复说明）。
-- **深度补充剩余（32-37 已完成 4 项，对应 implementation_plan.md §16）**：按"面试被问概率 × 补齐成本"排序：
-  1. **34 分析器结构化抽取**（中）——schema 约束 + 修复重试，与 36 共享 `complete_json`；
-  2. **35 记忆摘要压缩**（中低）——深度加分项，复用 32 的召回基建。
+- §12.1-12.3 / §13-15 全部待办均已按设计文档实现（01-31 ✅）；深度补充 **32（RAG 向量检索）✅**、**36（LLM 层可靠性）✅**、**37（真实 LLM 评测）✅**、**33（多 Agent 真协作）✅**、**34（分析器结构化抽取）✅** 已实现（见上方修复说明）。
+- **深度补充剩余（32-37 已完成 5 项，对应 implementation_plan.md §16）**：按"面试被问概率 × 补齐成本"排序：
+  1. **35 记忆摘要压缩**（中低）——深度加分项，复用 32 的召回基建。
 
 > 依赖顺序建议：23（多源路由，底层）→ 24（分析器）→ 25（榜单，复用 23 的 provider）→ 26（时间线，复用 23 的 Releases）→ 27（定价，独立）→ 28（导出，复用 26/27）→ 29（评测，依赖 24/25/26 的结构化产出）→ 30/31（简历/面试达标补充，依赖已就绪的 `evaluation/benchmark.py` 真实执行版）。已全部完成。
-> 深度补充顺序：32 → 36 → 37 → 33 → 34 → 35（32 与 35 共享召回基建，36 与 34 共享 `complete_json`，37 依赖 36）。**32 ✅、36 ✅、37 ✅、33 ✅ 已完成，下一步 34 分析器结构化抽取。**
+> 深度补充顺序：32 → 36 → 37 → 33 → 34 → 35（32 与 35 共享召回基建，36 与 34 共享 `complete_json`，37 依赖 36）。**32 ✅、36 ✅、37 ✅、33 ✅、34 ✅ 已完成，下一步 35 记忆摘要压缩。**
