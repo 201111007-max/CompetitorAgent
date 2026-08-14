@@ -5,9 +5,65 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from typing import Any
 
 from competitor_agent.knowledge_base.competitor_store import CompetitorStore, TextChunk, chunk_text
+
+# 句子结束符（中文/英文句号、感叹、问号、分号后断句）
+_SENT_SPLIT_RE = re.compile(r"(?<=[。！？!?.；;])\s*")
+
+
+def _split_blocks(text: str) -> list[str]:
+    """按空行 / Markdown 标题行切候选块，保留标题为独立块。"""
+    blocks: list[str] = []
+    cur: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            if cur:
+                blocks.append(" ".join(cur))
+                cur = []
+            if stripped:
+                blocks.append(stripped)
+        else:
+            cur.append(stripped)
+    if cur:
+        blocks.append(" ".join(cur))
+    return blocks
+
+
+def chunk_text_semantic(text: str, size: int = 1200, overlap: int = 200) -> list[str]:
+    """语义感知分块：先按标题/空行/句子边界切候选块，再折叠到 size 上限。
+
+    与 ``chunk_text``（固定窗口硬切）不同，分块边界总是落在标题/段落/句末，
+    减少从句中截断；极长单句（>size）整句保留不硬切。
+    """
+    text = text.strip()
+    if not text:
+        return []
+    if len(text) <= size:
+        return [text]
+    sentences: list[str] = []
+    for block in _split_blocks(text):
+        sentences.extend(s for s in _SENT_SPLIT_RE.split(block) if s.strip())
+    chunks: list[str] = []
+    buf = ""
+    for sentence in sentences:
+        if len(sentence) > size:
+            if buf:
+                chunks.append(buf)
+                buf = ""
+            chunks.append(sentence)
+            continue
+        if buf and len(buf) + len(sentence) > size:
+            chunks.append(buf)
+            buf = sentence
+        else:
+            buf += sentence
+    if buf:
+        chunks.append(buf)
+    return chunks
 
 
 class Ingester:
@@ -24,11 +80,15 @@ class Ingester:
         source_url: str = "",
         chunk_size: int = 1200,
         overlap: int = 200,
+        semantic: bool = False,
     ) -> int:
-        """摄取一段文档，返回生成的片段数"""
+        """摄取一段文档，返回生成的片段数；semantic=True 用语义感知分块"""
         if not text.strip():
             return 0
-        chunks = chunk_text(text, size=chunk_size, overlap=overlap)
+        if semantic:
+            chunks = chunk_text_semantic(text, size=chunk_size, overlap=overlap)
+        else:
+            chunks = chunk_text(text, size=chunk_size, overlap=overlap)
         items = []
         for i, part in enumerate(chunks):
             chunk_id = _chunk_id(competitor, dimension, part)

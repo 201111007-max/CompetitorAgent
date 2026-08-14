@@ -142,6 +142,23 @@
 - **设计文档 31 §12.3 #11 失败类型统计**：已实现（见上方修复说明）——`FailureType` 五类分类 + `classify_case`（复用 accuracy_eval 判定口径）+ `Benchmark.run()` 聚合 `failure_stats`/`failure_records`（accuracy miss + strategy miss 归类去重）+ 分布报告（Markdown 表 + CSV failure 行 + `to_dict` 携带）+ `build_benchmark_api` 时间线隔离加固；首份分布（38 用例）：`{parse_failure:1}`——唯一失败为有意 miss 的 rumor case，accuracy 全命中。harness v0.5.0。
 - 全量测试通过（618 passed, 3 skipped；1 环境性失败同前：本机已装 playwright）。
 
+### 设计文档 32（RAG 真向量检索）实现中（2026-08-14，WIP 检查点）
+
+**已实现**：
+- `knowledge_base/vector_store.py`（新增）：`VectorStore`——chromadb `PersistentClient` 集合（懒创建）+ **可插拔嵌入** `embed_fn`（callable 注入 / `"hash"` 内置确定性哈希嵌入 / `None`→sentence-transformers 模型、本地有权重缓存时自动升级）；`is_available()` 探测 HF 本地缓存**权重文件**（不触发网络）；`embed/upsert/search/get_existing/clear`。
+- `CompetitorStore`：新增 `vector_store` 参数；`add/add_many/clear/_load_chunks` 增量同步向量索引（**跳过已存在 id + 去重**，规避 chromadb `DuplicateIDError`）；新增 `search_hybrid(query, top_k, alpha=0.5)`（alpha=向量权重，0 等价纯词袋、1 纯向量），词袋/向量各自 min-max 归一化后加权融合，返回 `(chunk, score, source∈{lexical,vector,fused})`；向量不可用时等价 `search`。
+- `Retriever.retrieve(..., strategy="hybrid"|"lexical")` 默认 hybrid（向量不可用自动降级词袋，行为不变）；`Ingester.ingest(..., semantic=True)` + `chunk_text_semantic`（标题/空行/句末边界切块，不从句中截断，超长单句整句保留）。
+- `api.py`：新增 `vector_store` 注入参数，`enable_rag` 时默认构造 `VectorStore()`（模型不可用→降级词袋，行为不变）。
+- 测试：`tests/unit/knowledge_base/test_vector_retrieval.py` 15 条——VectorStore mock 嵌入 upsert/search、可用性（callable/hash/无权重降级）、融合矛盾（同义词命中 hybrid / lexical 缺失）、alpha=0 等价词袋、语义 chunk 无句中截断、Retriever hybrid 差分、API 接线 stub。
+
+**发现的问题（已解决）**：
+1. **pip 网络**：默认华为镜像走代理 504 装不了包 → 绕行 `-i https://pypi.org/simple` 直连成功安装 chromadb 1.5.9 / sentence-transformers 5.7.0。
+2. **模型权重不可得**：huggingface 权重文件下载被代理 407 拦截（HEAD 200 但文件请求失败），bge-small-zh-v1.5 权重无法下载（本地仅缓存 config、无权重）→ 嵌入可插拔设计；`is_available()` 改探测**权重文件**而非 config.json，避免 `SentenceTransformer` 构造触发网络重试（曾使测试挂起 ~13min）。
+3. **重复 chunk_id**：历史知识库 JSON（~2360 chunks）存在重复 id（同内容重复摄入）→ 直接 upsert 触发 `DuplicateIDError` → `_embed_chunks` 跳过已存在 id + 去重修复。
+4. **测试污染防护**：API 接线测试改用 stub `CompetitorStore`（monkeypatch），避免触碰真实用户数据目录 `~/.competitor_agent/memory/knowledge_base.json`。
+
+**待办**：全量回归确认后 ① 表 32 行状态改 ✅ 并追加正式修复说明；② 同步设计文档 32 §3.1 后端描述为"chromadb 集合 + 可插拔嵌入（含内置 hash 离线兜底）"。
+
 ### 待办（下一步按序实施，均已有设计文档）
 - §12.1-12.3 / §13-15 全部待办均已按设计文档实现（01-31 ✅）。
 - **深度补充（32-37，对应 implementation_plan.md §16）**：已设计待实现，按"面试被问概率 × 补齐成本"排序：

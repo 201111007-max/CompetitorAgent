@@ -103,6 +103,7 @@ class CompetitorAnalysisAPI:
         enable_rag: bool = True,  # 设计文档 30：消融开关（默认开启，行为不变）
         enable_memory: bool = True,  # 设计文档 30：消融开关（默认开启，行为不变）
         rag_store: object | None = None,  # 设计文档 30：消融可注入共享知识库实例
+        vector_store: object | None = None,  # 设计文档 32：可注入向量层（测试/评测确定性 mock）
     ) -> None:
         # 配置注入：显式参数优先，其次 config，最后默认值
         cfg = config or load_config()
@@ -138,11 +139,22 @@ class CompetitorAnalysisAPI:
             from competitor_agent.knowledge_base.competitor_store import CompetitorStore
             from competitor_agent.knowledge_base.ingester import Ingester
             from competitor_agent.knowledge_base.retriever import Retriever
+            from competitor_agent.knowledge_base.vector_store import VectorStore
 
-            self._store = rag_store or CompetitorStore()
+            # 向量层（设计文档 32）：注入的优先；默认 VectorStore 懒加载——嵌入模型
+            # 不可用（未缓存/未装依赖）时 is_available()=False，检索自动降级纯词袋，行为不变
+            if vector_store is not None:
+                self._vector_store = vector_store
+            else:
+                self._vector_store = VectorStore()
+            self._store = rag_store or CompetitorStore(vector_store=self._vector_store)
             self._ingester = Ingester(store=self._store)
             self._retriever = Retriever(store=self._store)
         else:
+            self._store = None
+            self._ingester = None
+            self._retriever = None
+            self._vector_store = None
             self._store = None
             self._ingester = None
             self._retriever = None
