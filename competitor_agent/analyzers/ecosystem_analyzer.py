@@ -9,11 +9,10 @@
 """
 from __future__ import annotations
 
-import json
 from typing import Any
 
-from competitor_agent.analyzers.base import BaseCompetitorAnalyzer
 from competitor_agent.agent.prompts.trust_boundary import wrap_untrusted
+from competitor_agent.analyzers.base import BaseCompetitorAnalyzer
 from competitor_agent.domain_types.enums import DimensionType
 from competitor_agent.domain_types.info_gap import InfoGap
 from competitor_agent.domain_types.observation import Observation
@@ -51,8 +50,15 @@ class EcosystemAnalyzer(BaseCompetitorAnalyzer):
             {"role": "user", "content": wrap_untrusted(observation.raw_text[:4000], observation.evidence.url)},
         ]
 
-    def _parse_result(self, text: str) -> dict[str, Any]:
-        return json.loads(text)  # type: ignore[no-any-return]
+    def _details_properties(self) -> dict[str, Any]:
+        """details 结构（设计文档 34）：对齐评测 _ecosystem_signal 抽取键命名空间。"""
+        return {
+            "mcp_servers": {"type": "array", "items": {"type": "object"}},
+            "plugins": {"type": "object"},
+            "ide_support": {"type": "array", "items": {"type": "string"}},
+            "integrations": {"type": "array", "items": {"type": "string"}},
+            "repo_activity": {"type": "object"},
+        }
 
     def _rule_extract(self, observation: Observation) -> dict[str, Any]:
         text = observation.raw_text or ""

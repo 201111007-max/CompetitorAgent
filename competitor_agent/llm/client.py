@@ -45,6 +45,12 @@ _RETRYABLE_ERR_FRAGMENTS = (
     "connection",
 )
 
+# 结构化补全（设计文档 34）修复重试提示：回灌 schema 校验错误，要求只输出合法 JSON
+_JSON_REPAIR_HINT = (
+    "你上一次的输出未通过 JSON Schema 校验。请重新生成，只输出合法的 JSON 对象本身，"
+    "不要包裹在 Markdown 代码块里。务必修正以下问题："
+)
+
 
 def _estimate_tokens(texts: list[str]) -> int:
     return sum(len(t) // 4 for t in texts)
@@ -101,8 +107,12 @@ class LLMClient:
                 return value.strip()
         return None
 
-    def complete(self, messages: list[dict[str, str]]) -> str:
-        """最通用：返回原始文本（带重试 + 多模型 fallback + 超时）"""
+    def complete(self, messages: list[dict[str, str]], json_mode: bool = False) -> str:
+        """最通用：返回原始文本（带重试 + 多模型 fallback + 超时）。
+
+        json_mode（设计文档 34）：SDK 路径附加 ``response_format={"type": "json_object"}``
+        软性约束结构化输出；注入 call_func 路径透传 messages 不动（mock 由调用方保证 JSON）。
+        """
         started = time.monotonic()
         if self._call is not None:
             return self._attempt_models(
@@ -128,6 +138,8 @@ class LLMClient:
 
         def attempt(model: str) -> Any:
             create_kwargs: dict[str, Any] = {"model": model, "messages": messages}
+            if json_mode:
+                create_kwargs["response_format"] = {"type": "json_object"}
             if self._timeout is not None:
                 create_kwargs["timeout"] = self._timeout
             return client.chat.completions.create(**create_kwargs)  # type: ignore[arg-type]
@@ -162,7 +174,7 @@ class LLMClient:
                         timed_out=saw_timeout,
                     )
                     return text
-                except Exception as exc:  # noqa: BLE001 —— 聚合各类 SDK/mock 错误统一判定
+                except Exception as exc:
                     last_exc = exc
                     if self._is_timeout(exc):
                         saw_timeout = True
@@ -252,12 +264,110 @@ class LLMClient:
             timed_out=timed_out,
         )
 
-    def complete_json(self, messages: list[dict[str, str]]) -> dict[str, Any]:
-        """要求模型输出 JSON，解析失败抛 LLMUnavailableError（底层走带重试的 complete）"""
-        text = self.complete(messages)
-        try:
-            result = json.loads(text)
-            assert isinstance(result, dict)
-            return result
-        except (json.JSONDecodeError, AssertionError) as exc:
-            raise LLMUnavailableError(f"LLM 返回非 JSON: {exc}") from exc
+    def complete_json(
+        self,
+        messages: list[dict[str, str]],
+        schema: dict[str, Any] | None = None,
+        retries: int = 2,
+    ) -> dict[str, Any]:
+        """带 JSON Schema 约束的结构化补全（设计文档 34）。
+
+        - 解析失败 / schema 校验失败 → 把错误信息回灌 prompt 修复重试（≤``retries`` 次）；
+        - 重试耗尽仍失败 → 抛 ``LLMUnavailableError``（由调用方降级规则）；
+        - ``schema=None`` 保持旧语义：仅 ``json.loads`` 校验，不做结构约束。
+        """
+        retry_budget = max(0, int(retries))
+        attempt = 0
+        last_error = ""
+        while True:
+            attempt += 1
+            prompt = messages if attempt == 1 else (
+                messages + [{"role": "user", "content": _JSON_REPAIR_HINT + last_error}]
+            )
+            text = self.complete(prompt, json_mode=True)
+            try:
+                result = json.loads(text)
+                if not isinstance(result, dict):
+                    raise json.JSONDecodeError(
+                        f"期望 JSON 对象，实际 {type(result).__name__}", text, 0
+                    )
+            except json.JSONDecodeError as exc:
+                last_error = f"JSON 解析失败: {exc}"
+            else:
+                problems = self._validate_schema(result, schema) if schema is not None else []
+                if problems:
+                    last_error = "；".join(problems)
+                else:
+                    return result
+            if attempt > retry_budget:
+                break
+        raise LLMUnavailableError(
+            f"LLM 结构化补全失败（{attempt} 次尝试）: {last_error}"
+        )
+
+    @classmethod
+    def _validate_schema(cls, data: Any, schema: dict[str, Any]) -> list[str]:
+        """JSON Schema 子集校验：返回问题列表（空列表 = 通过）。
+
+        支持 ``type``（object/array/string/number/integer/boolean）+ ``required`` +
+        ``properties``（object 嵌套）+ ``items``（array 元素）+ ``enum``。
+        ``null`` 值对任意类型放行（LLM 常以 null 表达"无数据"，不视为类型错误）。
+        """
+        problems: list[str] = []
+        cls._walk_schema(data, schema, "$", problems)
+        return problems
+
+    @staticmethod
+    def _walk_schema(
+        data: Any, schema: dict[str, Any], path: str, problems: list[str]
+    ) -> None:
+        expected = schema.get("type")
+        if expected is not None and data is not None and not LLMClient._type_matches(data, expected):
+            problems.append(f"{path} 期望 {expected}，实际 {type(data).__name__}")
+            return
+        if data is None:
+            return  # null 对任意类型放行（LLM 常以 null 表达"无数据"）
+
+        if expected == "array":
+            if not isinstance(data, list):
+                problems.append(f"{path} 期望 array，实际 {type(data).__name__}")
+                return
+            items = schema.get("items")
+            if items:
+                for idx, item in enumerate(data):
+                    LLMClient._walk_schema(item, items, f"{path}[{idx}]", problems)
+            return
+
+        if expected == "object" or "properties" in schema or "required" in schema:
+            if not isinstance(data, dict):
+                problems.append(f"{path} 期望 object，实际 {type(data).__name__}")
+                return
+            for req in schema.get("required", []):
+                if req not in data:
+                    problems.append(f"{path} 缺少必填字段 {req}")
+            for key, sub in (schema.get("properties") or {}).items():
+                if key in data:
+                    LLMClient._walk_schema(data[key], sub, f"{path}.{key}", problems)
+            return
+
+        enum = schema.get("enum")
+        if enum is not None and data not in enum:
+            problems.append(f"{path} 取值 {data!r} 不在允许枚举 {enum}")
+
+    @staticmethod
+    def _type_matches(data: Any, expected: str) -> bool:
+        if expected == "object":
+            return isinstance(data, dict)
+        if expected == "array":
+            return isinstance(data, list)
+        if expected == "string":
+            return isinstance(data, str)
+        if expected == "number":
+            return isinstance(data, (int, float)) and not isinstance(data, bool)
+        if expected == "integer":
+            return isinstance(data, int) and not isinstance(data, bool)
+        if expected == "boolean":
+            return isinstance(data, bool)
+        if expected == "null":
+            return data is None
+        return True

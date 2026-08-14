@@ -9,13 +9,12 @@
 """
 from __future__ import annotations
 
-import json
 import re
 from datetime import datetime, timezone
 from typing import Any
 
-from competitor_agent.analyzers.base import BaseCompetitorAnalyzer
 from competitor_agent.agent.prompts.trust_boundary import wrap_untrusted
+from competitor_agent.analyzers.base import BaseCompetitorAnalyzer
 from competitor_agent.domain_types.enums import DimensionType, ResultStatus
 from competitor_agent.domain_types.info_gap import InfoGap
 from competitor_agent.domain_types.observation import Observation
@@ -105,8 +104,16 @@ class PricingAnalyzer(BaseCompetitorAnalyzer):
             {"role": "user", "content": wrap_untrusted(observation.raw_text[:4000], observation.evidence.url)},
         ]
 
-    def _parse_result(self, text: str) -> dict[str, Any]:
-        return json.loads(text)  # type: ignore[no-any-return]
+    def _details_properties(self) -> dict[str, Any]:
+        """details 结构（设计文档 34）：plans/usage 与评测 _plan_price 抽取键对齐。
+
+        plans 元素仅约束为 object（兼容 LLM 的 monthly_price_usd 契约键与
+        mock/规则的 price+period 兼容键两种形态，不深层卡类型）。
+        """
+        return {
+            "plans": {"type": "array", "items": {"type": "object"}},
+            "usage": {"type": "object"},
+        }
 
     def _rule_extract(self, observation: Observation) -> dict[str, Any]:
         lines = [ln.strip() for ln in observation.raw_text.splitlines() if ln.strip()]
@@ -229,7 +236,7 @@ def _build_usage(lines: list[str]) -> dict[str, Any]:
     if not per_by_unit and not model_tiers:
         return {}
     key = "request" if "request" in per_by_unit else next(iter(per_by_unit), "request")
-    unit = key[:-1] if key.endswith("s") else key  # "requests" → "request" 单数
+    unit = key.removesuffix("s")  # "requests" → "request" 单数
     return {
         "unit": unit,
         "per_unit_price": per_by_unit.get(key),

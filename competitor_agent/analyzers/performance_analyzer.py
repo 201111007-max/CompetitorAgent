@@ -6,12 +6,11 @@
 """
 from __future__ import annotations
 
-import json
 import re
 from typing import Any
 
-from competitor_agent.analyzers.base import BaseCompetitorAnalyzer
 from competitor_agent.agent.prompts.trust_boundary import wrap_untrusted
+from competitor_agent.analyzers.base import BaseCompetitorAnalyzer
 from competitor_agent.domain_types.enums import DimensionType, ResultStatus
 from competitor_agent.domain_types.info_gap import InfoGap
 from competitor_agent.domain_types.observation import Observation
@@ -83,8 +82,12 @@ class PerformanceAnalyzer(BaseCompetitorAnalyzer):
             {"role": "user", "content": wrap_untrusted(observation.raw_text[:4000], observation.evidence.url)},
         ]
 
-    def _parse_result(self, text: str) -> dict[str, Any]:
-        return json.loads(text)  # type: ignore[no-any-return]
+    def _details_properties(self) -> dict[str, Any]:
+        """details 结构（设计文档 34）：benchmarks 与评测 _benchmark_score 抽取键对齐。
+
+        元素仅约束 object——兼容 LLM 的 name/score 契约键与规则/mock 的 raw 行形态。
+        """
+        return {"benchmarks": {"type": "array", "items": {"type": "object"}}}
 
     def _rule_extract(self, observation: Observation) -> dict[str, Any]:
         benchmarks = []
