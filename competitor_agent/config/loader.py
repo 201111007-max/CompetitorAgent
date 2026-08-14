@@ -119,6 +119,9 @@ class LLMConfig:
     model: str = "deepseek-v4-flash"
     temperature: float = 0.1
     max_tokens: int = 2048
+    fallback_models: list[str] = field(default_factory=list)  # 主模型重试耗尽后的回退模型链（设计文档 36）
+    timeout: float | None = None  # 单次调用超时（秒，连接+读）；None 用 SDK 默认
+    max_retries: int = 3  # 每个模型的可重试错误最大重试次数
 
 
 @dataclass
@@ -137,6 +140,7 @@ class AppConfig:
     model: str = "deepseek-v4-flash"
     temperature: float = 0.1
     max_tokens: int = 2048
+    llm: LLMConfig = field(default_factory=LLMConfig)
     budget: BudgetConfig = field(default_factory=BudgetConfig)
     termination: TerminationConfig = field(default_factory=TerminationConfig)
     execution: ExecutionConfig = field(default_factory=ExecutionConfig)
@@ -177,6 +181,7 @@ def load_config(path: str | os.PathLike | None = None) -> AppConfig:
         model=raw.get("model", "deepseek-v4-flash"),
         temperature=raw.get("temperature", 0.1),
         max_tokens=raw.get("max_tokens", 2048),
+        llm=_build_section(LLMConfig, raw.get("llm")),
         budget=_build_section(BudgetConfig, raw.get("budget")),
         termination=_build_section(TerminationConfig, raw.get("termination")),
         execution=_build_section(ExecutionConfig, raw.get("execution")),

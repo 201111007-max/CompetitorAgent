@@ -95,7 +95,13 @@ async def _event_generator(
             pass
 
     api_with_sink = CompetitorAnalysisAPI(
-        llm=LLMClient(model=_config.model, base_url=_config.api_base_url),
+        llm=LLMClient(
+            model=_config.llm.model,
+            base_url=_config.llm.api_base_url,
+            fallback_models=_config.llm.fallback_models,
+            timeout=_config.llm.timeout,
+            max_retries=_config.llm.max_retries,
+        ),
         use_llm=True,
         memory=_get_memory(),
         event_sink=_on_event,
