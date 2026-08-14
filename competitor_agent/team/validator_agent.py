@@ -112,6 +112,45 @@ class FactValidator:
                 )
                 return
 
+    def arbitrate(self, results: list[DimensionResult]) -> dict[str, DimensionResult]:
+        """同维度多来源仲裁：按 置信度 > 证据源 trust > 时间新鲜度 取优（设计文档 33 §3.3）。
+
+        被丢弃的候选保留为最优结果的 conflict_evidence（不静默丢弃，供报告标注）。
+        每个维度只有一个结果时原样返回（与既有串行行为一致）。
+        """
+        by_dim: dict[str, list[DimensionResult]] = {}
+        for result in results:
+            by_dim.setdefault(result.dimension, []).append(result)
+
+        arbitrated: dict[str, DimensionResult] = {}
+        for dim, candidates in by_dim.items():
+            if len(candidates) == 1:
+                arbitrated[dim] = candidates[0]
+                continue
+            best = max(candidates, key=self._candidate_rank)
+            conflicts = [c for c in candidates if c is not best]
+            if conflicts:
+                best.conflict_evidence = [
+                    self._describe_conflict(c) for c in conflicts
+                ]
+            arbitrated[dim] = best
+        return arbitrated
+
+    @staticmethod
+    def _candidate_rank(result: DimensionResult) -> tuple[float, float, str]:
+        """仲裁排序键：置信度 > 平均证据 trust > 时间新鲜度（ISO 时间戳字典序）。"""
+        trust = (
+            sum(e.trust_level for e in result.evidence) / len(result.evidence)
+            if result.evidence
+            else 0.0
+        )
+        return (result.confidence, trust, result.timestamp)
+
+    @staticmethod
+    def _describe_conflict(result: DimensionResult) -> str:
+        sources = ", ".join(e.source_name for e in result.evidence) or "无证据"
+        return f"{result.dimension}: {result.summary[:120]}（来源 {sources}，置信 {result.confidence:.2f}）"
+
 
 class ValidatorAgent(BaseAgent):
     """校验 Agent：包装 FactValidator，发布校验结果"""
@@ -157,3 +196,7 @@ class ValidatorAgent(BaseAgent):
             },
         )
         return outcome
+
+    def arbitrate(self, results: list[DimensionResult]) -> dict[str, DimensionResult]:
+        """同维度多来源仲裁（委托 FactValidator，设计文档 33 §3.3）"""
+        return self._validator.arbitrate(results)

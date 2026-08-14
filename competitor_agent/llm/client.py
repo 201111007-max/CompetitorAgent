@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import random
+import threading
 import time
 from typing import Any, Callable
 
@@ -84,6 +85,8 @@ class LLMClient:
         self._base_url = base_url or os.getenv(_BASE_URL_ENV)
         # 累计调用成本（设计文档 37：真实评测报告成本核算，复用 _log_call 的 cost_usd）
         self.total_cost_usd = 0.0
+        # 成本累计锁：并行编排（设计文档 33）多线程并发调用时原子累加
+        self._cost_lock = threading.Lock()
 
     @staticmethod
     def has_api_key() -> bool:
@@ -231,7 +234,8 @@ class LLMClient:
             + completion_tokens / 1000 * _PRICING_PER_1K["output"],
             6,
         )
-        self.total_cost_usd = round(self.total_cost_usd + cost_usd, 6)
+        with self._cost_lock:
+            self.total_cost_usd = round(self.total_cost_usd + cost_usd, 6)
         emit_session_event(
             "llm.call", "llm",
             f"LLM 调用完成 {final_model or self._model}（{prompt_tokens}+{completion_tokens} tokens, "

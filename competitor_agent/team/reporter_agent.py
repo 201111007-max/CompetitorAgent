@@ -78,4 +78,10 @@ class ReporterAgent(BaseAgent):
             lines.append("\n## 校验备注")
             for issue in validation.issues:
                 lines.append(f"- [{issue.severity}] {issue.dimension}: {issue.message}")
+        conflicts = [r for r in report.dimension_results if r.conflict_evidence]
+        if conflicts:
+            lines.append("\n## 多来源仲裁备注")
+            for result in conflicts:
+                for note in result.conflict_evidence:
+                    lines.append(f"- {result.dimension}: 采纳现结论，丢弃 {note}")
         return "\n".join(lines)

@@ -494,6 +494,61 @@ class CompetitorAnalysisAPI:
         与 single 对齐的统一语义（设计文档 18 §2）：同一规划埋点、同一 BudgetController、
         同一 checkpoint 落盘/清理、取消后保留 checkpoint 供 resume。
         """
+        strategy, orch, slog = self._begin_team(task, session_id, max_retries)
+
+        # 预算一致性：与 single 共用 BudgetController，耗尽即提前终止
+        stop = self._budget.should_stop(strategy.gaps)
+        if stop.should_stop:
+            logger.info("预算已耗尽（%s），team 提前终止", stop.reason)
+            report = self._builder.build(
+                competitor=strategy.competitor,
+                results=[],
+                gaps_pending=list(strategy.gaps),
+                terminal_state=self._terminal_state(stop.reason, strategy).value,
+            )
+        else:
+            report = orch.run(task, strategy=strategy)
+            self._budget.record_iteration(cost=0.01)
+
+        return self._finish_team(report, task, session_id, strategy, slog)
+
+    async def analyze_team_async(
+        self,
+        task: str,
+        session_id: str | None = None,
+        max_retries: int = 1,
+        max_parallel: int = 4,
+    ) -> CompetitorReport:
+        """异步多 Agent 流水线（设计文档 33）：与 analyze_team 语义一致，
+        但编排走 TeamOrchestrator.run_async——Collector 总线驱动、Analyzer 按缺口并行、
+        Validator 冲突仲裁。默认入口仍为同步 run()（回归安全网），本方法为可选 async 入口。
+        """
+        strategy, orch, slog = self._begin_team(task, session_id, max_retries, max_parallel)
+
+        # 预算一致性：与 single 共用 BudgetController，耗尽即提前终止
+        stop = self._budget.should_stop(strategy.gaps)
+        if stop.should_stop:
+            logger.info("预算已耗尽（%s），team 提前终止", stop.reason)
+            report = self._builder.build(
+                competitor=strategy.competitor,
+                results=[],
+                gaps_pending=list(strategy.gaps),
+                terminal_state=self._terminal_state(stop.reason, strategy).value,
+            )
+        else:
+            report = await orch.run_async(task, strategy=strategy)
+            self._budget.record_iteration(cost=0.01)
+
+        return self._finish_team(report, task, session_id, strategy, slog)
+
+    def _begin_team(
+        self,
+        task: str,
+        session_id: str | None,
+        max_retries: int,
+        max_parallel: int = 4,
+    ) -> tuple[CompetitorStrategy, TeamOrchestrator, object]:
+        """analyze_team / analyze_team_async 共用前置：会话埋点 + 统一规划 + 组装编排器。"""
         self._emit(ProgressEvent(event="phase_start", phase="strategic", message=f"规划: {task}"))
         set_current_session(session_id)
         slog = get_session_logger(session_id)
@@ -519,27 +574,24 @@ class CompetitorAnalysisAPI:
             use_llm=self._use_llm,
             memory=self._memory,
             max_retries=max_retries,
+            max_parallel=max_parallel,
             ingester=self._ingester,
             retriever=self._retriever,
             session_id=session_id,
             providers=self._providers,
             builder=self._builder,
         )
+        return strategy, orch, slog
 
-        # 预算一致性：与 single 共用 BudgetController，耗尽即提前终止
-        stop = self._budget.should_stop(strategy.gaps)
-        if stop.should_stop:
-            logger.info("预算已耗尽（%s），team 提前终止", stop.reason)
-            report = self._builder.build(
-                competitor=strategy.competitor,
-                results=[],
-                gaps_pending=list(strategy.gaps),
-                terminal_state=self._terminal_state(stop.reason, strategy).value,
-            )
-        else:
-            report = orch.run(task, strategy=strategy)
-            self._budget.record_iteration(cost=0.01)
-
+    def _finish_team(
+        self,
+        report: CompetitorReport,
+        task: str,
+        session_id: str | None,
+        strategy: CompetitorStrategy,
+        slog: object,
+    ) -> CompetitorReport:
+        """analyze_team / analyze_team_async 共用收尾：记忆沉淀 + checkpoint + 埋点 + 取消/归档。"""
         # 记忆闭环：分析成功后沉淀技能 + 记录数据源成功率（与单 Agent 路径对齐）
         self._record_team_memory_success(report)
 
