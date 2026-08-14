@@ -26,13 +26,18 @@
 ```python
 class VectorStore:
     """chromadb 向量集合：embedding 生成 + upsert + 语义检索。
-    未安装依赖时 is_available() 返回 False，调用方降级词袋。"""
+    未安装依赖/模型不可用时 is_available() 返回 False，调用方降级词袋。"""
     def __init__(self, collection_name: str = "competitor_chunks",
-                 model_name: str = "BAAI/bge-small-zh-v1.5") -> None: ...
-    def is_available(self) -> bool: ...          # 依赖与模型可用性探测
+                 embed_fn: Callable | str | None = None) -> None:
+        # embed_fn 可插拔嵌入：
+        #   callable  → 外部注入（测试/自定义模型）
+        #   "hash"    → 内置确定性哈希嵌入（无依赖离线兜底）
+        #   None      → sentence-transformers 模型（本地有权重缓存时自动升级）
+    def is_available(self) -> bool: ...          # 探测依赖 + HF 本地权重文件（不触发网络）
     def embed(self, texts: list[str]) -> list[list[float]]: ...
     def upsert(self, chunk_ids: list[str], vectors: list[list[float]], metadatas: list[dict]) -> None: ...
     def search(self, query_vec: list[float], top_k: int) -> list[tuple[str, float]]: ...  # (chunk_id, score)
+    def get_existing(self, chunk_ids: list[str]) -> set[str]: ...  # 增量同步去重
     def clear(self) -> None: ...
 ```
 

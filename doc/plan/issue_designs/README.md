@@ -38,11 +38,11 @@
 | `29_evaluation_coverage_design.md` | §12.3 #9：评测盲区（生态/口碑/时间线覆盖） | P2 | ✅ 已实现 |
 | `30_ablation_comparison_design.md` | §12.3 #10：无对比/消融实验（有无 RAG/rerank/memory） | P2 | ✅ 已实现 |
 | `31_failure_stats_design.md` | §12.3 #11：无失败类型统计（五类分类+聚合分布） | P2 | ✅ 已实现 |
-| `32_rag_vector_retrieval_design.md` | §16.1 RAG：纯词袋检索，向量化未实现（深度补充） | P2 | 📋 已设计，待实现 |
+| `32_rag_vector_retrieval_design.md` | §16.1 RAG：纯词袋检索，向量化未实现（深度补充） | P2 | ✅ 已实现 |
 | `33_team_async_orchestration_design.md` | §16.1 多 Agent：顺序流水线非真协作（深度补充） | P2 | 📋 已设计，待实现 |
 | `34_analyzer_structured_extraction_design.md` | §16.1 分析器：LLM 一次调用+关键词兜底（深度补充） | P2 | 📋 已设计，待实现 |
 | `35_memory_compression_design.md` | §16.1 记忆：四层=JSON 计数，无摘要/向量召回（深度补充） | P3 | 📋 已设计，待实现 |
-| `36_llm_reliability_design.md` | §16.1 LLM 层：单次调用无重试/多模型 fallback（深度补充） | P2 | 📋 已设计，待实现 |
+| `36_llm_reliability_design.md` | §16.1 LLM 层：单次调用无重试/多模型 fallback（深度补充） | P2 | ✅ 已实现 |
 | `37_real_llm_evaluation_design.md` | §16.1 评测：真实 LLM 质量未量化（深度补充） | P2 | 📋 已设计，待实现 |
 
 > **问题 1 修复说明**：多 Agent 已接入主流程。`CompetitorAnalysisAPI.analyze()` 新增 `mode` 参数（`single` / `team`，**默认 `team`**），`mode="team"` 时走事件驱动 + 状态决策的多 Agent 流水线（Collector→Analyzer→Validator→Reporter，支持 SUCCESS/RETRY/DEGRADED/FAILED 决策）。CLI 新增 `--mode` 选项。全量 312 个测试通过。
@@ -107,6 +107,10 @@
 
 > **设计文档 31 修复说明**：失败类型统计已落地。① **失败分类** `evaluation/failure.py`：`FailureType` 五类（`source_unavailable` 源抓取失败/降级全灭/BLOCKED、`hallucination` 预测无真值支持、`no_data` 源有响应但页面无目标信息、`parse_failure` 有内容但抽取/归一化错误、`budget_exhausted` 预算触停）+ `FailureRecord`（case_id/dimension/type/detail/evidence_urls）+ `classify_case`（优先级：幻觉 > 预算 > 源不可用 > 无数据 > 解析错误；全命中返回空；判定口径复用 `accuracy_eval` 归一化，与 `hallucination_instances` 一一对应）。② **聚合**：`Benchmark.run()` 逐 case 保留真实报告 → `_classify_failures`（accuracy 未命中 case 归类 + strategy miss case——无有效源 → `SOURCE_UNAVAILABLE`、有源未选最优 → `PARSE_FAILURE`——按 (case_id, type) 去重）→ `BenchmarkReport.failure_stats`（type→count）+ `failure_records`（逐条样本，`to_dict` 同步携带，供结构化导出复用）。③ **渲染/导出**：`_write_markdown` 增「## 失败类型分布」表（类型/计数/占比 + 逐 case 样本表含证据 URL）；`_write_csv` 增 `failure.{type}` 与 `failure.total` 行。④ **时间线隔离加固**：`build_benchmark_api` 注入每 case 独立的空 `TimelineMemory`（临时目录），保证「首轮无基线不产生事件」边界（设计文档 26/29）不受外部共享时间线状态污染——失败统计可信可复现。⑤ **测试** `test_failure_stats.py` 19 条：classify_case 5 类场景 + 优先级 + 全命中空 + 证据收集、`_classify_failures` 聚合计数/去重/空、自定义 fixtures 集成（真实链路 mock LLM + 固定页面 → `{hallucination:1, no_data:1, parse_failure:2}`）、默认 38 用例报告含分布表与 CSV failure 行。⑥ **首份分布**（默认 38 用例 mock）：`failure_stats={parse_failure:1}`——唯一确定性失败为有意 miss 的 `cursor_rumor_miss_2026`（有源未选最优），accuracy 全命中。harness 版本 **0.4.0 → 0.5.0**。
 
+> **设计文档 32 修复说明**：RAG 真向量检索已落地。① **`VectorStore`（新增 `knowledge_base/vector_store.py`）**：chromadb `PersistentClient` 集合（懒创建）+ **可插拔嵌入** `embed_fn`（callable 注入 / `"hash"` 内置确定性哈希嵌入 / `None`→sentence-transformers、本地有权重缓存时自动升级）；`is_available()` 只探测依赖与 HF 本地缓存**权重文件**、不触发网络；`embed/upsert/search/get_existing/clear`。② **`CompetitorStore`**：新增 `vector_store` 参数，`add/add_many/clear/_load_chunks` 增量同步向量索引（**跳过已存在 id + 去重**，规避 chromadb `DuplicateIDError`）；新增 `search_hybrid(query, top_k, alpha=0.5)`——词袋/向量各自 min-max 归一化后 alpha 加权融合，返回 `(chunk, score, source∈{lexical,vector,fused})`，向量不可用等价 `search`。③ **`Retriever.retrieve(..., strategy="hybrid"|"lexical")`** 默认 hybrid（向量不可用自动降级词袋，行为不变）；**`Ingester.ingest(semantic=True)`** + `chunk_text_semantic`（标题/空行/句末边界切块，不从句中截断，超长单句整句保留）。④ **`api.py`** 新增 `vector_store` 注入参数，`enable_rag` 时默认构造（模型不可用→降级词袋）。⑤ 测试 `tests/unit/knowledge_base/test_vector_retrieval.py` 15 条（mock 嵌入 upsert/search、可用性 callable/hash/无权重降级、融合矛盾同义词命中 hybrid/lexical 缺失、alpha=0 等价词袋、语义 chunk 无句中截断、Retriever hybrid 差分、API 接线 stub）。全量 652 个测试通过。实现中记录 4 个已解决问题：pip 走代理 504（绕行 `-i https://pypi.org/simple` 直连装 chromadb 1.5.9/sentence-transformers 5.7.0）、HF 权重被代理 407 拦截→嵌入可插拔 + `is_available` 探测权重文件避免 `SentenceTransformer` 构造触网挂起（曾挂 ~13min）、历史知识库 ~2360 chunks 重复 id→跳过已存在+去重、API 接线测试改 stub 避免污染真实用户数据目录。
+
+> **设计文档 36 修复说明**：LLM 层可靠性已落地。① **重试与退避** `llm/client.py`：`LLMClient` 新增 `fallback_models`/`timeout`/`max_retries`/`backoff` 参数；`complete` 内 `_attempt_models` 逐模型 × 逐次重试——可重试错误（`_should_retry`：429/408/5xx 状态码或异常类名含 ratelimit/connection/timeout/internalserver）指数退避（1s、2s、4s…+ 抖动）重试 ≤`max_retries`；**不可重试（401/400/404）立即抛**不浪费重试；主模型重试耗尽自动切 `fallback_models` 链；**全灭抛 `LLMUnavailableError`** 降级规则（语义不变，仅触发频率更低）。② **超时**：SDK 路径每次调用透传 `timeout`（连接+读）。③ **调用日志** `_log_call` 增 `attempts`/`final_model`/`retried`/`timed_out` 字段（脱敏，不落 prompt/密钥）。④ **配置** `config/loader.py`：`LLMConfig` 增 `fallback_models`（默认空）/`timeout`（默认 None）/`max_retries`（默认 3），并正式接入 `AppConfig.llm` + `load_config` 解析 `llm` section（此前 LLMConfig 是未接线的死配置）；`review_config.yaml` 增 `llm` section（api_base_url/model/fallback_models/timeout:120/max_retries:3）。⑤ **接线**：`cli.py`（`_build_llm`）/`web_app.py` 构造 `LLMClient` 改读 `cfg.llm`，业务代码零改动透明生效；`call_func` 注入路径（测试/mock）完全兼容。新增 `tests/unit/llm/test_client_reliability.py` 11 条（重试后成功 attempts=3、连续失败抛错、401/普通异常不重试立即抛、fallback 成功 final_model/全灭、TimeoutError 重试且 timed_out 标记、LLMConfig 默认与 YAML 解析叠加）。全量 676 个测试通过（675 passed / 1 环境性失败同前：本机已装 playwright）。
+
 ## 设计文档统一模板
 
 每个设计文档包含以下章节：
@@ -142,7 +146,7 @@
 - **设计文档 31 §12.3 #11 失败类型统计**：已实现（见上方修复说明）——`FailureType` 五类分类 + `classify_case`（复用 accuracy_eval 判定口径）+ `Benchmark.run()` 聚合 `failure_stats`/`failure_records`（accuracy miss + strategy miss 归类去重）+ 分布报告（Markdown 表 + CSV failure 行 + `to_dict` 携带）+ `build_benchmark_api` 时间线隔离加固；首份分布（38 用例）：`{parse_failure:1}`——唯一失败为有意 miss 的 rumor case，accuracy 全命中。harness v0.5.0。
 - 全量测试通过（618 passed, 3 skipped；1 环境性失败同前：本机已装 playwright）。
 
-### 设计文档 32（RAG 真向量检索）实现中（2026-08-14，WIP 检查点）
+### 设计文档 32（RAG 真向量检索）已完成（2026-08-14）
 
 **已实现**：
 - `knowledge_base/vector_store.py`（新增）：`VectorStore`——chromadb `PersistentClient` 集合（懒创建）+ **可插拔嵌入** `embed_fn`（callable 注入 / `"hash"` 内置确定性哈希嵌入 / `None`→sentence-transformers 模型、本地有权重缓存时自动升级）；`is_available()` 探测 HF 本地缓存**权重文件**（不触发网络）；`embed/upsert/search/get_existing/clear`。
@@ -157,16 +161,15 @@
 3. **重复 chunk_id**：历史知识库 JSON（~2360 chunks）存在重复 id（同内容重复摄入）→ 直接 upsert 触发 `DuplicateIDError` → `_embed_chunks` 跳过已存在 id + 去重修复。
 4. **测试污染防护**：API 接线测试改用 stub `CompetitorStore`（monkeypatch），避免触碰真实用户数据目录 `~/.competitor_agent/memory/knowledge_base.json`。
 
-**待办**：全量回归确认后 ① 表 32 行状态改 ✅ 并追加正式修复说明；② 同步设计文档 32 §3.1 后端描述为"chromadb 集合 + 可插拔嵌入（含内置 hash 离线兜底）"。
+**收尾（已完成）**：① 表 32 行状态已改 ✅ 并追加正式修复说明；② 设计文档 32 §3.1 后端描述已同步为"chromadb 集合 + 可插拔嵌入（含内置 hash 离线兜底）"。
 
 ### 待办（下一步按序实施，均已有设计文档）
-- §12.1-12.3 / §13-15 全部待办均已按设计文档实现（01-31 ✅）。
-- **深度补充（32-37，对应 implementation_plan.md §16）**：已设计待实现，按"面试被问概率 × 补齐成本"排序：
-  1. **32 RAG 真向量检索**（高）——chromadb 已有依赖与接口，性价比最高；
-  2. **36 LLM 层可靠性**（中）→ **37 真实 LLM 评测**（高）——先稳链路再出真实质量报告，补上"评测只测了 mock"的信任环；
-  3. **33 多 Agent 真协作**（中高）——消除"名不副实"隐患（或按路线 2 明确降级叙事）；
-  4. **34 分析器结构化抽取**（中）——schema 约束 + 修复重试，与 36 共享 `complete_json`；
-  5. **35 记忆摘要压缩**（中低）——深度加分项，复用 32 的召回基建。
+- §12.1-12.3 / §13-15 全部待办均已按设计文档实现（01-31 ✅）；深度补充 **32（RAG 向量检索）✅**、**36（LLM 层可靠性）✅** 已实现（见上方修复说明）。
+- **深度补充剩余（32-37 已完成 2 项，对应 implementation_plan.md §16）**：按"面试被问概率 × 补齐成本"排序：
+  1. **37 真实 LLM 评测**（高）——36 已稳定 LLM 链路，出真实质量报告补上"评测只测了 mock"的信任环；
+  2. **33 多 Agent 真协作**（中高）——消除"名不副实"隐患（或按路线 2 明确降级叙事）；
+  3. **34 分析器结构化抽取**（中）——schema 约束 + 修复重试，与 36 共享 `complete_json`；
+  4. **35 记忆摘要压缩**（中低）——深度加分项，复用 32 的召回基建。
 
 > 依赖顺序建议：23（多源路由，底层）→ 24（分析器）→ 25（榜单，复用 23 的 provider）→ 26（时间线，复用 23 的 Releases）→ 27（定价，独立）→ 28（导出，复用 26/27）→ 29（评测，依赖 24/25/26 的结构化产出）→ 30/31（简历/面试达标补充，依赖已就绪的 `evaluation/benchmark.py` 真实执行版）。已全部完成。
-> 深度补充顺序：32 → 36 → 37 → 33 → 34 → 35（32 与 35 共享召回基建，36 与 34 共享 `complete_json`，37 依赖 36）。
+> 深度补充顺序：32 → 36 → 37 → 33 → 34 → 35（32 与 35 共享召回基建，36 与 34 共享 `complete_json`，37 依赖 36）。**32 ✅、36 ✅ 已完成，下一步 37 真实 LLM 评测。**
