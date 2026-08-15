@@ -51,6 +51,7 @@ from competitor_agent.core.report_exporter import (
 from competitor_agent.core.stop_verifier import StopVerifier
 from competitor_agent.core.strategic_loop import StrategicPlanner
 from competitor_agent.core.task_parser import parse_task
+from competitor_agent.core.url_guard import URLError, guard_http_url
 from competitor_agent.domain_types.competitor import Competitor
 from competitor_agent.domain_types.enums import GapStatus, ResultStatus, TerminalState
 from competitor_agent.domain_types.events import ProgressEvent
@@ -478,7 +479,15 @@ class CompetitorAnalysisAPI:
         return loop.run(task)
 
     def _react_web_extract(self, url: str) -> str:
-        """ReAct 工具：真实抓取给定 URL 的页面文本（失败返回可读信息）。"""
+        """ReAct 工具：真实抓取给定 URL 的页面文本（失败返回可读信息）。
+
+        抓取前过 URL 守卫（设计文档 41）：私网/保留地址拒绝，返回可读原因供回灌自恢复。
+        """
+        try:
+            if self._config.collector.block_private_urls:
+                url = guard_http_url(url)
+        except URLError as exc:
+            return f"URL 被安全守卫拦截: {exc}"
         try:
             obs = self._extractor.fetch(
                 InfoGap(field="web"),
@@ -486,7 +495,8 @@ class CompetitorAnalysisAPI:
             )
         except DataSourceUnavailableError as exc:
             return f"抓取失败: {exc}"
-        return (obs.raw_text or "").strip()[:2000] or "（页面无文本内容）"
+        max_chars = self._config.collector.max_content_chars
+        return (obs.raw_text or "").strip()[:max_chars] or "（页面无文本内容）"
 
     def analyze_team(
         self,
