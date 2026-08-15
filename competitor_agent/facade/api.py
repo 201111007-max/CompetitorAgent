@@ -13,6 +13,7 @@ M4 新增：
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from collections.abc import AsyncIterator
@@ -21,7 +22,7 @@ from pathlib import Path
 from typing import Callable
 
 from competitor_agent.agent.react_agent import ReactAgent
-from competitor_agent.agent.react_loop import ReactLoop
+from competitor_agent.agent.react_loop import ReactLoop, ReactRunResult
 from competitor_agent.agent.tool_registry import build_react_dispatcher
 from competitor_agent.analyzers.registry import AnalyzerRegistry
 from competitor_agent.collector.providers import build_providers
@@ -467,19 +468,150 @@ class CompetitorAnalysisAPI:
         """最近一次时间线快照重建为 CompetitorReport（告警 diff 的 prev；无则 None）。"""
         return self._timeline.report_for(name)
 
-    def analyze_react(self, task: str) -> str:
-        """ReAct 模式：LLM 驱动工具调用（需 LLM Key）
+    def analyze_react(self, task: str, session_id: str | None = None) -> str:
+        """ReAct 模式：LLM 驱动工具调用（需 LLM Key），返回结论文本。
 
         MCP 工具集多工具自主调用（设计文档 40）：web_search/github/pricing 等统一经
         build_react_dispatcher 注册；web_extract 复用真实采集链路 + URL 守卫（设计文档 41）。
+        与主路径共享统一会话上下文（设计文档 43 §2.2）：session_id 取消协作、
+        IterationBudget 步数预算、记忆/RAG 注入、事件推送，步数计入共享 BudgetController。
         """
+        loop = self._react_loop(task, session_id)
+        result = loop.run_with_result(task)
+        if result.steps:
+            self._budget.record_iteration(cost=0.01 * result.steps)
+        return result.answer
+
+    def analyze_react_report(self, task: str, session_id: str | None = None) -> CompetitorReport:
+        """ReAct 模式结构化入口（设计文档 43 §2.3）：产物入 CompetitorReport 而非裸字符串。
+
+        共享与 analyze 同源的会话上下文；结论文本优先按结构化 JSON
+        （summary/details/confidence，对齐设计文档 34 schema）解析为 DimensionResult，
+        非 JSON 时降级为单个 react 维度（summary=结论文本）。取消/预算耗尽 → 终态标注。
+        """
+        loop = self._react_loop(task, session_id)
+        result = loop.run_with_result(task)
+        if result.steps:
+            self._budget.record_iteration(cost=0.01 * result.steps)
+        terminal = (
+            "cancelled"
+            if result.cancelled
+            else ("partial" if result.budget_exhausted else "success")
+        )
+        dr = self._react_dimension_result(result)
+        report = self._builder.build(
+            competitor=self._react_competitor(task),
+            results=[dr] if dr is not None else [],
+            gaps_pending=[],
+            terminal_state=terminal,
+        )
+        return report
+
+    def _react_loop(self, task: str, session_id: str | None) -> ReactLoop:
+        """组装共享会话上下文的 ReactLoop（取消/预算/记忆/RAG/事件，与 analyze 同源）。"""
         dispatcher = build_react_dispatcher(
             config=self._config,
             web_extract=self._react_web_extract,
         )
         agent = ReactAgent(llm=self._llm or LLMClient(), dispatcher=dispatcher)
-        loop = ReactLoop(agent, event_sink=self._event_sink)
-        return loop.run(task)
+        budget = IterationBudget(
+            max_iterations=self._budget.max_iterations,
+            cost_limit=self._budget.cost_limit,
+        )
+        return ReactLoop(
+            agent,
+            event_sink=self._event_sink,
+            session_id=session_id,
+            budget=budget,
+            memory_context_fn=self._react_memory_context,
+            rag_fn=self._react_rag_context,
+        )
+
+    def _react_competitor(self, task: str) -> Competitor:
+        """从任务解析竞品（注册表命中带官方源；未知竞品退化为裸名）。"""
+        from competitor_agent.core.competitor_registry import resolve_competitor
+
+        try:
+            name = parse_task(task, llm=self._llm, use_llm=self._use_llm).primary_competitor
+        except Exception:  # noqa: BLE001 — 解析失败不影响 ReAct 产物
+            name = ""
+        if name and name != "unknown":
+            competitor = resolve_competitor(name)
+            if competitor is not None:
+                return competitor
+        return Competitor(name=name or "unknown")
+
+    def _react_memory_context(self, task: str) -> str:
+        """记忆召回（设计文档 35 recent_context，与 single 路径同口径）：失败静默降级。"""
+        if self._memory is None:
+            return ""
+        comp = self._react_competitor(task).name
+        if not comp or comp == "unknown":
+            return ""
+        try:
+            return "\n".join(self._memory.recent_context(comp, top_k=3, query=task))
+        except Exception:  # noqa: BLE001 — 记忆召回失败不影响推理
+            logger.warning("ReAct 记忆召回失败: %s", comp, exc_info=True)
+            return ""
+
+    def _react_rag_context(self, task: str) -> str:
+        """RAG 检索（与 GapExecutor._retrieve_rag 同口径）：失败静默降级。"""
+        if self._retriever is None:
+            return ""
+        comp = self._react_competitor(task).name
+        try:
+            chunks = self._retriever.retrieve(
+                query=task, competitor=comp, dimension="", top_k=5
+            )
+        except Exception:  # noqa: BLE001 — 检索失败不影响推理
+            logger.warning("ReAct RAG 检索失败: %s", comp, exc_info=True)
+            return ""
+        if not chunks:
+            return ""
+        lines = []
+        for c in chunks:
+            src = f"（来源: {c.source_url}）" if c.source_url else ""
+            lines.append(f"- [{c.competitor}/{c.dimension}]{src} {c.text[:300]}")
+        return "\n".join(lines)
+
+    def _react_dimension_result(self, result: ReactRunResult) -> DimensionResult | None:
+        """把 ReAct 结论文本归一化为 DimensionResult（结构化 JSON 优先，降级为单 react 维度）。
+
+        LLM 不可用等降级文案 → PARTIAL 低置信（不把"服务不可用"标成 COMPLETE）。
+        """
+        answer = (result.answer or "").strip()
+        parsed = None
+        if answer.startswith("{"):
+            try:
+                parsed = json.loads(answer)
+            except json.JSONDecodeError:
+                parsed = None
+        if isinstance(parsed, dict) and "summary" in parsed:
+            confidence = float(parsed.get("confidence", 0.7))
+            return DimensionResult(
+                dimension="react",
+                summary=str(parsed.get("summary", "")),
+                details=parsed.get("details", {}) if isinstance(parsed.get("details"), dict) else {},
+                confidence=confidence,
+                status=ResultStatus.COMPLETE if confidence >= 0.5 else ResultStatus.PARTIAL,
+            )
+        if not answer:
+            return None
+        if "LLM 服务不可用" in answer:
+            return DimensionResult(
+                dimension="react",
+                summary=answer,
+                details={},
+                confidence=0.0,
+                status=ResultStatus.PARTIAL,
+            )
+        return DimensionResult(
+            dimension="react",
+            summary=answer,
+            details={},
+            confidence=0.7,
+            status=ResultStatus.COMPLETE,
+        )
 
     def _react_web_extract(self, url: str) -> str:
         """ReAct 工具：真实抓取给定 URL 的页面文本（失败返回可读信息）。

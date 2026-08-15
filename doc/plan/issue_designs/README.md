@@ -49,7 +49,7 @@
 | `40_mcp_react_bridge_design.md` | 第二轮：MCP 8 工具与 ReAct 单工具两条路径互不相干 | 高 | ✅ 已实现 |
 | `41_url_guard_design.md` | 第二轮：`_react_web_extract`/MCP `web_extract` 无 SSRF/URL 防护 | 高 | ✅ 已实现 |
 | `42_behavior_eval_design.md` | 第二轮：评测只测结果字段，工具自恢复/RAG 收益无行为指标 | 中高 | ✅ 已实现 |
-| `43_dual_agent_brain_design.md` | 第三轮：双 Agent 大脑未统一（ReAct 旁路 + 多 Agent 实为流水线） | 高 | 📝 已出设计（未实现） |
+| `43_dual_agent_brain_design.md` | 第三轮：双 Agent 大脑未统一（ReAct 旁路 + 多 Agent 实为流水线） | 高 | ✅ 已实现 |
 | `44_llm_depth_design.md` | 第三轮：分析/规划单轮 LLM 补全，智力深度浅 | 中 | 📝 已出设计（未实现） |
 | `45_memory_loop_design.md` | 第三轮：记忆 L4 只写不读 + team 路径不注入 memory_context | 中 | 📝 已出设计（未实现） |
 | `46_engineering_consistency_design.md` | 第三轮：双编排并存/消息膨胀/默认值不一致/计价硬编码等工程一致性 | 中低 | 📝 已出设计（未实现） |
@@ -61,6 +61,8 @@
 > **设计文档 40 修复说明**：MCP↔ReAct 工具打通已落地。① **唯一工具源** `mcp_server/tools/__init__.py`：新增 `TOOLS: dict[str, Callable]`（8 个工具函数）+ `TOOL_SPECS: dict[str, ToolSpec]`（含 description + params_schema——设计文档 38 JSON Schema 契约，`_schema(required, optional)` 由 `{参数: 类型}` 生成；web_extract 描述标注"URL 过安全守卫防 SSRF"），**工具描述/schema 只维护这一份**，`__all__` 同步导出。② **`build_react_dispatcher`**（新 `agent/tool_registry.py`）：把 `TOOLS`+`TOOL_SPECS` 注册进 `ToolDispatcher`（默认超时读 `config.collector.timeout_seconds`），`web_extract` 可覆盖为真实采集链路实现；`facade/api.py::analyze_react` 改用它（`build_react_dispatcher(config=self._config, web_extract=self._react_web_extract)`）——agent 从单工具升级为**多工具自主调用**（web_search/github_stars/analyze_pricing 等），`_react_web_extract` 保留设计文档 41 守卫语义；`ToolDispatcher` 直连 import 移除、`agent/__init__.py` 导出 `build_react_dispatcher`。③ **MCP 同源** `mcp_server/server.py::create_server`：删掉 8 个手写 `@mcp.tool()` 薄封装（含重复描述），改为遍历 `TOOL_SPECS` 用 `mcp.tool(name=name, description=spec.description)(TOOLS[name])` 生成（MCP 工具名从 `web_extract_tool` 等对齐为 `web_extract` 等内部名；输入 schema 由函数注解自动派生），`_require_mcp`/`run_stdio`/`run_sse` 不变。④ **测试** `tests/unit/agent/test_tool_registry.py` 13 条：注册表一致（`tool_count == len(TOOLS) == 8`、每个工具描述含参数类型与描述、缺 url `ToolArgumentError`、web_extract 覆盖仍守 schema）、MCP 同源（`create_server` 工具名集 == `TOOLS` 键、描述 == `TOOL_SPECS` 无重复文案、输入 schema 派生）、多工具 ReAct 集成（mock LLM `web_search → web_extract → Final Answer` 端到端成功 + 工具结果回灌）、自恢复（不存在工具"工具不可用"回灌 → 改调合法工具）——全量 **802 passed / 6 skipped**（+13；MCP 同源测试 `importorskip("mcp")` 本机已装）。
 
 > **设计文档 42 修复说明**：行为级评测已落地。① **`evaluation/behavior_eval.py`**（新）：`BehaviorMetrics`（react_recovery_rate/recovery_n/retrieval_hit_hybrid/retrieval_hit_lexical/retrieval_n）；`RecoveryScenario`/`RetrievalCase` 夹具 + `ScriptedLLM`（确定性脚本化 mock：第 1 轮故意输出非法参数/不存在工具，第 2 轮读最近一条 Observation 含设计文档 38 错误反馈关键词则输出合法调用修正——**依据 react_agent 把 task 追加在 Observation 之后的结构按内容前缀定位 Observation**，最终 Final Answer）；`RecoveryEvaluator`（驱动 `ReactLoop`，恢复判定 = 修正后的合法工具调用**真的成功分发**（成功分发才记录，防"仅看 Final Answer"误判）+ 产出结论，`run() -> (rate, n)`）；`RetrievalEvaluator`（对 (query, 期望 chunk) 夹具分别 `retrieve(strategy="hybrid"|"lexical")` 算 hit_rate@k，`run() -> (hit_hybrid, hit_lexical, n)`；默认灌库可注入哈希向量层，chromadb 缺失降级词袋 hybrid==lexical 不误判劣）。② **`BenchmarkReport.behavior`**（benchmark.py）：`Benchmark.run()` 末尾 `_run_behavior_evals()` 追加行为评测（两 Evaluator 均无 Key/网络，mock/real 模式都跑）；`to_dict` 增 `behavior` 五字段；`_write_markdown` 增「行为评测（设计文档 42）」节（恢复率含样本数 + hybrid/lexical 命中率）；`_write_csv` 增 `behavior.*` 行；`BehaviorMetrics` 进 `__all__`。③ **门禁**：mock 判定 `react_recovery_rate ≥ 0.9` 且 `retrieval_hit_hybrid ≥ retrieval_hit_lexical` 为过；向量层不可用时 hybrid 等价 lexical（equal，不判劣）。④ **测试** `tests/evaluation/test_behavior_eval.py` 17 条：RecoveryEvaluator（默认场景恢复率 1.0、永不恢复注入 0.0、修正仍非法记失败、空场景 0、ScriptedLLM 首轮错误/读 Observation 修正）、RetrievalEvaluator（默认 hybrid ≥ lexical 且 ≥0.8、空用例、同义词嵌入 hybrid=1.0/lexical=0.0 证明向量收益、无向量层 hybrid==lexical）、BenchmarkReport（默认 behavior 零值、mock 全量门禁过、to_dict 含 behavior、Markdown/CSV 渲染、新增行为评测不改变核心指标）——评测目录全量 **102 passed / 1 skipped**（real smoke 无 Key 跳过），全量 **819 passed / 6 skipped**（+17，无回归）。首份报告（normal 22 用例 mock）：恢复率 1.00（2 场景）、hybrid/lexical 命中率 1.00/1.00（5 样本，hybrid ≥ lexical 过门禁）。
+
+> **设计文档 43 修复说明**：双 Agent 大脑统一已落地（2026-08-15）。① **ReactLoop 共享会话上下文**（`agent/react_loop.py`）：新增 `session_id`（取消协作，每步前置 `is_cancelled`）/`budget`（`IterationBudget` 步数预算，每步 `consume`）/`memory_context_fn`（记忆召回）/`rag_fn`（RAG 检索）——记忆笔记 + 知识库片段经 `enrich_prompt` 注入系统提示；新增 `ReactRunResult`（answer/steps/cancelled/budget_exhausted）与 `run_with_result()`（`run()` 保持裸字符串向后兼容，`behavior_eval.py` 旧调用零改动）；取消/预算耗尽中断时覆盖为准确终止文案（不再误报"已达最大步数"）。② **`ReactAgent.run`** 新增可选 `step_guard` 每步前置回调（默认 None 行为不变）。③ **facade 接线**（`facade/api.py`）：`analyze_react(task, session_id=None)` 透传共享上下文并把步数计入共享 `BudgetController`（`record_iteration(cost=0.01*steps)`）；新增 **`analyze_react_report(task, session_id=None) -> CompetitorReport`** 结构化入口——结论文本优先按结构化 JSON（summary/details/confidence，对齐设计文档 34 schema）解析为 `DimensionResult`，非 JSON 降级为单 react 维度，LLM 不可用 → PARTIAL 低置信（不把"服务不可用"标 COMPLETE），取消/预算耗尽 → 终态标注。主路径"分析阶段走 ReAct 工具闭环"与设计文档 44 链式分析取其一（44 实施时并入）。④ **测试** `tests/unit/facade/test_react_context.py` 10 条：记忆/RAG 注入（系统提示含两注入块）、无注入降级、步数计入 `IterationBudget`、预算耗尽中断只执行一步、取消中断第一步即停、`run()` 裸字符串兼容、结构化 JSON 入 `CompetitorReport`（维度/置信/详情/终态）、文本答案降级 react 维度、步数计入 `BudgetController`、`analyze_react` 裸字符串兼容。全量 **829 passed / 6 skipped**（+10，无回归）。
 
 > **问题 1 修复说明**：多 Agent 已接入主流程。`CompetitorAnalysisAPI.analyze()` 新增 `mode` 参数（`single` / `team`，**默认 `team`**），`mode="team"` 时走事件驱动 + 状态决策的多 Agent 流水线（Collector→Analyzer→Validator→Reporter，支持 SUCCESS/RETRY/DEGRADED/FAILED 决策）。CLI 新增 `--mode` 选项。全量 312 个测试通过。
 
@@ -234,17 +236,17 @@
 
 > 依赖顺序建议：**38 → 41 → 40 → 42**（38 回灌闭环是 40/42 前置；41 与 40 同批，web_extract 两入口统一防护）。**38、40、41、42 均已实现（2026-08-15）**，第二轮待办仅剩 **39（预算成本挂钩）** 暂缓——用户 2026-08-15 决定成本控制先不考虑，不影响其余项（39 独立无依赖）。设计文档保留，后续想做可恢复。
 
-### 待办（第三轮评审 43-46，2026-08-15 已出设计，尚未实现）
+### 待办（第三轮评审 43-46，2026-08-15 已出设计；**43 已实现，45/44/46 待实施**）
 
-> 触发：2026-08-15 评审——**"agent 主循环在哪 / 多 Agent 如何协作 / 工具调用和主流程什么关系"** 的架构拷问（问题 1）＋ 记忆"写了要能用"（问题 4）＋ LLM 智力深度浅（问题 2）＋ 工程一致性六项细节（问题 5）。本轮只产出设计文档（43-46），尚未实现。
-> 实施顺序建议：**43 → 45 → 44 → 46**（43 统一主智能路径并接线 ReactLoop 共享上下文，是 44 分析阶段进 ReAct 循环的前提；45 的 team 路径 memory 注入是 46 抽公共分析段的先手；44 链式分析可选并入 43 的 ReAct 闭环实现）。
+> 触发：2026-08-15 评审——**"agent 主循环在哪 / 多 Agent 如何协作 / 工具调用和主流程什么关系"** 的架构拷问（问题 1）＋ 记忆"写了要能用"（问题 4）＋ LLM 智力深度浅（问题 2）＋ 工程一致性六项细节（问题 5）。本轮先产出设计文档（43-46）。
+> 实施顺序建议：**43 → 45 → 44 → 46**（43 统一主智能路径并接线 ReactLoop 共享上下文，是 44 分析阶段进 ReAct 循环的前提；45 的 team 路径 memory 注入是 46 抽公共分析段的先手；44 链式分析可选并入 43 的 ReAct 闭环实现）。**43 已完成（2026-08-15，见上方"设计文档 43 修复说明"）**。
 
-- **设计文档 43 双 Agent 大脑未统一（高，1.5-2 天）**：`analyze_react` 是仅测试调用的旁路（裸字符串、无取消/预算/记忆/事件）；team 的"多 Agent"实为带总线的顺序流水线。设计：ReactLoop 共享会话上下文（session_id 取消/budget 预算/memory+RAG 注入/event_sink），主路径分析阶段可选走 ReAct 闭环，`analyze_react` 产物结构化入 `CompetitorReport`。前置 38/40/41，可选 39。
+- ~~**设计文档 43 双 Agent 大脑未统一（高，1.5-2 天）**：`analyze_react` 是仅测试调用的旁路（裸字符串、无取消/预算/记忆/事件）；team 的"多 Agent"实为带总线的顺序流水线。设计：ReactLoop 共享会话上下文（session_id 取消/budget 预算/memory+RAG 注入/event_sink），主路径分析阶段可选走 ReAct 闭环，`analyze_react` 产物结构化入 `CompetitorReport`。前置 38/40/41，可选 39。~~ ✅ **已实现（2026-08-15，见上方"设计文档 43 修复说明"）**。
 - **设计文档 44 LLM 智力深度浅（中，1-1.5 天）**：分析器每维度只做一次 `complete_json`，规划基本是规则。设计：链式分析（抽取→`_verify_details` 校验→工具补证→二次补全，`_MAX_CHAIN_STEPS=2`）＋ 规划 LLM 化（`PLAN_SCHEMA` 结构化，非法回退规则）。前置 34/36/40，规则路径全程兜底。
 - **设计文档 45 记忆回路只写不读/不对称（中，0.5-1 天）**：`retrieve_patterns` 零调用方（L4 是"数据僵尸"）；team 路径 `AnalyzerAgent` 不注入 `memory_context`（与 single 不对称）。设计：L4 消费（成功提权/失败降权 + `set_failure_penalties` 源降级），team 路径补 `_retrieve_memory` 复用 `recent_context`。前置 35。
 - **设计文档 46 工程一致性细节收敛（中低，1-1.5 天）**：① 双编排并存；② ReAct 消息膨胀（每轮重发 task、Observation 无截断）；③ async 是线程包装；④ `use_llm` 默认不一致（cli False vs 库 True）；⑤ 评测全 mock + `BaseAgent` 无覆盖测试；⑥ 计价硬编码 DeepSeek 单价。设计：共享分析段、Observation 截断/历史压缩、cli 默认对齐、计价读 config、BaseAgent 状态机单测。部分依赖 45（先接线 memory）。
 
-> 本轮四份设计（43-46）仅登记待办，未实现；**39 仍暂缓**（用户 2026-08-15 决定成本控制先不考虑）。实施从 43 开始。
+> 43 已实现（2026-08-15）；**45/44/46 三份设计待实施**；**39 仍暂缓**（用户 2026-08-15 决定成本控制先不考虑）。实施从 45 开始（下一步），再 44 → 46。
 
 > 依赖顺序建议：23（多源路由，底层）→ 24（分析器）→ 25（榜单，复用 23 的 provider）→ 26（时间线，复用 23 的 Releases）→ 27（定价，独立）→ 28（导出，复用 26/27）→ 29（评测，依赖 24/25/26 的结构化产出）→ 30/31（简历/面试达标补充，依赖已就绪的 `evaluation/benchmark.py` 真实执行版）。已全部完成。
 > 深度补充顺序：32 → 36 → 37 → 33 → 34 → 35（32 与 35 共享召回基建，36 与 34 共享 `complete_json`，37 依赖 36）。**32-37 已全部实现（见上方各修复说明），深度补充待办清空。**
