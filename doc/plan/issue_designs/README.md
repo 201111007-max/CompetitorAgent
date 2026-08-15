@@ -49,6 +49,10 @@
 | `40_mcp_react_bridge_design.md` | 第二轮：MCP 8 工具与 ReAct 单工具两条路径互不相干 | 高 | ✅ 已实现 |
 | `41_url_guard_design.md` | 第二轮：`_react_web_extract`/MCP `web_extract` 无 SSRF/URL 防护 | 高 | ✅ 已实现 |
 | `42_behavior_eval_design.md` | 第二轮：评测只测结果字段，工具自恢复/RAG 收益无行为指标 | 中高 | ✅ 已实现 |
+| `43_dual_agent_brain_design.md` | 第三轮：双 Agent 大脑未统一（ReAct 旁路 + 多 Agent 实为流水线） | 高 | 📝 已出设计（未实现） |
+| `44_llm_depth_design.md` | 第三轮：分析/规划单轮 LLM 补全，智力深度浅 | 中 | 📝 已出设计（未实现） |
+| `45_memory_loop_design.md` | 第三轮：记忆 L4 只写不读 + team 路径不注入 memory_context | 中 | 📝 已出设计（未实现） |
+| `46_engineering_consistency_design.md` | 第三轮：双编排并存/消息膨胀/默认值不一致/计价硬编码等工程一致性 | 中低 | 📝 已出设计（未实现） |
 
 > **设计文档 38 修复说明**：工具层升级已落地。① **`ToolSpec` 契约**（`agent/tool_dispatcher.py`）：name/func/description/params_schema（JSON Schema 子集：type/required/properties/enum，复用设计文档 34 `LLMClient._validate_schema`）/timeout；`register(name, func, *, spec=None)` 未给 spec 时建默认契约（旧调用零改动兼容）。② **dispatch 前校验**：参数不合 schema → 抛 `ToolArgumentError`（可读原因含字段与期望类型），不再冒泡原生异常。③ **超时执行**：`ThreadPoolExecutor(max_workers=1)` + `future.result(timeout)`，超时返回"工具执行超时: <name>"（工作线程 daemon、`shutdown(wait=False)` 不悬挂循环）；默认超时读 `CollectorConfig.timeout_seconds`（`facade/api.py::analyze_react` 注入）。④ **`get_tool_descriptions`** 输出 `name(params: 类型, 可选?: 类型) — description`（schema 优先、无 schema 回退签名注解）。⑤ **解析失败回灌**：`response_parser.py` `_parse_json_args` 失败/非对象抛 `ToolArgumentError` 不再静默 `{}`，`ReActStep` 增 `args_error` 字段（`extract_action` 捕获写入，无 `Args:` 时保持 `args_error=""` 兼容）。⑥ **四类反馈**：`react_agent.py` action 分支区分 工具参数解析失败 / 工具参数错误（`ToolArgumentError`）/ 工具不可用（`ValueError`）/ 工具执行异常（`Exception`），均经 `wrap_untrusted` 回灌 Observation——模型可据可读反馈修正重试（自恢复闭环，叠加设计文档 06 注入防护）。⑦ **测试** 15 条新增（`tests/unit/agent/test_react.py`）：`TestToolSchema`（合法通过/缺必填/类型错/enum 越界/描述含类型）、`TestToolTimeout`（超时返回可读/无超时正常）、`TestReActFeedback`（四类反馈互不混淆）、`TestReActRecovery`（错误参数→回灌→修正参数→工具成功调用）、解析 args_error 三条——全量 **763 passed / 4 skipped**，既有 test_react.py 断言全部保持（`{name}` 裸注册与无 schema 行为不变）。
 
@@ -229,6 +233,18 @@
 - ~~**设计文档 42 行为级评测（中高）**：`evaluation/behavior_eval.py`——`RecoveryEvaluator`（ScriptedLLM 回放错误→回灌→重试→判定自恢复）+ `RetrievalEvaluator`（hybrid vs lexical `hit_rate@k`，证明 RAG 收益）+ `BenchmarkReport.behavior` 指标进渲染/门禁（mock 下恢复率 ≥0.9 且 hybrid ≥ lexical）。预计 1 天。~~ ✅ **已实现（2026-08-15，见上方"设计文档 42 修复说明"）**。
 
 > 依赖顺序建议：**38 → 41 → 40 → 42**（38 回灌闭环是 40/42 前置；41 与 40 同批，web_extract 两入口统一防护）。**38、40、41、42 均已实现（2026-08-15）**，第二轮待办仅剩 **39（预算成本挂钩）** 暂缓——用户 2026-08-15 决定成本控制先不考虑，不影响其余项（39 独立无依赖）。设计文档保留，后续想做可恢复。
+
+### 待办（第三轮评审 43-46，2026-08-15 已出设计，尚未实现）
+
+> 触发：2026-08-15 评审——**"agent 主循环在哪 / 多 Agent 如何协作 / 工具调用和主流程什么关系"** 的架构拷问（问题 1）＋ 记忆"写了要能用"（问题 4）＋ LLM 智力深度浅（问题 2）＋ 工程一致性六项细节（问题 5）。本轮只产出设计文档（43-46），尚未实现。
+> 实施顺序建议：**43 → 45 → 44 → 46**（43 统一主智能路径并接线 ReactLoop 共享上下文，是 44 分析阶段进 ReAct 循环的前提；45 的 team 路径 memory 注入是 46 抽公共分析段的先手；44 链式分析可选并入 43 的 ReAct 闭环实现）。
+
+- **设计文档 43 双 Agent 大脑未统一（高，1.5-2 天）**：`analyze_react` 是仅测试调用的旁路（裸字符串、无取消/预算/记忆/事件）；team 的"多 Agent"实为带总线的顺序流水线。设计：ReactLoop 共享会话上下文（session_id 取消/budget 预算/memory+RAG 注入/event_sink），主路径分析阶段可选走 ReAct 闭环，`analyze_react` 产物结构化入 `CompetitorReport`。前置 38/40/41，可选 39。
+- **设计文档 44 LLM 智力深度浅（中，1-1.5 天）**：分析器每维度只做一次 `complete_json`，规划基本是规则。设计：链式分析（抽取→`_verify_details` 校验→工具补证→二次补全，`_MAX_CHAIN_STEPS=2`）＋ 规划 LLM 化（`PLAN_SCHEMA` 结构化，非法回退规则）。前置 34/36/40，规则路径全程兜底。
+- **设计文档 45 记忆回路只写不读/不对称（中，0.5-1 天）**：`retrieve_patterns` 零调用方（L4 是"数据僵尸"）；team 路径 `AnalyzerAgent` 不注入 `memory_context`（与 single 不对称）。设计：L4 消费（成功提权/失败降权 + `set_failure_penalties` 源降级），team 路径补 `_retrieve_memory` 复用 `recent_context`。前置 35。
+- **设计文档 46 工程一致性细节收敛（中低，1-1.5 天）**：① 双编排并存；② ReAct 消息膨胀（每轮重发 task、Observation 无截断）；③ async 是线程包装；④ `use_llm` 默认不一致（cli False vs 库 True）；⑤ 评测全 mock + `BaseAgent` 无覆盖测试；⑥ 计价硬编码 DeepSeek 单价。设计：共享分析段、Observation 截断/历史压缩、cli 默认对齐、计价读 config、BaseAgent 状态机单测。部分依赖 45（先接线 memory）。
+
+> 本轮四份设计（43-46）仅登记待办，未实现；**39 仍暂缓**（用户 2026-08-15 决定成本控制先不考虑）。实施从 43 开始。
 
 > 依赖顺序建议：23（多源路由，底层）→ 24（分析器）→ 25（榜单，复用 23 的 provider）→ 26（时间线，复用 23 的 Releases）→ 27（定价，独立）→ 28（导出，复用 26/27）→ 29（评测，依赖 24/25/26 的结构化产出）→ 30/31（简历/面试达标补充，依赖已就绪的 `evaluation/benchmark.py` 真实执行版）。已全部完成。
 > 深度补充顺序：32 → 36 → 37 → 33 → 34 → 35（32 与 35 共享召回基建，36 与 34 共享 `complete_json`，37 依赖 36）。**32-37 已全部实现（见上方各修复说明），深度补充待办清空。**
