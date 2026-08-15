@@ -18,6 +18,10 @@ class IFourLayerMemory(Protocol):
         """L1: 列出归档会话；competitor 为空返回最近全部"""
         ...
 
+    def recent_context(self, competitor: str, top_k: int = 5, query: str = "") -> list[str]:
+        """L1: 按任务相关度召回可注入的记忆上下文（摘要 + 最近相关会话，设计文档 35）"""
+        ...
+
     def save_note(self, competitor: str, note: str) -> None:
         """L2: 保存持久笔记"""
         ...
@@ -34,12 +38,36 @@ class IFourLayerMemory(Protocol):
         """L3: 取回技能"""
         ...
 
+    def record_success(
+        self,
+        competitor: str,
+        gap_field: str,
+        source_name: str,
+        method: str = "",
+    ) -> None:
+        """L3: 分析成功后自动提炼技能（可携带成功做法 method，设计文档 35）"""
+        ...
+
     def record_outcome(self, source: str, success: bool) -> None:
         """L4: 记录数据源成功率"""
         ...
 
     def source_success_rates(self) -> dict[str, float]:
         """L4: 数据源成功率统计"""
+        ...
+
+    def note_pattern(
+        self,
+        competitor: str,
+        dimension: str,
+        pattern: str,
+        outcome: str,
+    ) -> None:
+        """L4: 记录可检索经验/反例（outcome ∈ success/degraded/failure，设计文档 35）"""
+        ...
+
+    def retrieve_patterns(self, competitor: str, dimension: str) -> list[str]:
+        """L4: 取回某竞品某维度的经验/反例（供规划与失败归因联动）"""
         ...
 
 

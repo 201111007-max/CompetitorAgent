@@ -50,6 +50,10 @@ class FourLayerMemory(IFourLayerMemory):
     def recent_sessions(self) -> list[AnalysisSession]:
         return self._sessions.recent_sessions()
 
+    def recent_context(self, competitor: str, top_k: int = 5, query: str = "") -> list[str]:
+        """L1: 按任务相关度召回可注入的记忆上下文（设计文档 35 §3.2）"""
+        return self._sessions.recent_context(competitor, top_k=top_k, query=query)
+
     # ---- L2 持久笔记 ----
     def save_note(self, competitor: str, note: str) -> None:
         self._notes.save_note(competitor, note)
@@ -64,8 +68,14 @@ class FourLayerMemory(IFourLayerMemory):
     def retrieve_skills(self, competitor: str) -> list[Skill]:
         return self._skills.retrieve_skills(competitor)
 
-    def record_success(self, competitor: str, gap_field: str, source_name: str) -> None:
-        self._skills.record_success(competitor, gap_field, source_name)
+    def record_success(
+        self,
+        competitor: str,
+        gap_field: str,
+        source_name: str,
+        method: str = "",
+    ) -> None:
+        self._skills.record_success(competitor, gap_field, source_name, method=method)
 
     def record_failure(self, competitor: str, gap_field: str, source_name: str) -> None:
         self._skills.record_failure(competitor, gap_field, source_name)
@@ -79,3 +89,15 @@ class FourLayerMemory(IFourLayerMemory):
 
     def top_sources(self, n: int = 5) -> list[tuple[str, float]]:
         return self._evolution.top_sources(n)
+
+    def note_pattern(
+        self,
+        competitor: str,
+        dimension: str,
+        pattern: str,
+        outcome: str,
+    ) -> None:
+        self._evolution.note_pattern(competitor, dimension, pattern, outcome)
+
+    def retrieve_patterns(self, competitor: str, dimension: str) -> list[str]:
+        return self._evolution.retrieve_patterns(competitor, dimension)

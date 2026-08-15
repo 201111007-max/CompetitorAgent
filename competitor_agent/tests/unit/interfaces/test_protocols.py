@@ -55,6 +55,9 @@ class FakeMemory:
     def list_sessions(self, competitor: str | None = None) -> list:
         return []
 
+    def recent_context(self, competitor: str, top_k: int = 5, query: str = "") -> list:
+        return []
+
     def save_note(self, competitor: str, note: str) -> None:
         return None
 
@@ -67,11 +70,20 @@ class FakeMemory:
     def retrieve_skills(self, competitor: str) -> list:
         return []
 
+    def record_success(self, competitor: str, gap_field: str, source_name: str, method: str = "") -> None:
+        return None
+
     def record_outcome(self, source: str, success: bool) -> None:
         return None
 
     def source_success_rates(self) -> dict:
         return {}
+
+    def note_pattern(self, competitor: str, dimension: str, pattern: str, outcome: str) -> None:
+        return None
+
+    def retrieve_patterns(self, competitor: str, dimension: str) -> list:
+        return []
 
 
 class FakeVerifier:

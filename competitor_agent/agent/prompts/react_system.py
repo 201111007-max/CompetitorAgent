@@ -33,11 +33,14 @@ def enrich_prompt(
     sections.append(base_prompt)
 
     if skills:
-        lines = [
-            f"- {s.competitor_name}:{s.gap_field} 使用 {s.source_name} 源有效"
-            for s in skills
-            if s.success and (not competitor or s.competitor_name == competitor)
-        ]
+        lines = []
+        for s in skills:
+            if not s.success or (competitor and s.competitor_name != competitor):
+                continue
+            line = f"- {s.competitor_name}:{s.gap_field} 使用 {s.source_name} 源有效"
+            if s.method:
+                line += f"（做法: {s.method}）"
+            lines.append(line)
         if lines:
             sections.append("\n历史技能（推荐优先使用的数据源）:\n" + "\n".join(lines))
 
@@ -56,9 +59,12 @@ def enrich_prompt(
 
 
 def format_skills(skills: list[Skill], competitor: str) -> list[str]:
-    """把技能列表格式化为一行行提示文本（供检索/注入复用）"""
+    """把技能列表格式化为一行行提示文本（供检索/注入复用，含做法）"""
     out: list[str] = []
     for s in skills:
         if s.competitor_name == competitor and s.success:
-            out.append(f"{s.gap_field} 使用 {s.source_name} 源有效")
+            line = f"{s.gap_field} 使用 {s.source_name} 源有效"
+            if s.method:
+                line += f"（做法: {s.method}）"
+            out.append(line)
     return out

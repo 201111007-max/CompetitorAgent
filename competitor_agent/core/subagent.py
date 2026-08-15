@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+from typing import Callable
+
 from competitor_agent.analyzers.base import BaseCompetitorAnalyzer
 from competitor_agent.collector.source_selector import SourceSelector
 from competitor_agent.core.budget import IterationBudget
@@ -32,6 +34,7 @@ class SubAgent:
         extractor: ICompetitorDataSource,
         analyzer: BaseCompetitorAnalyzer,
         budget: IterationBudget,
+        memory_context_fn: Callable[[str, str], str] | None = None,
     ) -> None:
         self._gap = gap
         self._strategy = strategy
@@ -40,6 +43,7 @@ class SubAgent:
             extractor=extractor,
             analyzer=analyzer,
             budget=budget,
+            memory_context_fn=memory_context_fn,
         )
 
     @property

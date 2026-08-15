@@ -34,7 +34,7 @@ class SkillStore:
         self._max_per_competitor = max_per_competitor
 
     def record_skill(self, skill: Skill) -> None:
-        """写入一条技能（同竞品+缺口+源 合并，权重累加）"""
+        """写入一条技能（同竞品+缺口+源 合并，权重累加，method 取最新非空）"""
         competitor = skill.competitor_name
         if not competitor:
             raise ValueError("技能沉淀需要 competitor_name")
@@ -45,6 +45,8 @@ class SkillStore:
             if item["gap_field"] == skill.gap_field and item["source_name"] == skill.source_name:
                 item["success"] = item.get("success", True) if skill.success else False
                 item["weight"] = float(item.get("weight", 0.0)) + _SKILL_BOOST_STEP
+                if skill.method:
+                    item["method"] = skill.method
                 matched = True
                 break
         if not matched:
@@ -55,6 +57,7 @@ class SkillStore:
                     "source_name": skill.source_name,
                     "success": skill.success,
                     "weight": _SKILL_BOOST_STEP,
+                    "method": skill.method,
                 }
             )
         # 裁剪
@@ -63,14 +66,21 @@ class SkillStore:
         self._store.put(competitor, skills)
         self._store.save()
 
-    def record_success(self, competitor: str, gap_field: str, source_name: str) -> None:
-        """分析成功后自动提炼技能"""
+    def record_success(
+        self,
+        competitor: str,
+        gap_field: str,
+        source_name: str,
+        method: str = "",
+    ) -> None:
+        """分析成功后自动提炼技能（可携带成功做法 method，设计文档 35）"""
         self.record_skill(
             Skill(
                 competitor_name=competitor,
                 gap_field=gap_field,
                 source_name=source_name,
                 success=True,
+                method=method,
             )
         )
 
@@ -116,4 +126,5 @@ def _skill_from_dict(data: dict) -> Skill:
         source_name=str(data.get("source_name", "")),
         success=bool(data.get("success", True)),
         weight=float(data.get("weight", 0.0)),
+        method=str(data.get("method", "")),
     )

@@ -152,6 +152,8 @@ class BaseCompetitorAnalyzer:
         messages = self._build_prompt(observation, gap)
         if context.rag_context:
             messages = self._inject_rag_context(messages, context.rag_context)
+        if context.memory_context:
+            messages = self._inject_memory_context(messages, context.memory_context)
         parsed = self._llm.complete_json(messages, schema=self._schema_for(gap))
         confidence = float(parsed.get("confidence", 0.7))
         status = ResultStatus.COMPLETE
@@ -195,6 +197,27 @@ class BaseCompetitorAnalyzer:
             f"{last['content']}\n\n"
             f"[知识库参考片段（外部事实依据，可引用其来源）]\n"
             f"{wrap_untrusted(rag_context)}"
+        )
+        return messages
+
+    def _inject_memory_context(
+        self, messages: list[dict[str, str]], memory_context: str
+    ) -> list[dict[str, str]]:
+        """把记忆召回的历史经验（设计文档 35）注入最后一条 user 消息。
+
+        与 RAG 不同：记忆是本系统沉淀的过往结论（可信、仅作参考），
+        排在 RAG 块之后，不影响 mock LLM 对观测文本的抽取（见 benchmark _user_text）。
+        """
+        if not messages:
+            return messages
+        last = messages[-1]
+        if last["role"] != "user":
+            messages = messages + [{"role": "user", "content": ""}]
+            last = messages[-1]
+        last["content"] = (
+            f"{last['content']}\n\n"
+            f"[历史经验参考（本系统沉淀的过往结论，仅作参考，请交叉核实后再采信）]\n"
+            f"{memory_context}"
         )
         return messages
 

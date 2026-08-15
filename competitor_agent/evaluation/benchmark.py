@@ -201,6 +201,7 @@ class BenchmarkMockLLM:
     _POSITIVE_MARKERS = ("love", "great", "awesome", "fast", "recommend", "best", "好用", "好评", "推荐", "喜欢")
     _NEGATIVE_MARKERS = ("bug", "slow", "bad", "terrible", "crash", "worse", "难用", "差评", "吐槽", "失望", "贵", "限制")
     _RAG_MARKER = "[知识库参考片段"
+    _MEMORY_MARKER = "[历史经验参考"  # 设计文档 35：记忆召回块，同样不影响 mock 抽取
 
     def complete(self, messages: list[dict[str, str]], model: str | None = None) -> str:
         if not messages:
@@ -240,13 +241,16 @@ class BenchmarkMockLLM:
 
     @staticmethod
     def _user_text(messages: list[dict[str, str]]) -> str:
-        """取最后一条 user 消息，剥离 RAG 注入尾巴（外部事实依据不影响 mock 抽取）。"""
+        """取最后一条 user 消息，剥离注入尾巴（RAG/记忆参考块不影响 mock 抽取）。"""
         user = ""
         for message in reversed(messages):
             if message.get("role") == "user":
                 user = message.get("content", "")
                 break
         idx = user.find(BenchmarkMockLLM._RAG_MARKER)
+        if idx >= 0:
+            return user[:idx]
+        idx = user.find(BenchmarkMockLLM._MEMORY_MARKER)
         return user[:idx] if idx >= 0 else user
 
     @classmethod

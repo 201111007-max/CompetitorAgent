@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import Any, Callable
 
 from competitor_agent.analyzers.base import BaseCompetitorAnalyzer
 from competitor_agent.collector.source_selector import SourceCandidate, SourceSelector
@@ -87,12 +87,15 @@ class GapExecutor:
         retriever: Any | None = None,
         session_id: str | None = None,
         providers: dict[str, object] | None = None,
+        memory_context_fn: Callable[[str, str], str] | None = None,
     ) -> None:
         self._selector = selector
         self._default_extractor = extractor
         self._analyzer = analyzer
         self._budget = budget
         self._session_id = session_id
+        # 记忆召回回调（设计文档 35）：(competitor, dimension) -> 可注入的历史经验文本
+        self._memory_context_fn = memory_context_fn
         # 按 source_name 分发的采集器注册表（SPA 兜底）；未注册的源回退到默认 extractor
         self._extractors: dict[str, ICompetitorDataSource] = dict(
             extractors
@@ -199,6 +202,7 @@ class GapExecutor:
             competitor_name=context.competitor_name,
             dimension=self._analyzer.dimension,
             rag_context=self._retrieve_rag(context.competitor_name, gap.field),
+            memory_context=self._retrieve_memory(context.competitor_name, gap.field),
         )
         if gap.field == "performance":
             # 榜单直连（设计文档 25）：仅 performance 缺口注入，避免其余维度额外开销
@@ -209,6 +213,16 @@ class GapExecutor:
                 except Exception:  # noqa: BLE001 — 榜单失败完全回退现状，不阻塞主流程
                     logger.warning("榜单直连失败，回退页面抽取: %s", context.competitor_name)
         return self._analyzer.analyze(observation, gap, analysis_ctx)
+
+    def _retrieve_memory(self, competitor: str, dimension: str) -> str:
+        """记忆召回（设计文档 35）：按任务相关度取"摘要 + 最近相关会话"，失败静默降级。"""
+        if self._memory_context_fn is None:
+            return ""
+        try:
+            return self._memory_context_fn(competitor, dimension)
+        except Exception:  # noqa: BLE001 — 记忆召回失败不影响主流程
+            logger.warning("记忆召回失败: %s/%s", competitor, dimension)
+            return ""
 
     def _retrieve_rag(self, competitor: str, dimension: str) -> str:
         """检索知识库相关片段，拼成可注入的文本（含来源）"""
