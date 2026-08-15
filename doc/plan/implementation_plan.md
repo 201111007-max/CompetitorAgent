@@ -672,13 +672,13 @@ dev:
 > 状态：2026-08-15 第三轮评审——**"agent 主循环在哪 / 多 Agent 如何协作 / 工具调用和主流程什么关系"** 的架构拷问
 > （问题 1）＋ 记忆"写了要能用"（问题 4）＋ LLM 智力深度浅（问题 2）＋ 工程一致性六项细节（问题 5）。
 > 本轮只产出设计文档（43-46，用户 2026-08-15 指示"只写设计文档"）；实施顺序建议 43 → 45 → 44 → 46。
-> **43 已完成（2026-08-15，见 §18.3）**；45/44/46 待实施。
+> **43、45 已完成（2026-08-15，见 §18.3/§18.4）**；44/46 待实施。
 
 | 待办 | 代码证据 | 优先级 | 预计 |
 |---|---|---|---|
 | **43 双 Agent 大脑未统一**（`facade/api.py` / `agent/react_loop.py` / `analyzers/base.py`） | `analyze_react`（api.py:470）仅测试调用（tests/unit/facade/test_api.py:69-93）、返回裸字符串、无取消/预算/记忆/事件；team 的"多 Agent"实为带总线的顺序流水线（BaseAgent 仅 `run(ctx)`，base_agent.py:57；TeamOrchestrator.run 硬编码顺序，team/orchestrator.py:100-153） | **高** | ✅ 已完成 |
 | **44 LLM 智力深度浅**（`analyzers/base.py` / `core/strategic_loop.py`） | 分析器每维度仅一次 `complete_json`（base.py:157）无迭代/工具查证；规划基本是规则（`DIMENSION_PRIORITY`+关键词提权+静态预算），LLM 仅在 `parse_task` 用一次 | **中** | 1-1.5 天 |
-| **45 记忆回路只写不读/不对称**（`core/strategic_loop.py` / `collector/source_selector.py` / `team/analyzer_agent.py`） | `retrieve_patterns` 全仓库零调用（写入有 orchestrator.py:243、api.py:690）；team `AnalyzerAgent.analyze_observation`（analyzer_agent.py:71-79）不传 `memory_context`，与 single（GapExecutor 注入）不对称 | **中** | 0.5-1 天 |
+| **45 记忆回路只写不读/不对称**（`core/strategic_loop.py` / `collector/source_selector.py` / `team/analyzer_agent.py`） | `retrieve_patterns` 全仓库零调用（写入有 orchestrator.py:243、api.py:690）；team `AnalyzerAgent.analyze_observation`（analyzer_agent.py:71-79）不传 `memory_context`，与 single（GapExecutor 注入）不对称 | **中** | ✅ 已完成 |
 | **46 工程一致性细节收敛**（`agent/react_agent.py` / `cli.py` / `llm/client.py` / `facade/api.py`） | ① 双编排并存（SingleOrchestrator vs TeamOrchestrator+CollectorAgent.collect）；② ReAct 每轮重发完整 task（react_agent.py:57）+ Observation 原文入上下文无截断；③ async 是线程包装（`asyncio.to_thread`/`run_in_executor`）；④ `use_llm` 默认不一致（cli.py:61 False vs api.py:95 True）；⑤ 评测全 mock + `BaseAgent` 无覆盖测试；⑥ 计价硬编码 DeepSeek 单价（client.py:33） | **中低** | 1-1.5 天 |
 
 ### 18.1 实施顺序与依赖
@@ -707,6 +707,24 @@ dev:
   `CompetitorReport`、文本答案降级 react 维度、步数计入 `BudgetController`、`analyze_react` 裸字符串兼容）。
 - **回归**：全量 **829 passed / 6 skipped**（+10，无回归）；`test_react.py`（38）/`test_tool_registry.py`（40）/
   `test_url_guard.py`（41）/`test_behavior_eval.py`（42）全绿。
+
+### 18.4 45 完成说明（2026-08-15）
+
+- **L4 消费接线**（`memory/evolution_memory.py`）：新增 `retrieve_patterns_with_outcome(competitor, dimension) -> list[(pattern, outcome)]`
+  （按 outcome 可靠判定提权/降权）与 `failure_patterns_for(competitor) -> list[str]`（从 outcome ∈ {failure, degraded} 的 pattern 文本提取源名，
+  ASCII 源名正则，提取不到跳过）；`IFourLayerMemory` 契约与 `FourLayerMemory` 委托同步；`test_protocols.py` FakeMemory 补齐。
+- **规划提权/降权**（`core/strategic_loop.py`）：新增 `_apply_pattern_boost`（与 L3 `_apply_memory_boost` 并列）——成功模式初始置信度 +0.1（封顶 0.9）；
+  失败/降级反例对未定置信缺口降权（优先级 -1，下限 1）；只读消费不新增写入，读取失败静默降级（try/except）。
+- **源选择降级**（`collector/source_selector.py`）：新增 `set_failure_penalties(failure_sources)`——失败反例命中源 trust 压到 0.05 排后
+  （降级优先于成功率，仍保留在降级链可再尝试）；`facade/api.py` 新增 `_set_selector_penalties`，`analyze`/`analyze_team` 规划出竞品后注入
+  `memory.failure_patterns_for(competitor)`；`TeamOrchestrator` 新增 `selector` 参数复用外层同一 selector（success rates + failure penalties 对齐）。
+- **team 路径补 memory_context**（`team/analyzer_agent.py`）：新增 `_retrieve_memory`（复用 `recent_context` top_k=3，与 single `GapExecutor` 同口径），
+  `analyze_observation` 的 `AnalysisContext` 注入 `memory_context`（`AnalysisContext.memory_context` 契约已存在）；`memory=None`/召回失败静默空串。
+- **测试**：新增 `tests/unit/memory/test_memory_loop_45.py` 14 条——L4 契约（with_outcome/failure_patterns_for 提取与 FourLayerMemory 委托）、
+  规划提权（+0.1）/降权（priority-1）/封顶 0.9/无 pattern 不变、selector 失败源排后（含压过成功率/无惩罚保持）、team 注入（有记忆含历史结论/
+  `memory=None` 空/与 single 同口径/真实归档经 recent_context 到达 context）。
+- **回归**：unit+integration+e2e **753 passed / 3 环境性失败**（playwright 1 + httpx/MCP 2，均为本机环境与远程既有代码问题，非本改动引入）；
+  evaluation **103 passed**（含 behavior/benchmark/ablation/failure/real）。mypy：改动文件不新增错误（远程既有 129 项另行处理）。
 
 
 
