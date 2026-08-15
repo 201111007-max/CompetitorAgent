@@ -628,8 +628,8 @@ dev:
 
 > 状态背景：§16 的 6 项深度补充（设计文档 32/36/37/33/34/35）已全部实现合入，工程面（记忆/观测/评测/可靠性）达标。
 > 本节为 2026-08-15 第二轮评审的新结论：**agent 最核心的"LLM ↔ 工具"交互面是全项目最薄**，且
-> URL 安全/行为可靠性是"显式能力但无实证"（39 成本控制已暂缓，见 17.1）。**38（工具层升级）、40（MCP↔ReAct 打通）、41（URL 防护）已于 2026-08-15 实现**
-> （38：`ToolSpec`/schema 校验/超时/四类反馈回灌；40：`TOOLS`+`TOOL_SPECS` 唯一工具源 + `build_react_dispatcher` 多工具 + `create_server` 同源生成；41：`url_guard` 私网黑名单 + DNS rebinding + 重定向逐跳，两入口接入；全量 802 测试通过）；剩余一项（42）补齐后 agent 交互面从"裸调用"升级为
+> URL 安全/行为可靠性是"显式能力但无实证"（39 成本控制已暂缓，见 17.1）。**38（工具层升级）、40（MCP↔ReAct 打通）、41（URL 防护）、42（行为级评测）已于 2026-08-15 全部实现**
+> （38：`ToolSpec`/schema 校验/超时/四类反馈回灌；40：`TOOLS`+`TOOL_SPECS` 唯一工具源 + `build_react_dispatcher` 多工具 + `create_server` 同源生成；41：`url_guard` 私网黑名单 + DNS rebinding + 重定向逐跳，两入口接入；42：`behavior_eval.py` 自恢复 + 检索命中进 `BenchmarkReport` 门禁；全量 **819 passed / 6 skipped**）；agent 交互面从"裸调用"升级为
 > "契约 + 校验 + 回灌 + 超时 + 多工具 + 安全 + 行为量化"的现代 agent 交互层。
 > 设计文档见 `doc/plan/issue_designs/38_tool_layer_design.md` ~ `42_behavior_eval_design.md`，索引与待办状态见 `issue_designs/README.md`。
 
@@ -639,18 +639,18 @@ dev:
 | 39 预算成本挂钩 | `snapshot_cost/snapshot_tokens` + GapExecutor 补记真实增量 + `record_iteration` 真实成本 | `gap_executor.py:127` 固定 `0.01`；`budget.py:61-68` diminishing 依赖恒 0 的 `delta_tokens`；`api.py:517/546` 常数记账 | 中高 | ~~0.5 天~~ ⏸ 暂缓 |
 | 40 MCP↔ReAct 打通 | `TOOLS`+`TOOL_SPECS` 唯一工具源 + `build_react_dispatcher()` + `create_server()` 同源 | `mcp_server/server.py:42-148` 8 工具与 `api.py:474-476` 单工具两条路径互不相干，描述双份 | 高 | ✅ 已实现（2026-08-15） |
 | 41 URL 防护 | `url_guard.py` 私网/环回黑名单 + DNS rebinding 全量校验 + 重定向逐跳 + 统一超时/大小 | `api.py:480-489` `_react_web_extract` 任意 URL 直抓；`web_tools.py:19` `httpx.get(follow_redirects=True)` 无防 | 高 | ✅ 已实现（2026-08-15） |
-| 42 行为级评测 | `behavior_eval.py`（RecoveryEvaluator + RetrievalEvaluator）+ `BenchmarkReport.behavior` 门禁 | `benchmark.py:92-141` 全结果字段，无行为指标；`retriever.py:19-42` hybrid/lexical 无对比数据 | 中高 | 1 天 |
+| 42 行为级评测 | `behavior_eval.py`（RecoveryEvaluator + RetrievalEvaluator）+ `BenchmarkReport.behavior` 门禁 | `benchmark.py:92-141` 全结果字段，无行为指标；`retriever.py:19-42` hybrid/lexical 无对比数据 | 中高 | ✅ 已实现（2026-08-15） |
 
 ### 17.1 实施顺序与依赖
 
 ```
-38（工具契约/回灌，✅ 2026-08-15 已实现）→ 41（URL 防护，✅ 2026-08-15 已实现）→ 40（MCP↔ReAct 打通，✅ 2026-08-15 已实现）→ 42（行为级评测）
+38（工具契约/回灌，✅ 2026-08-15 已实现）→ 41（URL 防护，✅ 2026-08-15 已实现）→ 40（MCP↔ReAct 打通，✅ 2026-08-15 已实现）→ 42（行为级评测，✅ 2026-08-15 已实现）
 39（预算成本挂钩）已暂缓——用户 2026-08-15 决定成本控制先不考虑，独立无依赖，后续可恢复
 ```
 
 - **38 前置**：设计文档 34 的 `_validate_schema`（JSON Schema 子集）可直接复用。
-- **40 ✅ 依赖 38 + 41**：工具注册表统一（38）后 `build_react_dispatcher` 只需接线；web_extract 两入口（ReAct/MCP）统一过 41 的守卫。（2026-08-15 已实现，下一项 42）
-- **42 依赖 38 + 32**：RecoveryEvaluator 依赖 38 的回灌闭环（否则"自恢复"无从测起）；RetrievalEvaluator 依赖 32 的 retriever hybrid/lexical。
+- **40 ✅ 依赖 38 + 41**：工具注册表统一（38）后 `build_react_dispatcher` 只需接线；web_extract 两入口（ReAct/MCP）统一过 41 的守卫。（2026-08-15 已实现）
+- **42 ✅ 依赖 38 + 32**：RecoveryEvaluator 依赖 38 的回灌闭环（否则"自恢复"无从测起）；RetrievalEvaluator 依赖 32 的 retriever hybrid/lexical。（2026-08-15 已实现，第二轮 38-42 待办全部完成，仅 39 暂缓）
 - **39（暂缓）**：若恢复，对齐 dota_helper tactical_loop P0-2 模式（先预检配额、分析后按真实 token 补记），无 LLM/mock 路径增量恒 0（回归安全）；前置仅 37（`total_cost_usd` 已有）。
 
 ### 17.2 验收口径
@@ -659,7 +659,7 @@ dev:
 - **39**：GapExecutor 闭环后 `used_cost` ≈ 真实增量（非固定 0.01）；diminishing 触发/不触发；`cost_limit` 触顶 → `COST_LIMIT_REACHED`/`PARTIAL`；无 LLM 时行为与现状逐字节一致。
 - **40 ✅**：`build_react_dispatcher().tool_count == len(TOOLS)`；`create_server()` 工具名集合 == `TOOLS` 键集合、描述同源无重复；mock LLM 多工具 ReAct 链路（web_search→web_extract→Final）端到端成功 + 自恢复（不存在工具→回灌→改调合法）——已实现，新增 13 条测试。
 - **41 ✅**：私网/环回/保留段/畸形 scheme 全拒；DNS rebinding（多 IP 含内网）拒；重定向到内网拒（逐跳重校验、不跟随）；超时/大小读 `CollectorConfig`；公网采集行为不变（`block_private_urls=False` 可豁免）——已实现，新增 28 条测试。
-- **42**：mock 下 `react_recovery_rate ≥ 0.9`、`retrieval_hit_hybrid ≥ retrieval_hit_lexical`；`to_dict` 含 `behavior` 字段；既有评测门禁零破坏。
+- **42 ✅**：mock 下 `react_recovery_rate ≥ 0.9`、`retrieval_hit_hybrid ≥ retrieval_hit_lexical`；`to_dict` 含 `behavior` 字段；`_write_markdown`/`_write_csv` 输出行为评测节/行；既有评测门禁零破坏——已实现，新增 17 条测试。
 
 > 与 §16 的关系：§16 补齐"每个模块往深一层"；本节补齐"**agent 之所以是 agent**"的交互层——工具契约、错误恢复、
 > 安全边界、行为量化。全部完成后项目可回答"工具调用怎么保稳 / SSRF 怎么防 / RAG 收益怎么证明"三类面试深挖问题。
