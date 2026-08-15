@@ -54,6 +54,8 @@ class CollectorConfig:
     cache_ttl_seconds: int = 86400
     max_retries: int = 2
     timeout_seconds: int = 20
+    max_content_chars: int = 8000  # 统一内容大小上限（设计文档 41，替代 ReAct 2000 / web_tools 8000 硬编码）
+    block_private_urls: bool = True  # URL 守卫（设计文档 41）：默认开启；False 用于本地调试
     rate_limit_per_second: int = 2
     use_playwright: bool = False
     user_agent: str = "competitor-agent/0.1"
