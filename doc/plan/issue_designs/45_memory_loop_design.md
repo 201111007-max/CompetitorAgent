@@ -8,6 +8,11 @@
 > 丢了记忆增强。
 > 依赖：设计文档 35（`memory/session_archive.py` `recent_context` 相关度召回已有；`IFourLayerMemory.note_pattern/
 > retrieve_patterns` 契约已有，`memory/four_layer_memory.py` 已实现）。
+>
+> **实现状态（2026-08-15）**：已落地 ✅。L4 消费接线（`retrieve_patterns_with_outcome` 规划提权/降权 +
+> `failure_patterns_for` 源选择降级 `set_failure_penalties`）；team 路径 `AnalyzerAgent._retrieve_memory` 注入
+> `memory_context`（与 single 的 GapExecutor 同口径 recent_context）；`TeamOrchestrator` 复用外层 selector。
+> 详见 `doc/plan/issue_designs/README.md` 设计文档 45 修复说明。
 
 ## 1. 问题现状
 
