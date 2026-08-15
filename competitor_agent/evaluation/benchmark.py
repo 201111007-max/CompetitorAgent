@@ -24,6 +24,7 @@ from typing import Any, Callable
 from competitor_agent.domain_types.enums import ObservationStatus
 from competitor_agent.domain_types.observation import Observation, SourceEvidence
 from competitor_agent.evaluation.accuracy_eval import AccuracyEvaluator, AccuracyMetrics, EvalCase
+from competitor_agent.evaluation.behavior_eval import BehaviorMetrics, RecoveryEvaluator, RetrievalEvaluator
 from competitor_agent.evaluation.failure import FailureRecord, FailureType, classify_case
 from competitor_agent.evaluation.strategy_eval import StrategyCase, StrategyEvaluator, StrategyMetrics
 from competitor_agent.facade.api import CompetitorAnalysisAPI
@@ -109,6 +110,8 @@ class BenchmarkReport:
     per_case_cost: dict[str, float] = field(default_factory=dict)  # case_id/task → cost
     cost_limit_usd: float | None = None  # 真实评测成本护栏上限（None=不限）
     budget_aborted: bool = False  # 是否因成本护栏超限中止
+    # 设计文档 42：行为级评测——工具自恢复率 + 检索命中率（hybrid vs lexical）
+    behavior: BehaviorMetrics = field(default_factory=BehaviorMetrics)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -138,6 +141,13 @@ class BenchmarkReport:
             "confusion_matrix": self.confusion_matrix,
             "failure_stats": self.failure_stats,
             "failure_records": self.failure_records,
+            "behavior": {
+                "react_recovery_rate": self.behavior.react_recovery_rate,
+                "recovery_n": self.behavior.recovery_n,
+                "retrieval_hit_hybrid": self.behavior.retrieval_hit_hybrid,
+                "retrieval_hit_lexical": self.behavior.retrieval_hit_lexical,
+                "retrieval_n": self.behavior.retrieval_n,
+            },
         }
 
 
@@ -733,6 +743,23 @@ class Benchmark:
             per_case_cost=per_case_cost,
             cost_limit_usd=self._cost_limit_usd,
             budget_aborted=budget_aborted,
+            behavior=self._run_behavior_evals(),
+        )
+
+    def _run_behavior_evals(self) -> BehaviorMetrics:
+        """设计文档 42：行为级评测——工具自恢复（ScriptedLLM 确定性）+ 检索命中（hybrid vs lexical）。
+
+        两 Evaluator 均无真实 Key/网络依赖，mock/real 模式都跑（确定性可复现）；
+        RecoveryEvaluator 用脚本化 mock 而非真实 LLM（真实 LLM 恢复为后续增强）。
+        """
+        recovery_rate, recovery_n = RecoveryEvaluator().run()
+        hit_hybrid, hit_lexical, retrieval_n = RetrievalEvaluator().run()
+        return BehaviorMetrics(
+            react_recovery_rate=recovery_rate,
+            recovery_n=recovery_n,
+            retrieval_hit_hybrid=hit_hybrid,
+            retrieval_hit_lexical=hit_lexical,
+            retrieval_n=retrieval_n,
         )
 
     def _budget_exceeded(self, total_cost: float) -> bool:
@@ -909,6 +936,12 @@ def _write_csv(report: BenchmarkReport, out: Path, mock_report: BenchmarkReport 
     for ftype in sorted(report.failure_stats):
         rows.append([report.harness_version, f"failure.{ftype}", str(report.failure_stats[ftype])])
     rows.append([report.harness_version, "failure.total", str(sum(report.failure_stats.values()))])
+    # 设计文档 42：行为级评测（工具自恢复 + 检索命中率）
+    rows.append([report.harness_version, "behavior.react_recovery_rate", str(report.behavior.react_recovery_rate)])
+    rows.append([report.harness_version, "behavior.recovery_n", str(report.behavior.recovery_n)])
+    rows.append([report.harness_version, "behavior.retrieval_hit_hybrid", str(report.behavior.retrieval_hit_hybrid)])
+    rows.append([report.harness_version, "behavior.retrieval_hit_lexical", str(report.behavior.retrieval_hit_lexical)])
+    rows.append([report.harness_version, "behavior.retrieval_n", str(report.behavior.retrieval_n)])
     # 设计文档 37：mock vs real 对比（real 报告内嵌 mock 基线，直答"评测是不是自证"）
     if mock_report is not None and mock_report.llm_mode != report.llm_mode:
         rows.append([report.harness_version, "vs.mock.accuracy.field_accuracy", str(mock_report.accuracy.field_accuracy)])
@@ -942,6 +975,15 @@ def _write_markdown(
     lines.append(f"| 成本效率 | {report.strategy.cost_efficiency:.4f} |")
     lines.append(f"| 平均命中排名 | {report.strategy.avg_source_rank:.2f} |")
     lines.append(f"| 累计成本(USD) | {report.cost_usd:.6f} |")
+
+    # 设计文档 42：行为评测——工具自恢复率 + 检索命中率（hybrid vs lexical）
+    lines.append("\n## 行为评测（设计文档 42）")
+    lines.append("\n| 指标 | 值 |")
+    lines.append("|------|----|")
+    lines.append(f"| 工具自恢复率 | {report.behavior.react_recovery_rate:.2f}（{report.behavior.recovery_n} 场景） |")
+    lines.append(f"| 检索命中率 hybrid | {report.behavior.retrieval_hit_hybrid:.2f} |")
+    lines.append(f"| 检索命中率 lexical | {report.behavior.retrieval_hit_lexical:.2f} |")
+    lines.append(f"| 检索样本数 | {report.behavior.retrieval_n} |")
 
     # 设计文档 37：mock vs real 对比段（real 报告内嵌 mock 基线，直答"评测是不是自证"）
     if mock_report is not None and mock_report.llm_mode != report.llm_mode:
@@ -1095,6 +1137,7 @@ if __name__ == "__main__":
 __all__ = [
     "AccuracyCase",
     "ACCURACY_FIXTURE",
+    "BehaviorMetrics",
     "Benchmark",
     "BenchmarkExtractor",
     "BenchmarkMockLLM",
