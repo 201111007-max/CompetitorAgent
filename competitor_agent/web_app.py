@@ -243,6 +243,12 @@ async def _event_generator(
                     "competitor_name": report.competitor.name,
                     "created_at": report.created_at,
                     "freshness": report.freshness.to_dict() if report.freshness else None,
+                    # 设计文档 35：结构化维度 + 遗留缺口，供会话摘要/相关度召回
+                    "dimensions": [
+                        {"dimension": r.dimension, "summary": r.summary, "confidence": r.confidence}
+                        for r in report.dimension_results
+                    ],
+                    "pending_gaps": [g.field for g in report.gaps_pending],
                 },
             )
         )

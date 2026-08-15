@@ -340,6 +340,12 @@ class CompetitorAnalysisAPI:
                     "created_at": report.created_at,
                     "freshness": report.freshness.to_dict() if report.freshness else None,
                     "pricing_profiles": pricing_profiles,
+                    # 设计文档 35：结构化维度 + 遗留缺口，供会话摘要/相关度召回
+                    "dimensions": [
+                        {"dimension": r.dimension, "summary": r.summary, "confidence": r.confidence}
+                        for r in report.dimension_results
+                    ],
+                    "pending_gaps": [g.field for g in report.gaps_pending],
                 },
             )
         )
@@ -667,6 +673,13 @@ class CompetitorAnalysisAPI:
                     Skill(competitor_name=competitor, gap_field=r.dimension, source_name=source, success=True)
                 )
                 self._memory.record_outcome(source, True)
+                # 设计文档 35：多 Agent 路径同样沉淀进化经验（成功模式）
+                self._memory.note_pattern(
+                    competitor,
+                    r.dimension,
+                    pattern=f"缺口 {r.dimension} 由源 {source} 有效",
+                    outcome="success",
+                )
 
     # ── M4: 流式分析 ──────────────────────────────────────────────────
 
@@ -713,6 +726,12 @@ class CompetitorAnalysisAPI:
                         "competitor_name": report.competitor.name,
                         "created_at": report.created_at,
                         "freshness": report.freshness.to_dict() if report.freshness else None,
+                        # 设计文档 35：结构化维度 + 遗留缺口，供会话摘要/相关度召回
+                        "dimensions": [
+                            {"dimension": r.dimension, "summary": r.summary, "confidence": r.confidence}
+                            for r in report.dimension_results
+                        ],
+                        "pending_gaps": [g.field for g in report.gaps_pending],
                     },
                 )
             )

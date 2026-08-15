@@ -186,6 +186,7 @@ class SingleOrchestrator:
             retriever=self._retriever,
             session_id=sid,
             providers=self._providers,
+            memory_context_fn=self._memory_context_fn(),
         )
         result = loop.execute(gap, strategy)
         # 每完成一个缺口保存 checkpoint（结果快照 + 共享预算用量）
@@ -210,19 +211,41 @@ class SingleOrchestrator:
         )
         return result
 
+    def _memory_context_fn(self) -> Any:
+        """记忆召回回调（设计文档 35）：(competitor, dimension) -> 相关历史经验文本。"""
+        if self._memory is None:
+            return None
+        return lambda comp, dim: "\n".join(
+            self._memory.recent_context(comp, top_k=3, query=dim)
+        )
+
     def _record_memory_success(self, strategy: CompetitorStrategy, gap: object) -> None:
-        """分析成功后沉淀技能 + 记录数据源成功率（记忆自动进化）"""
+        """分析成功后沉淀技能（含做法）+ 记录数据源成功率 + 进化经验（记忆自动进化）"""
         if self._memory is None:
             return
         gap_field = getattr(gap, "field", "")
         competitor = strategy.competitor.name
-        tried = getattr(gap, "sources_tried", None)
+        tried = getattr(gap, "sources_tried", None) or []
         source = tried[-1] if tried else ""
         if source:
+            # 做法：经降级链才命中 → 记录降级路径；直接命中 → 空（默认无需说明）
+            method = f"降级链: {' → '.join(tried)}" if len(tried) > 1 else ""
             self._memory.record_skill(
-                Skill(competitor_name=competitor, gap_field=gap_field, source_name=source, success=True)
+                Skill(
+                    competitor_name=competitor,
+                    gap_field=gap_field,
+                    source_name=source,
+                    success=True,
+                    method=method,
+                )
             )
             self._memory.record_outcome(source, True)
+            self._memory.note_pattern(
+                competitor,
+                gap_field,
+                pattern=f"缺口 {gap_field} 由源 {source} 有效",
+                outcome="success",
+            )
 
 
 __all__ = ["AnalysisOrchestrator", "SingleOrchestrator"]

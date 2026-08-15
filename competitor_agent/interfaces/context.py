@@ -23,6 +23,7 @@ class AnalysisContext:
     dimension: DimensionType | None = None
     history: list[object] = field(default_factory=list)
     rag_context: str = ""  # RAG 检索到的背景知识片段（含来源），注入分析器 prompt
+    memory_context: str = ""  # 记忆召回的历史经验（设计文档 35），注入分析器 prompt
     benchmark_scores: dict[str, object] = field(default_factory=dict)  # 榜单直连结果（设计文档 25）
 
 
@@ -65,6 +66,7 @@ class Skill:
     source_name: str
     success: bool = True
     weight: float = 0.0
+    method: str = ""  # 成功做法文本（设计文档 35）：如"该源抓不到 → 降级到榜单源"
 
 
 @dataclass

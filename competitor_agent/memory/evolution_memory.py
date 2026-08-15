@@ -4,25 +4,73 @@
 - SPA 站点 → Playwright 优先（成功率自动积累）
 - record_outcome(source, success) 累积计数
 - source_success_rates() 返回成功率字典（含默认值 0.5 平滑）
+
+设计文档 35：新增经验/反例归纳（note_pattern / retrieve_patterns），
+按竞品记录可检索的模式清单（独立 JsonStore，不污染成功率统计），供规划与失败归因联动。
 """
 from __future__ import annotations
 
 import logging
 from pathlib import Path
 
-from competitor_agent.memory.json_store import JsonStore
+from competitor_agent.memory.json_store import JsonStore, now_iso
 
 logger = logging.getLogger("competitor_agent.memory.evolution_memory")
 
 _SMOOTHING_PRIOR = 0.5
 _SMOOTHING_ALPHA = 1.0
+_MAX_PATTERNS_PER_COMPETITOR = 50
 
 
 class EvolutionMemory:
-    """L4 进化层：数据源成功率统计"""
+    """L4 进化层：数据源成功率统计 + 经验/反例归纳"""
 
     def __init__(self, data_dir: Path | str | None = None) -> None:
         self._store = JsonStore("evolution_memory", data_dir)
+        self._pattern_store = JsonStore("evolution_patterns", data_dir)
+
+    def note_pattern(
+        self,
+        competitor: str,
+        dimension: str,
+        pattern: str,
+        outcome: str,
+    ) -> None:
+        """记录一条可检索经验/反例（跨竞品归纳），outcome ∈ {success, degraded, failure}。
+
+        同 (dimension, pattern, outcome) 去重并刷新时间戳；每竞品最多保留
+        ``_MAX_PATTERNS_PER_COMPETITOR`` 条（先进先出裁剪）。
+        """
+        if not competitor or not pattern:
+            return
+        patterns = self._patterns(competitor)
+        for item in patterns:
+            if (
+                item.get("dimension") == dimension
+                and item.get("pattern") == pattern
+                and item.get("outcome") == outcome
+            ):
+                item["created_at"] = now_iso()
+                self._persist_patterns(competitor, patterns)
+                return
+        patterns.append(
+            {
+                "dimension": dimension,
+                "pattern": pattern,
+                "outcome": outcome,
+                "created_at": now_iso(),
+            }
+        )
+        patterns = patterns[-_MAX_PATTERNS_PER_COMPETITOR:]
+        self._persist_patterns(competitor, patterns)
+
+    def retrieve_patterns(self, competitor: str, dimension: str) -> list[str]:
+        """取回某竞品该维度的经验/反例（供规划与失败归因联动读取）。"""
+        return [
+            str(item["pattern"])
+            for item in self._patterns(competitor)
+            if item.get("dimension") == dimension
+        ]
 
     def record_outcome(self, source: str, success: bool) -> None:
         """记录一次数据源采集成败"""
@@ -61,3 +109,11 @@ class EvolutionMemory:
         if not isinstance(raw, dict):
             return {}
         return raw
+
+    def _patterns(self, competitor: str) -> list[dict]:
+        raw = self._pattern_store.get(competitor, [])
+        return raw if isinstance(raw, list) else []
+
+    def _persist_patterns(self, competitor: str, patterns: list[dict]) -> None:
+        self._pattern_store.put(competitor, patterns)
+        self._pattern_store.save()

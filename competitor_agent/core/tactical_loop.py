@@ -12,7 +12,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 from competitor_agent.analyzers.base import BaseCompetitorAnalyzer
 from competitor_agent.collector.source_selector import SourceSelector
@@ -42,6 +42,7 @@ class TacticalLoop:
         retriever: Any | None = None,
         session_id: str | None = None,
         providers: dict[str, object] | None = None,
+        memory_context_fn: Callable[[str, str], str] | None = None,
     ) -> None:
         self._executor = GapExecutor(
             selector=selector,
@@ -53,6 +54,7 @@ class TacticalLoop:
             retriever=retriever,
             session_id=session_id,
             providers=providers,
+            memory_context_fn=memory_context_fn,
         )
 
     @property
