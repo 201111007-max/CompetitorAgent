@@ -70,12 +70,18 @@ class SourceSelector:
     ) -> None:
         self._cache: dict[str, str] = {}
         self._success_rates: dict[str, float] = {}
+        # 失败反例命中的源（设计文档 45）：candidates 中把记录 failures 的源排后
+        self._failure_penalties: set[str] = set()
         # 外部源提供方：按 kind 索引（design doc 23）
         self._providers: dict[str, object] = {p.kind: p for p in providers or []}  # type: ignore[union-attr]
 
     def set_success_rates(self, success_rates: dict[str, float]) -> None:
         """注入 L4 数据源成功率（驱动优选）"""
         self._success_rates = dict(success_rates)
+
+    def set_failure_penalties(self, failure_sources: list[str]) -> None:
+        """注入 L4 失败反例命中的源（设计文档 45）：candidates 中把这些源降级排后。"""
+        self._failure_penalties = set(failure_sources)
 
     def candidates(self, gap: InfoGap, competitor: Competitor) -> list[SourceCandidate]:
         """返回按可信度降序的候选源。
@@ -113,9 +119,12 @@ class SourceSelector:
                     seen.add(cand.url)
                     candidates.append(cand)
 
-        # 成功率高（已验证的杀手源）——优先前置
+        # 成功率高（已验证的杀手源）——优先前置；失败反例命中的源降级排后（设计文档 45）
         boosted: list[SourceCandidate] = []
         for cand in candidates:
+            if cand.source_name in self._failure_penalties:
+                boosted.append(cand.with_trust(0.05))
+                continue
             rate = self._success_rates.get(cand.source_name)
             if rate is not None:
                 cand = cand.with_trust(0.5 + 0.5 * rate)  # 0.5~1.0

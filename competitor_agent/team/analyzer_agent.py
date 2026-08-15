@@ -16,7 +16,7 @@ from competitor_agent.domain_types.report import DimensionResult
 from competitor_agent.interfaces.context import AnalysisContext
 from competitor_agent.interfaces.memory import IFourLayerMemory
 from competitor_agent.team.base_agent import AgentContext, AgentResult, AgentStatus, BaseAgent
-from competitor_agent.team.message_bus import Envelope, T_ANALYZED, MessageBus
+from competitor_agent.team.message_bus import T_ANALYZED, Envelope, MessageBus
 
 logger = logging.getLogger("competitor_agent.team.analyzer_agent")
 
@@ -75,6 +75,7 @@ class AnalyzerAgent(BaseAgent):
                 competitor_name=competitor_name,
                 dimension=analyzer.dimension,
                 rag_context=self._retrieve_rag(competitor_name, obs.gap_field),
+                memory_context=self._retrieve_memory(competitor_name, obs.gap_field),
             ),
         )
 
@@ -94,6 +95,21 @@ class AnalyzerAgent(BaseAgent):
         except Exception as exc:  # noqa: BLE001 —— 单缺口分析失败降级，不阻塞流水线
             logger.warning("异步分析失败: %s: %s", obs.gap_field, exc)
             return None
+
+    def _retrieve_memory(self, competitor: str, dimension: str) -> str:
+        """记忆召回（设计文档 45）：team 路径与 single 对齐——复用 recent_context 相关度召回。
+
+        无记忆（memory=None）或召回失败均静默返回空串（enable_memory=False 全绿）。
+        """
+        if self._memory is None:
+            return ""
+        try:
+            return "\n".join(
+                self._memory.recent_context(competitor, top_k=3, query=dimension)
+            )
+        except Exception:  # noqa: BLE001 — 记忆召回失败不影响主流程
+            logger.warning("记忆召回失败: %s/%s", competitor, dimension)
+            return ""
 
     def _retrieve_rag(self, competitor: str, dimension: str) -> str:
         """检索知识库相关片段，拼成可注入的文本（含来源）"""

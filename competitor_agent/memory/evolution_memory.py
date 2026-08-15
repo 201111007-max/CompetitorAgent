@@ -7,10 +7,13 @@
 
 设计文档 35：新增经验/反例归纳（note_pattern / retrieve_patterns），
 按竞品记录可检索的模式清单（独立 JsonStore，不污染成功率统计），供规划与失败归因联动。
+设计文档 45：L4 消费接线——retrieve_patterns_with_outcome（规划提权/降权按 outcome 判定）
++ failure_patterns_for（源选择把失败反例命中源排后）。
 """
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 
 from competitor_agent.memory.json_store import JsonStore, now_iso
@@ -20,6 +23,11 @@ logger = logging.getLogger("competitor_agent.memory.evolution_memory")
 _SMOOTHING_PRIOR = 0.5
 _SMOOTHING_ALPHA = 1.0
 _MAX_PATTERNS_PER_COMPETITOR = 50
+
+# 失败/降级 outcome 集（供 failure_patterns_for 判定反例）
+_FAILURE_OUTCOMES = frozenset({"failure", "degraded"})
+# 从 pattern 文本提取源名（"由源 X 有效" / "源 X 无数据" 等）；源名即 source_name（ASCII 标识符）
+_PATTERN_SOURCE_RE = re.compile(r"源\s*([A-Za-z_][A-Za-z0-9_]*)")
 
 
 class EvolutionMemory:
@@ -71,6 +79,34 @@ class EvolutionMemory:
             for item in self._patterns(competitor)
             if item.get("dimension") == dimension
         ]
+
+    def retrieve_patterns_with_outcome(
+        self, competitor: str, dimension: str
+    ) -> list[tuple[str, str]]:
+        """取回某竞品该维度的 (pattern, outcome) 列表（设计文档 45）。
+
+        供规划提权/降权按 outcome 可靠判定（区别于仅文本的 retrieve_patterns）。
+        """
+        return [
+            (str(item["pattern"]), str(item.get("outcome", "")))
+            for item in self._patterns(competitor)
+            if item.get("dimension") == dimension
+        ]
+
+    def failure_patterns_for(self, competitor: str) -> list[str]:
+        """取回某竞品失败/降级反例涉及的源名清单（设计文档 45 §3.1）。
+
+        从 outcome ∈ {failure, degraded} 的 pattern 文本提取源名（"由源 X 有效" 等格式），
+        供 SourceSelector.set_failure_penalties 把记录 failures 的源排后；提取不到源名则跳过。
+        """
+        sources: set[str] = set()
+        for item in self._patterns(competitor):
+            if item.get("outcome") not in _FAILURE_OUTCOMES:
+                continue
+            match = _PATTERN_SOURCE_RE.search(str(item.get("pattern", "")))
+            if match:
+                sources.add(match.group(1))
+        return sorted(sources)
 
     def record_outcome(self, source: str, success: bool) -> None:
         """记录一次数据源采集成败"""

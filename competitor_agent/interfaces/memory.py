@@ -70,5 +70,15 @@ class IFourLayerMemory(Protocol):
         """L4: 取回某竞品某维度的经验/反例（供规划与失败归因联动）"""
         ...
 
+    def retrieve_patterns_with_outcome(
+        self, competitor: str, dimension: str
+    ) -> list[tuple[str, str]]:
+        """L4: 取回某竞品某维度的 (pattern, outcome) 列表（设计文档 45，供规划提权/降权）"""
+        ...
+
+    def failure_patterns_for(self, competitor: str) -> list[str]:
+        """L4: 取回某竞品失败/降级反例涉及的源名清单（设计文档 45，供源选择降级）"""
+        ...
+
 
 __all__ = ["IFourLayerMemory"]

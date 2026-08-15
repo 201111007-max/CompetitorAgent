@@ -70,6 +70,7 @@ class StrategicPlanner:
         competitor = self._resolve_with_sources(parsed)
         gaps = self._build_gaps(task, parsed.dimensions)
         self._apply_memory_boost(gaps, competitor, memory)
+        self._apply_pattern_boost(gaps, competitor, memory)
         budget = self._allocate_budget(parsed.dimensions)
         return CompetitorStrategy(
             competitor=competitor,
@@ -128,6 +129,32 @@ class StrategicPlanner:
                 if skill.gap_field == gap.field and skill.success:
                     gap.confidence = min(gap.confidence + 0.2, 0.8)
                     break
+
+    def _apply_pattern_boost(
+        self,
+        gaps: list[InfoGap],
+        competitor: Competitor,
+        memory: IFourLayerMemory | None,
+    ) -> None:
+        """L4 进化模式消费（设计文档 45）：成功模式提权 / 失败反例降权。
+
+        与 _apply_memory_boost（L3 技能）并列：按维度检索 (pattern, outcome)，
+        成功 → 初始置信度 +0.1（封顶 0.9）；失败/降级 → 未定置信缺口降权（优先级 -1，下限 1）。
+        只读消费不新增写入；读取失败静默降级（记忆层损坏不影响规划）。
+        """
+        if memory is None:
+            return
+        for gap in gaps:
+            try:
+                entries = memory.retrieve_patterns_with_outcome(competitor.name, gap.field)
+            except Exception:  # 记忆层损坏不影响规划
+                logger.warning("L4 模式取回失败，跳过 pattern boost: field=%s", gap.field, exc_info=True)
+                continue
+            for _pattern, outcome in entries:
+                if outcome == "success":
+                    gap.confidence = min(gap.confidence + 0.1, 0.9)
+                elif outcome in ("failure", "degraded") and gap.confidence == 0:
+                    gap.priority = max(gap.priority - 1, 1)
 
     def _allocate_budget(self, dimensions: list[str] | None = None) -> dict[str, int]:
         if dimensions is not None:

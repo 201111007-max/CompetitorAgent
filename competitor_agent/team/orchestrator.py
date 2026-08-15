@@ -61,12 +61,14 @@ class TeamOrchestrator:
         session_id: str | None = None,
         providers: dict[str, object] | None = None,
         builder: ReportBuilder | None = None,
+        selector: SourceSelector | None = None,
     ) -> None:
         self._bus = bus or MessageBus()
         self._planner = StrategicPlanner(llm=llm, use_llm=use_llm)
+        # 设计文档 45：复用外层注入的 selector（含 L4 成功率 + 失败反例降级），缺省内部 new 兼容旧调用
         self._collector = CollectorAgent(
             self._bus,
-            SourceSelector(providers=list((providers or {}).values())),
+            selector or SourceSelector(providers=list((providers or {}).values())),
             extractor,
             memory=memory,
             ingester=ingester,
