@@ -47,10 +47,12 @@
 | `38_tool_layer_design.md` | 第二轮：工具层无 schema/校验/超时/失败回灌（LLM↔工具交互最薄） | 高 | ✅ 已实现 |
 | `39_budget_cost_hook_design.md` | 第二轮：成本上限形同虚设（固定 0.01 记账、diminishing 死逻辑） | 中高 | ⏸ 暂缓（用户决定，成本控制先不做） |
 | `40_mcp_react_bridge_design.md` | 第二轮：MCP 8 工具与 ReAct 单工具两条路径互不相干 | 高 | ⏳ 已出设计待实现 |
-| `41_url_guard_design.md` | 第二轮：`_react_web_extract`/MCP `web_extract` 无 SSRF/URL 防护 | 高 | ⏳ 已出设计待实现 |
+| `41_url_guard_design.md` | 第二轮：`_react_web_extract`/MCP `web_extract` 无 SSRF/URL 防护 | 高 | ✅ 已实现 |
 | `42_behavior_eval_design.md` | 第二轮：评测只测结果字段，工具自恢复/RAG 收益无行为指标 | 中高 | ⏳ 已出设计待实现 |
 
 > **设计文档 38 修复说明**：工具层升级已落地。① **`ToolSpec` 契约**（`agent/tool_dispatcher.py`）：name/func/description/params_schema（JSON Schema 子集：type/required/properties/enum，复用设计文档 34 `LLMClient._validate_schema`）/timeout；`register(name, func, *, spec=None)` 未给 spec 时建默认契约（旧调用零改动兼容）。② **dispatch 前校验**：参数不合 schema → 抛 `ToolArgumentError`（可读原因含字段与期望类型），不再冒泡原生异常。③ **超时执行**：`ThreadPoolExecutor(max_workers=1)` + `future.result(timeout)`，超时返回"工具执行超时: <name>"（工作线程 daemon、`shutdown(wait=False)` 不悬挂循环）；默认超时读 `CollectorConfig.timeout_seconds`（`facade/api.py::analyze_react` 注入）。④ **`get_tool_descriptions`** 输出 `name(params: 类型, 可选?: 类型) — description`（schema 优先、无 schema 回退签名注解）。⑤ **解析失败回灌**：`response_parser.py` `_parse_json_args` 失败/非对象抛 `ToolArgumentError` 不再静默 `{}`，`ReActStep` 增 `args_error` 字段（`extract_action` 捕获写入，无 `Args:` 时保持 `args_error=""` 兼容）。⑥ **四类反馈**：`react_agent.py` action 分支区分 工具参数解析失败 / 工具参数错误（`ToolArgumentError`）/ 工具不可用（`ValueError`）/ 工具执行异常（`Exception`），均经 `wrap_untrusted` 回灌 Observation——模型可据可读反馈修正重试（自恢复闭环，叠加设计文档 06 注入防护）。⑦ **测试** 15 条新增（`tests/unit/agent/test_react.py`）：`TestToolSchema`（合法通过/缺必填/类型错/enum 越界/描述含类型）、`TestToolTimeout`（超时返回可读/无超时正常）、`TestReActFeedback`（四类反馈互不混淆）、`TestReActRecovery`（错误参数→回灌→修正参数→工具成功调用）、解析 args_error 三条——全量 **763 passed / 4 skipped**，既有 test_react.py 断言全部保持（`{name}` 裸注册与无 schema 行为不变）。
+
+> **设计文档 41 修复说明**：SSRF / URL 防护已落地。① **统一守卫** `core/url_guard.py`：`guard_http_url(url, *, block_private=True)` 仅允许 http/https；host 解析**全部 IP**（`socket.getaddrinfo` 全量）任一落在私网/环回/保留/链路本地/组播段即拒绝（标准库 `is_private/is_loopback/is_link_local/is_reserved/is_multicast` + `PRIVATE_NETS` 显式网段兜底，IPv4-mapped IPv6 归一化），防 DNS rebinding；`URLError(ValueError)` 携带可读原因（与设计文档 38 `ToolArgumentError` 同回灌语义），`resolve_all` 解析失败抛 `URLError('域名解析失败')`。② **配置化** `CollectorConfig` 新增 `max_content_chars=8000`、`block_private_urls=True`（默认开，False 本地调试豁免），消除三处硬编码（web_tools 15.0/8000、ReAct 2000）。③ **ReAct 入口** `facade/api.py::_react_web_extract`：抓取前守卫，`URLError` 捕获返回 `"URL 被安全守卫拦截: ..."` 回灌自恢复，`[:2000]` 改读 `config.max_content_chars`。④ **MCP 入口** `mcp_server/tools/web_tools.py::web_extract`：守卫**先于任何抓取依赖执行**（bs4 懒加载后置，不因缺解析库放行内网）；`follow_redirects=True` 改为**手动逐跳重校验**（`urljoin` 拼 Location、每跳 `guard_http_url`、`_MAX_REDIRECTS=5`、关自动跟随）杜绝重定向到内网；超时/大小读 `collector.timeout_seconds`/`max_content_chars`；`httpx` 升模块级 import（硬依赖），bs4 缺依赖返回可读错误。⑤ **测试** `tests/unit/core/test_url_guard.py` 28 条：黑名单 10 项（127/10/172.16-31/192.168/169.254/::1/fc00::/fe80）、公网通过、`block_private=False` 豁免、scheme 畸形（file/ftp/无 scheme/缺 host/解析失败）、DNS rebinding（多 IP 一公网一内网拒绝、全公网通过、`::ffff:` 映射）、`resolve_all` 去重与失败、ReAct 侧（内网拦截不回灌原文/max_content_chars/豁免开关）、MCP 侧（内网拦截/重定向到内网拒绝且不跟随/公网重定向逐跳跟随/配置化 timeout 与截断）——全量 **789 passed / 6 skipped**（2 条 MCP 内容提取测试因本机缺 bs4 跳过，与既有 web_extractor 一致；httpx 已装）。
 
 > **问题 1 修复说明**：多 Agent 已接入主流程。`CompetitorAnalysisAPI.analyze()` 新增 `mode` 参数（`single` / `team`，**默认 `team`**），`mode="team"` 时走事件驱动 + 状态决策的多 Agent 流水线（Collector→Analyzer→Validator→Reporter，支持 SUCCESS/RETRY/DEGRADED/FAILED 决策）。CLI 新增 `--mode` 选项。全量 312 个测试通过。
 
@@ -211,7 +213,7 @@
 - §12.1-12.3 / §13-15 全部待办均已按设计文档实现（01-31 ✅）；深度补充 **32-37 全部 6 项已实现**（见上方各修复说明）。
 - **深度补充 32-37 全部完成**（对应 implementation_plan.md §16）：按"面试被问概率 × 补齐成本"排序依次实现 **32 → 36 → 37 → 33 → 34 → 35**，待办清空。
 
-### 待办（第二轮评审 38-42，2026-08-15 已出设计；38 已实现，其余待实现）
+### 待办（第二轮评审 38-42，2026-08-15 已出设计；38、41 已实现，40/42 待实现）
 
 > 触发：第二轮评审——工程面（记忆/观测/评测/可靠性）已达标，但 **agent 最核心的"LLM ↔ 工具"交互面**与**安全/评测的实证闭环**仍是短板。
 > 实施顺序：**38（工具层契约/回灌，40/42 前置）→ 41（URL 防护，40 依赖）→ 40（MCP↔ReAct 打通）→ 42（行为级评测，依赖 38/32）**；39（预算成本挂钩）已暂缓（见下）。
@@ -219,10 +221,10 @@
 - ~~**设计文档 38 工具层升级（高）**：`ToolSpec`（name/description/params_schema/timeout）+ `ToolDispatcher` schema 校验（复用 34 `_validate_schema`）+ 超时执行 + 四类反馈（工具不存在/参数错误/执行异常/超时）回灌 Observation；`_parse_json_args` 失败不再静默 `{}`（`ReActStep.args_error`），模型可自恢复。预计 1 天。~~ ✅ **已实现（2026-08-15，见上方"设计文档 38 修复说明"）**。
 - ~~**设计文档 39 预算成本挂钩（中高）**：`LLMClient.snapshot_cost/snapshot_tokens` + `GapExecutor(llm=...)` 分析前后采样补记真实增量（对齐 dota_helper tactical_loop P0-2 模式）+ facade `record_iteration` 改真实成本 → `cost_limit` 真实触顶、diminishing 生效；无 LLM 时增量恒 0（回归安全）。预计 0.5 天。~~ **已暂缓（2026-08-15 用户决定，成本控制先不考虑）；设计文档保留，后续想做可恢复。**
 - **设计文档 40 MCP↔ReAct 打通（高）**：`mcp_server/tools/__init__.py` 收敛 `TOOLS`+`TOOL_SPECS` 唯一工具源（含 38 schema）+ 新 `agent/tool_registry.py::build_react_dispatcher()` 供 `analyze_react` 多工具自主调用 + `create_server()` 同源生成 `@mcp.tool`（消除重复描述）。预计 0.5-1 天。
-- **设计文档 41 URL 防护（高）**：`core/url_guard.py::guard_http_url`（仅 http/https + 私网/环回/保留段黑名单 + `getaddrinfo` 全量 IP 防 DNS rebinding）+ 统一超时/内容上限读 `CollectorConfig` + 重定向逐跳重校验 + 两入口（ReAct/MCP）统一接入，失败可读回灌。预计 0.5 天。
+- ~~**设计文档 41 URL 防护（高）**：`core/url_guard.py::guard_http_url`（仅 http/https + 私网/环回/保留段黑名单 + `getaddrinfo` 全量 IP 防 DNS rebinding）+ 统一超时/内容上限读 `CollectorConfig` + 重定向逐跳重校验 + 两入口（ReAct/MCP）统一接入，失败可读回灌。预计 0.5 天。~~ ✅ **已实现（2026-08-15，见上方"设计文档 41 修复说明"）**。
 - **设计文档 42 行为级评测（中高）**：`evaluation/behavior_eval.py`——`RecoveryEvaluator`（ScriptedLLM 回放错误→回灌→重试→判定自恢复）+ `RetrievalEvaluator`（hybrid vs lexical `hit_rate@k`，证明 RAG 收益）+ `BenchmarkReport.behavior` 指标进渲染/门禁（mock 下恢复率 ≥0.9 且 hybrid ≥ lexical）。预计 1 天。
 
-> 依赖顺序建议：**38 → 41 → 40 → 42**（38 回灌闭环是 40/42 前置；41 与 40 同批，web_extract 两入口统一防护）。**38 已实现（2026-08-15）**，下一项 **41（URL 防护）**。**39（预算成本挂钩）已暂缓**——用户 2026-08-15 决定成本控制先不考虑，不影响其余项（39 独立无依赖）。其余已出设计，状态 ⏳，实现后逐一改 ✅ 并追加修复说明。
+> 依赖顺序建议：**38 → 41 → 40 → 42**（38 回灌闭环是 40/42 前置；41 与 40 同批，web_extract 两入口统一防护）。**38、41 已实现（2026-08-15）**，下一项 **40（MCP↔ReAct 打通）**。**39（预算成本挂钩）已暂缓**——用户 2026-08-15 决定成本控制先不考虑，不影响其余项（39 独立无依赖）。其余已出设计，状态 ⏳，实现后逐一改 ✅ 并追加修复说明。
 
 > 依赖顺序建议：23（多源路由，底层）→ 24（分析器）→ 25（榜单，复用 23 的 provider）→ 26（时间线，复用 23 的 Releases）→ 27（定价，独立）→ 28（导出，复用 26/27）→ 29（评测，依赖 24/25/26 的结构化产出）→ 30/31（简历/面试达标补充，依赖已就绪的 `evaluation/benchmark.py` 真实执行版）。已全部完成。
 > 深度补充顺序：32 → 36 → 37 → 33 → 34 → 35（32 与 35 共享召回基建，36 与 34 共享 `complete_json`，37 依赖 36）。**32-37 已全部实现（见上方各修复说明），深度补充待办清空。**

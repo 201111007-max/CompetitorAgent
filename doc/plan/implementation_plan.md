@@ -628,8 +628,8 @@ dev:
 
 > 状态背景：§16 的 6 项深度补充（设计文档 32/36/37/33/34/35）已全部实现合入，工程面（记忆/观测/评测/可靠性）达标。
 > 本节为 2026-08-15 第二轮评审的新结论：**agent 最核心的"LLM ↔ 工具"交互面是全项目最薄**，且
-> URL 安全/行为可靠性是"显式能力但无实证"（39 成本控制已暂缓，见 17.1）。**38（工具层升级）已于 2026-08-15 实现**
-> （`ToolSpec`/schema 校验/超时/四类反馈回灌，全量 763 测试通过）；剩余三项补齐后 agent 交互面从"裸调用"升级为
+> URL 安全/行为可靠性是"显式能力但无实证"（39 成本控制已暂缓，见 17.1）。**38（工具层升级）与 41（URL 防护）已于 2026-08-15 实现**
+> （38：`ToolSpec`/schema 校验/超时/四类反馈回灌；41：`url_guard` 私网黑名单 + DNS rebinding + 重定向逐跳，两入口接入；全量 789 测试通过）；剩余两项补齐后 agent 交互面从"裸调用"升级为
 > "契约 + 校验 + 回灌 + 超时 + 多工具 + 安全 + 行为量化"的现代 agent 交互层。
 > 设计文档见 `doc/plan/issue_designs/38_tool_layer_design.md` ~ `42_behavior_eval_design.md`，索引与待办状态见 `issue_designs/README.md`。
 
@@ -638,13 +638,13 @@ dev:
 | 38 工具层升级 | `ToolSpec`（schema/描述/超时）+ dispatch 校验 + 失败回灌 + 超时 + 四类反馈 | `tool_dispatcher.py:16-48` 裸注册无契约；`response_parser.py:102-108` 解析失败静默 `{}`；`react_agent.py:64-74` 仅捕获 ValueError、无超时 | 高 | ✅ 已实现（2026-08-15） |
 | 39 预算成本挂钩 | `snapshot_cost/snapshot_tokens` + GapExecutor 补记真实增量 + `record_iteration` 真实成本 | `gap_executor.py:127` 固定 `0.01`；`budget.py:61-68` diminishing 依赖恒 0 的 `delta_tokens`；`api.py:517/546` 常数记账 | 中高 | ~~0.5 天~~ ⏸ 暂缓 |
 | 40 MCP↔ReAct 打通 | `TOOLS`+`TOOL_SPECS` 唯一工具源 + `build_react_dispatcher()` + `create_server()` 同源 | `mcp_server/server.py:42-148` 8 工具与 `api.py:474-476` 单工具两条路径互不相干，描述双份 | 高 | 0.5-1 天 |
-| 41 URL 防护 | `url_guard.py` 私网/环回黑名单 + DNS rebinding 全量校验 + 重定向逐跳 + 统一超时/大小 | `api.py:480-489` `_react_web_extract` 任意 URL 直抓；`web_tools.py:19` `httpx.get(follow_redirects=True)` 无防 | 高 | 0.5 天 |
+| 41 URL 防护 | `url_guard.py` 私网/环回黑名单 + DNS rebinding 全量校验 + 重定向逐跳 + 统一超时/大小 | `api.py:480-489` `_react_web_extract` 任意 URL 直抓；`web_tools.py:19` `httpx.get(follow_redirects=True)` 无防 | 高 | ✅ 已实现（2026-08-15） |
 | 42 行为级评测 | `behavior_eval.py`（RecoveryEvaluator + RetrievalEvaluator）+ `BenchmarkReport.behavior` 门禁 | `benchmark.py:92-141` 全结果字段，无行为指标；`retriever.py:19-42` hybrid/lexical 无对比数据 | 中高 | 1 天 |
 
 ### 17.1 实施顺序与依赖
 
 ```
-38（工具契约/回灌，✅ 2026-08-15 已实现）→ 41（URL 防护）→ 40（MCP↔ReAct 打通）→ 42（行为级评测）
+38（工具契约/回灌，✅ 2026-08-15 已实现）→ 41（URL 防护，✅ 2026-08-15 已实现）→ 40（MCP↔ReAct 打通）→ 42（行为级评测）
 39（预算成本挂钩）已暂缓——用户 2026-08-15 决定成本控制先不考虑，独立无依赖，后续可恢复
 ```
 
@@ -658,7 +658,7 @@ dev:
 - **38 ✅**：schema 校验（缺必填/类型错/enum 越界 → `ToolArgumentError` 可读回灌）、解析失败不再静默 `{}`（`args_error`）、超时不悬挂、四类反馈互不混淆、恢复链路端到端（错参数 → 回灌 → 合法重试）——已实现，新增 15 条测试。
 - **39**：GapExecutor 闭环后 `used_cost` ≈ 真实增量（非固定 0.01）；diminishing 触发/不触发；`cost_limit` 触顶 → `COST_LIMIT_REACHED`/`PARTIAL`；无 LLM 时行为与现状逐字节一致。
 - **40**：`build_react_dispatcher().tool_count == len(TOOLS)`；`create_server()` 工具名集合 == `TOOLS` 键集合、描述同源无重复；mock LLM 多工具 ReAct 链路端到端成功 + 自恢复。
-- **41**：私网/环回/保留段/畸形 scheme 全拒；DNS rebinding（多 IP 含内网）拒；重定向到内网拒；超时/大小读 `CollectorConfig`；公网采集行为不变。
+- **41 ✅**：私网/环回/保留段/畸形 scheme 全拒；DNS rebinding（多 IP 含内网）拒；重定向到内网拒（逐跳重校验、不跟随）；超时/大小读 `CollectorConfig`；公网采集行为不变（`block_private_urls=False` 可豁免）——已实现，新增 28 条测试。
 - **42**：mock 下 `react_recovery_rate ≥ 0.9`、`retrieval_hit_hybrid ≥ retrieval_hit_lexical`；`to_dict` 含 `behavior` 字段；既有评测门禁零破坏。
 
 > 与 §16 的关系：§16 补齐"每个模块往深一层"；本节补齐"**agent 之所以是 agent**"的交互层——工具契约、错误恢复、
