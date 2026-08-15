@@ -22,7 +22,7 @@ from typing import Callable
 
 from competitor_agent.agent.react_agent import ReactAgent
 from competitor_agent.agent.react_loop import ReactLoop
-from competitor_agent.agent.tool_dispatcher import ToolDispatcher
+from competitor_agent.agent.tool_registry import build_react_dispatcher
 from competitor_agent.analyzers.registry import AnalyzerRegistry
 from competitor_agent.collector.providers import build_providers
 from competitor_agent.collector.source_selector import SourceSelector
@@ -470,10 +470,13 @@ class CompetitorAnalysisAPI:
     def analyze_react(self, task: str) -> str:
         """ReAct 模式：LLM 驱动工具调用（需 LLM Key）
 
-        web_extract 工具接入真实采集链路（复用 self._extractor），非占位实现。
+        MCP 工具集多工具自主调用（设计文档 40）：web_search/github/pricing 等统一经
+        build_react_dispatcher 注册；web_extract 复用真实采集链路 + URL 守卫（设计文档 41）。
         """
-        dispatcher = ToolDispatcher(default_timeout=self._config.collector.timeout_seconds)
-        dispatcher.register("web_extract", self._react_web_extract)
+        dispatcher = build_react_dispatcher(
+            config=self._config,
+            web_extract=self._react_web_extract,
+        )
         agent = ReactAgent(llm=self._llm or LLMClient(), dispatcher=dispatcher)
         loop = ReactLoop(agent, event_sink=self._event_sink)
         return loop.run(task)
