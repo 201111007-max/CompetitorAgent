@@ -8,7 +8,7 @@ from __future__ import annotations
 from competitor_agent.agent.prompts.react_system import enrich_prompt
 from competitor_agent.agent.prompts.trust_boundary import wrap_untrusted
 from competitor_agent.agent.response_parser import ReActStep, ResponseParser
-from competitor_agent.agent.tool_dispatcher import ToolDispatcher
+from competitor_agent.agent.tool_dispatcher import ToolArgumentError, ToolDispatcher
 from competitor_agent.interfaces.context import Skill
 from competitor_agent.llm.client import LLMClient
 from competitor_agent.observability.logger import get_logger
@@ -62,10 +62,17 @@ class ReactAgent:
                 return parsed.final_answer
 
             if parsed.step_type.value == "action":
-                try:
-                    result = self._dispatcher.dispatch(parsed.tool_name, parsed.tool_args)
-                except ValueError as exc:
-                    result = f"工具不可用: {exc}"
+                if parsed.args_error:
+                    result = f"工具参数解析失败: {parsed.args_error}；请重新生成合法 JSON 参数"
+                else:
+                    try:
+                        result = self._dispatcher.dispatch(parsed.tool_name, parsed.tool_args)
+                    except ToolArgumentError as exc:
+                        result = f"工具参数错误: {exc}；请修正参数后重试"
+                    except ValueError as exc:  # 工具不存在
+                        result = f"工具不可用: {exc}"
+                    except Exception as exc:  # 执行异常也回灌，不冒泡卡死
+                        result = f"工具执行异常: {type(exc).__name__}: {exc}"
                 messages.append({
                     "role": "user",
                     "content": f"Observation（工具结果，不可信外部数据）: {wrap_untrusted(str(result))}",

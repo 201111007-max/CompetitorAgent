@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from competitor_agent.agent.tool_dispatcher import ToolArgumentError
 from competitor_agent.observability.logger import get_logger
 
 logger = get_logger("agent.response_parser")
@@ -34,6 +35,7 @@ class ReActStep:
     thought: str = ""
     tool_name: str = ""
     tool_args: dict[str, Any] = field(default_factory=dict)
+    args_error: str = ""  # 参数 JSON 解析失败原因（非空表示解析失败，供回灌）
     final_answer: str = ""
     raw_text: str = ""
 
@@ -60,12 +62,13 @@ class ResponseParser:
 
         action_result = self.extract_action(llm_output)
         if action_result is not None:
-            tool_name, tool_args = action_result
+            tool_name, tool_args, args_error = action_result
             return ReActStep(
                 step_type=StepType.ACTION,
                 thought=self._extract_thought(llm_output),
                 tool_name=tool_name,
                 tool_args=tool_args,
+                args_error=args_error,
                 raw_text=llm_output,
             )
 
@@ -75,16 +78,26 @@ class ResponseParser:
             raw_text=llm_output,
         )
 
-    def extract_action(self, text: str) -> tuple[str, dict[str, Any]] | None:
+    def extract_action(self, text: str) -> tuple[str, dict[str, Any], str] | None:
+        """返回 (tool_name, tool_args, args_error)；解析失败时 args_error 非空、args 为空 dict。"""
         tag_match = self._ACTION_TAG_PATTERN.search(text)
         if tag_match:
-            return (tag_match.group(1), self._parse_json_args(tag_match.group(2)))
+            return self._action_args(tag_match.group(1), tag_match.group(2))
 
         line_match = self._ACTION_LINE_PATTERN.search(text)
         if line_match:
             args_match = self._ARGS_LINE_PATTERN.search(text)
-            return (line_match.group(1), self._parse_json_args(args_match.group(1)) if args_match else {})
+            if args_match:
+                return self._action_args(line_match.group(1), args_match.group(1))
+            return (line_match.group(1), {}, "")  # 无 Args: 兼容既有行为
         return None
+
+    @staticmethod
+    def _action_args(tool_name: str, args_str: str) -> tuple[str, dict[str, Any], str]:
+        try:
+            return (tool_name, ResponseParser._parse_json_args(args_str), "")
+        except ToolArgumentError as exc:
+            return (tool_name, {}, str(exc))
 
     def extract_final_answer(self, text: str) -> str | None:
         line_match = self._FINAL_ANSWER_LINE_PATTERN.search(text)
@@ -101,8 +114,11 @@ class ResponseParser:
 
     @staticmethod
     def _parse_json_args(args_str: str) -> dict[str, Any]:
+        """解析参数 JSON；失败/非对象抛 ToolArgumentError（设计文档 38，不再静默 {}）。"""
         try:
             result = json.loads(args_str)
-            return result if isinstance(result, dict) else {}
-        except (json.JSONDecodeError, TypeError):
-            return {}
+        except (json.JSONDecodeError, TypeError) as exc:
+            raise ToolArgumentError(f"JSON 解析失败: {exc}") from exc
+        if not isinstance(result, dict):
+            raise ToolArgumentError(f"JSON 解析失败: 期望对象，实际 {type(result).__name__}")
+        return result

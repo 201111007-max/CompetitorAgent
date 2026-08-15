@@ -471,7 +471,7 @@ class CompetitorAnalysisAPI:
 
         web_extract 工具接入真实采集链路（复用 self._extractor），非占位实现。
         """
-        dispatcher = ToolDispatcher()
+        dispatcher = ToolDispatcher(default_timeout=self._config.collector.timeout_seconds)
         dispatcher.register("web_extract", self._react_web_extract)
         agent = ReactAgent(llm=self._llm or LLMClient(), dispatcher=dispatcher)
         loop = ReactLoop(agent, event_sink=self._event_sink)
