@@ -41,7 +41,7 @@
 | `32_rag_vector_retrieval_design.md` | §16.1 RAG：纯词袋检索，向量化未实现（深度补充） | P2 | ✅ 已实现 |
 | `33_team_async_orchestration_design.md` | §16.1 多 Agent：顺序流水线非真协作（深度补充） | P2 | ✅ 已实现 |
 | `34_analyzer_structured_extraction_design.md` | §16.1 分析器：LLM 一次调用+关键词兜底（深度补充） | P2 | ✅ 已实现 |
-| `35_memory_compression_design.md` | §16.1 记忆：四层=JSON 计数，无摘要/向量召回（深度补充） | P3 | 📋 已设计，待实现 |
+| `35_memory_compression_design.md` | §16.1 记忆：四层=JSON 计数，无摘要/向量召回（深度补充） | P3 | ✅ 已实现 |
 | `36_llm_reliability_design.md` | §16.1 LLM 层：单次调用无重试/多模型 fallback（深度补充） | P2 | ✅ 已实现 |
 | `37_real_llm_evaluation_design.md` | §16.1 评测：真实 LLM 质量未量化（深度补充） | P2 | ✅ 已实现 |
 
@@ -117,6 +117,8 @@
 
 > **设计文档 34 修复说明**：分析器结构化抽取已落地。① **`complete_json` 结构化补全**（`llm/client.py`）：新增 `schema` 参数（JSON Schema 子集：`type`/`required`/`properties`/`items`/`enum`，`null` 对任意类型放行）+ `retries=2` 修复重试——解析失败/schema 校验失败把**错误信息回灌 prompt** 重试（≤2 次），耗尽抛 `LLMUnavailableError` 降级规则；SDK 路径附带 `response_format={"type":"json_object"}` 软约束（注入 call_func 路径透传不动，mock 兼容）；`schema=None` 保持旧语义仅 `json.loads`。② **`BaseCompetitorAnalyzer`**：`_analyze_with_llm` 改走 `complete_json(messages, schema=self._schema_for(gap))`（保留 `detect_injection` 注入防护）；新增 `_schema_for(gap)` 顶层统一 `summary/details/confidence` 必备键 + `_details_properties()` 按维度声明 details 结构；新增 **真值校验 `_verify_details`**——details 实体数值（`_VERIFY_NUMERIC_KEYS`：价格/单价/数量/得分/计数，0 值缺省与比例型豁免）与 `observation.raw_text` 原文交叉核对（忽略逗号差异，`12,000`↔`12000`），每处冲突置信度 -0.15（下限 0.1）、<0.5 转 `[PARTIAL]`。③ **五个维度 schema**（pricing `plans/usage`、feature `features`、performance `benchmarks`、ecosystem `mcp_servers/plugins/ide_support/integrations/repo_activity`、sentiment `signals/polarity_ratio/verdict`）与评测 `extract_prediction` 抽取键命名空间对齐（plans 元素仅约束 object，兼容 LLM 契约键与 mock/规则兼容键）；各子类裸 `json.loads` 的 `_parse_result` 删除（基类保留 `(text, schema)` 兼容钩子）。④ **测试** 22 条：`tests/unit/llm/test_complete_json_schema.py` 11（合法通过、缺必填重试耗尽、非法 JSON/类型错修复重试、错误回灌含 `$.confidence`、enum 失败、null 放行、数组 items 校验、boolean≠number、retries=0/恢复）+ `tests/unit/analyzers/test_structured_extraction.py` 11（schema 与评测键对齐、编造数值→惩罚→[PARTIAL]、一致→COMPLETE、0 值不罚、千分位一致、类型错修复非降级、schema 耗尽降级规则）；既有 `test_llm_path_structured` 更新为原文含数值（一致不罚）。全量 **738 个测试通过**（737 passed / 1 环境性失败同前：本机已装 playwright）。
 
+> **设计文档 35 修复说明**：记忆摘要压缩与相关度召回已落地。① **会话摘要压缩**（新增 `memory/session_summary.py`）：`SessionSummary`（competitor/dimensions/key_conclusions/pending_gaps/created_at/session_id）+ `summarize_session`（**无 LLM** 规则抽取 `confidence>=0.6` 的结论，历史归档无结构化维度时回退 Markdown 首行保证可检索）+ `compress_archive`（最近 `keep_full` 条保全文视图、更旧折叠为摘要条目，`summarize_rest=False` 丢弃更旧）。② **归档扩展**（`session_archive.py`）：新增 `_summary_store` 上下文视图 + `compress(max_entries=20, keep_full=5)` 超限滚动压缩 + `recent_context(competitor, top_k, query="")`——query 非空时**按词袋相关度召回**（复用 `CompetitorStore.tokenize` 的 TF 余弦，设计文档 32 向量层接入后由调用侧自动升级）而非"最近 N 条"；压缩只影响注入路径，`list_sessions`/`get_history` **全文契约无损**。③ **技能语义化**：`Skill` 增 `method`（成功做法文本），`SkillStore.record_success(..., method)` 沉淀、合并取最新非空、落盘回传；`enrich_prompt`/`format_skills` 注入带「做法: …」，method 空保持旧格式兼容。④ **进化记忆归纳**：`EvolutionMemory` 增 `note_pattern(competitor, dimension, pattern, outcome)` + `retrieve_patterns`（可检索经验/反例清单，独立 `evolution_patterns` 存储**不污染成功率统计**，按竞品去重裁剪）。⑤ **主流程接入**：`_archive_report`/`analyze_stream`/Web 归档 raw 增加结构化 `dimensions`+`pending_gaps`；`IFourLayerMemory`/`FourLayerMemory` 增 `recent_context`/`note_pattern`/`retrieve_patterns` 与 `record_success(method=...)`；`SingleOrchestrator` 经 `TacticalLoop`→`GapExecutor(memory_context_fn)` 按缺口维度召回历史经验注入 `AnalysisContext.memory_context`，`BaseCompetitorAnalyzer._inject_memory_context` 注入最后一条 user 消息（`[历史经验参考…]`，排 RAG 块之后、`BenchmarkMockLLM` 同样剥离保证 mock 确定性）；单/团队成功沉淀均带 method（单路径降级链 `a→b→X` 自动成 method）并 `note_pattern` 成功模式。⑥ **测试** 23 条：`tests/unit/memory/test_memory_compression.py`——summarize 高置信抽取/回退/封顶、compress 折叠保全文/丢弃、`recent_context` 相关度压倒新旧（更旧 pricing 结论排到更新 feature 前）、压缩内容较全文精简、`get_history` 无损、skill method 往返/prompt 注入/合并/落盘、进化模式往返/去重/**不污染成功率**、FourLayerMemory 委托、memory_context 注入到达分析器 prompt（含不注入分支）；`test_protocols.py` FakeMemory 补齐新协议方法。全量 **748 个测试通过**（748 passed / 4 skipped：3 个 real-LLM e2e 无 Key 跳过 + 1 个 playwright 环境性跳过）。**深度补充 32-37 至此全部完成，待办清空。**
+
 ## 设计文档统一模板
 
 每个设计文档包含以下章节：
@@ -186,10 +188,21 @@
 
 **收尾（已完成）**：① 表 32 行状态已改 ✅ 并追加正式修复说明；② 设计文档 32 §3.1 后端描述已同步为"chromadb 集合 + 可插拔嵌入（含内置 hash 离线兜底）"。
 
+### 设计文档 35（记忆摘要压缩与相关度召回）已完成（2026-08-15）
+
+**已实现**：
+- `memory/session_summary.py`（新增）：`SessionSummary` + `summarize_session`（**无 LLM** 规则抽取 `confidence>=0.6` 结论，历史归档无结构化维度回退 Markdown 首行）+ `compress_archive`（最近 `keep_full` 保全文、更旧折叠为摘要，`summarize_rest=False` 丢弃）。
+- `session_archive.py`：`_summary_store` 上下文视图 + `compress(max_entries=20, keep_full=5)` 滚动压缩 + `recent_context(competitor, top_k, query)` **相关度召回**（TF 余弦，query 压倒新旧排序）；压缩只影响注入路径，`get_history`/`list_sessions` 全文契约无损。
+- Skill 语义化：`Skill.method` 成功做法文本，`record_success(method=...)` 沉淀/合并/落盘，`enrich_prompt` 注入「做法: …」（method 空兼容旧格式）。
+- Evolution 归纳：`note_pattern`/`retrieve_patterns`（独立 `evolution_patterns` 存储，不污染成功率统计，按竞品去重）。
+- 主流程接入：归档 raw 带结构化 `dimensions`+`pending_gaps`；`GapExecutor(memory_context_fn)` 按缺口维度召回 → `AnalysisContext.memory_context` → `_inject_memory_context` 注入 `[历史经验参考…]`；成功沉淀带 method + `note_pattern`。
+- 测试：`test_memory_compression.py` 23 条 + `test_protocols.py` FakeMemory 补齐。全量 **748 个测试通过**（748 passed / 4 skipped）。
+
+**深度补充 32-37 至此全部完成，待办清空。**
+
 ### 待办（下一步按序实施，均已有设计文档）
-- §12.1-12.3 / §13-15 全部待办均已按设计文档实现（01-31 ✅）；深度补充 **32（RAG 向量检索）✅**、**36（LLM 层可靠性）✅**、**37（真实 LLM 评测）✅**、**33（多 Agent 真协作）✅**、**34（分析器结构化抽取）✅** 已实现（见上方修复说明）。
-- **深度补充剩余（32-37 已完成 5 项，对应 implementation_plan.md §16）**：按"面试被问概率 × 补齐成本"排序：
-  1. **35 记忆摘要压缩**（中低）——深度加分项，复用 32 的召回基建。
+- §12.1-12.3 / §13-15 全部待办均已按设计文档实现（01-31 ✅）；深度补充 **32-37 全部 6 项已实现**（见上方各修复说明）。
+- **深度补充 32-37 全部完成**（对应 implementation_plan.md §16）：按"面试被问概率 × 补齐成本"排序依次实现 **32 → 36 → 37 → 33 → 34 → 35**，待办清空。
 
 > 依赖顺序建议：23（多源路由，底层）→ 24（分析器）→ 25（榜单，复用 23 的 provider）→ 26（时间线，复用 23 的 Releases）→ 27（定价，独立）→ 28（导出，复用 26/27）→ 29（评测，依赖 24/25/26 的结构化产出）→ 30/31（简历/面试达标补充，依赖已就绪的 `evaluation/benchmark.py` 真实执行版）。已全部完成。
-> 深度补充顺序：32 → 36 → 37 → 33 → 34 → 35（32 与 35 共享召回基建，36 与 34 共享 `complete_json`，37 依赖 36）。**32 ✅、36 ✅、37 ✅、33 ✅、34 ✅ 已完成，下一步 35 记忆摘要压缩。**
+> 深度补充顺序：32 → 36 → 37 → 33 → 34 → 35（32 与 35 共享召回基建，36 与 34 共享 `complete_json`，37 依赖 36）。**32-37 已全部实现（见上方各修复说明），深度补充待办清空。**
