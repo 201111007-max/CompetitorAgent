@@ -5,6 +5,8 @@
 """
 from __future__ import annotations
 
+from typing import Callable
+
 from competitor_agent.agent.prompts.react_system import enrich_prompt
 from competitor_agent.agent.prompts.trust_boundary import wrap_untrusted
 from competitor_agent.agent.response_parser import ReActStep, ResponseParser
@@ -49,11 +51,17 @@ class ReactAgent:
         system_prompt: str,
         user_message: str,
         max_steps: int = 6,
+        step_guard: Callable[[], bool] | None = None,
     ) -> str:
-        """执行 ReAct 循环直到 Final Answer 或步数耗尽"""
+        """执行 ReAct 循环直到 Final Answer 或步数耗尽
+
+        step_guard: 每步开始前调用（设计文档 43 取消/预算协作），返回 False 提前终止。
+        """
         messages = [{"role": "system", "content": system_prompt}]
         step = 0
         while step < max_steps:
+            if step_guard is not None and not step_guard():
+                break
             reply = self._llm.complete(messages + [{"role": "user", "content": user_message}])
             parsed: ReActStep = self._parser.parse(reply)
             messages.append({"role": "assistant", "content": reply})

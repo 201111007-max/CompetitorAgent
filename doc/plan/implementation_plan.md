@@ -671,11 +671,12 @@ dev:
 
 > 状态：2026-08-15 第三轮评审——**"agent 主循环在哪 / 多 Agent 如何协作 / 工具调用和主流程什么关系"** 的架构拷问
 > （问题 1）＋ 记忆"写了要能用"（问题 4）＋ LLM 智力深度浅（问题 2）＋ 工程一致性六项细节（问题 5）。
-> **本轮只产出设计文档（43-46），尚未实现**（用户 2026-08-15 指示"只写设计文档"）；实施顺序建议 43 → 45 → 44 → 46。
+> 本轮只产出设计文档（43-46，用户 2026-08-15 指示"只写设计文档"）；实施顺序建议 43 → 45 → 44 → 46。
+> **43 已完成（2026-08-15，见 §18.3）**；45/44/46 待实施。
 
 | 待办 | 代码证据 | 优先级 | 预计 |
 |---|---|---|---|
-| **43 双 Agent 大脑未统一**（`facade/api.py` / `agent/react_loop.py` / `analyzers/base.py`） | `analyze_react`（api.py:470）仅测试调用（tests/unit/facade/test_api.py:69-93）、返回裸字符串、无取消/预算/记忆/事件；team 的"多 Agent"实为带总线的顺序流水线（BaseAgent 仅 `run(ctx)`，base_agent.py:57；TeamOrchestrator.run 硬编码顺序，team/orchestrator.py:100-153） | **高** | 1.5-2 天 |
+| **43 双 Agent 大脑未统一**（`facade/api.py` / `agent/react_loop.py` / `analyzers/base.py`） | `analyze_react`（api.py:470）仅测试调用（tests/unit/facade/test_api.py:69-93）、返回裸字符串、无取消/预算/记忆/事件；team 的"多 Agent"实为带总线的顺序流水线（BaseAgent 仅 `run(ctx)`，base_agent.py:57；TeamOrchestrator.run 硬编码顺序，team/orchestrator.py:100-153） | **高** | ✅ 已完成 |
 | **44 LLM 智力深度浅**（`analyzers/base.py` / `core/strategic_loop.py`） | 分析器每维度仅一次 `complete_json`（base.py:157）无迭代/工具查证；规划基本是规则（`DIMENSION_PRIORITY`+关键词提权+静态预算），LLM 仅在 `parse_task` 用一次 | **中** | 1-1.5 天 |
 | **45 记忆回路只写不读/不对称**（`core/strategic_loop.py` / `collector/source_selector.py` / `team/analyzer_agent.py`） | `retrieve_patterns` 全仓库零调用（写入有 orchestrator.py:243、api.py:690）；team `AnalyzerAgent.analyze_observation`（analyzer_agent.py:71-79）不传 `memory_context`，与 single（GapExecutor 注入）不对称 | **中** | 0.5-1 天 |
 | **46 工程一致性细节收敛**（`agent/react_agent.py` / `cli.py` / `llm/client.py` / `facade/api.py`） | ① 双编排并存（SingleOrchestrator vs TeamOrchestrator+CollectorAgent.collect）；② ReAct 每轮重发完整 task（react_agent.py:57）+ Observation 原文入上下文无截断；③ async 是线程包装（`asyncio.to_thread`/`run_in_executor`）；④ `use_llm` 默认不一致（cli.py:61 False vs api.py:95 True）；⑤ 评测全 mock + `BaseAgent` 无覆盖测试；⑥ 计价硬编码 DeepSeek 单价（client.py:33） | **中低** | 1-1.5 天 |
@@ -689,7 +690,25 @@ dev:
 - **46**：部分依赖 45（先接线 memory 再抽公共分析段）；② ReAct 消息膨胀在长页面多轮下会真实掉点，建议优先于默认值/计价修复。
 - **39（仍暂缓）**：与 43 的预算共享正交；用户 2026-08-15 决定成本控制先不考虑，后续想做可恢复。
 
-### 18.2 验收口径
+### 18.3 43 完成说明（2026-08-15）
+
+- **ReactLoop 共享会话上下文**（`agent/react_loop.py`）：新增 `session_id`（取消）/`budget`（`IterationBudget`）/
+  `memory_context_fn`（记忆召回）/`rag_fn`（RAG 检索）参数——每步前置 `is_cancelled(session_id)` 检查、`budget.consume` 步数预算、
+  系统提示注入记忆笔记 + 知识库片段（复用 `enrich_prompt`）；新增 `ReactRunResult`（answer/steps/cancelled/budget_exhausted）
+  与 `run_with_result()`（`run()` 保持裸字符串向后兼容）；取消/预算耗尽中断时覆盖为准确终止文案。
+- **`ReactAgent.run`**（`agent/react_agent.py`）：新增可选 `step_guard` 每步前置回调（取消/预算协作），默认 None 行为不变。
+- **facade 接线**（`facade/api.py`）：`analyze_react(task, session_id=None)` 透传共享上下文并把步数计入共享
+  `BudgetController`；新增 **`analyze_react_report(task, session_id=None) -> CompetitorReport`** 结构化入口——
+  结论文本优先按结构化 JSON（summary/details/confidence，对齐设计文档 34 schema）解析为 `DimensionResult`，
+  非 JSON 降级为单 react 维度，LLM 不可用 → PARTIAL 低置信不标 COMPLETE，取消/预算耗尽 → 终态标注。
+  主路径分析阶段"ReAct 工具闭环"与设计文档 44 的链式分析取其一（44 实施时并入）。
+- **测试**：新增 `tests/unit/facade/test_react_context.py` 10 条（记忆/RAG 注入、无注入降级、步数计入
+  `IterationBudget`、预算耗尽中断只执行一步、取消中断第一步即停、`run()` 裸字符串兼容、结构化 JSON 入
+  `CompetitorReport`、文本答案降级 react 维度、步数计入 `BudgetController`、`analyze_react` 裸字符串兼容）。
+- **回归**：全量 **829 passed / 6 skipped**（+10，无回归）；`test_react.py`（38）/`test_tool_registry.py`（40）/
+  `test_url_guard.py`（41）/`test_behavior_eval.py`（42）全绿。
+
+
 
 - **43**：`analyze_react` 与 `analyze` 共享取消（`is_cancelled(session_id)` 能中断 ReAct 循环）/预算（步数计入 `IterationBudget`）/记忆+RAG（系统提示含注入块）/事件（event_sink）；mock LLM 下 `analyze` 分析阶段走 ReAct 循环并产出可解析 `DimensionResult`（summary/details/confidence），`analyze_react` 结果可入 `CompetitorReport`（不再是裸字符串）；`use_llm=False` 规则路径与现状逐字节一致。
 - **44**：首轮抽取与原文数值冲突 → `_verify_details` 下调置信 → 触发工具补证 → 二轮修正通过；`_MAX_CHAIN_STEPS` 后仍冲突 → 保留降级置信不无限循环；mock LLM 规划返回非法枚举/budget 缺失 → 兜底回退规则；`use_llm=False` 纯规则结果与现状一致。
