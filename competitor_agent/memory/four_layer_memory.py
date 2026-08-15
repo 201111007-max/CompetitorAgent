@@ -101,3 +101,11 @@ class FourLayerMemory(IFourLayerMemory):
 
     def retrieve_patterns(self, competitor: str, dimension: str) -> list[str]:
         return self._evolution.retrieve_patterns(competitor, dimension)
+
+    def retrieve_patterns_with_outcome(
+        self, competitor: str, dimension: str
+    ) -> list[tuple[str, str]]:
+        return self._evolution.retrieve_patterns_with_outcome(competitor, dimension)
+
+    def failure_patterns_for(self, competitor: str) -> list[str]:
+        return self._evolution.failure_patterns_for(competitor)

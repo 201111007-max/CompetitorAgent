@@ -1,4 +1,6 @@
 """interfaces 契约冒烟测试：所有 Protocol 可被 fake 实现满足（运行时类型可检查）"""
+from __future__ import annotations
+
 from competitor_agent.domain_types import (
     Competitor,
     CompetitorStrategy,
@@ -83,6 +85,12 @@ class FakeMemory:
         return None
 
     def retrieve_patterns(self, competitor: str, dimension: str) -> list:
+        return []
+
+    def retrieve_patterns_with_outcome(self, competitor: str, dimension: str) -> list:
+        return []
+
+    def failure_patterns_for(self, competitor: str) -> list:
         return []
 
 

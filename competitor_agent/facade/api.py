@@ -193,6 +193,7 @@ class CompetitorAnalysisAPI:
         self._emit(ProgressEvent(event="phase_start", phase="strategic", message=f"规划: {task}"))
 
         strategy = self._planner.plan(task, memory=self._memory)
+        self._set_selector_penalties(strategy.competitor.name)
         self._emit(
             ProgressEvent(
                 event="phase_complete",
@@ -370,7 +371,7 @@ class CompetitorAnalysisAPI:
             if report.markdown_report and note.strip() not in report.markdown_report:
                 report.markdown_report = report.markdown_report.rstrip() + "\n" + note
         except Exception:
-            pass
+            logger.warning("竞品 JSON 导出提示追加失败: %s", report.competitor.name, exc_info=True)
         return path
 
     def _export_comparison_json(self, report: ComparisonReport) -> Path | None:
@@ -387,7 +388,7 @@ class CompetitorAnalysisAPI:
             if report.markdown_report and note.strip() not in report.markdown_report:
                 report.markdown_report = report.markdown_report.rstrip() + "\n" + note
         except Exception:
-            pass
+            logger.warning("对比矩阵 JSON 导出提示追加失败: %s", report.competitors, exc_info=True)
         return path
 
     def report_diff(self, prev: CompetitorReport, cur: CompetitorReport) -> list[Alert]:
@@ -550,9 +551,24 @@ class CompetitorAnalysisAPI:
             return ""
         try:
             return "\n".join(self._memory.recent_context(comp, top_k=3, query=task))
-        except Exception:  # noqa: BLE001 — 记忆召回失败不影响推理
+        except Exception:
             logger.warning("ReAct 记忆召回失败: %s", comp, exc_info=True)
             return ""
+
+    def _set_selector_penalties(self, competitor: str) -> None:
+        """L4 失败反例 → 源选择降级（设计文档 45）：分析某竞品前把失败源注入 selector。
+
+        与 set_success_rates（init 时一次性注入全局成功率）不同，失败反例按竞品区分，
+        故在每次规划出竞品后设置；无记忆或提取失败静默跳过。
+        """
+        if self._memory is None:
+            self._selector.set_failure_penalties([])
+            return
+        try:
+            self._selector.set_failure_penalties(self._memory.failure_patterns_for(competitor))
+        except Exception:
+            logger.warning("L4 失败反例提取失败，跳过源降级: %s", competitor, exc_info=True)
+            self._selector.set_failure_penalties([])
 
     def _react_rag_context(self, task: str) -> str:
         """RAG 检索（与 GapExecutor._retrieve_rag 同口径）：失败静默降级。"""
@@ -563,7 +579,7 @@ class CompetitorAnalysisAPI:
             chunks = self._retriever.retrieve(
                 query=task, competitor=comp, dimension="", top_k=5
             )
-        except Exception:  # noqa: BLE001 — 检索失败不影响推理
+        except Exception:  # 检索失败不影响推理
             logger.warning("ReAct RAG 检索失败: %s", comp, exc_info=True)
             return ""
         if not chunks:
@@ -707,6 +723,7 @@ class CompetitorAnalysisAPI:
 
         # 统一规划（与 single 一致：competitor.resolved / gaps.planned 埋点）
         strategy = self._planner.plan(task, memory=self._memory)
+        self._set_selector_penalties(strategy.competitor.name)
         log_event(
             slog, "competitor.resolved", "strategic",
             f"识别竞品 {strategy.competitor.name}",
@@ -731,6 +748,7 @@ class CompetitorAnalysisAPI:
             session_id=session_id,
             providers=self._providers,
             builder=self._builder,
+            selector=self._selector,
         )
         return strategy, orch, slog
 
