@@ -106,6 +106,7 @@ class CompetitorAnalysisAPI:
         enable_memory: bool = True,  # 设计文档 30：消融开关（默认开启，行为不变）
         rag_store: object | None = None,  # 设计文档 30：消融可注入共享知识库实例
         vector_store: object | None = None,  # 设计文档 32：可注入向量层（测试/评测确定性 mock）
+        tool_dispatcher: object | None = None,  # 设计文档 44：链式分析工具补证分发器（可注入 mock）
     ) -> None:
         # 配置注入：显式参数优先，其次 config，最后默认值
         cfg = config or load_config()
@@ -127,7 +128,16 @@ class CompetitorAnalysisAPI:
         if self._memory is not None:
             self._selector.set_success_rates(self._memory.source_success_rates())
         self._extractor = extractor or WebExtractor()
-        self._analyzers = AnalyzerRegistry(llm=llm, use_llm=use_llm)
+        # 工具补证分发器（设计文档 44）：链式分析触发时经 web_search/web_extract 补证。
+        # 未注入时用 MCP 工具集同源构建，web_extract 走真实采集链路 + URL 守卫（与 ReAct 同语义）；
+        # 构建只注册函数不触发网络（可注入 mock 供测试/评测确定性）。
+        self._verify_dispatcher = tool_dispatcher or build_react_dispatcher(
+            config=cfg,
+            web_extract=self._react_web_extract,
+        )
+        self._analyzers = AnalyzerRegistry(
+            llm=llm, use_llm=use_llm, tool_dispatcher=self._verify_dispatcher
+        )
         # 新鲜度 TTL（设计文档 26）：build() 为报告计算 freshness 元数据
         self._builder = ReportBuilder(dimension_ttl_days=cfg.freshness.dimension_ttl_days)
         self._budget = BudgetController(max_iterations=max_iterations, cost_limit=cost_limit)
@@ -526,6 +536,7 @@ class CompetitorAnalysisAPI:
             budget=budget,
             memory_context_fn=self._react_memory_context,
             rag_fn=self._react_rag_context,
+            obs_max_chars=self._config.collector.max_content_chars,
         )
 
     def _react_competitor(self, task: str) -> Competitor:
@@ -749,6 +760,7 @@ class CompetitorAnalysisAPI:
             providers=self._providers,
             builder=self._builder,
             selector=self._selector,
+            tool_dispatcher=self._verify_dispatcher,  # 设计文档 44：team 分析器同样可工具补证
         )
         return strategy, orch, slog
 

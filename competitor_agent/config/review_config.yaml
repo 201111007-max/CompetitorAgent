@@ -7,14 +7,18 @@ model: "deepseek-chat"
 temperature: 0.1
 max_tokens: 2048
 
-# ===== LLM 可靠性（设计文档 36）=====
-# LLMClient 构造读取本 section（fallback_models/timeout/max_retries），重试与 fallback 透明生效。
+# ===== LLM 可靠性（设计文档 36）+ 计价（设计文档 46）=====
+# LLMClient 构造读取本 section（fallback_models/timeout/max_retries/pricing_per_1k），
+# 重试与 fallback 透明生效；pricing_per_1k 为"美元/千 token"，按模型覆盖，缺省用内置近似。
 llm:
   api_base_url: "https://api.deepseek.com"
   model: "deepseek-chat"
   fallback_models: []          # 主模型重试耗尽后的回退模型链，如 ["deepseek-reasoner"]
   timeout: 120                 # 单次调用超时（秒，连接+读）
   max_retries: 3               # 可重试错误（429/5xx/连接/超时）每个模型的最大重试次数
+  pricing_per_1k:              # 计价（美元/千 token）：换模型时覆盖以得准确成本展示
+    input: 0.0003
+    output: 0.0006
 
 # ===== 预算（BudgetController）=====
 budget:

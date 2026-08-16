@@ -31,13 +31,14 @@ PROMPT = "competitor> "
 
 
 def _build_llm(cfg: AppConfig) -> LLMClient:
-    """按 LLMConfig 构造带重试/fallback/超时的 LLMClient（设计文档 36）"""
+    """按 LLMConfig 构造带重试/fallback/超时的 LLMClient（设计文档 36/46）"""
     return LLMClient(
         model=cfg.llm.model,
         base_url=cfg.llm.api_base_url,
         fallback_models=cfg.llm.fallback_models,
         timeout=cfg.llm.timeout,
         max_retries=cfg.llm.max_retries,
+        pricing_per_1k=cfg.llm.pricing_per_1k,
     )
 
 
@@ -58,9 +59,13 @@ def _run_analyze(
     out_dir: str | None = None,
     mode: str = "team",
     llm: LLMClient | None = None,
-    use_llm: bool = False,
+    use_llm: bool = True,
 ) -> None:
-    """analyze 子命令 + /analyze 处理器"""
+    """analyze 子命令 + /analyze 处理器
+
+    use_llm 默认 True：与库入口（facade/api.py）默认一致（设计文档 46 §3.3），
+    避免"同一环境 CLI 与库行为不同"；无 Key 时 parse_task 自动回退规则解析。
+    """
     args = sanitize_task(args.strip())
     if not args:
         print("用法: analyze <竞品或任务>")
@@ -220,8 +225,8 @@ def _run_help(args: str) -> None:
         print(f"  /{cmd.name:9s} {cmd.args_hint}")
 
 
-def _repl(api: CompetitorAnalysisAPI, llm: LLMClient | None = None, use_llm: bool = False) -> NoReturn:
-    """交互 REPL：斜杠命令路由 + 自由文本任务"""
+def _repl(api: CompetitorAnalysisAPI, llm: LLMClient | None = None, use_llm: bool = True) -> NoReturn:
+    """交互 REPL：斜杠命令路由 + 自由文本任务（use_llm 默认 True，与库语义一致）"""
     print("competitor_agent 交互模式（输入 /help 查看命令，Ctrl+C / Ctrl+D 退出）")
     handlers = {
         "analyze": lambda a: _run_analyze(api, a, llm=llm, use_llm=use_llm),

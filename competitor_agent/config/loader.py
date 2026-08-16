@@ -124,6 +124,8 @@ class LLMConfig:
     fallback_models: list[str] = field(default_factory=list)  # 主模型重试耗尽后的回退模型链（设计文档 36）
     timeout: float | None = None  # 单次调用超时（秒，连接+读）；None 用 SDK 默认
     max_retries: int = 3  # 每个模型的可重试错误最大重试次数
+    # 计价（美元/千 token，设计文档 46 §3.3）：按模型覆盖；None 沿用内置 DeepSeek 量级近似
+    pricing_per_1k: dict[str, float] | None = None
 
 
 @dataclass

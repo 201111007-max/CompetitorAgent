@@ -13,7 +13,11 @@ from __future__ import annotations
 import time
 from typing import Any, Callable
 
-from competitor_agent.analyzers.base import BaseCompetitorAnalyzer
+from competitor_agent.analyzers.base import (
+    BaseCompetitorAnalyzer,
+    analyze_with_context,
+    retrieve_rag_text,
+)
 from competitor_agent.collector.source_selector import SourceCandidate, SourceSelector
 from competitor_agent.collector.spa_extractor import SpaExtractor
 from competitor_agent.core.budget import IterationBudget
@@ -24,7 +28,7 @@ from competitor_agent.domain_types.info_gap import CLOSED_CONFIDENCE, InfoGap
 from competitor_agent.domain_types.observation import Observation
 from competitor_agent.domain_types.report import DimensionResult
 from competitor_agent.interfaces.collector import ICompetitorDataSource
-from competitor_agent.interfaces.context import AnalysisContext, SourceContext
+from competitor_agent.interfaces.context import SourceContext
 from competitor_agent.interfaces.exceptions import DataSourceUnavailableError
 from competitor_agent.observability.logger import get_logger, get_session_logger, log_event
 
@@ -198,21 +202,25 @@ class GapExecutor:
             logger.warning("知识库摄入失败: %s/%s", competitor, dimension)
 
     def _analyze(self, observation: Observation, gap: InfoGap, context: SourceContext) -> DimensionResult:
-        analysis_ctx = AnalysisContext(
-            competitor_name=context.competitor_name,
-            dimension=self._analyzer.dimension,
-            rag_context=self._retrieve_rag(context.competitor_name, gap.field),
-            memory_context=self._retrieve_memory(context.competitor_name, gap.field),
-        )
+        benchmark_scores = None
         if gap.field == "performance":
             # 榜单直连（设计文档 25）：仅 performance 缺口注入，避免其余维度额外开销
             provider = self._providers.get("benchmark")
             if provider is not None:
                 try:
-                    analysis_ctx.benchmark_scores = provider.fetch_scores(context.competitor_name)  # type: ignore[attr-defined]
+                    benchmark_scores = provider.fetch_scores(context.competitor_name)  # type: ignore[attr-defined]
                 except Exception:  # noqa: BLE001 — 榜单失败完全回退现状，不阻塞主流程
                     logger.warning("榜单直连失败，回退页面抽取: %s", context.competitor_name)
-        return self._analyzer.analyze(observation, gap, analysis_ctx)
+        # 统一分析段（设计文档 46 §3.1）：与 team AnalyzerAgent 同一实现
+        return analyze_with_context(
+            self._analyzer,
+            observation,
+            gap,
+            competitor_name=context.competitor_name,
+            rag_context=retrieve_rag_text(self._retriever, context.competitor_name, gap.field),
+            memory_context=self._retrieve_memory(context.competitor_name, gap.field),
+            benchmark_scores=benchmark_scores,
+        )
 
     def _retrieve_memory(self, competitor: str, dimension: str) -> str:
         """记忆召回（设计文档 35）：按任务相关度取"摘要 + 最近相关会话"，失败静默降级。"""
@@ -223,28 +231,6 @@ class GapExecutor:
         except Exception:  # noqa: BLE001 — 记忆召回失败不影响主流程
             logger.warning("记忆召回失败: %s/%s", competitor, dimension)
             return ""
-
-    def _retrieve_rag(self, competitor: str, dimension: str) -> str:
-        """检索知识库相关片段，拼成可注入的文本（含来源）"""
-        if self._retriever is None:
-            return ""
-        try:
-            chunks = self._retriever.retrieve(
-                query=dimension,
-                competitor=competitor,
-                dimension=dimension,
-                top_k=5,
-            )
-        except Exception:  # noqa: BLE001 — 检索失败不影响主流程
-            logger.warning("知识库检索失败: %s/%s", competitor, dimension)
-            return ""
-        if not chunks:
-            return ""
-        lines = []
-        for c in chunks:
-            src = f"（来源: {c.source_url}）" if c.source_url else ""
-            lines.append(f"- [{c.competitor}/{c.dimension}]{src} {c.text[:300]}")
-        return "\n".join(lines)
 
     def _update_gap(self, gap: InfoGap, observation: Observation, result: DimensionResult) -> None:
         """合并证据、更新置信度与状态"""
