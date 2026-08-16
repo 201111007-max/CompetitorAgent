@@ -62,6 +62,7 @@ class TeamOrchestrator:
         providers: dict[str, object] | None = None,
         builder: ReportBuilder | None = None,
         selector: SourceSelector | None = None,
+        tool_dispatcher: Any | None = None,  # 设计文档 44：链式分析工具补证分发器
     ) -> None:
         self._bus = bus or MessageBus()
         self._planner = StrategicPlanner(llm=llm, use_llm=use_llm)
@@ -77,7 +78,7 @@ class TeamOrchestrator:
         )
         self._analyzer = AnalyzerAgent(
             self._bus,
-            AnalyzerRegistry(llm=llm, use_llm=use_llm),
+            AnalyzerRegistry(llm=llm, use_llm=use_llm, tool_dispatcher=tool_dispatcher),
             memory=memory,
             retriever=retriever,
         )
