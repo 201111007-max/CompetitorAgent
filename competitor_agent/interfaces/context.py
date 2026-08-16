@@ -25,6 +25,7 @@ class AnalysisContext:
     rag_context: str = ""  # RAG 检索到的背景知识片段（含来源），注入分析器 prompt
     memory_context: str = ""  # 记忆召回的历史经验（设计文档 35），注入分析器 prompt
     benchmark_scores: dict[str, object] = field(default_factory=dict)  # 榜单直连结果（设计文档 25）
+    tool_dispatcher: object | None = None  # 工具补证分发器（设计文档 44），None 用分析器自带/无
 
 
 @dataclass

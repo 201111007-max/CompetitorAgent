@@ -6,11 +6,14 @@
 3. 按 config 分配维度预算
 4. 产出 CompetitorStrategy
 
-LLM 版规划（可选增强）在 M2 记忆接入时替换 plan() 内部。
+LLM 版规划（设计文档 44 §3.2）：plan() 走一次结构化 complete_json
+（competitor/dimensions/priorities/budget/custom_sources，PLAN_SCHEMA 约束），
+规则为降级（LLM 不可用/非法输入回退 _plan_with_rules）。
 """
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from competitor_agent.core.competitor_registry import resolve_competitor
 from competitor_agent.core.task_parser import parse_task
@@ -41,6 +44,31 @@ _FOCUS_KEYWORDS = {
     "features": ["功能", "特性", "features", "feature"],
 }
 
+# 设计文档 44：规划 LLM 化的结构化输出约束（JSON Schema 子集，复用 34 complete_json）
+_PLAN_DIM_ENUM = ["pricing", "feature", "performance", "ecosystem", "sentiment", "roadmap"]
+PLAN_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "required": ["competitor"],
+    "properties": {
+        "competitor": {"type": "string"},
+        "dimensions": {"type": "array", "items": {"type": "string", "enum": _PLAN_DIM_ENUM}},
+        "priorities": {"type": "object"},
+        "budget": {"type": "object"},
+        "custom_sources": {"type": "object"},
+    },
+}
+
+_PLAN_PROMPT = (
+    "你是竞品分析战略规划器。根据用户任务规划竞品分析策略，只输出 JSON，不要其他文字。\n"
+    'JSON 格式: {"competitor": "竞品规范名", '
+    '"dimensions": ["pricing","feature","performance","ecosystem","sentiment","roadmap"]（可选，缺省=全部维度）, '
+    '"priorities": {"维度名": 1-10 整数}（可选，缺省用默认）, '
+    '"budget": {"维度名": 迭代次数整数}（可选，缺省每维度 1）, '
+    '"custom_sources": {"home或pricing或docs": "用户提供的URL"}}（可选）。\n'
+    "规则：只列任务明确要求的维度（如任务只说定价就只列 pricing）；任务没提维度则列出全部 6 个维度；"
+    "priorities 体现任务侧重（如强调价格则 pricing 优先）。"
+)
+
 
 class StrategicPlanner:
     """规则版战略规划器"""
@@ -65,8 +93,26 @@ class StrategicPlanner:
         self._use_llm = use_llm
 
     def plan(self, task: str, memory: IFourLayerMemory | None = None) -> CompetitorStrategy:
-        """解析任务 → 竞品 + 缺口清单 + 预算（内部先 parse_task，保持签名向后兼容）"""
-        parsed = parse_task(task, llm=self._llm, use_llm=self._use_llm)
+        """解析任务 → 竞品 + 缺口清单 + 预算。
+
+        设计文档 44 §3.2：LLM 可用时一次结构化规划（competitor/dimensions/priorities/budget），
+        LLM 不可用 / 非法输入回退规则版（_plan_with_rules，行为与现状一致）。
+        """
+        if self._use_llm and self._llm is not None:
+            try:
+                parsed = self._llm.complete_json(
+                    self._plan_messages(task, memory), schema=PLAN_SCHEMA
+                )
+                return self._strategy_from_llm(parsed, memory)
+            except Exception as exc:  # noqa: BLE001 — LLM 规划任何失败/非法输入回退规则版
+                logger.warning("LLM 规划失败，回退规则版: %s", exc)
+        return self._plan_with_rules(task, memory)
+
+    def _plan_with_rules(
+        self, task: str, memory: IFourLayerMemory | None = None
+    ) -> CompetitorStrategy:
+        """规则版规划（现状路径）：parse_task 仅用规则解析（不二次调 LLM）。"""
+        parsed = parse_task(task, use_llm=False)
         competitor = self._resolve_with_sources(parsed)
         gaps = self._build_gaps(task, parsed.dimensions)
         self._apply_memory_boost(gaps, competitor, memory)
@@ -80,6 +126,119 @@ class StrategicPlanner:
             },
             terminal_thresholds={"confidence": 0.8},
         )
+
+    # ── 设计文档 44：规划 LLM 化 ─────────────────────────────────────
+
+    def _plan_messages(self, task: str, memory: IFourLayerMemory | None) -> list[dict[str, str]]:
+        """规划 prompt：任务 + 可选历史经验参考（失败静默省略）。"""
+        content = _PLAN_PROMPT
+        context = self._plan_memory_context(task, memory)
+        if context:
+            content += f"\n\n[历史经验参考（本系统沉淀的过往结论，仅作参考）]\n{context}"
+        return [{"role": "user", "content": content}]
+
+    def _plan_memory_context(self, task: str, memory: IFourLayerMemory | None) -> str:
+        """规划记忆召回（recent_context，设计文档 35）：按规则预判竞品召回历史结论。"""
+        if memory is None:
+            return ""
+        recall = getattr(memory, "recent_context", None)
+        if not callable(recall):
+            return ""
+        try:
+            competitor = parse_task(task, use_llm=False).primary_competitor
+        except Exception:  # noqa: BLE001 — 竞品预判失败不影响规划 prompt
+            return ""
+        if not competitor or competitor == "unknown":
+            return ""
+        try:
+            return "\n".join(recall(competitor, top_k=3, query=task))
+        except Exception:  # noqa: BLE001 — 记忆召回失败不影响规划
+            logger.warning("规划记忆召回失败: %s", competitor)
+            return ""
+
+    def _strategy_from_llm(
+        self,
+        parsed: dict[str, Any],
+        memory: IFourLayerMemory | None,
+    ) -> CompetitorStrategy:
+        """把 LLM 规划结果转为 CompetitorStrategy（复用记忆提权/降权，非法输入抛错回退规则）。"""
+        competitor = self._competitor_from_llm(parsed)
+        dimensions = self._dimensions_from_llm(parsed)
+        gaps = self._gaps_from_llm(parsed, dimensions)
+        self._apply_memory_boost(gaps, competitor, memory)
+        self._apply_pattern_boost(gaps, competitor, memory)
+        budget = self._llm_budget(parsed.get("budget"), dimensions)
+        return CompetitorStrategy(
+            competitor=competitor,
+            gaps=gaps,
+            budget_allocation={
+                DimensionType(dim): n for dim, n in budget.items() if dim in self._enabled
+            },
+            terminal_thresholds={"confidence": 0.8},
+        )
+
+    def _competitor_from_llm(self, parsed: dict[str, Any]) -> Competitor:
+        name = str(parsed.get("competitor") or "").strip()
+        if not name or name.lower() in ("unknown", "未知"):
+            raise ValueError("LLM 规划未识别竞品")
+        competitor = resolve_competitor(name)
+        custom = {
+            str(k): str(v) for k, v in (parsed.get("custom_sources") or {}).items() if v
+        }
+        if not custom:
+            return competitor
+        links = dict(competitor.official_links)
+        links.update(custom)
+        return Competitor(
+            name=competitor.name,
+            aliases=competitor.aliases,
+            category=competitor.category,
+            official_links=links,
+        )
+
+    def _dimensions_from_llm(self, parsed: dict[str, Any]) -> list[str]:
+        raw = parsed.get("dimensions")
+        if isinstance(raw, list) and raw:
+            valid = [d for d in raw if d in DIMENSION_PRIORITY and d in self._enabled]
+            if valid:
+                return valid
+        return list(self._enabled)
+
+    def _gaps_from_llm(self, parsed: dict[str, Any], dimensions: list[str]) -> list[InfoGap]:
+        raw_priorities = parsed.get("priorities")
+        priorities = raw_priorities if isinstance(raw_priorities, dict) else {}
+        gaps = []
+        for dim in dimensions:
+            priority = self._coerce_priority(priorities.get(dim), DIMENSION_PRIORITY[dim])
+            gaps.append(
+                InfoGap(field=dim, priority=priority, confidence=0.0, status=GapStatus.OPEN)
+            )
+        return gaps
+
+    @staticmethod
+    def _coerce_priority(raw: Any, default: int) -> int:
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            return default
+        return max(1, min(10, value))
+
+    @staticmethod
+    def _llm_budget(raw: Any, dimensions: list[str]) -> dict[str, int]:
+        """LLM 预算分配：缺失维度兜底 1（设计文档 44 §3.2），越界收敛到 [1,5]。"""
+        source = raw if isinstance(raw, dict) else {}
+        budget: dict[str, int] = {}
+        for dim in dimensions:
+            raw_n = source.get(dim)
+            if raw_n is None:
+                n = 1
+            else:
+                try:
+                    n = int(raw_n)
+                except (TypeError, ValueError):
+                    n = 1
+            budget[dim] = max(1, min(n, 5))
+        return budget
 
     def _resolve_with_sources(self, parsed: object) -> Competitor:
         """解析竞品 + 注入自定义数据源（custom_sources → official_links，供 SourceSelector 使用）"""
