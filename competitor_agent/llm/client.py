@@ -78,6 +78,7 @@ class LLMClient:
         timeout: float | None = None,
         max_retries: int = 3,
         backoff: float = 1.0,
+        pricing_per_1k: dict[str, float] | None = None,
     ) -> None:
         # call_func: (messages, **kwargs) -> str；默认走 openai SDK（惰性导入）
         self._call = call_func
@@ -86,6 +87,14 @@ class LLMClient:
         self._timeout = timeout
         self._max_retries = max(1, int(max_retries))
         self._backoff = max(0.0, float(backoff))
+        # 计价（设计文档 46 §3.3）：config 注入优先，无配置沿用 DeepSeek 量级近似（行为不变）
+        if pricing_per_1k:
+            self._pricing_per_1k = {
+                "input": float(pricing_per_1k["input"]),
+                "output": float(pricing_per_1k["output"]),
+            }
+        else:
+            self._pricing_per_1k = dict(_PRICING_PER_1K)
         # 显式传入优先，否则读环境变量（不明文硬编码）
         self._api_key = api_key or self._read_env_key()
         self._base_url = base_url or os.getenv(_BASE_URL_ENV)
@@ -242,8 +251,8 @@ class LLMClient:
         if completion_tokens is None:
             completion_tokens = _estimate_tokens([text])
         cost_usd = round(
-            prompt_tokens / 1000 * _PRICING_PER_1K["input"]
-            + completion_tokens / 1000 * _PRICING_PER_1K["output"],
+            prompt_tokens / 1000 * self._pricing_per_1k["input"]
+            + completion_tokens / 1000 * self._pricing_per_1k["output"],
             6,
         )
         with self._cost_lock:

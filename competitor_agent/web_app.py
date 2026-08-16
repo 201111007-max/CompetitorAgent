@@ -101,6 +101,7 @@ async def _event_generator(
             fallback_models=_config.llm.fallback_models,
             timeout=_config.llm.timeout,
             max_retries=_config.llm.max_retries,
+            pricing_per_1k=_config.llm.pricing_per_1k,
         ),
         use_llm=True,
         memory=_get_memory(),

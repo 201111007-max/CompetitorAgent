@@ -9,11 +9,11 @@ import asyncio
 import logging
 from typing import Any
 
+from competitor_agent.analyzers.base import analyze_with_context, retrieve_rag_text
 from competitor_agent.analyzers.registry import AnalyzerRegistry
 from competitor_agent.domain_types.info_gap import InfoGap
 from competitor_agent.domain_types.observation import Observation
 from competitor_agent.domain_types.report import DimensionResult
-from competitor_agent.interfaces.context import AnalysisContext
 from competitor_agent.interfaces.memory import IFourLayerMemory
 from competitor_agent.team.base_agent import AgentContext, AgentResult, AgentStatus, BaseAgent
 from competitor_agent.team.message_bus import T_ANALYZED, Envelope, MessageBus
@@ -66,17 +66,19 @@ class AnalyzerAgent(BaseAgent):
     def analyze_observation(
         self, competitor_name: str, obs: Observation
     ) -> DimensionResult:
-        """单缺口分析（供串行循环与异步并行编排复用，无总线副作用）"""
+        """单缺口分析（供串行循环与异步并行编排复用，无总线副作用）
+
+        统一分析段（设计文档 46 §3.1）：与 single 路径 GapExecutor 同一实现
+        （RAG/记忆注入 + 校验 + 补全），消除两套分析实现漂移。
+        """
         analyzer = self._registry.get(obs.gap_field)
-        return analyzer.analyze(
+        return analyze_with_context(
+            analyzer,
             obs,
             InfoGap(field=obs.gap_field),
-            AnalysisContext(
-                competitor_name=competitor_name,
-                dimension=analyzer.dimension,
-                rag_context=self._retrieve_rag(competitor_name, obs.gap_field),
-                memory_context=self._retrieve_memory(competitor_name, obs.gap_field),
-            ),
+            competitor_name=competitor_name,
+            rag_context=retrieve_rag_text(self._retriever, competitor_name, obs.gap_field),
+            memory_context=self._retrieve_memory(competitor_name, obs.gap_field),
         )
 
     async def _handle_async(self, env: Envelope) -> DimensionResult | None:
@@ -110,25 +112,3 @@ class AnalyzerAgent(BaseAgent):
         except Exception:  # noqa: BLE001 — 记忆召回失败不影响主流程
             logger.warning("记忆召回失败: %s/%s", competitor, dimension)
             return ""
-
-    def _retrieve_rag(self, competitor: str, dimension: str) -> str:
-        """检索知识库相关片段，拼成可注入的文本（含来源）"""
-        if self._retriever is None:
-            return ""
-        try:
-            chunks = self._retriever.retrieve(
-                query=dimension,
-                competitor=competitor,
-                dimension=dimension,
-                top_k=5,
-            )
-        except Exception:  # noqa: BLE001 — 检索失败不影响主流程
-            logger.warning("知识库检索失败: %s/%s", competitor, dimension)
-            return ""
-        if not chunks:
-            return ""
-        lines = []
-        for c in chunks:
-            src = f"（来源: {c.source_url}）" if c.source_url else ""
-            lines.append(f"- [{c.competitor}/{c.dimension}]{src} {c.text[:300]}")
-        return "\n".join(lines)

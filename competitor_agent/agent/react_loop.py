@@ -55,6 +55,7 @@ class ReactLoop:
         budget: IterationBudget | None = None,
         memory_context_fn: Callable[[str], str] | None = None,
         rag_fn: Callable[[str], str] | None = None,
+        obs_max_chars: int | None = None,
     ) -> None:
         self._agent = agent
         self._max_steps = max_steps
@@ -63,6 +64,8 @@ class ReactLoop:
         self._budget = budget
         self._memory_context_fn = memory_context_fn
         self._rag_fn = rag_fn
+        # 单条 Observation 截断上限（设计文档 46 §3.2）：None 用 ReactAgent 默认值
+        self._obs_max_chars = obs_max_chars
 
     def run(self, task: str) -> str:
         """运行一次分析会话，返回最终结论文本（向后兼容：不携带取消/预算状态）。"""
@@ -86,6 +89,7 @@ class ReactLoop:
                 task,
                 max_steps=self._max_steps,
                 step_guard=self._step_guard(result),
+                obs_max_chars=self._obs_max_chars,
             )
             # 取消/预算中断时 ReactAgent 返回"已达最大步数"，此处覆盖为准确终止文案
             if result.cancelled:
@@ -130,7 +134,7 @@ class ReactLoop:
             return None
         try:
             ctx = self._memory_context_fn(task)
-        except Exception:  # noqa: BLE001 — 记忆召回失败不影响推理
+        except Exception:
             logger.warning("ReAct 记忆注入失败", exc_info=True)
             return None
         return [ctx] if ctx else None
@@ -141,7 +145,7 @@ class ReactLoop:
             return None
         try:
             ctx = self._rag_fn(task)
-        except Exception:  # noqa: BLE001 — 检索失败不影响推理
+        except Exception:
             logger.warning("ReAct RAG 注入失败", exc_info=True)
             return None
         return [ctx] if ctx else None

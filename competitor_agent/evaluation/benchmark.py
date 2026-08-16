@@ -221,6 +221,10 @@ class BenchmarkMockLLM:
         if "语义解析器" in system:
             # 规划解析 prompt：返回空竞品，令 parse_task 回退规则版（确定性）
             return json.dumps({"competitors": [], "dimensions": None, "custom_sources": {}})
+        if "战略规划器" in system:
+            # 设计文档 44 规划 LLM 化 prompt：返回空竞品/维度（合法 schema），
+            # 令 plan() 经 _strategy_from_llm 校验失败回退规则版（确定性 + 单次调用，不触发修复重试）
+            return json.dumps({"competitor": "", "dimensions": []})
         if "定价" in system:
             plans = self._plans(user)
             return json.dumps(
@@ -542,6 +546,7 @@ def build_real_llm() -> LLMClient:
         fallback_models=cfg.llm.fallback_models,
         timeout=cfg.llm.timeout,
         max_retries=cfg.llm.max_retries,
+        pricing_per_1k=cfg.llm.pricing_per_1k,
     )
 
 
@@ -823,7 +828,7 @@ class Benchmark:
         all_cases: list[object] = acc_cases + strat_cases
         if not all_cases:
             return 0.0
-        with_trace = sum(1 for c in all_cases if getattr(c, "trace"))
+        with_trace = sum(1 for c in all_cases if c.trace)
         return round(with_trace / len(all_cases), 4)
 
     @staticmethod
@@ -1135,22 +1140,22 @@ if __name__ == "__main__":
 
 
 __all__ = [
-    "AccuracyCase",
     "ACCURACY_FIXTURE",
+    "HARNESS_VERSION",
+    "STRATEGY_FIXTURE",
+    "AccuracyCase",
     "BehaviorMetrics",
+    "BenchStrategyCase",
     "Benchmark",
     "BenchmarkExtractor",
     "BenchmarkMockLLM",
     "BenchmarkReport",
-    "BenchStrategyCase",
+    "FailureRecord",
+    "FailureType",
     "build_benchmark_api",
     "build_real_llm",
     "classify_case",
     "extract_prediction",
     "extract_strategy",
-    "FailureRecord",
-    "FailureType",
-    "HARNESS_VERSION",
     "real_trace",
-    "STRATEGY_FIXTURE",
 ]
