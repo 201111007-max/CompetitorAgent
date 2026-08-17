@@ -738,3 +738,37 @@ dev:
 > 与 §17 的关系：§17 补齐"agent 之所以是 agent"的交互层；本节把**两条智能（ReAct 循环 + 主流水线）**收敛为一条，
 > 让记忆 L4 真正被消费、LLM 从"抽一次 JSON"走向多步推理。全部完成后可回答"agent 主循环在哪 / 多 Agent 如何协作 /
 > 工具调用和主流程什么关系 / 记忆写了能不能用"四类最深追问。
+
+## 19. 第五轮评审待办（写死代码知识型规则 → skill 化，设计文档 48）
+
+> 状态背景：设计文档 47（主路径单轨 LLM）落地后，主路径"想"的部分（解析/规划/分析）已全部走 LLM，
+> 但"知识/规范"仍固化在 Python 字符串/字典里（维度抽取要求、事实边界、置信度披露、规划规范）。
+> 参考 Dota2-Agent（`D:\trae_projects\Dota2-Agent`）的 skill 机制（`.skills/*.md` + `SkillLoader` 两层注入），
+> 决策：**把"知识型"写死内容抽为 skill 文档注入 LLM，主体流程由 LLM 驱动；"保证型"逻辑保留代码兜底**。
+> **48 已于 2026-08-18 实现（见 §19.1）**。
+> 设计文档见 `doc/plan/issue_designs/48_skill_guided_pipeline_design.md`，索引与状态见 `issue_designs/README.md`。
+
+| 项 | 内容 | 优先级 | 状态 |
+|---|---|---|---|
+| **48 写死代码知识型规则 → skill 化**（`analyzers/*` / `core/strategic_loop.py`） | 新增 `competitor_agent/skills/`：`SkillLoader`（仿 dota-agent `utils/skill_loader.py`，frontmatter 解析 / `get` / `get_content` / `SKILLS_DIR` 覆盖）+ 9 个 skill md（`planning` + 6 维度 + `fact_verification` + `confidence_disclosure`）；注入点 `analyzers/base.py::_base_messages`（维度 skill + fact_verification + confidence_disclosure）与 `strategic_loop.py::_plan_messages`（planning）；**skill 只追加不替换**现有 `_build_prompt` 文案；`BenchmarkMockLLM` 门禁与 891 测试保持（skill 块不进入"用户任务"/观察文本段） | 中 | ✅ 已实现（2026-08-18） |
+
+### 19.1 48 完成说明（2026-08-18）
+
+- **`skills/` 包**：新增 `competitor_agent/skills/`——`loader.py`（`SkillLoader` 仿 dota-agent：frontmatter 解析 /
+  `get_descriptions` / `get_content` / `get`（缺失 → None）+ `SKILLS_DIR` 环境变量覆盖 + 模块级单例 `get_skill_loader`，
+  缺目录/读失败静默空）+ 9 个 skill md（`planning` + 6 维度 `{dim}_analysis` + `fact_verification` + `confidence_disclosure`）。
+- **注入点**：`analyzers/base.py::_inject_skills`（`_base_messages` 末尾调用）——以**独立 system 消息**插在首条
+  system（维度抽取指令）之后，注入 `<skill name="{dim}_analysis">` + `fact_verification` + `confidence_disclosure`；
+  `core/strategic_loop.py::_plan_messages` 末尾追加 `<skill name="planning">` 独立 system 消息。
+  **messages[0]（维度指令 / "战略规划器"+"用户任务"）与末条 user（观察文本）均保持原样** → BenchmarkMockLLM
+  的维度分支与观察抽取不受影响；skill 缺失静默跳过（零依赖降级）。
+- **测试**：新增 `tests/unit/skills/test_skill_loader.py` 14 条（frontmatter 解析/CRLF/无 frontmatter/空文本、
+  get/get_content/缺失 None/缺目录空/SKILLS_DIR 覆盖/reload/描述清单/默认包内 9 技能/显式目录绕过缓存）+
+  `tests/evaluation/test_skill_injection.py` 11 条（6 维注入自身 skill、三块齐全、messages[0]/末条 user 原样、
+  规划注入 planning、缺失不注入、mock 各维分支正确 JSON、`_user_text` 不被 skill 污染、mock_llm 全链路出维度）。
+- **回归**：全量 **916 passed / 2 skipped**（+25；1 个环境性失败同前：本机已装 playwright）；ruff 改动文件通过、
+  mypy 改动文件不新增错误（远程既有 129 项另行处理，base.py:176 `_parse_result` 为既有未改动行）。
+
+- **可改为 skill（知识型）**：各维度抽取规范（`_build_prompt`）、真值/事实边界指导（`_count_numeric_conflicts` 语义 → skill，**代码核对动作保留兜底**）、置信度披露（`FactValidator` 阈值语义 → skill，**阈值判定保留代码**）、规划规范（`_PLAN_PROMPT`）、补证查询关键词（`_DIMENSION_VERIFY_QUERIES`）。
+- **不宜改（保证型，保持代码）**：注入防护（`detect_injection`/`wrap_untrusted`，安全）、选源路由表（`source_selector.py`，确定性/评测门禁）、降级链/预算/取消/checkpoint、真值校验动作与链式停止（`_UNHELPFUL_TOOL_MARKERS`/`_MAX_CHAIN_STEPS`）、仲裁/校验阈值（`validator_agent.py`）、聚合权重/渲染、schema 修复重试（`llm/client.py`）、名称规范化、定价结构抽取。
+- **范围外（不修改）**：`task_parser` 提示词（已走 LLM）、ReAct 路径、已走 LLM 的调用结构与次数。

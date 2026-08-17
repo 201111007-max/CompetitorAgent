@@ -23,6 +23,7 @@ from competitor_agent.interfaces.context import AnalysisContext
 from competitor_agent.interfaces.exceptions import LLMUnavailableError
 from competitor_agent.llm.client import LLMClient
 from competitor_agent.observability.logger import get_logger
+from competitor_agent.skills import get_skill_loader
 
 logger = get_logger("analyzers.base")
 
@@ -247,12 +248,40 @@ class BaseCompetitorAnalyzer:
         gap: InfoGap,
         context: AnalysisContext,
     ) -> list[dict[str, str]]:
-        """组装分析 prompt：子类 _build_prompt + RAG/记忆注入（链式各轮复用）。"""
+        """组装分析 prompt：子类 _build_prompt + RAG/记忆注入 + skill 注入（链式各轮复用）。"""
         messages = self._build_prompt(observation, gap)
         if context.rag_context:
             messages = self._inject_rag_context(messages, context.rag_context)
         if context.memory_context:
             messages = self._inject_memory_context(messages, context.memory_context)
+        return self._inject_skills(messages)
+
+    def _inject_skills(self, messages: list[dict[str, str]]) -> list[dict[str, str]]:
+        """注入 skill 块（设计文档 48）：维度抽取 + 事实边界 + 置信度披露。
+
+        以独立 system 消息插在首条 system（维度抽取指令）之后——messages[0]
+        与末条 user（观察文本）均保持原样，故 BenchmarkMockLLM 的维度分支与
+        观察抽取不受影响（skill 块不进入"用户任务"/观察文本段）。
+        目录缺失/文件解析失败 → 静默跳过（零依赖降级，不影响主流程）。
+        """
+        loader = get_skill_loader()
+        names = [
+            f"{self.dimension.value}_analysis",
+            "fact_verification",
+            "confidence_disclosure",
+        ]
+        blocks: list[str] = []
+        for name in names:
+            body = loader.get(name)
+            if body:
+                blocks.append(f'<skill name="{name}">\n{body}\n</skill>')
+        if not blocks:
+            return messages
+        skill_msg: dict[str, str] = {"role": "system", "content": "\n\n".join(blocks)}
+        if messages and messages[0].get("role") == "system":
+            messages.insert(1, skill_msg)
+        else:
+            messages.insert(0, skill_msg)
         return messages
 
     def _needs_verification(self, parsed: dict[str, Any], observation: Observation) -> bool:

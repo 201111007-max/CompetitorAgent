@@ -190,6 +190,11 @@ python -m competitor_agent.evaluation.benchmark --llm real --out reports/benchma
 | 新维度覆盖 | CI / 手动跑 evaluation | ecosystem/sentiment/roadmap 字段准确率 < 80% 或空数据幻觉率 > 2% 阻断合并（设计文档 29） |
 | 新增采集器 | 新 collector 提交 | 必须附带覆盖该源的正/负样本 case |
 
+> **skill 注入与 mock 确定性（设计文档 48）**：分析 / 规划 prompt 注入的 `<skill name="...">` 块是独立 system
+> 消息，不进入 `BenchmarkMockLLM` 依赖的「用户任务」/观察文本段 → mock 全量门禁（字段 1.0 / 幻觉 0 /
+> 工具选择 ≥0.85 / trace 100%）与既有断言保持（`tests/evaluation/test_skill_injection.py` 验证）。
+> 技能目录可用 `SKILLS_DIR` 环境变量覆盖（评测注入确定性内容），注入点对缺失静默降级。
+
 ---
 
 ## 6. 新增用例流程

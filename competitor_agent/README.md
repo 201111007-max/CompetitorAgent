@@ -79,6 +79,7 @@ competitor_agent/
 ├── agent/                      # ReAct 交互层 + 护栏 + prompts
 ├── collector/                  # 数据源（web/github/pricing/benchmark/review）
 ├── analyzers/                  # 维度分析器（仅 LLM，无规则降级）
+├── skills/                     # skill 文档（规划/各维度抽取/事实边界/置信度披露，注入 LLM）
 ├── knowledge_base/             # 竞品知识库（RAG）
 ├── memory/                     # 四层记忆 + 竞品时间线（timeline_memory）
 ├── team/                       # 多 Agent 协作
@@ -95,7 +96,14 @@ competitor_agent/
 - 架构总纲：`../doc/ai_coding_agent_competitor_analysis_architecture.md`
 - 分步实现计划：`../doc/plan/implementation_plan.md`
 - 各模块契约/规范：`docs/`（interfaces/domain_models/prompts/data_sources/configuration/evaluation_guide/testing/usage/api）
-- 逐期设计文档：`../doc/plan/issue_designs/`（含 26_freshness_timeline_design.md：新鲜度 TTL / 过期提示 / refresh_stale / 时间线事件；27_pricing_modeling_design.md：结构化定价画像 / 成本估算；28_structured_export_design.md：结构化导出 / 定时调度轮 / 异动告警）
+- 逐期设计文档：`../doc/plan/issue_designs/`（含 26_freshness_timeline_design.md：新鲜度 TTL / 过期提示 / refresh_stale / 时间线事件；27_pricing_modeling_design.md：结构化定价画像 / 成本估算；28_structured_export_design.md：结构化导出 / 定时调度轮 / 异动告警；47_llm_only_pipeline_design.md：主路径仅 LLM 解析，无规则降级；48_skill_guided_pipeline_design.md：写死代码知识型规则 → skill 化，主体流程 LLM 驱动 + 保证型逻辑代码兜底）
+
+## skill 机制（设计文档 48）
+
+`skills/*.md`（YAML frontmatter：name/description + 正文规范）承载"知识型"写死内容：
+规划规范（planning）、6 个维度抽取规范、真值/事实边界（fact_verification）、置信度披露（confidence_disclosure），
+经 `SkillLoader` 以独立 `<skill name="...">` system 消息注入分析/规划 prompt；保证型逻辑（安全/路由/校验/阈值/聚合）仍由代码兜底。
+目录缺省 `skills/`，可用环境变量 `SKILLS_DIR` 覆盖（测试/评测注入确定性内容）；文件缺失静默跳过。
 
 ## 里程碑状态
 

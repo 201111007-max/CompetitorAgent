@@ -179,6 +179,21 @@ report = api.resume("sess_abc123")
 | 定时调度轮 | `run_scheduled(competitors=None, alert_sink=None)` / CLI `schedule` |
 | MCP | `mcp_server.server --transport sse` |
 
+### skill 机制（设计文档 48）
+
+分析 / 规划 prompt 会注入 `skills/*.md` 的规范块（`<skill name="...">`）作为独立 system 消息：
+- `planning`：规划规范（注入 `StrategicPlanner._plan_messages`）；
+- `<维度>_analysis`（pricing/feature/performance/ecosystem/sentiment/roadmap）：各维度抽取规范；
+- `fact_verification` / `confidence_disclosure`：真值边界与置信度披露（注入分析器 `_base_messages`）。
+
+```bash
+# 自定义 skill 目录（测试/评测注入确定性内容）
+$env:SKILLS_DIR = "D:\my_skills"; python -m competitor_agent.cli analyze "Cursor"
+```
+
+目录缺省 `competitor_agent/skills/`；文件缺失 / 解析失败时注入点静默跳过（主流程不受影响）。
+保证型逻辑（安全 / 选源路由 / 校验 / 阈值 / 聚合）不随 skill 改变，仍由代码兜底。
+
 ---
 
 ## 4. 输出说明
