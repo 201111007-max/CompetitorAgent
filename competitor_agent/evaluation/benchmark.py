@@ -190,10 +190,13 @@ class BenchmarkExtractor:
 
 
 class BenchmarkMockLLM:
-    """确定性 mock LLM：按分析器 system prompt 维度从观测文本抽取规范化 JSON。
+    """确定性 mock LLM：在 LLM 版接口上按 prompt 维度返回固定规范化 JSON。
 
-    输出结构对齐各分析器 prompt 的 JSON 契约（plans / features / benchmarks），
-    顶层 tasks 解析 prompt 返回空竞品列表以触发规则版解析（保持规划确定性）。
+    设计文档 47：确定性从"规则版降级"转移到 mock 固定返回——解析/规划/分析
+    都走 LLM 版代码路径，CI 无 Key 仍可复现：
+    - 解析 prompt → 从任务文本提取竞品/分辨率（mock 即固定 oracle，非主路径规则）；
+    - 规划 prompt → 返回合法 PLAN_SCHEMA（competitor 优先取自用例，否则从任务推断）；
+    - 分析 prompt → 维持现有"按维度抽取规范化 JSON"逻辑（只依赖固定页面）。
     """
 
     _PLAN_RE = re.compile(
@@ -205,13 +208,24 @@ class BenchmarkMockLLM:
         "support", "integration", "cli", "agent", "terminal", "multimodal",
         "rag", "mcp", "code", "review", "deploy", "token",
     )
-    # 生态 / 口碑信号标记（对齐 analyzer 的规则降级关键词，保证确定性）
+    # 生态 / 口碑信号标记（对齐 analyzer 的 prompt 契约，保证确定性）
     _IDE_MARKERS = ("vscode", "jetbrains", "terminal")
     _PLUGIN_MARKERS = ("plugin", "extension", "marketplace")
     _POSITIVE_MARKERS = ("love", "great", "awesome", "fast", "recommend", "best", "好用", "好评", "推荐", "喜欢")
     _NEGATIVE_MARKERS = ("bug", "slow", "bad", "terrible", "crash", "worse", "难用", "差评", "吐槽", "失望", "贵", "限制")
     _RAG_MARKER = "[知识库参考片段"
     _MEMORY_MARKER = "[历史经验参考"  # 设计文档 35：记忆召回块，同样不影响 mock 抽取
+    # 任务解析 mock 的分辨率推断（原规则逻辑移入 mock 作为固定 oracle）
+    _DISCOVERY_MARKERS = (
+        "所有", "全部", "有哪些", "哪些", "盘点", "市场", "市面上", "现在市场上的",
+        "帮我找", "帮我寻找", "discover", "find all", "list all",
+    )
+    _COMPARE_MARKERS = ("对比", "比较", "compare", "vs")
+
+    def __init__(self, competitor: str = "", dimension: str = "") -> None:
+        """competitor/dimension 取自评测用例（规划 prompt 的确定性返回）。"""
+        self._competitor = (competitor or "").strip()
+        self._dimensions = [dimension] if dimension else []
 
     def complete(self, messages: list[dict[str, str]], model: str | None = None) -> str:
         if not messages:
@@ -219,12 +233,29 @@ class BenchmarkMockLLM:
         system = messages[0].get("content", "")
         user = self._user_text(messages)
         if "语义解析器" in system:
-            # 规划解析 prompt：返回空竞品，令 parse_task 回退规则版（确定性）
-            return json.dumps({"competitors": [], "dimensions": None, "custom_sources": {}})
+            # 任务解析 prompt：从任务文本提取竞品 + 分辨率（mock 固定 oracle）
+            competitors = self._registry_competitors(user)
+            resolution = "compare" if len(competitors) >= 2 else (
+                "discovery" if any(m in user.lower() for m in self._DISCOVERY_MARKERS) else "registry"
+            )
+            return json.dumps(
+                {"resolution": resolution, "competitors": competitors, "dimensions": None, "custom_sources": {}}
+            )
         if "战略规划器" in system:
-            # 设计文档 44 规划 LLM 化 prompt：返回空竞品/维度（合法 schema），
-            # 令 plan() 经 _strategy_from_llm 校验失败回退规则版（确定性 + 单次调用，不触发修复重试）
-            return json.dumps({"competitor": "", "dimensions": []})
+            # 设计文档 47 规划 prompt：返回合法 PLAN_SCHEMA（competitor 优先取自用例）
+            competitor = self._competitor or self._infer_competitor(user)
+            return json.dumps({"competitor": competitor, "dimensions": self._dimensions})
+        if "竞品发现助手" in system:
+            # 竞品去重 prompt：原样回显候选（确定性去重 = 保序直通）
+            try:
+                data = json.loads(user)
+            except (json.JSONDecodeError, TypeError):
+                return "[]"
+            return json.dumps(data, ensure_ascii=False) if isinstance(data, list) else "[]"
+        if "路线图" in system:
+            return json.dumps(
+                {"summary": "路线图数据有限", "details": {"releases": [], "upcoming": []}, "confidence": 0.3}
+            )
         if "定价" in system:
             plans = self._plans(user)
             return json.dumps(
@@ -252,6 +283,35 @@ class BenchmarkMockLLM:
                 {"summary": details["verdict"], "details": details, "confidence": confidence}
             )
         return json.dumps({"summary": user[:120], "details": {}, "confidence": 0.5})
+
+    @classmethod
+    def _registry_competitors(cls, text: str) -> list[str]:
+        """任务文本中的注册表竞品名（保序去重，mock 固定 oracle）。"""
+        from competitor_agent.core.competitor_registry import COMPETITOR_REGISTRY
+
+        lowered = text.lower()
+        hits: list[str] = []
+        for canon, competitor in COMPETITOR_REGISTRY.items():
+            if canon in lowered or any(a in lowered for a in competitor.aliases):
+                hits.append(competitor.name)
+        return hits
+
+    def _infer_competitor(self, text: str) -> str:
+        """规划 mock：注册表命中优先；否则取任务段首 ASCII 词作为规范名（mock oracle）。
+
+        规划 prompt 已含"用户任务：<task>"，只从任务段推断，避免被 prompt 指令文本污染。
+        """
+        from competitor_agent.core.competitor_registry import canonicalize
+
+        marker = "用户任务："
+        idx = text.find(marker)
+        if idx >= 0:
+            text = text[idx + len(marker):]
+        names = self._registry_competitors(text)
+        if names:
+            return names[0]
+        ascii_parts = "".join(c for c in text if c.isascii() and (c.isalnum() or c.isspace()))
+        return canonicalize(ascii_parts) or "unknown"
 
     @staticmethod
     def _user_text(messages: list[dict[str, str]]) -> str:
@@ -560,8 +620,10 @@ def build_benchmark_api(
     rag_store: object | None = None,
     timeline: object | None = None,
 ) -> CompetitorAnalysisAPI:
-    """按用例配置构建 API：mock 用确定性 MockLLM（无 Key、无网络），real 用真实 LLMClient，
-    rules 用纯规则降级（use_llm=False，设计文档 30 的 no-llm-rule 消融变体）。
+    """按用例配置构建 API：mock 用确定性 MockLLM（无 Key、无网络），real 用真实 LLMClient。
+
+    设计文档 47：主路径仅 LLM（use_llm 恒 True）；确定性由 mock LLM 在 LLM 版接口上
+    固定返回承担（不再依赖规则版降级）。
 
     llm：共享 LLMClient 实例（real 模式跨 case 复用，连接复用 + 成本累计；设计文档 37）。
       为 None 时按 llm_mode 默认构造（mock=确定性 MockLLM；real=按 LLMConfig 构造）。
@@ -571,17 +633,15 @@ def build_benchmark_api(
     timeline：默认注入每 case 独立的空时间线存储，保证「首轮无基线不产生事件」
     （设计文档 26/29 边界）不受外部共享时间线状态污染——失败统计可信且可复现。
     """
-    use_llm = False
     if llm is None:
         if llm_mode == "mock":
-            llm = LLMClient(call_func=BenchmarkMockLLM().complete)
-            use_llm = True
+            mock = BenchmarkMockLLM(
+                competitor=str(getattr(case, "competitor", "")),
+                dimension=str(getattr(case, "dimension", "")),
+            )
+            llm = LLMClient(call_func=mock.complete)
         elif llm_mode == "real":
             llm = build_real_llm()
-            use_llm = True
-    else:
-        # 显式注入的共享实例（real 复用 / 测试注入）
-        use_llm = True
     extractor = BenchmarkExtractor(
         page=getattr(case, "page", ""),
         fail_urls=set(getattr(case, "fail_urls", None) or ()),
@@ -591,7 +651,7 @@ def build_benchmark_api(
     return CompetitorAnalysisAPI(
         extractor=extractor,
         llm=llm,
-        use_llm=use_llm,
+        use_llm=True,
         max_iterations=8,
         cost_limit=1.0,
         enable_rag=enable_rag,

@@ -1,16 +1,19 @@
-"""设计文档 44：规划 LLM 化单测（StrategicPlanner 结构化规划 + 规则兜底）
+"""设计文档 44/47：规划 LLM 化单测（StrategicPlanner 结构化规划，仅 LLM）
 
 - LLM 结构化规划（competitor/dimensions/priorities/budget/custom_sources）入 CompetitorStrategy
-- 非法枚举 / budget 缺失 → 兜底（缺失维度默认 1 / 非法回退规则版）
-- use_llm=False 纯规则结果与现状一致；记忆提权在 LLM 路径同样生效
+- 非法枚举 / 缺失字段 / 空 competitor → 抛错（设计文档 47：不再回退规则版）
+- 记忆提权在 LLM 路径生效；规划 prompt 含任务 + 历史经验
 """
 from __future__ import annotations
 
 import json
 
+import pytest
+
 from competitor_agent.core.strategic_loop import StrategicPlanner
 from competitor_agent.domain_types import DimensionType, GapStatus
 from competitor_agent.interfaces.context import Skill
+from competitor_agent.interfaces.exceptions import LLMUnavailableError
 from competitor_agent.llm.client import LLMClient
 
 
@@ -75,23 +78,22 @@ class TestLlmPlanning:
         assert by_field["pricing"].priority == 10  # 收敛上限
         assert strategy.budget_allocation[DimensionType.PRICING] == 5  # 收敛上限
 
-    def test_invalid_enum_falls_back_to_rules(self):
+    def test_invalid_enum_schema_fails(self):
+        """非法维度枚举 → complete_json schema 校验失败 → LLMUnavailableError。"""
         llm = _plan_llm({"competitor": "Cursor", "dimensions": ["pricing", "bogus_dim"]})
-        strategy = StrategicPlanner(llm=llm, use_llm=True).plan("Cursor")
-        # bogus_dim 不在枚举 → complete_json schema 失败 → 回退规则版（默认 6 维度）
-        assert len(strategy.gaps) == 6
+        with pytest.raises(LLMUnavailableError):
+            StrategicPlanner(llm=llm, use_llm=True).plan("Cursor")
 
-    def test_empty_competitor_falls_back_to_rules(self):
+    def test_empty_competitor_raises(self):
+        """空 competitor → _strategy_from_llm 抛错（不再回退规则版）。"""
         llm = _plan_llm({"competitor": "", "dimensions": ["pricing"]})
-        strategy = StrategicPlanner(llm=llm, use_llm=True).plan("分析 Cursor")
-        # competitor 空 → _strategy_from_llm 抛错 → 回退规则版
-        assert strategy.competitor.name == "cursor"
-        assert len(strategy.gaps) == 6
+        with pytest.raises(ValueError):
+            StrategicPlanner(llm=llm, use_llm=True).plan("分析 Cursor")
 
-    def test_missing_competitor_key_schema_fails_to_rules(self):
+    def test_missing_competitor_key_schema_fails(self):
         llm = _plan_llm({"dimensions": ["pricing"]})  # 缺 required competitor
-        strategy = StrategicPlanner(llm=llm, use_llm=True).plan("Cursor")
-        assert len(strategy.gaps) == 6
+        with pytest.raises(LLMUnavailableError):
+            StrategicPlanner(llm=llm, use_llm=True).plan("Cursor")
 
     def test_llm_memory_boost_applied(self):
         """LLM 规划结果同样走 _apply_memory_boost：技能命中的缺口置信度 +0.2。"""
@@ -103,31 +105,33 @@ class TestLlmPlanning:
         by_field = {g.field: g for g in strategy.gaps}
         assert by_field["pricing"].confidence == 0.2
 
-    def test_plan_prompt_contains_memory_context(self):
+    def test_plan_prompt_contains_task_and_memory_context(self):
         captured = []
 
         def rec(messages, model):
             captured.append(messages)
+            system = messages[0].get("content", "")
+            if "语义解析器" in system:
+                # 记忆预判的 parse 调用：返回竞品
+                return json.dumps({"competitors": ["cursor"], "dimensions": None, "custom_sources": {}})
             return json.dumps({"competitor": "Cursor", "dimensions": ["pricing"]})
 
         planner = StrategicPlanner(llm=LLMClient(call_func=rec), use_llm=True)
-        planner.plan("Cursor", memory=StubMemory())
-        assert "历史：pricing 用官网源有效" in captured[0][0]["content"]
+        planner.plan("分析 Cursor", memory=StubMemory())
+        plan_prompt = captured[-1][0]["content"]
+        assert "分析 Cursor" in plan_prompt  # 用户任务在规划 prompt 中
+        assert "历史：pricing 用官网源有效" in plan_prompt
 
 
-class TestRulesFallback:
-    def test_use_llm_false_uses_rules(self):
-        """use_llm=False（即使给了 llm）→ 纯规则，行为与现状一致。"""
+class TestNoLlmRaises:
+    def test_use_llm_false_raises(self):
+        """设计文档 47：use_llm=False 直接抛 LLMUnavailableError（无规则版）。"""
         llm = LLMClient(call_func=lambda m, x: json.dumps({"competitor": "Cursor"}))
         p = StrategicPlanner(llm=llm, use_llm=False)
-        strategy = p.plan("分析 cursor 的定价 pricing")
-        by_field = {g.field: g for g in strategy.gaps}
-        assert len(strategy.gaps) == 6
-        assert by_field["pricing"].priority == 10  # 关键词提权
-        assert strategy.budget_allocation[DimensionType.FEATURE] == 3
+        with pytest.raises(LLMUnavailableError):
+            p.plan("分析 cursor 的定价 pricing")
 
-    def test_rules_path_budget_allocation(self):
+    def test_no_llm_raises(self):
         p = StrategicPlanner()
-        strategy = p.plan("cursor")
-        assert strategy.budget_allocation[DimensionType.PRICING] == 2
-        assert strategy.budget_allocation[DimensionType.FEATURE] == 3
+        with pytest.raises(LLMUnavailableError):
+            p.plan("cursor")

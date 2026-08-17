@@ -43,20 +43,20 @@ def _cursor():
     )
 
 
-def _make_loop(cands, budget=None, analyzer=None):
+def _make_loop(cands, mock_llm, budget=None, analyzer=None):
     return TacticalLoop(
         selector=FakeSelector(cands),
         extractor=FakeExtractor(),
-        analyzer=analyzer or PricingAnalyzer(use_llm=False),
+        analyzer=analyzer or PricingAnalyzer(llm=mock_llm, use_llm=True),
         budget=budget or IterationBudget(max_iterations=5, cost_limit=1.0),
     )
 
 
 class TestTacticalLoop:
-    def test_success_closure(self):
+    def test_success_closure(self, mock_llm):
         gap = InfoGap(field="pricing")
         cand = SourceCandidate(source_name="official_pricing", url="https://www.cursor.com/pricing", trust_level=0.9)
-        loop = _make_loop([cand])
+        loop = _make_loop([cand], mock_llm)
         strategy = CompetitorStrategy(competitor=_cursor(), gaps=[gap])
         result = loop.execute(gap, strategy)
         assert result is not None
@@ -66,28 +66,28 @@ class TestTacticalLoop:
         assert gap.evidence
         assert "official_pricing" in gap.sources_tried
 
-    def test_no_plans_partial(self):
+    def test_no_plans_partial(self, mock_llm):
         gap = InfoGap(field="pricing")
         cand = SourceCandidate(source_name="official_home", url="https://www.cursor.com", trust_level=0.9)
         strategy = CompetitorStrategy(competitor=_cursor(), gaps=[gap])
-        result = _make_loop([cand]).execute(gap, strategy)
+        result = _make_loop([cand], mock_llm).execute(gap, strategy)
         assert result is not None
         assert result.details["plans"] == []
         assert gap.status == GapStatus.PARTIAL
 
-    def test_degrades_across_sources(self):
+    def test_degrades_across_sources(self, mock_llm):
         gap = InfoGap(field="pricing")
         bad = SourceCandidate(source_name="official_pricing", url="https://404.com/x", trust_level=0.9)
         good = SourceCandidate(source_name="official_home", url="https://www.cursor.com/pricing", trust_level=0.9)
         strategy = CompetitorStrategy(competitor=_cursor(), gaps=[gap])
-        result = _make_loop([bad, good]).execute(gap, strategy)
+        result = _make_loop([bad, good], mock_llm).execute(gap, strategy)
         assert result is not None
 
-    def test_budget_exhausted_blocks(self):
+    def test_budget_exhausted_blocks(self, mock_llm):
         gap = InfoGap(field="pricing")
         cand = SourceCandidate(source_name="official_pricing", url="https://www.cursor.com/pricing", trust_level=0.9)
         budget = IterationBudget(max_iterations=0, cost_limit=0.0)
         strategy = CompetitorStrategy(competitor=_cursor(), gaps=[gap])
-        result = _make_loop([cand], budget=budget).execute(gap, strategy)
+        result = _make_loop([cand], mock_llm, budget=budget).execute(gap, strategy)
         assert result is None
         assert gap.status == GapStatus.BLOCKED

@@ -52,16 +52,16 @@ class TestSourcePreference:
 
 
 class TestMemoryDrivesPlanning:
-    def test_second_analysis_boosts_confidence(self, tmp_path):
+    def test_second_analysis_boosts_confidence(self, tmp_path, mock_llm):
         mem = FourLayerMemory(tmp_path / "mem")
         mem.record_skill(Skill(competitor_name="cursor", gap_field="pricing", source_name="docs", success=True))
-        p = StrategicPlanner()
+        p = StrategicPlanner(llm=mock_llm, use_llm=True)
         strategy = p.plan("cursor", memory=mem)
         by_field = {g.field: g for g in strategy.gaps}
         assert by_field["pricing"].confidence == 0.2  # 记忆提升
 
-    def test_no_memory_no_boost(self, tmp_path):
-        p = StrategicPlanner()
+    def test_no_memory_no_boost(self, tmp_path, mock_llm):
+        p = StrategicPlanner(llm=mock_llm, use_llm=True)
         strategy = p.plan("cursor")
         by_field = {g.field: g for g in strategy.gaps}
         assert by_field["pricing"].confidence == 0.0
@@ -75,14 +75,14 @@ class TestMemoryDrivesPlanning:
 
 
 class TestApiWithMemory:
-    def test_api_memory_exposed(self, tmp_path):
+    def test_api_memory_exposed(self, tmp_path, mock_llm):
         from competitor_agent.facade.api import CompetitorAnalysisAPI
 
         mem = FourLayerMemory(tmp_path / "mem")
-        api = CompetitorAnalysisAPI(extractor=None, use_llm=False, memory=mem, max_iterations=2)
+        api = CompetitorAnalysisAPI(extractor=None, llm=mock_llm, use_llm=True, memory=mem, max_iterations=2)
         assert api.memory is mem
 
-    def test_api_memory_drives_confidence(self, tmp_path):
+    def test_api_memory_drives_confidence(self, tmp_path, mock_llm):
         from competitor_agent.domain_types import Observation, SourceEvidence
         from competitor_agent.facade.api import CompetitorAnalysisAPI
         from competitor_agent.interfaces.context import SourceContext
@@ -101,7 +101,7 @@ class TestApiWithMemory:
                 ev = SourceEvidence(source_name="web_extractor", url=url, content_hash=str(hash(url)))
                 return Observation(gap_field=gap.field, source="web_extractor", raw_text=text, evidence=ev)
 
-        api = CompetitorAnalysisAPI(extractor=FakeExtractor(), use_llm=False, memory=mem, max_iterations=4)
+        api = CompetitorAnalysisAPI(extractor=FakeExtractor(), llm=mock_llm, use_llm=True, memory=mem, max_iterations=4)
         api.analyze("分析 Cursor")
         # 分析后应沉淀技能，二次规划命中记忆（同存储目录重新加载）
         mem2 = FourLayerMemory(tmp_path / "m")
@@ -109,6 +109,6 @@ class TestApiWithMemory:
         # 直接规划即可观察到记忆命中带来的置信度提升
         from competitor_agent.core.strategic_loop import StrategicPlanner
 
-        strategy = StrategicPlanner().plan("cursor", memory=mem2)
+        strategy = StrategicPlanner(llm=mock_llm, use_llm=True).plan("cursor", memory=mem2)
         by_field = {g.field: g for g in strategy.gaps}
         assert by_field["pricing"].confidence >= 0.2

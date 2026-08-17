@@ -162,6 +162,8 @@ class TestRealSmoke:
     @pytest.mark.skipif(not LLMClient.has_api_key(), reason="无 API Key（OPENAI/DEEPSEEK/LLM_API_KEY），跳过真实 LLM 评测")
     def test_real_smoke_normal_subset(self, tmp_path):
         """有 Key 时真实调用：2-3 条 normal 用例 → 报告含真实质量指标与成本"""
+        if not LLMClient.has_api_key():
+            pytest.skip("运行期无 LLM API Key（隔离环境已清除），跳过真实 LLM 评测")
         report = Benchmark(llm_mode="real", llm=build_real_llm(), tag="normal", cost_limit_usd=0.5).run()
         assert report.llm_mode == "real"
         assert report.n_cases >= 2

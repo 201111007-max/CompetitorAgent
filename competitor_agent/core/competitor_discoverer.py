@@ -1,14 +1,14 @@
-"""CompetitorDiscoverer — 自主发现竞品（设计文档 20）
+"""CompetitorDiscoverer — 自主发现竞品（设计文档 20 / 47）
 
 职责边界：只负责"怎么找"（联网枚举候选 + 补全 official_links），
 不负责"该不该找"——意图判定（REGISTRY/DISCOVERY/COMPARE）由 LLM 决策
 （见 core/task_parser.py 的 ResolutionDecision），本类仅在判定 DISCOVERY 后被调用。
 
-发现顺序：
-1. 注册表命中优先（任务文本含已知竞品名/别名，直接返回注册表条目）；
-2. 未知 → 调用注入的 web_tool（如 MCP web 搜索）枚举候选（名称 + 官网）；
-   use_llm=True 时用 LLM 归纳去重、补全 official_links；
-3. 无 Key / 无网络 / 无候选 → 内置兜底清单（常见 AI coding agent），保证不 0 维度。
+发现顺序（设计文档 47：无内置兜底清单）：
+1. 注册表命中优先（任务文本含已知竞品名/别名，直接返回注册表条目，属数据查询）；
+2. 未知 → 调用注入的 web_tool（如 MCP web 搜索）枚举候选（名称 + 官网），
+   LLM 归纳去重、补全 official_links；LLM 不可用/失败抛 LLMUnavailableError；
+3. 缺 web_tool / 搜索失败 / 无候选 → 返回空（不编造内置清单），由上层报"未能发现任何竞品"。
 """
 from __future__ import annotations
 
@@ -17,21 +17,10 @@ from typing import Any, Callable
 
 from competitor_agent.core.competitor_registry import COMPETITOR_REGISTRY, canonicalize
 from competitor_agent.domain_types.competitor import Competitor
+from competitor_agent.interfaces.exceptions import LLMUnavailableError
 from competitor_agent.llm.client import LLMClient
 
 logger = logging.getLogger("competitor_agent.core.competitor_discoverer")
-
-# 无 Key / 无网络时的内置兜底清单（常见 AI Coding Agent，保证普查任务不 0 维度）
-_FALLBACK_CANDIDATES: list[dict[str, str]] = [
-    {"name": "cursor", "home": "https://www.cursor.com", "pricing": "https://www.cursor.com/pricing"},
-    {"name": "claude-code", "home": "https://www.anthropic.com/claude-code", "docs": "https://docs.anthropic.com/en/docs/claude-code"},
-    {"name": "copilot", "home": "https://github.com/features/copilot", "docs": "https://docs.github.com/en/copilot"},
-    {"name": "codex", "home": "https://openai.com/index/introducing-codex/"},
-    {"name": "windsurf", "home": "https://windsurf.com", "pricing": "https://windsurf.com/pricing"},
-    {"name": "aider", "home": "https://aider.chat", "docs": "https://aider.chat/docs/"},
-    {"name": "gemini-cli", "home": "https://github.com/google-gemini/gemini-cli"},
-    {"name": "opencode", "home": "https://opencode.ai"},
-]
 
 # web_tool 返回的候选字段 key → official_links key（与 SourceSelector 对齐）
 _LINK_KEYS = ("home", "pricing", "docs", "changelog")
@@ -65,8 +54,7 @@ class CompetitorDiscoverer:
         """联网检索候选竞品列表（名称 + official_links），返回去重后的 ≥1 个竞品。
 
         1) 注册表命中优先；
-        2) 未知 → web_tool 搜索（名称 + 官网），use_llm=True 时 LLM 归纳去重补全；
-        3) 兜底内置清单。
+        2) 未知 → web_tool 搜索（名称 + 官网），LLM 归纳去重补全。
 
         on_candidate: 每发现一个候选竞品名即回调（供 Web SSE 实时推送）。
         """
@@ -79,22 +67,23 @@ class CompetitorDiscoverer:
         return self._to_competitors(candidates)
 
     def _search(self, task: str) -> list[dict[str, Any]]:
-        """候选枚举：注册表命中 → web_tool → 内置兜底。"""
-        # 1) 注册表命中：任务文本直接含已知竞品
+        """候选枚举：注册表命中 → web_tool 联网搜索（无内置兜底，设计文档 47）。"""
+        # 1) 注册表命中：任务文本直接含已知竞品（数据查询，不算规则解析）
         registered = self._registry_hits(task)
         if registered:
             return registered
-        # 2) web_tool 联网搜索
-        if self._web_tool is not None:
-            try:
-                raw = self._web_tool(task)
-                if raw:
-                    return self._dedupe_with_llm(raw)
-            except Exception:  # noqa: BLE001 - 搜索失败回退兜底，不崩溃
-                logger.warning("web_tool 搜索失败，回退内置清单: task=%r", task, exc_info=True)
-        # 3) 内置兜底清单（无 Key / 无网络 / 搜索失败）
-        logger.info("使用内置竞品兜底清单（无 web_tool / 无候选）")
-        return list(_FALLBACK_CANDIDATES)
+        # 2) web_tool 联网搜索（缺 web_tool / 搜索失败 → 无候选，不编造清单）
+        if self._web_tool is None:
+            logger.warning("发现任务缺少联网搜索工具（web_tool）")
+            return []
+        try:
+            raw = self._web_tool(task)
+        except Exception:  # noqa: BLE001 - 搜索失败返回空候选，不编造兜底清单
+            logger.warning("web_tool 搜索失败: task=%r", task, exc_info=True)
+            return []
+        if not raw:
+            return []
+        return self._dedupe_with_llm(raw)
 
     @staticmethod
     def _registry_hits(task: str) -> list[dict[str, Any]]:
@@ -113,21 +102,19 @@ class CompetitorDiscoverer:
         return hits
 
     def _dedupe_with_llm(self, raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """use_llm=True 时用 LLM 归纳去重 + 补全 official_links；否则规则去重。"""
-        if self._use_llm and self._llm is not None:
-            try:
-                text = self._llm.complete(
-                    messages=[
-                        {"role": "system", "content": _LLM_DEDUP_PROMPT},
-                        {"role": "user", "content": json_dumps(raw)},
-                    ]
-                )
-                parsed = json_loads_array(text)
-                if parsed:
-                    return parsed
-            except Exception:  # noqa: BLE001 - LLM 失败回退规则去重
-                logger.warning("LLM 去重失败，回退规则去重", exc_info=True)
-        return raw
+        """LLM 归纳去重 + 补全 official_links；LLM 不可用/失败抛 LLMUnavailableError。"""
+        if not (self._use_llm and self._llm is not None):
+            raise LLMUnavailableError("竞品去重仅支持 LLM：需要配置 LLM API Key")
+        try:
+            text = self._llm.complete(
+                messages=[
+                    {"role": "system", "content": _LLM_DEDUP_PROMPT},
+                    {"role": "user", "content": json_dumps(raw)},
+                ]
+            )
+            return json_loads_array(text)
+        except Exception as exc:  # noqa: BLE001 - LLM 去重失败统一抛 LLMUnavailableError
+            raise LLMUnavailableError(f"竞品去重失败: {exc}") from exc
 
     @staticmethod
     def _to_competitors(candidates: list[dict[str, Any]]) -> list[Competitor]:

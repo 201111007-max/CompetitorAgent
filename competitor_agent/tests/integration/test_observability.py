@@ -75,9 +75,9 @@ class TestAnalyzeInstrumentation:
         built = [e for e in _events(sid) if e["event"] == "report.built"]
         assert built and built[0].get("dimension_count") is not None
 
-    def test_team_flow_emits_terminated_and_report(self, fake_extractor) -> None:
+    def test_team_flow_emits_terminated_and_report(self, fake_extractor, mock_llm) -> None:
         sid = "sess_obs_team"
-        api = CompetitorAnalysisAPI(extractor=fake_extractor, use_llm=False)
+        api = CompetitorAnalysisAPI(extractor=fake_extractor, llm=mock_llm, use_llm=True)
         report = api.analyze("分析 Cursor", mode="team", session_id=sid)
 
         events = [e["event"] for e in _events(sid)]
@@ -86,12 +86,12 @@ class TestAnalyzeInstrumentation:
         assert "report.built" in events
         assert report.dimension_results
 
-    def test_cancelled_session_logs_terminated(self, fake_extractor) -> None:
+    def test_cancelled_session_logs_terminated(self, fake_extractor, mock_llm) -> None:
         sid = "sess_obs_cancel"
         set_cancel = __import__("competitor_agent.core.checkpoint", fromlist=["set_cancel"]).set_cancel
         try:
             set_cancel(sid)
-            api = CompetitorAnalysisAPI(extractor=fake_extractor, use_llm=False, max_iterations=10)
+            api = CompetitorAnalysisAPI(extractor=fake_extractor, llm=mock_llm, use_llm=True, max_iterations=10)
             report = api.analyze("分析 Cursor", mode="single", session_id=sid)
             assert report.terminal_state == "cancelled"
             events = [e["event"] for e in _events(sid)]

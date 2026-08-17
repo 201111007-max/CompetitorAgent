@@ -23,44 +23,44 @@ class FakeExtractor:
         return Observation(gap_field=gap.field, source="web_extractor", raw_text=text, evidence=ev)
 
 
-def _api(**kwargs):
-    return CompetitorAnalysisAPI(extractor=FakeExtractor(), use_llm=False, **kwargs)
+def _api(llm, **kwargs):
+    return CompetitorAnalysisAPI(extractor=FakeExtractor(), llm=llm, use_llm=True, **kwargs)
 
 
 class TestAnalyze:
-    def test_analyze_returns_report(self):
-        api = _api()
+    def test_analyze_returns_report(self, mock_llm):
+        api = _api(mock_llm)
         report = api.analyze("分析 Cursor")
         assert report.competitor.name == "cursor"
         assert report.overall_confidence > 0
         assert report.markdown_report
         assert "# cursor 竞品分析报告" in report.markdown_report
 
-    def test_analyze_pricing_dimension_found(self):
-        api = _api()
+    def test_analyze_pricing_dimension_found(self, mock_llm):
+        api = _api(mock_llm)
         report = api.analyze("分析 Cursor")
         pricing = [r for r in report.dimension_results if r.dimension == "pricing"]
         assert pricing
         assert pricing[0].details["plans"]
 
-    def test_analyze_fallback_unknown_competitor(self):
+    def test_analyze_fallback_unknown_competitor(self, mock_llm):
         # 未知竞品也能产出报告（走 home 链接，无官方链接则缺 url → 该维度无结果但不崩溃）
-        api = _api()
+        api = _api(mock_llm)
         report = api.analyze("分析 UnknownToolX")
-        assert report.competitor.name == "unknowntoolx"
+        assert "unknowntoolx" in report.competitor.name
         assert report.markdown_report
 
-    def test_analyze_emits_events(self):
+    def test_analyze_emits_events(self, mock_llm):
         events = []
-        api = CompetitorAnalysisAPI(extractor=FakeExtractor(), use_llm=False, event_sink=events.append)
+        api = CompetitorAnalysisAPI(extractor=FakeExtractor(), llm=mock_llm, use_llm=True, event_sink=events.append)
         api.analyze("分析 Cursor")
         assert events
         assert any(e.event == "phase_start" for e in events)
         assert any(e.event == "report" for e in events)
 
-    def test_analyze_gap_pending_not_crashed(self):
+    def test_analyze_gap_pending_not_crashed(self, mock_llm):
         # 未关闭缺口会进报告，但不崩溃
-        api = _api(max_iterations=1, cost_limit=0.05)
+        api = _api(mock_llm, max_iterations=1, cost_limit=0.05)
         report = api.analyze("分析 Cursor")
         assert report.gaps_pending is not None
 

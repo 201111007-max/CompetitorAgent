@@ -15,7 +15,9 @@ import pytest
 from competitor_agent import web_app
 from competitor_agent.config.loader import AppConfig
 from competitor_agent.core import report_archiver as ra
+from competitor_agent.evaluation.benchmark import BenchmarkMockLLM
 from competitor_agent.facade.api import CompetitorAnalysisAPI
+from competitor_agent.llm.client import LLMClient
 from competitor_agent.memory import FourLayerMemory
 from fastapi.testclient import TestClient
 
@@ -62,6 +64,9 @@ class TestReportViaEventGenerator:
             extractor=fake_extractor, llm=mock_llm, use_llm=True, max_iterations=10
         )
         monkeypatch.setattr(web_app, "CompetitorAnalysisAPI", lambda **kw: _ReportAPI(inner))
+        # 设计文档 47：Web 内部路由 parse_task 亦走真实 LLM（无 Key 会抛错）。
+        # 注入 mock_llm 保持生产 _event_generator 链路可复现（不触发真实网络/Key）。
+        monkeypatch.setattr(web_app, "LLMClient", lambda **kwargs: mock_llm)
 
         sid = "sess_rep_export"
         lines: list[str] = []

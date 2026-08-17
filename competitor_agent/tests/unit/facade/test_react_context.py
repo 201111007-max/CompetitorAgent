@@ -105,7 +105,20 @@ class FakeExtractor:
 
 
 def _api(llm):
-    return CompetitorAnalysisAPI(extractor=FakeExtractor(), llm=llm, use_llm=False)
+    """包装 react llm：任务解析 prompt 单独处理（设计文档 47：仅 LLM），其余走 react 脚本。"""
+    import json
+
+    def call(messages, model):
+        system = messages[0].get("content", "")
+        if "语义解析器" in system:
+            return json.dumps(
+                {"resolution": "registry", "competitors": ["cursor"], "dimensions": None, "custom_sources": {}}
+            )
+        if isinstance(llm, LLMClient):
+            return llm.complete(messages)
+        return llm(messages, model)
+
+    return CompetitorAnalysisAPI(extractor=FakeExtractor(), llm=LLMClient(call_func=call), use_llm=True)
 
 
 class TestAnalyzeReactReport:

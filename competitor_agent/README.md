@@ -47,7 +47,8 @@ python -m competitor_agent.mcp_server.server --transport sse --port 8001
 ```python
 from competitor_agent import CompetitorAnalysisAPI
 
-api = CompetitorAnalysisAPI(use_llm=False)
+# 设计文档 46/47：默认 use_llm=True，主路径仅 LLM（需配置 LLM API Key）
+api = CompetitorAnalysisAPI(llm=LLMClient(...), use_llm=True)
 report = api.analyze("Cursor")
 print(report.markdown_report)
 
@@ -77,7 +78,7 @@ competitor_agent/
 ├── core/                       # 框架内核（双循环/预算/停止验证/报告/checkpoint）
 ├── agent/                      # ReAct 交互层 + 护栏 + prompts
 ├── collector/                  # 数据源（web/github/pricing/benchmark/review）
-├── analyzers/                  # 维度分析器（LLM 驱动，规则降级）
+├── analyzers/                  # 维度分析器（仅 LLM，无规则降级）
 ├── knowledge_base/             # 竞品知识库（RAG）
 ├── memory/                     # 四层记忆 + 竞品时间线（timeline_memory）
 ├── team/                       # 多 Agent 协作

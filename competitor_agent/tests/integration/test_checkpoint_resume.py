@@ -19,7 +19,7 @@ pytestmark = pytest.mark.integration
 
 
 class TestCheckpointResume:
-    def test_cancel_then_resume_restores_session(self, fake_extractor) -> None:
+    def test_cancel_then_resume_restores_session(self, fake_extractor, mock_llm) -> None:
         started = threading.Event()
         release = threading.Event()
 
@@ -29,7 +29,7 @@ class TestCheckpointResume:
                 release.wait(timeout=10)
                 return fake_extractor.fetch(gap, context)
 
-        api = CompetitorAnalysisAPI(extractor=BlockingExtractor(), use_llm=False, max_iterations=10)
+        api = CompetitorAnalysisAPI(extractor=BlockingExtractor(), llm=mock_llm, use_llm=True, max_iterations=10)
         sid = f"sess_res_{uuid.uuid4().hex[:8]}"
         holder: dict = {}
 
@@ -60,7 +60,7 @@ class TestCheckpointResume:
         with pytest.raises(ValueError):
             api.resume(sid)
 
-    def test_resume_missing_session_raises(self, fake_extractor) -> None:
-        api = CompetitorAnalysisAPI(extractor=fake_extractor, use_llm=False)
+    def test_resume_missing_session_raises(self, fake_extractor, mock_llm) -> None:
+        api = CompetitorAnalysisAPI(extractor=fake_extractor, llm=mock_llm, use_llm=True)
         with pytest.raises(ValueError):
             api.resume(f"sess_missing_{uuid.uuid4().hex[:8]}")

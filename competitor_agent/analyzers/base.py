@@ -1,9 +1,12 @@
 """BaseCompetitorAnalyzer — 维度分析器基类
 
 职责：
-- 统一 analyze() 骨架：LLM 驱动优先，失败自动降级到规则提取
-- 子类实现 dimension / _build_prompt / _rule_extract / _parse_result
+- 统一 analyze() 骨架：仅 LLM 链式分析（设计文档 47，无规则降级）
+- 子类实现 dimension / _build_prompt / _parse_result
 - 产出 DimensionResult（含置信度与证据）
+
+LLM 不可用 / 注入命中 → 返回低置信 [PARTIAL]（保留结构化返回，不炸流水线，
+报告标注"该维度未分析"）；不再降级规则。
 """
 from __future__ import annotations
 
@@ -128,16 +131,36 @@ class BaseCompetitorAnalyzer:
         gap: InfoGap,
         context: AnalysisContext,
     ) -> DimensionResult:
-        """LLM 驱动优先，失败自动降级规则提取"""
-        if self._use_llm and self._llm is not None:
-            try:
-                return self._analyze_with_llm(observation, gap, context)
-            except LLMUnavailableError:
-                logger.info("LLM 不可用，降级规则提取: field=%s", gap.field)
-            except Exception:
-                logger.exception("LLM 分析失败，降级规则提取: field=%s", gap.field)
+        """仅 LLM 链式分析（设计文档 47）；LLM 不可用/注入命中返回不可信 PARTIAL。
 
-        return self._analyze_with_rules(observation, gap, context)
+        保留结构化返回：无规则可降，但报告仍可标注"该维度未分析"。
+        """
+        if not (self._use_llm and self._llm is not None):
+            return self._unavailable_result(observation, gap, "LLM 不可用")
+        try:
+            return self._analyze_with_llm(observation, gap, context)
+        except LLMUnavailableError:
+            logger.info("LLM 不可用/内容不可信，返回 PARTIAL: field=%s", gap.field)
+            return self._unavailable_result(observation, gap, "LLM 不可用/内容不可信")
+        except Exception:
+            logger.exception("LLM 分析失败，返回 PARTIAL: field=%s", gap.field)
+            return self._unavailable_result(observation, gap, "LLM 分析失败")
+
+    def _unavailable_result(
+        self,
+        observation: Observation,
+        gap: InfoGap,
+        reason: str,
+    ) -> DimensionResult:
+        """LLM 不可用/注入命中的低置信 PARTIAL（设计文档 47 §3.5）。"""
+        return DimensionResult(
+            dimension=self.dimension.value,
+            summary=reason,
+            details={},
+            confidence=0.1,
+            evidence=[observation.evidence],
+            status=ResultStatus.PARTIAL,
+        )
 
     def confidence(self, result: DimensionResult) -> float:
         return result.confidence
@@ -180,7 +203,7 @@ class BaseCompetitorAnalyzer:
         assert self._llm is not None
         if detect_injection(observation.raw_text):
             logger.warning(
-                "检测到提示注入特征，跳过 LLM 分析，降级规则提取: field=%s source=%s",
+                "检测到提示注入特征，跳过 LLM 分析，返回不可信 PARTIAL: field=%s source=%s",
                 gap.field,
                 observation.evidence.source_name,
             )
@@ -208,6 +231,9 @@ class BaseCompetitorAnalyzer:
             parsed = self._llm.complete_json(messages, schema=self._schema_for(gap))
         confidence = float(parsed.get("confidence", 0.7))
         status = ResultStatus.COMPLETE
+        if confidence < 0.5:
+            # 低置信 LLM 结果 → PARTIAL（该维度未充分分析，不标 COMPLETE）
+            status = ResultStatus.PARTIAL
         adjusted = self._verify_details(parsed, observation)
         if adjusted is not None and adjusted < confidence:
             confidence = adjusted
@@ -348,21 +374,6 @@ class BaseCompetitorAnalyzer:
         )
         return messages
 
-    def _analyze_with_rules(
-        self,
-        observation: Observation,
-        gap: InfoGap,
-        context: AnalysisContext,
-    ) -> DimensionResult:
-        parsed = self._rule_extract(observation)
-        # 规则路径默认 0.5；子类可在 _rule_extract 返回中显式给 confidence
-        # （如 sentiment 无信号 → 低置信 PARTIAL，避免编造）
-        confidence = float(parsed.get("confidence", 0.5))
-        status = ResultStatus.COMPLETE if confidence >= 0.5 else ResultStatus.PARTIAL
-        return self._make_result(
-            observation, gap, parsed, confidence=confidence, status=status
-        )
-
     def _make_result(
         self,
         observation: Observation,
@@ -379,10 +390,6 @@ class BaseCompetitorAnalyzer:
             evidence=[observation.evidence],
             status=status,
         )
-
-    def _rule_extract(self, observation: Observation) -> dict[str, Any]:
-        """规则降级提取（子类覆盖）"""
-        return {"summary": observation.raw_text[:200], "details": {}}
 
 
 def analyze_with_context(

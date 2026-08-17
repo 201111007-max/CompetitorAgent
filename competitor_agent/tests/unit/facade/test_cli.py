@@ -1,5 +1,10 @@
 """cli.py 单测（M5.1）：解析器 + 子命令 + handlers
+
+设计文档 47：仅 LLM 解析/规划/分析；无 Key → 打印提示 + 退出码 2。
+analyze 路由用 mock LLM（BenchmarkMockLLM 从任务文本确定性推断竞品/分辨率）。
 """
+import pytest
+
 from competitor_agent.cli import (
     _repl,
     _run_analyze,
@@ -12,6 +17,13 @@ from competitor_agent.cli import (
 )
 from competitor_agent.domain_types.competitor import Competitor
 from competitor_agent.domain_types.report import ComparisonReport
+from competitor_agent.evaluation.benchmark import BenchmarkMockLLM
+from competitor_agent.llm.client import LLMClient
+
+
+def _mock_llm() -> LLMClient:
+    """确定性 mock LLM：从任务文本推断竞品/分辨率（无 Key 可测 analyze 路由）。"""
+    return LLMClient(call_func=BenchmarkMockLLM().complete)
 
 
 class StubReport:
@@ -121,12 +133,12 @@ class TestGeneralHandlers:
 
 class TestRunAnalyze:
     def test_analyze_single_prints_report(self, capsys):
-        _run_analyze(StubAPI(), "Cursor")
+        _run_analyze(StubAPI(), "Cursor", llm=_mock_llm())
         captured = capsys.readouterr()
         assert "竞品分析报告" in captured.out
 
     def test_analyze_compare_task(self, capsys):
-        _run_analyze(StubAPI(), "对比 Cursor 和 Windsurf")
+        _run_analyze(StubAPI(), "对比 Cursor 和 Windsurf", llm=_mock_llm())
         captured = capsys.readouterr()
         assert "对比报告" in captured.out
 
@@ -136,17 +148,24 @@ class TestRunAnalyze:
         assert "用法" in captured.out
 
     def test_analyze_writes_out_file(self, tmp_path, capsys):
-        _run_analyze(StubAPI(), "Cursor", out_dir=str(tmp_path))
+        _run_analyze(StubAPI(), "Cursor", out_dir=str(tmp_path), llm=_mock_llm())
         files = list(tmp_path.glob("*.md"))
         assert files
         assert "竞品分析报告" in files[0].read_text(encoding="utf-8")
 
     def test_analyze_discovery_task(self, capsys):
         """设计文档 20：普查任务路由到 discover，输出品类格局矩阵"""
-        _run_analyze(StubAPI(), "帮我寻找市场上所有 AI coding agent")
+        _run_analyze(StubAPI(), "帮我寻找市场上所有 AI coding agent", llm=_mock_llm())
         captured = capsys.readouterr()
         assert "竞品格局对比报告" in captured.out
         assert "品类格局矩阵" in captured.out
+
+    def test_analyze_no_key_prints_error_exit_2(self, capsys):
+        """设计文档 47：无 LLM → 打印需要配置 API Key，退出码 2。"""
+        code = _run_analyze(StubAPI(), "Cursor", llm=None)
+        captured = capsys.readouterr()
+        assert code == 2
+        assert "需要配置 LLM API Key" in captured.out
 
 
 class TestRunHistory:
@@ -183,8 +202,10 @@ class TestRunResume:
 class TestMain:
     def _patch_api(self, monkeypatch, api=None):
         monkeypatch.setattr("competitor_agent.cli._make_api", lambda: api or StubAPI())
-        # main() 现以 kwargs 构造 LLMClient（model/base_url），mock 需接受任意参数
-        monkeypatch.setattr("competitor_agent.cli.LLMClient", lambda *a, **kw: None)
+        # main() 以 kwargs 构造 LLMClient；mock 需接受任意参数并返回确定性 LLM
+        monkeypatch.setattr(
+            "competitor_agent.cli.LLMClient", lambda *a, **kw: _mock_llm()
+        )
 
     def test_main_oneshot(self, monkeypatch, capsys):
         self._patch_api(monkeypatch)
@@ -288,7 +309,7 @@ class TestRepl:
         inputs = iter(["Cursor", "exit"])
         monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
         try:
-            _repl(StubAPI())
+            _repl(StubAPI(), llm=_mock_llm())
         except SystemExit:
             pass
         captured = capsys.readouterr()

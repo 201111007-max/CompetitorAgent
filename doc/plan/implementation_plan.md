@@ -430,7 +430,8 @@ dev:
 
 ### 11.5 能站得住的正面点（面试主动讲）
 
-- **LLM→规则降级链**：`analyzers/base.py:40-48` 捕获异常降级，无 Key 也能出报告。
+- **主路径单轨 LLM + mock 确定性评测**（设计文档 47）：任务解析 / 规划 / 竞品识别 / 维度分析只走 LLM，
+  无 Key 抛 `LLMUnavailableError`；确定性由 `BenchmarkMockLLM` 在 LLM 版接口上固定返回承担，CI 无 Key 仍可复现。
 - **入站清洗**：`input_sanitizer.py` 处理 surrogate/ANSI 泄漏/路径穿越。
 - **预算控制**：四条件终止 + `IStopVerifier` Hook。
 - **单元测试用真实断言**（非纯 mock），如并行加速用真实计时验证。

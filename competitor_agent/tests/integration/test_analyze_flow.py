@@ -17,8 +17,8 @@ pytestmark = pytest.mark.integration
 
 
 class TestAnalyzeFlow:
-    def test_single_mode_full_chain_produces_report(self, fake_extractor) -> None:
-        api = CompetitorAnalysisAPI(extractor=fake_extractor, use_llm=False, max_iterations=10)
+    def test_single_mode_full_chain_produces_report(self, fake_extractor, mock_llm) -> None:
+        api = CompetitorAnalysisAPI(extractor=fake_extractor, llm=mock_llm, use_llm=True, max_iterations=10)
         report = api.analyze("分析 Cursor", mode="single")
 
         assert report.competitor.name == "cursor"
@@ -28,8 +28,8 @@ class TestAnalyzeFlow:
         assert "## 维度结论" in report.markdown_report
         assert "### " in report.markdown_report
 
-    def test_single_flow_evidence_carries_source_url(self, fake_extractor) -> None:
-        api = CompetitorAnalysisAPI(extractor=fake_extractor, use_llm=False, max_iterations=10)
+    def test_single_flow_evidence_carries_source_url(self, fake_extractor, mock_llm) -> None:
+        api = CompetitorAnalysisAPI(extractor=fake_extractor, llm=mock_llm, use_llm=True, max_iterations=10)
         report = api.analyze("只分析 cursor 的定价", mode="single")
 
         pricing = [r for r in report.dimension_results if r.dimension == "pricing"]
@@ -37,29 +37,29 @@ class TestAnalyzeFlow:
         assert pricing[0].evidence, "维度结论应携带证据链"
         assert all(ev.url for ev in pricing[0].evidence), "证据应带 source_url"
 
-    def test_single_flow_markdown_lists_evidence(self, fake_extractor) -> None:
-        api = CompetitorAnalysisAPI(extractor=fake_extractor, use_llm=False, max_iterations=10)
+    def test_single_flow_markdown_lists_evidence(self, fake_extractor, mock_llm) -> None:
+        api = CompetitorAnalysisAPI(extractor=fake_extractor, llm=mock_llm, use_llm=True, max_iterations=10)
         report = api.analyze("只分析 cursor 的定价", mode="single")
 
         assert "证据:" in report.markdown_report
         assert "cursor.com/pricing" in str(report.dimension_results)
 
-    def test_team_mode_full_chain_produces_report(self, fake_extractor) -> None:
-        api = CompetitorAnalysisAPI(extractor=fake_extractor, use_llm=False)
+    def test_team_mode_full_chain_produces_report(self, fake_extractor, mock_llm) -> None:
+        api = CompetitorAnalysisAPI(extractor=fake_extractor, llm=mock_llm, use_llm=True)
         report = api.analyze("分析 Cursor")  # 默认 team 多 Agent 流水线
 
         assert report.dimension_results
         assert report.terminal_state == "success"
         assert "# cursor 竞品分析报告" in report.markdown_report
 
-    def test_events_flow_from_plan_to_report(self, fake_extractor) -> None:
+    def test_events_flow_from_plan_to_report(self, fake_extractor, mock_llm) -> None:
         events: list = []
 
         def sink(event: object) -> None:
             events.append(event)
 
         api = CompetitorAnalysisAPI(
-            extractor=fake_extractor, use_llm=False, event_sink=sink, max_iterations=10
+            extractor=fake_extractor, llm=mock_llm, use_llm=True, event_sink=sink, max_iterations=10
         )
         api.analyze("分析 Cursor", mode="single")
 
@@ -67,8 +67,8 @@ class TestAnalyzeFlow:
         assert any(e.event == "phase_start" for e in events)
         assert any(e.event == "report" for e in events)
 
-    def test_real_report_is_benchmark_evaluable(self, fake_extractor) -> None:
-        api = CompetitorAnalysisAPI(extractor=fake_extractor, use_llm=False, max_iterations=10)
+    def test_real_report_is_benchmark_evaluable(self, fake_extractor, mock_llm) -> None:
+        api = CompetitorAnalysisAPI(extractor=fake_extractor, llm=mock_llm, use_llm=True, max_iterations=10)
         report = api.analyze("只分析 cursor 的定价", mode="single")
 
         # 复用设计文档 03 的字段抽取：真实报告同命名空间可评测

@@ -1,12 +1,12 @@
-"""PerformanceAnalyzer — 性能评测维度分析器（设计文档 25）
+"""PerformanceAnalyzer — 性能评测维度分析器（设计文档 25 / 47）
 
 优先级：榜单证据（context.benchmark_scores，权威直连）> 官网/文档页数字。
 同指标冲突以榜单为准并在报告注明来源；仅有页面 → 置信度降档；
 均无 → [PARTIAL] 注明"无权威榜单数据"，不编造。
+设计文档 47：仅 LLM 分析（无规则降级）。
 """
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from competitor_agent.agent.prompts.trust_boundary import wrap_untrusted
@@ -16,10 +16,6 @@ from competitor_agent.domain_types.info_gap import InfoGap
 from competitor_agent.domain_types.observation import Observation
 from competitor_agent.domain_types.report import DimensionResult
 from competitor_agent.interfaces.context import AnalysisContext
-
-_BENCHMARK_MARKERS = re.compile(
-    r"(swe-bench|aider|human-eval|percent|score|accuracy|pass@|win rate)", re.IGNORECASE
-)
 
 # 页面条目名 → 榜单指标的关键字映射（用于"同指标以榜单为准"）
 _BOARD_KEYWORDS: dict[str, tuple[str, ...]] = {
@@ -85,19 +81,9 @@ class PerformanceAnalyzer(BaseCompetitorAnalyzer):
     def _details_properties(self) -> dict[str, Any]:
         """details 结构（设计文档 34）：benchmarks 与评测 _benchmark_score 抽取键对齐。
 
-        元素仅约束 object——兼容 LLM 的 name/score 契约键与规则/mock 的 raw 行形态。
+        元素仅约束 object——兼容 LLM 的 name/score 契约键与 mock 的 raw 行形态。
         """
         return {"benchmarks": {"type": "array", "items": {"type": "object"}}}
-
-    def _rule_extract(self, observation: Observation) -> dict[str, Any]:
-        benchmarks = []
-        for line in observation.raw_text.splitlines():
-            if _BENCHMARK_MARKERS.search(line) and len(line) < 200:
-                benchmarks.append({"raw": line.strip()})
-        return {
-            "summary": f"检测到 {len(benchmarks)} 条性能相关记录",
-            "details": {"benchmarks": benchmarks[:10]},
-        }
 
 
 def _merge_benchmarks(board_scores: dict[str, Any], base_benchmarks: list[dict[str, Any]]) -> list[dict[str, Any]]:

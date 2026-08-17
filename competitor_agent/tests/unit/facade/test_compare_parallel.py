@@ -24,10 +24,11 @@ class FakeExtractor:
         return Observation(gap_field=gap.field, source="web_extractor", raw_text=text, evidence=ev)
 
 
-def _parallel_api(**kwargs) -> CompetitorAnalysisAPI:
+def _parallel_api(llm=None, **kwargs) -> CompetitorAnalysisAPI:
     cfg = AppConfig(execution=ExecutionConfig(mode="parallel", max_parallel_subagents=4))
     kwargs.setdefault("extractor", FakeExtractor())
-    kwargs.setdefault("use_llm", False)
+    kwargs.setdefault("llm", llm)
+    kwargs.setdefault("use_llm", True)
     return CompetitorAnalysisAPI(config=cfg, **kwargs)
 
 
@@ -37,8 +38,8 @@ def _strip_ts(md: str) -> str:
 
 
 class TestCompareParallel:
-    def test_parallel_compare_returns_comparison_in_input_order(self):
-        api = _parallel_api()
+    def test_parallel_compare_returns_comparison_in_input_order(self, mock_llm):
+        api = _parallel_api(llm=mock_llm)
         result = api.compare("Cursor", "Windsurf", "Copilot")
         assert isinstance(result, ComparisonReport)
         assert [r.competitor.name for r in result.reports] == ["cursor", "windsurf", "copilot"]
@@ -47,10 +48,10 @@ class TestCompareParallel:
         for n in ("cursor", "windsurf", "copilot"):
             assert n in md
 
-    def test_parallel_compare_same_semantics_as_serial(self):
+    def test_parallel_compare_same_semantics_as_serial(self, mock_llm):
         cfg_serial = AppConfig(execution=ExecutionConfig(mode="single", max_parallel_subagents=4))
-        serial = CompetitorAnalysisAPI(extractor=FakeExtractor(), use_llm=False, config=cfg_serial)
-        parallel = _parallel_api()
+        serial = CompetitorAnalysisAPI(extractor=FakeExtractor(), llm=mock_llm, use_llm=True, config=cfg_serial)
+        parallel = _parallel_api(llm=mock_llm)
         r_serial = serial.compare("Cursor", "Windsurf")
         r_parallel = parallel.compare("Cursor", "Windsurf")
         assert [r.competitor.name for r in r_serial.reports] == [
@@ -58,9 +59,9 @@ class TestCompareParallel:
         ]
         assert _strip_ts(r_serial.markdown_report) == _strip_ts(r_parallel.markdown_report)
 
-    def test_parallel_compare_emits_parallel_phase_event(self):
+    def test_parallel_compare_emits_parallel_phase_event(self, mock_llm):
         events = []
-        api = _parallel_api(event_sink=events.append)
+        api = _parallel_api(llm=mock_llm, event_sink=events.append)
         api.compare("Cursor", "Windsurf")
         msgs = [e.message for e in events if e.event == "phase_start"]
         assert any("并行" in m for m in msgs)

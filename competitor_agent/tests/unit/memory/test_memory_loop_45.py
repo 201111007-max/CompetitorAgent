@@ -47,33 +47,33 @@ class TestL4Contract:
 
 
 class TestPlannerPatternBoost:
-    def _plans(self, memory):
-        strategy = StrategicPlanner().plan("cursor", memory=memory)
+    def _plans(self, memory, mock_llm):
+        strategy = StrategicPlanner(llm=mock_llm, use_llm=True).plan("cursor", memory=memory)
         return {g.field: g for g in strategy.gaps}
 
-    def test_success_pattern_boosts_confidence(self, tmp_path):
+    def test_success_pattern_boosts_confidence(self, tmp_path, mock_llm):
         mem = FourLayerMemory(tmp_path / "m")
         mem.note_pattern("cursor", "pricing", "由源 docs 有效", outcome="success")
-        by_field = self._plans(mem)
+        by_field = self._plans(mem, mock_llm)
         assert by_field["pricing"].confidence == 0.1
 
-    def test_failure_pattern_downgrades_priority(self, tmp_path):
+    def test_failure_pattern_downgrades_priority(self, tmp_path, mock_llm):
         mem = FourLayerMemory(tmp_path / "m")
         mem.note_pattern("cursor", "pricing", "失败: 源 docs 无数据", outcome="failure")
-        by_field = self._plans(mem)
+        by_field = self._plans(mem, mock_llm)
         assert by_field["pricing"].confidence == 0.0
         assert by_field["pricing"].priority == 8  # 默认 9 → 降权
 
-    def test_no_pattern_no_change(self):
-        by_field = self._plans(None)
+    def test_no_pattern_no_change(self, mock_llm):
+        by_field = self._plans(None, mock_llm)
         assert by_field["pricing"].confidence == 0.0
         assert by_field["pricing"].priority == 9
 
-    def test_success_boost_respects_cap(self, tmp_path):
+    def test_success_boost_respects_cap(self, tmp_path, mock_llm):
         mem = FourLayerMemory(tmp_path / "m")
         for i in range(10):
             mem.note_pattern("cursor", "pricing", f"由源 docs 有效 {i}", outcome="success")
-        by_field = self._plans(mem)
+        by_field = self._plans(mem, mock_llm)
         assert by_field["pricing"].confidence == 0.9  # 封顶
 
 

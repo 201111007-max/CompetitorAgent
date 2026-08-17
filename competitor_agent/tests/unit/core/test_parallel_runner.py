@@ -47,8 +47,8 @@ def _strategy(fields=("pricing", "feature", "performance")):
     return CompetitorStrategy(competitor=comp, gaps=[InfoGap(field=f) for f in fields])
 
 
-def _make_subagent(extractor):
-    registry = AnalyzerRegistry(use_llm=False)
+def _make_subagent(extractor, mock_llm):
+    registry = AnalyzerRegistry(llm=mock_llm, use_llm=True)
 
     def factory(gap: InfoGap, strategy: CompetitorStrategy) -> SubAgent:
         return SubAgent(
@@ -64,7 +64,7 @@ def _make_subagent(extractor):
 
 
 class TestSubAgent:
-    def test_single_gap_closure(self):
+    def test_single_gap_closure(self, mock_llm):
         gap = InfoGap(field="pricing")
         strategy = _strategy(("pricing",))
         sub = SubAgent(
@@ -72,7 +72,7 @@ class TestSubAgent:
             strategy=strategy,
             selector=SourceSelector(),
             extractor=SlowExtractor(),
-            analyzer=PricingAnalyzer(use_llm=False),
+            analyzer=PricingAnalyzer(llm=mock_llm, use_llm=True),
             budget=IterationBudget(max_iterations=5, cost_limit=1.0),
         )
         result = sub.run()
@@ -82,15 +82,15 @@ class TestSubAgent:
 
 
 class TestParallelRunner:
-    def test_parallel_merges_results_in_order(self):
-        factory = _make_subagent(SlowExtractor(delay=0.05))
+    def test_parallel_merges_results_in_order(self, mock_llm):
+        factory = _make_subagent(SlowExtractor(delay=0.05), mock_llm)
         strategy = _strategy()
         runner = ParallelRunner(factory, max_workers=4)
         results = runner.run(strategy)
         assert [r.dimension for r in results] == ["pricing", "feature", "performance"]
 
-    def test_parallel_faster_than_serial(self):
-        factory = _make_subagent(SlowExtractor(delay=0.15))
+    def test_parallel_faster_than_serial(self, mock_llm):
+        factory = _make_subagent(SlowExtractor(delay=0.15), mock_llm)
         strategy = _strategy(("pricing", "feature", "performance"))
         runner = ParallelRunner(factory, max_workers=3)
 
@@ -100,7 +100,7 @@ class TestParallelRunner:
 
         assert parallel_elapsed < 0.4  # 3 个 0.15s 任务并行应显著快于 0.45s 串行
 
-    def test_shared_budget_is_thread_safe(self):
+    def test_shared_budget_is_thread_safe(self, mock_llm):
         budget = IterationBudget(max_iterations=20, cost_limit=1.0, min_continuations=999)
         seen = set()
         lock = threading.Lock()
@@ -111,7 +111,7 @@ class TestParallelRunner:
                     seen.add(gap.field)
                 return super().fetch(gap, context)
 
-        registry = AnalyzerRegistry(use_llm=False)
+        registry = AnalyzerRegistry(llm=mock_llm, use_llm=True)
 
         def factory(gap: InfoGap, strategy: CompetitorStrategy) -> SubAgent:
             return SubAgent(

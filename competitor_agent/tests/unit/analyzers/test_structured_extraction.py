@@ -161,13 +161,14 @@ class TestSchemaRepairRetry:
         assert result.details["features"] == ["MCP"]
         assert len(seen) == 2
 
-    def test_schema_failure_falls_back_to_rules(self):
-        """schema 校验耗尽（缺 confidence）→ 降级规则提取"""
+    def test_schema_failure_degrades_to_partial(self):
+        """schema 校验耗尽（缺 confidence）→ 仅 LLM 降级为 PARTIAL（无规则回退，不编造）"""
         def fake_llm(messages, model):
             return json.dumps({"summary": "s", "details": {}})  # 永远缺 confidence
 
         a = PricingAnalyzer(llm=LLMClient(call_func=fake_llm))
         obs = _obs("Pro plan: $20/month", "pricing")
         result = a.analyze(obs, InfoGap(field="pricing"), AnalysisContext())
-        assert result.details["plans"]  # 来自规则降级
-        assert result.confidence == 0.5
+        assert result.status == ResultStatus.PARTIAL
+        assert result.confidence < 0.5  # LLM 不可用/内容不可信 → 低置信降级
+        assert not result.details.get("plans")  # 不编造定价数据

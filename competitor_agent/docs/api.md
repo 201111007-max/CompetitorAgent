@@ -14,7 +14,7 @@ class CompetitorAnalysisAPI:
     def __init__(
         self,
         llm: LLMClient | None = None,
-        use_llm: bool = False,
+        use_llm: bool = True,
         max_iterations: int = 10,
         cost_limit: float = 1.0,
         event_sink: Callable[[ProgressEvent], None] | None = None,
@@ -27,13 +27,20 @@ class CompetitorAnalysisAPI:
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `llm` | `LLMClient \| None` | `None` | LLM 客户端（可选，缺失时走规则降级） |
-| `use_llm` | `bool` | `False` | 是否启用 LLM 分析 |
+| `llm` | `LLMClient \| None` | `None` | LLM 客户端（设计文档 47：主路径仅 LLM，缺失时抛 `LLMUnavailableError`） |
+| `use_llm` | `bool` | `True` | 是否启用 LLM（设计文档 46：默认开启，与 CLI 对齐；`False` 时抛 `LLMUnavailableError`） |
 | `max_iterations` | `int` | `10` | 最大迭代次数 |
 | `cost_limit` | `float` | `1.0` | 成本上限（美元） |
 | `event_sink` | `Callable` | `None` | 进度事件回调 |
 | `extractor` | `WebExtractor` | `None` | 自定义采集器 |
 | `memory` | `IFourLayerMemory` | `None` | 四层记忆（可选） |
+
+> **`LLMUnavailableError` 语义（设计文档 47）**：主路径（`parse_task` / `plan` / 竞品识别 / 维度分析）
+> 只走 LLM，不再有规则降级。未配置 API Key 或 LLM 调用失败时：
+> - `parse_task` / `plan` 抛 `LLMUnavailableError`（由调用方决定处理；CLI 打印"需要配置 LLM API Key"退出码 2，
+>   Web 返回 SSE `error` 事件）；
+> - 维度分析器 `analyze` **不抛错**，返回 `DimensionResult(status=PARTIAL, confidence=0.1)`（报告标注"该维度未分析"）；
+> - `competitor_registry.resolve_competitor` 未命中抛 `ValueError`（竞品识别已归 LLM）。
 
 ### 方法
 
@@ -44,7 +51,7 @@ class CompetitorAnalysisAPI:
 传入 `conversation_history` 支持多轮追问：相对指代（如"那定价呢"）可从历史承接上一轮竞品。
 
 ```python
-api = CompetitorAnalysisAPI(use_llm=False)
+api = CompetitorAnalysisAPI(llm=LLMClient(...), use_llm=True)  # 需配置 API Key
 report = api.analyze("Cursor")
 print(report.markdown_report)
 

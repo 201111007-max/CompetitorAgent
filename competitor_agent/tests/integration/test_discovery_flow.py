@@ -15,8 +15,8 @@ pytestmark = pytest.mark.integration
 
 
 class TestCompareIntegration:
-    def test_compare_nway_market_matrix(self, fake_extractor) -> None:
-        api = CompetitorAnalysisAPI(extractor=fake_extractor, use_llm=False, max_iterations=10)
+    def test_compare_nway_market_matrix(self, fake_extractor, mock_llm) -> None:
+        api = CompetitorAnalysisAPI(extractor=fake_extractor, llm=mock_llm, use_llm=True, max_iterations=10)
         result = api.compare("Cursor", "Windsurf", "Copilot")
 
         assert len(result.reports) == 3
@@ -26,14 +26,14 @@ class TestCompareIntegration:
         # 矩阵表头含维度列 + 竞品列
         assert md.startswith("# cursor vs windsurf vs copilot 竞品格局对比报告")
 
-    def test_compare_combined_task(self, fake_extractor) -> None:
-        api = CompetitorAnalysisAPI(extractor=fake_extractor, use_llm=False, max_iterations=10)
+    def test_compare_combined_task(self, fake_extractor, mock_llm) -> None:
+        api = CompetitorAnalysisAPI(extractor=fake_extractor, llm=mock_llm, use_llm=True, max_iterations=10)
         result = api.compare("对比 Cursor 和 Windsurf")
         assert len(result.reports) == 2
 
 
 class TestDiscoveryIntegration:
-    def test_discovery_produces_real_candidates_not_fake(self, fake_extractor) -> None:
+    def test_discovery_produces_real_candidates_not_fake(self, fake_extractor, mock_llm) -> None:
         """web_tool 返回候选 → discover 逐个分析 → 矩阵报告；不产出假竞品。"""
 
         def web_tool(task: str) -> list[dict]:
@@ -43,7 +43,7 @@ class TestDiscoveryIntegration:
             ]
 
         api = CompetitorAnalysisAPI(
-            extractor=fake_extractor, use_llm=False, max_iterations=10, web_tool=web_tool
+            extractor=fake_extractor, llm=mock_llm, use_llm=True, max_iterations=10, web_tool=web_tool
         )
         result = api.discover("帮我寻找市场上所有 AI coding agent")
 
@@ -56,21 +56,28 @@ class TestDiscoveryIntegration:
         # 发现出的竞品带官方链接，至少产出维度结论（不 0 维度）
         assert any(r.dimension_results for r in result.reports)
 
-    def test_discovery_fallback_list_still_analyzes(self, fake_extractor) -> None:
-        """无 web_tool：内置兜底清单，报告非空且不再 0 维度。"""
-        api = CompetitorAnalysisAPI(extractor=fake_extractor, use_llm=False, max_iterations=10)
-        result = api.discover("市场上所有 AI coding agent")
+    def test_discovery_without_web_tool_raises(self, fake_extractor, mock_llm) -> None:
+        """设计文档 47 移除了内置兜底清单：无 web_tool 的 discover 应直接抛错。"""
+        api = CompetitorAnalysisAPI(
+            extractor=fake_extractor, llm=mock_llm, use_llm=True, max_iterations=10
+        )
+        with pytest.raises(ValueError):
+            api.discover("市场上所有 AI coding agent")
 
-        assert len(result.reports) >= 2
-        assert any(r.dimension_results for r in result.reports)
-        assert "品类格局矩阵" in result.markdown_report
-
-    def test_full_analyze_discovery_task_via_cli_path(self, fake_extractor, capsys) -> None:
+    def test_full_analyze_discovery_task_via_cli_path(self, fake_extractor, capsys, mock_llm) -> None:
         """普查任务经 analyze 路由：真实产出矩阵而非 0 维度（问题 20 主诉求）。"""
         from competitor_agent.cli import _run_analyze
 
-        api = CompetitorAnalysisAPI(extractor=fake_extractor, use_llm=False, max_iterations=10)
-        _run_analyze(api, "帮我寻找现在市场上所有的 ai coding agent 并进行分析")
+        def web_tool(task: str) -> list[dict]:
+            return [
+                {"name": "cursor", "home": "https://www.cursor.com", "pricing": "https://www.cursor.com/pricing"},
+                {"name": "windsurf", "home": "https://windsurf.com", "pricing": "https://windsurf.com/pricing"},
+            ]
+
+        api = CompetitorAnalysisAPI(
+            extractor=fake_extractor, llm=mock_llm, use_llm=True, max_iterations=10, web_tool=web_tool
+        )
+        _run_analyze(api, "帮我寻找现在市场上所有的 ai coding agent 并进行分析", llm=mock_llm)
         captured = capsys.readouterr()
         assert "竞品格局对比报告" in captured.out
         assert "品类格局矩阵" in captured.out

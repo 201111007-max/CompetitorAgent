@@ -23,6 +23,7 @@ from competitor_agent.core.input_sanitizer import sanitize_task
 from competitor_agent.core.task_parser import ResolutionDecision, parse_task
 from competitor_agent.domain_types.report import CompetitorReport
 from competitor_agent.facade.api import CompetitorAnalysisAPI
+from competitor_agent.interfaces.exceptions import LLMUnavailableError
 from competitor_agent.llm.client import LLMClient
 from competitor_agent.observability.logger import setup_logging
 from competitor_agent.secret_vault import get_data_dir
@@ -60,17 +61,21 @@ def _run_analyze(
     mode: str = "team",
     llm: LLMClient | None = None,
     use_llm: bool = True,
-) -> None:
+) -> int:
     """analyze 子命令 + /analyze 处理器
 
-    use_llm 默认 True：与库入口（facade/api.py）默认一致（设计文档 46 §3.3），
-    避免"同一环境 CLI 与库行为不同"；无 Key 时 parse_task 自动回退规则解析。
+    use_llm 默认 True：与库入口（facade/api.py）默认一致（设计文档 46 §3.3）。
+    设计文档 47：仅 LLM 解析/规划/分析；无 Key → 打印"需要配置 LLM API Key"退出码 2。
     """
     args = sanitize_task(args.strip())
     if not args:
         print("用法: analyze <竞品或任务>")
-        return
-    parsed = parse_task(args, llm=llm, use_llm=use_llm)
+        return 0
+    try:
+        parsed = parse_task(args, llm=llm, use_llm=use_llm)
+    except LLMUnavailableError as exc:
+        print(f"需要配置 LLM API Key 才能分析（LLM 不可用: {exc}）")
+        return 2
     markdown = ""
     name = parsed.primary_competitor
     if parsed.resolution == ResolutionDecision.DISCOVERY:
@@ -89,6 +94,7 @@ def _run_analyze(
         markdown = rep.markdown_report
     if out_dir:
         _save_markdown(markdown, name, out_dir)
+    return 0
 
 
 def _save_markdown(text: str, name: str, out_dir: str) -> None:
@@ -225,11 +231,21 @@ def _run_help(args: str) -> None:
         print(f"  /{cmd.name:9s} {cmd.args_hint}")
 
 
+def _run_analyze_repl(
+    api: CompetitorAnalysisAPI,
+    args: str,
+    llm: LLMClient | None = None,
+    use_llm: bool = True,
+) -> None:
+    """REPL 版 analyze：丢弃退出码（交互循环不因无 Key 退出）。"""
+    _run_analyze(api, args, llm=llm, use_llm=use_llm)
+
+
 def _repl(api: CompetitorAnalysisAPI, llm: LLMClient | None = None, use_llm: bool = True) -> NoReturn:
     """交互 REPL：斜杠命令路由 + 自由文本任务（use_llm 默认 True，与库语义一致）"""
     print("competitor_agent 交互模式（输入 /help 查看命令，Ctrl+C / Ctrl+D 退出）")
     handlers = {
-        "analyze": lambda a: _run_analyze(api, a, llm=llm, use_llm=use_llm),
+        "analyze": lambda a: _run_analyze_repl(api, a, llm=llm, use_llm=use_llm),
         "compare": lambda a: _run_compare_repl(api, a),
         "history": lambda a: _run_history(api, a),
         "resume": lambda a: _run_resume(api, a),
@@ -297,7 +313,7 @@ def build_parser() -> argparse.ArgumentParser:
     schedule_p.add_argument("--competitors", default=None, help="目标竞品（逗号分隔）；缺省用跟踪竞品")
 
     benchmark_p = sub.add_parser("benchmark", help="运行评测基准（--ablate 追加消融对比，设计文档 30；--llm real 真实质量评测，设计文档 37）")
-    benchmark_p.add_argument("--ablate", action="store_true", help="追加 5 组消融变体（full/no-rag/no-memory/no-rag+no-memory/no-llm-rule）并落盘 reports/ablation/")
+    benchmark_p.add_argument("--ablate", action="store_true", help="追加 4 组消融变体（full/no-rag/no-memory/no-rag+no-memory）并落盘 reports/ablation/")
     benchmark_p.add_argument("--llm", choices=["mock", "real"], default="mock", help="LLM 模式：mock=确定性评测（默认），real=真实 LLM（需配置 API Key）")
     benchmark_p.add_argument("--tag", default=None, help="按 tag 过滤用例子集（如 normal）控制成本")
     benchmark_p.add_argument("--cost-limit", type=float, default=None, dest="cost_limit", help="真实评测成本护栏上限（美元），缺省 real 模式 $1.0")
@@ -316,13 +332,11 @@ def main(argv: list[str] | None = None) -> int:
         _run_resume(api, args.resume_id)
         return 0
     if args.oneshot:
-        _run_analyze(api, args.oneshot, llm=llm, use_llm=use_llm)
-        return 0
+        return _run_analyze(api, args.oneshot, llm=llm, use_llm=use_llm)
 
     if args.command == "analyze":
         task = " ".join(args.task)
-        _run_analyze(api, task, out_dir=args.out_dir, mode=args.mode, llm=llm, use_llm=use_llm)
-        return 0
+        return _run_analyze(api, task, out_dir=args.out_dir, mode=args.mode, llm=llm, use_llm=use_llm)
     if args.command == "history":
         reports = api.get_history(args.competitor)
         if not reports:

@@ -88,46 +88,12 @@ def canonicalize(name: str) -> str:
     return name.strip().lower().replace(" ", "-")
 
 
-# 对比任务连接词（M5.4：对比拆分）
-_COMPARE_CONNECTORS = (" 和 ", " 与 ", " vs ", " vs. ", " and ", "、")
-# 对比任务触发词
-_COMPARE_MARKERS = ("对比分析", "对比", "比较", "compare", "vs")
-
-
-def split_compare_text(task: str) -> list[str] | None:
-    """尝试把 '对比 A 和 B' 拆成两个竞品文本；非对比任务返回 None。"""
-    lowered = task.lower()
-    if not any(m in lowered for m in _COMPARE_MARKERS):
-        return None
-    # 去掉对比前缀，得到 ' A 和 B' 剩余部分（若无前缀则保留原文，如 "Cursor vs Windsurf"）
-    rest = task
-    stripped = task.lstrip()
-    for marker in _COMPARE_MARKERS:
-        if stripped.lower().startswith(marker):
-            rest = stripped[len(marker):]
-            break
-    for connector in _COMPARE_CONNECTORS:
-        if connector in rest:
-            parts = [p.strip() for p in rest.split(connector)]
-            parts = [p for p in parts if p]
-            if len(parts) >= 2:
-                return parts[:2]
-    return None
-
-
-def resolve_competitors(task: str) -> list[Competitor]:
-    """解析任务中的竞品（对比任务返回 2 个，普通任务返回 1 个）"""
-    parts = split_compare_text(task)
-    if parts:
-        return [resolve_competitor(p) for p in parts]
-    return [resolve_competitor(task)]
-
-
 def resolve_competitor(name: str) -> Competitor:
-    """把用户输入解析为 Competitor（优先命中注册表）。
+    """把用户输入解析为 Competitor（注册表名称规范化映射，设计文档 47）。
 
-    任务可能含中文前缀（如"分析 Claude Code"），因此先尝试在任务文本中
-    匹配注册表内的规范名/别名子串；找不到时再退化为纯 ASCII 提取。
+    只做"名称 → 注册表条目"的映射（子串 + 精确 + 别名归一化）；
+    未命中抛 ValueError——竞品识别已交给 LLM 结构化输出，不再用
+    ASCII 抽取/对比拆分启发式造竞品。
     """
     raw = name.strip()
     lowered = raw.lower()
@@ -145,7 +111,4 @@ def resolve_competitor(name: str) -> Competitor:
         if canon in [canonicalize(a) for a in competitor.aliases]:
             return competitor
 
-    # 3) 未知：提取 ASCII 部分作为规范名
-    ascii_parts = "".join(c for c in raw if c.isascii() and (c.isalnum() or c.isspace()))
-    fallback = canonicalize(ascii_parts) or "unknown"
-    return Competitor(name=fallback)
+    raise ValueError(f"注册表未收录竞品: {name!r}（请由 LLM 输出规范名，或先 discover 发现）")

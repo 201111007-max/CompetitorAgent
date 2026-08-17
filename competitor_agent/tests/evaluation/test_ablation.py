@@ -119,10 +119,10 @@ class TestAblationRunner:
     def test_runner_aggregates_variants(self, tmp_path):
         _write_mini_fixture(tmp_path)
         runner = AblationRunner(fixtures_dir=tmp_path, memory_dir=tmp_path / "m")
-        results = runner.run(variants=[AblationVariant("full"), AblationVariant("no-llm-rule")])
+        results = runner.run(variants=[AblationVariant("full"), AblationVariant("no-memory")])
 
         assert len(results) == 2
-        assert [r.variant.name for r in results] == ["full", "no-llm-rule"]
+        assert [r.variant.name for r in results] == ["full", "no-memory"]
         for r in results:
             assert r.n_cases == 2
             assert 0.0 <= r.field_accuracy <= 1.0
@@ -205,6 +205,9 @@ class _RagAwarePricingMock:
     def complete(self, messages, model=None):
         system = messages[0].get("content", "")
         user = messages[-1].get("content", "")
+        if "战略规划器" in system:
+            # 设计文档 47：规划仅 LLM → mock 返回合法 PLAN_SCHEMA
+            return json.dumps({"competitor": "cursor", "dimensions": ["pricing"]})
         if "定价" not in system:
             return "{}"
         plans = []

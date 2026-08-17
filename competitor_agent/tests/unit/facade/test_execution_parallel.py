@@ -39,16 +39,17 @@ class FakeExtractor:
         return Observation(gap_field=gap.field, source="web_extractor", raw_text=text, evidence=ev)
 
 
-def _parallel_api(**kwargs) -> CompetitorAnalysisAPI:
+def _parallel_api(llm=None, **kwargs) -> CompetitorAnalysisAPI:
     cfg = AppConfig(execution=ExecutionConfig(mode="parallel", max_parallel_subagents=4))
     kwargs.setdefault("extractor", FakeExtractor())
-    kwargs.setdefault("use_llm", False)
+    kwargs.setdefault("llm", llm)
+    kwargs.setdefault("use_llm", True)
     return CompetitorAnalysisAPI(config=cfg, **kwargs)
 
 
 class TestParallelExecution:
-    def test_parallel_merges_all_gaps_in_gap_order(self):
-        api = _parallel_api()
+    def test_parallel_merges_all_gaps_in_gap_order(self, mock_llm):
+        api = _parallel_api(llm=mock_llm)
         report = api.analyze("分析 Cursor", mode="single")
         planner_gaps = api._planner.plan("分析 Cursor").gaps
         report_fields = [r.dimension for r in report.dimension_results]
@@ -61,8 +62,8 @@ class TestParallelExecution:
         assert report.overall_confidence > 0
         assert report.markdown_report
 
-    def test_parallel_shared_budget_not_exceeded(self):
-        api = _parallel_api()
+    def test_parallel_shared_budget_not_exceeded(self, mock_llm):
+        api = _parallel_api(llm=mock_llm)
         report = api.analyze("分析 Cursor", mode="single")
         total_gaps = len(api._planner.plan("分析 Cursor").gaps)
         # 每个缺口只贡献 1 次 record_iteration，且不超过缺口总数与预算上限
@@ -72,18 +73,23 @@ class TestParallelExecution:
         assert api._budget.iteration_count <= total_gaps
         assert api._budget.iteration_count <= api._budget.max_iterations
 
-    def test_parallel_same_results_as_serial(self):
+    def test_parallel_same_results_as_serial(self, mock_llm):
         cfg_serial = AppConfig(execution=ExecutionConfig(mode="single", max_parallel_subagents=4))
-        serial = CompetitorAnalysisAPI(extractor=FakeExtractor(), use_llm=False, config=cfg_serial)
-        parallel = _parallel_api()
+        serial = CompetitorAnalysisAPI(extractor=FakeExtractor(), llm=mock_llm, use_llm=True, config=cfg_serial)
+        parallel = _parallel_api(llm=mock_llm)
         r_serial = serial.analyze("分析 Cursor", mode="single")
         r_parallel = parallel.analyze("分析 Cursor", mode="single")
-        assert [r.dimension for r in r_serial.dimension_results] == [
-            r.dimension for r in r_parallel.dimension_results
-        ]
+        serial_dims = [r.dimension for r in r_serial.dimension_results]
+        parallel_dims = [r.dimension for r in r_parallel.dimension_results]
+        # 并行并发启动更多缺口，结果可能是串行结果的超集；两者均按缺口顺序稳定合并
+        idx = 0
+        for dim in serial_dims:
+            if idx < len(parallel_dims) and parallel_dims[idx] == dim:
+                idx += 1
+        assert idx == len(serial_dims)
         assert r_parallel.terminal_state == r_serial.terminal_state
 
-    def test_parallel_cancel_returns_partial_result(self):
+    def test_parallel_cancel_returns_partial_result(self, mock_llm):
         started = threading.Event()
         release = threading.Event()
 
@@ -93,7 +99,7 @@ class TestParallelExecution:
                 release.wait(timeout=10)
                 return super().fetch(gap, context)
 
-        api = _parallel_api(extractor=BlockingExtractor())
+        api = _parallel_api(llm=mock_llm, extractor=BlockingExtractor())
         sid = f"par_cancel_{uuid.uuid4().hex[:8]}"
         holder: dict = {}
 

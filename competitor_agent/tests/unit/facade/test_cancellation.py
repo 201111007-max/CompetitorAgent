@@ -45,30 +45,30 @@ class FakeExtractor:
         return Observation(gap_field=gap.field, source="web_extractor", raw_text=text, evidence=ev)
 
 
-def _api(**kwargs):
-    return CompetitorAnalysisAPI(extractor=FakeExtractor(), use_llm=False, **kwargs)
+def _api(llm, **kwargs):
+    return CompetitorAnalysisAPI(extractor=FakeExtractor(), llm=llm, use_llm=True, **kwargs)
 
 
 class TestSessionIdConsistency:
-    def test_passed_session_id_drives_internal_cancel_flag(self):
+    def test_passed_session_id_drives_internal_cancel_flag(self, mock_llm):
         # 预置取消标志：若 analyze 内部仍用自生成 uuid，则此处取消不会生效
         set_cancel("sess_probe_1")
         try:
-            report = _api().analyze("分析 Cursor", mode="single", session_id="sess_probe_1")
+            report = _api(mock_llm).analyze("分析 Cursor", mode="single", session_id="sess_probe_1")
             assert isinstance(report, CancelledResult)
             assert report.cancelled is True
             assert report.terminal_state == "cancelled"
         finally:
             clear_cancel("sess_probe_1")
 
-    def test_default_session_id_not_cancelled(self):
-        report = _api().analyze("分析 Cursor", mode="single", session_id="sess_probe_2")
+    def test_default_session_id_not_cancelled(self, mock_llm):
+        report = _api(mock_llm).analyze("分析 Cursor", mode="single", session_id="sess_probe_2")
         assert isinstance(report, CompetitorReport)
         assert not isinstance(report, CancelledResult)
         assert report.dimension_results
 
-    def test_cancel_api_sets_flag_for_reused_id(self):
-        api = _api()
+    def test_cancel_api_sets_flag_for_reused_id(self, mock_llm):
+        api = _api(mock_llm)
         api.cancel("sess_probe_3")
         try:
             assert is_cancelled("sess_probe_3")
@@ -77,10 +77,10 @@ class TestSessionIdConsistency:
         finally:
             clear_cancel("sess_probe_3")
 
-    def test_team_mode_cancel_propagates(self):
+    def test_team_mode_cancel_propagates(self, mock_llm):
         set_cancel("sess_probe_team")
         try:
-            report = _api().analyze("分析 Cursor", mode="team", session_id="sess_probe_team")
+            report = _api(mock_llm).analyze("分析 Cursor", mode="team", session_id="sess_probe_team")
             assert isinstance(report, CancelledResult)
             assert report.cancelled is True
             assert report.terminal_state == "cancelled"
@@ -108,12 +108,13 @@ class _SlowExtractor:
 
 
 class TestCooperativeCancellation:
-    def test_cancel_during_run_returns_partial_result_and_stops(self):
+    def test_cancel_during_run_returns_partial_result_and_stops(self, mock_llm):
         sid = "sess_partial_1"
         blocking = threading.Event()
         api = CompetitorAnalysisAPI(
             extractor=_SlowExtractor(sid, blocking),
-            use_llm=False,
+            llm=mock_llm,
+            use_llm=True,
         )
 
         result_holder: list[CompetitorReport] = []

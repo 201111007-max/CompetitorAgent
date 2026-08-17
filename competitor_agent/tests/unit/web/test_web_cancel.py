@@ -46,9 +46,14 @@ class SlowCancelAPI:
         set_cancel(session_id)
 
 
-def test_web_cancel_ends_sse_with_cancelled_event(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_web_cancel_ends_sse_with_cancelled_event(
+    monkeypatch: pytest.MonkeyPatch, mock_llm
+) -> None:
     """不依赖 pytest-asyncio：用 asyncio.run 直接驱动协程。"""
     monkeypatch.setattr(web_app, "CompetitorAnalysisAPI", SlowCancelAPI)
+    # 设计文档 47：Web 内部路由 parse_task 亦走真实 LLM（无 Key 会抛错）。
+    # 注入 mock_llm 保持生产 _event_generator 链路可复现（不触发真实网络/Key）。
+    monkeypatch.setattr(web_app, "LLMClient", lambda **kwargs: mock_llm)
     sid = "sess_e2e_gen"
     web_app._sessions[sid] = {"task": "分析 Cursor", "cancelled": False}
     SlowCancelAPI.started.clear()

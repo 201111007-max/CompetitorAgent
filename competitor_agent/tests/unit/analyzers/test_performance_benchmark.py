@@ -103,8 +103,20 @@ class TestProvider:
 
 
 class TestMergePriority:
+    def _perf_llm(self, benchmarks, confidence=0.8):
+        import json
+
+        from competitor_agent.llm.client import LLMClient
+
+        def fake_llm(messages, model):
+            return json.dumps(
+                {"summary": "ok", "details": {"benchmarks": benchmarks}, "confidence": confidence}
+            )
+
+        return PerformanceAnalyzer(llm=LLMClient(call_func=fake_llm))
+
     def test_board_wins_over_page(self):
-        a = PerformanceAnalyzer(use_llm=False)
+        a = self._perf_llm([{"name": "SWE-bench Verified", "score": "58%"}])
         obs = _obs("SWE-bench Verified: 58%")
         ctx = AnalysisContext(benchmark_scores={"swe_bench_verified": _score(score=62.0)})
         result = a.analyze(obs, InfoGap(field="performance"), ctx)
@@ -118,15 +130,16 @@ class TestMergePriority:
         assert not any(b.get("source") == "page" for b in result.details["benchmarks"])
 
     def test_page_only_downgrades_confidence(self):
-        a = PerformanceAnalyzer(use_llm=False)
+        # LLM 抽出页面基准；无权威榜单 → 置信度降档（min(0.8, 0.6)），页面条目保留
+        a = self._perf_llm([{"name": "SWE-bench Verified", "score": "58%"}])
         obs = _obs("SWE-bench Verified: 58%")
         result = a.analyze(obs, InfoGap(field="performance"), AnalysisContext())
         assert result.details["board_priority"] is False
-        assert result.confidence == 0.5  # 无榜单 → 降档
+        assert result.confidence == 0.6  # min(mock 0.8, 页面兜底上限 0.6) → 降档
         assert result.details["benchmarks"], "页面条目应保留（原结构，供评测抽取）"
 
     def test_neither_partial_no_fabrication(self):
-        a = PerformanceAnalyzer(use_llm=False)
+        a = self._perf_llm([], confidence=0.5)
         obs = _obs("just marketing copy with no numbers")
         result = a.analyze(obs, InfoGap(field="performance"), AnalysisContext())
         assert result.status == ResultStatus.PARTIAL
@@ -153,7 +166,7 @@ class TestMergePriority:
 
 
 class TestGapExecutorInjection:
-    def test_injects_benchmark_scores_into_analyzer(self):
+    def test_injects_benchmark_scores_into_analyzer(self, mock_llm):
         class FakeSelector(SourceSelector):
             def __init__(self, cands):
                 self._cands = cands
@@ -172,7 +185,7 @@ class TestGapExecutorInjection:
         executor = GapExecutor(
             selector=FakeSelector([cand]),
             extractor=object(),
-            analyzer=PerformanceAnalyzer(use_llm=False),
+            analyzer=PerformanceAnalyzer(llm=mock_llm, use_llm=True),
             budget=IterationBudget(max_iterations=5, cost_limit=1.0),
             providers={"benchmark": provider},
         )
