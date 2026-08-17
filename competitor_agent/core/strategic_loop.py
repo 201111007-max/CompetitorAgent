@@ -22,6 +22,7 @@ from competitor_agent.interfaces.context import Skill
 from competitor_agent.interfaces.exceptions import LLMUnavailableError
 from competitor_agent.interfaces.memory import IFourLayerMemory
 from competitor_agent.llm.client import LLMClient
+from competitor_agent.skills import get_skill_loader
 
 logger = logging.getLogger("competitor_agent.core.strategic_loop")
 
@@ -97,12 +98,23 @@ class StrategicPlanner:
     # ── 设计文档 44：规划 LLM 化 ─────────────────────────────────────
 
     def _plan_messages(self, task: str, memory: IFourLayerMemory | None) -> list[dict[str, str]]:
-        """规划 prompt：任务 + 可选历史经验参考（失败静默省略）。"""
+        """规划 prompt：任务 + 可选历史经验参考 + planning skill（失败静默省略）。
+
+        设计文档 48：planning skill 以独立 system 消息追加在末尾——messages[0]
+        （含"战略规划器"与"用户任务：<task>"段）保持不变，BenchmarkMockLLM
+        的规划分支与竞品推断不受影响。
+        """
         content = f"{_PLAN_PROMPT}\n\n用户任务：{task}"
         context = self._plan_memory_context(task, memory)
         if context:
             content += f"\n\n[历史经验参考（本系统沉淀的过往结论，仅作参考）]\n{context}"
-        return [{"role": "user", "content": content}]
+        messages: list[dict[str, str]] = [{"role": "user", "content": content}]
+        skill = get_skill_loader().get("planning")
+        if skill:
+            messages.append(
+                {"role": "system", "content": f'<skill name="planning">\n{skill}\n</skill>'}
+            )
+        return messages
 
     def _plan_memory_context(self, task: str, memory: IFourLayerMemory | None) -> str:
         """规划记忆召回（recent_context，设计文档 35）：LLM 预判竞品召回历史结论。
