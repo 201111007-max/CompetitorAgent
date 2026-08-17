@@ -84,6 +84,8 @@ class TestEndToEndMockLLM:
 @pytest.mark.skipif(not _has_llm_key(), reason=f"需要 LLM API Key（{' / '.join(_LLM_KEY_ENVS)}）")
 class TestEndToEndRealLLM:
     def test_real_llm_full_chain(self, fake_extractor) -> None:
+        if not _has_llm_key():
+            pytest.skip("运行期无 LLM API Key（隔离环境已清除），跳过真实 LLM 测试")
         api = CompetitorAnalysisAPI(extractor=fake_extractor, llm=LLMClient(), use_llm=True)
         report = api.analyze("分析 Cursor", mode="single")
 

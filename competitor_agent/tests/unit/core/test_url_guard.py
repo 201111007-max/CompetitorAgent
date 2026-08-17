@@ -133,32 +133,32 @@ def _long_extractor(text: str):
 class TestReActSide:
     """ReAct _react_web_extract：守卫拦截可读回灌 + max_content_chars 统一"""
 
-    def test_private_url_intercepted_readable(self, monkeypatch):
+    def test_private_url_intercepted_readable(self, monkeypatch, mock_llm):
         from competitor_agent.facade.api import CompetitorAnalysisAPI
 
         monkeypatch.setattr(socket, "getaddrinfo", _resolve("127.0.0.1"))
-        api = CompetitorAnalysisAPI(extractor=_long_extractor("secret"), use_llm=False)
+        api = CompetitorAnalysisAPI(extractor=_long_extractor("secret"), llm=mock_llm, use_llm=True)
         out = api._react_web_extract("http://127.0.0.1:8080/admin")
         assert "URL 被安全守卫拦截" in out
         assert "secret" not in out  # 未抓取内网
 
-    def test_max_content_chars_applied(self, monkeypatch):
+    def test_max_content_chars_applied(self, monkeypatch, mock_llm):
         from competitor_agent.facade.api import CompetitorAnalysisAPI
 
         monkeypatch.setattr(socket, "getaddrinfo", _resolve(PUBLIC_IP))
         cfg = AppConfig()
         cfg.collector.max_content_chars = 10
-        api = CompetitorAnalysisAPI(extractor=_long_extractor("A" * 100), use_llm=False, config=cfg)
+        api = CompetitorAnalysisAPI(extractor=_long_extractor("A" * 100), llm=mock_llm, use_llm=True, config=cfg)
         out = api._react_web_extract("https://example.com/")
         assert out == "A" * 10
 
-    def test_block_private_false_skips_guard(self, monkeypatch):
+    def test_block_private_false_skips_guard(self, monkeypatch, mock_llm):
         from competitor_agent.facade.api import CompetitorAnalysisAPI
 
         monkeypatch.setattr(socket, "getaddrinfo", _resolve("127.0.0.1"))
         cfg = AppConfig()
         cfg.collector.block_private_urls = False
-        api = CompetitorAnalysisAPI(extractor=_long_extractor("ok"), use_llm=False, config=cfg)
+        api = CompetitorAnalysisAPI(extractor=_long_extractor("ok"), llm=mock_llm, use_llm=True, config=cfg)
         assert api._react_web_extract("http://127.0.0.1/") == "ok"
 
 
@@ -212,7 +212,7 @@ class TestMcpSide:
             calls.append(str(url))
             if str(url) == "https://example.com/":
                 return httpx.Response(302, headers={"location": "https://example.com/pricing"})
-            return httpx.Response(200, text="<html><body>pricing page</body></html>")
+            return httpx.Response(200, text="<html><body>pricing page</body></html>", request=httpx.Request("GET", url))
 
         monkeypatch.setattr(socket, "getaddrinfo", _resolve(PUBLIC_IP))
         monkeypatch.setattr(httpx, "get", fake_get)
@@ -234,10 +234,10 @@ class TestMcpSide:
 
         def fake_get(url, **kwargs):
             captured.update(kwargs)
-            return httpx.Response(200, text="<html><body>" + "X" * 100 + "</body></html>")
+            return httpx.Response(200, text="<html><body>" + "X" * 100 + "</body></html>", request=httpx.Request("GET", url))
 
         monkeypatch.setattr(socket, "getaddrinfo", _resolve(PUBLIC_IP))
-        monkeypatch.setattr("competitor_agent.config.loader.load_config", lambda: cfg)
+        monkeypatch.setattr("mcp_server.tools.web_tools.load_config", lambda: cfg)
         monkeypatch.setattr(httpx, "get", fake_get)
         out = web_extract("https://example.com/")
         assert captured["timeout"] == 7  # 读 CollectorConfig.timeout_seconds，非硬编码

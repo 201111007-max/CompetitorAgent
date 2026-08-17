@@ -2,8 +2,8 @@
 
 组装：StrategicLoop（规划）→ 逐缺口 TacticalLoop（采集+分析）
      → BudgetController（终止）→ ReportBuilder（汇总）
-M1 默认 LLM 关闭（use_llm=False），无 Key 也能产出报告（规则降级）。
-M6 默认 LLM 开启（use_llm=True），主路径用 LLM 理解用户输入；无 Key 时自动降级规则。
+设计文档 46：默认 use_llm=True（LLM 驱动主路径）。
+设计文档 47：主路径仅 LLM 解析/规划/分析，无规则降级；无 Key 抛 LLMUnavailableError。
 
 M4 新增：
 - analyze_stream(): 流式分析（SSE 事件推送）
@@ -929,11 +929,16 @@ class CompetitorAnalysisAPI:
         # 用注册表恢复官方源（official_links），否则候选源为空、重跑缺口产出 0 结果
         from competitor_agent.core.competitor_registry import resolve_competitor
 
-        competitor = (
-            resolve_competitor(cp.competitor_name)
-            if cp.competitor_name and cp.competitor_name != "unknown"
-            else Competitor(name=cp.competitor_name)
-        )
+        competitor = None
+        if cp.competitor_name and cp.competitor_name != "unknown":
+            try:
+                competitor = resolve_competitor(cp.competitor_name)
+            except ValueError:
+                from competitor_agent.core.competitor_registry import canonicalize
+
+                competitor = Competitor(name=canonicalize(cp.competitor_name))
+        else:
+            competitor = Competitor(name=cp.competitor_name)
         gaps = self._reconstruct_gaps_from_checkpoint(cp.gaps)
         strategy = CompetitorStrategy(competitor=competitor, gaps=gaps)
 
@@ -1077,10 +1082,15 @@ class CompetitorAnalysisAPI:
 
         若任务解析出的竞品是 unknown（相对指代如"再对比下 Windsurf"），
         尝试从历史消息中提取最近竞品，拼成可解析的任务文本。
+        解析失败（LLM 不可用）直接返回原 task——消歧是可选增强（设计文档 47）。
         """
         if not conversation_history:
             return task
-        parsed = parse_task(task, llm=self._llm, use_llm=self._use_llm)
+        try:
+            parsed = parse_task(task, llm=self._llm, use_llm=self._use_llm)
+        except Exception:  # noqa: BLE001 — 消歧失败不阻塞主流程
+            logger.warning("历史消歧任务解析失败，返回原 task", exc_info=True)
+            return task
         if parsed.primary_competitor != "unknown":
             return task
         last_competitor = self._last_competitor_from_history(conversation_history)

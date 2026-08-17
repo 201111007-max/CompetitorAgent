@@ -1,4 +1,8 @@
-"""设计文档 27 §5 单测（pricing modeling）：结构抽取 / 成本估算 / 询价标注 / 渲染 / 时间线 diff"""
+"""设计文档 27 §5 单测（pricing modeling）：结构抽取 / 成本估算 / 询价标注 / 渲染 / 时间线 diff
+
+设计文档 47：仅 LLM 分析（无规则降级）——由 mock LLM 返回结构化定价 JSON，
+结构抽取/成本估算/询价标注仍由 PricingAnalyzer 的 LLM 产物层负责。
+"""
 from __future__ import annotations
 
 import json
@@ -13,10 +17,13 @@ from competitor_agent.interfaces.context import AnalysisContext
 from competitor_agent.llm.client import LLMClient
 from competitor_agent.memory.timeline_memory import TimelineMemory
 
-_STRUCTURE_TEXT = (
-    "Free $0\nPro $20/month\nTeams $40/month\nUltra $60/month\n"
-    "per 1000 requests $0.5\nincludes 1000 requests/month\nAdvanced model $2.00/request"
-)
+
+def _pricing_llm(details: dict, confidence: float = 0.8, summary: str = "pricing") -> LLMClient:
+    return LLMClient(
+        call_func=lambda messages, model: json.dumps(
+            {"summary": summary, "details": details, "confidence": confidence}
+        )
+    )
 
 
 def _obs(raw_text: str) -> Observation:
@@ -25,54 +32,55 @@ def _obs(raw_text: str) -> Observation:
 
 
 class TestStructureExtraction:
-    def test_rule_extract_full_structure(self) -> None:
-        a = PricingAnalyzer(use_llm=False)
-        result = a.analyze(_obs(_STRUCTURE_TEXT), InfoGap(field="pricing"), AnalysisContext())
+    def test_llm_full_structure(self) -> None:
+        a = PricingAnalyzer(
+            llm=_pricing_llm(
+                {
+                    "plans": [
+                        {"name": "Free", "monthly_price": 0},
+                        {"name": "Pro", "monthly_price": 20},
+                        {"name": "Teams", "monthly_price": 40},
+                        {"name": "Ultra", "monthly_price": 60},
+                    ],
+                    "usage": {"unit": "request", "per_unit_price": 0.0005, "quantity": 1000},
+                }
+            )
+        )
+        result = a.analyze(_obs("pro plans"), InfoGap(field="pricing"), AnalysisContext())
         profile = PricingProfile.from_dict(result.details["pricing"])
         assert [p.monthly_price_usd for p in profile.plans] == [0.0, 20.0, 40.0, 60.0]
-        assert [p.tier for p in profile.plans] == ["free", "pro", "business", "plan"]
         assert profile.usage is not None
-        assert profile.usage.per_unit_usd == 0.0005  # 每千请求 $0.5 → 每请求 $0.0005
+        assert profile.usage.per_unit_usd == 0.0005
         assert profile.usage.included_units == 1000
-        assert profile.usage.model_tiers == {"advanced": 2.0}
 
-    def test_rule_keeps_legacy_plan_keys(self) -> None:
+    def test_llm_keeps_legacy_plan_keys(self) -> None:
         """plans[].price/period 保留，兼容评测与既有渲染契约。"""
-        a = PricingAnalyzer(use_llm=False)
+        a = PricingAnalyzer(
+            llm=_pricing_llm({"plans": [{"name": "Pro", "price": "20", "period": "month"}]})
+        )
         result = a.analyze(_obs("Pro $20/month"), InfoGap(field="pricing"), AnalysisContext())
         assert result.details["plans"][0]["price"] == "20"
         assert result.details["plans"][0]["period"] == "month"
 
     def test_llm_legacy_shape_parsed(self) -> None:
-        def fake_llm(messages, model):
-            return json.dumps(
-                {
-                    "summary": "2 plans",
-                    "details": {"plans": [{"name": "Pro", "price": "20", "period": "month"}]},
-                    "confidence": 0.9,
-                }
-            )
-
-        a = PricingAnalyzer(llm=LLMClient(call_func=fake_llm))
+        a = PricingAnalyzer(
+            llm=_pricing_llm({"plans": [{"name": "Pro", "price": "20", "period": "month"}]}, confidence=0.9)
+        )
         result = a.analyze(_obs("Pro $20/mo"), InfoGap(field="pricing"), AnalysisContext())
         profile = PricingProfile.from_dict(result.details["pricing"])
         assert profile.plans[0].monthly_price_usd == 20.0
         assert result.confidence == 0.9
 
     def test_llm_structured_shape_parsed(self) -> None:
-        def fake_llm(messages, model):
-            return json.dumps(
+        a = PricingAnalyzer(
+            llm=_pricing_llm(
                 {
-                    "summary": "structured",
-                    "details": {
-                        "plans": [{"name": "Pro", "tier": "pro", "monthly_price": 20, "annual_price": 200}],
-                        "usage": {"unit": "request", "per_unit_price": 0.005, "quantity": 1000},
-                    },
-                    "confidence": 0.85,
-                }
+                    "plans": [{"name": "Pro", "tier": "pro", "monthly_price": 20, "annual_price": 200}],
+                    "usage": {"unit": "request", "per_unit_price": 0.005, "quantity": 1000},
+                },
+                confidence=0.85,
             )
-
-        a = PricingAnalyzer(llm=LLMClient(call_func=fake_llm))
+        )
         result = a.analyze(_obs("Pro $20/mo"), InfoGap(field="pricing"), AnalysisContext())
         profile = PricingProfile.from_dict(result.details["pricing"])
         assert profile.plans[0].tier == "pro"
@@ -80,7 +88,7 @@ class TestStructureExtraction:
         assert profile.usage is not None and profile.usage.per_unit_usd == 0.005
 
     def test_no_data_marks_partial_without_fabrication(self) -> None:
-        a = PricingAnalyzer(use_llm=False)
+        a = PricingAnalyzer(llm=_pricing_llm({"plans": []}, confidence=0.8))
         result = a.analyze(_obs("just marketing copy"), InfoGap(field="pricing"), AnalysisContext())
         assert result.details["plans"] == []
         assert result.status == ResultStatus.PARTIAL
@@ -91,7 +99,14 @@ class TestStructureExtraction:
 
 class TestCostEstimation:
     def test_within_limit_equals_plan_price(self) -> None:
-        a = PricingAnalyzer(use_llm=False)
+        a = PricingAnalyzer(
+            llm=_pricing_llm(
+                {
+                    "plans": [{"name": "Pro", "tier": "pro", "monthly_price": 20}],
+                    "usage": {"unit": "request", "per_unit_price": 0.0005, "quantity": 1000},
+                }
+            )
+        )
         result = a.analyze(
             _obs("Pro $20/month\nper 1000 requests $0.5\nincludes 1000 requests/month"),
             InfoGap(field="pricing"),
@@ -103,7 +118,11 @@ class TestCostEstimation:
         assert costs["heavy"] == 34.5  # 30000 次/月 → 档价 + 29000×$0.0005
 
     def test_no_per_unit_within_limit_price_no_overage(self) -> None:
-        a = PricingAnalyzer(use_llm=False)
+        a = PricingAnalyzer(
+            llm=_pricing_llm(
+                {"plans": [{"name": "Pro", "tier": "pro", "monthly_price": 20, "limits": {"requests": "1000 requests/month"}}]}
+            )
+        )
         result = a.analyze(
             _obs("Pro $20/month (1000 requests/month)"),
             InfoGap(field="pricing"),
@@ -115,9 +134,21 @@ class TestCostEstimation:
         assert costs["heavy"] is None
 
     def test_cheapest_plan_selected(self) -> None:
-        a = PricingAnalyzer(use_llm=False)
+        a = PricingAnalyzer(
+            llm=_pricing_llm(
+                {
+                    "plans": [
+                        {"name": "Free", "tier": "free", "monthly_price": 0},
+                        {"name": "Pro", "tier": "pro", "monthly_price": 20},
+                        {"name": "Teams", "tier": "business", "monthly_price": 40},
+                        {"name": "Ultra", "tier": "plan", "monthly_price": 60},
+                    ],
+                    "usage": {"unit": "request", "per_unit_price": 0.0005, "quantity": 1000},
+                }
+            )
+        )
         result = a.analyze(
-            _obs("Free $0\nPro $20/month\nTeams $40/month\nUltra $60/month\nper 1000 requests $0.5\nincludes 1000 requests/month"),
+            _obs("Free $0\nPro $20/month\nTeams $40/month\nUltra $60/month"),
             InfoGap(field="pricing"),
             AnalysisContext(),
         )
@@ -127,7 +158,16 @@ class TestCostEstimation:
         assert costs["heavy"] == 14.5  # 免费档 29000×$0.0005
 
     def test_enterprise_quote_not_guessed(self) -> None:
-        a = PricingAnalyzer(use_llm=False)
+        a = PricingAnalyzer(
+            llm=_pricing_llm(
+                {
+                    "plans": [
+                        {"name": "Pro", "tier": "pro", "monthly_price": 20},
+                        {"name": "Enterprise", "tier": "enterprise", "requires_quote": True},
+                    ]
+                }
+            )
+        )
         result = a.analyze(
             _obs("Pro $20/month\nEnterprise (contact sales)"),
             InfoGap(field="pricing"),
@@ -154,14 +194,24 @@ class TestPricingProfileSerialization:
 
 
 class TestPricingRendering:
-    def _render(self, text: str) -> str:
-        a = PricingAnalyzer(use_llm=False)
-        result = a.analyze(_obs(text), InfoGap(field="pricing"), AnalysisContext())
+    def _render(self, details: dict) -> str:
+        a = PricingAnalyzer(llm=_pricing_llm(details))
+        result = a.analyze(_obs("pricing page"), InfoGap(field="pricing"), AnalysisContext())
         report = CompetitorReport(competitor=_competitor("cursor"), dimension_results=[result])
         return MarkdownRenderer().render(report)
 
     def test_render_pricing_tables(self) -> None:
-        md = self._render(_STRUCTURE_TEXT)
+        md = self._render(
+            {
+                "plans": [
+                    {"name": "Free", "tier": "free", "monthly_price": 0},
+                    {"name": "Pro", "tier": "pro", "monthly_price": 20},
+                    {"name": "Teams", "tier": "business", "monthly_price": 40},
+                    {"name": "Ultra", "tier": "plan", "monthly_price": 60},
+                ],
+                "usage": {"unit": "request", "per_unit_price": 0.0005, "quantity": 1000},
+            }
+        )
         assert "#### 定价档位" in md
         assert "#### 按量计费" in md
         assert "#### 成本场景估算" in md
@@ -169,11 +219,18 @@ class TestPricingRendering:
         assert "| light | 30 次/天 | $0 |" in md
 
     def test_render_quote_plan(self) -> None:
-        md = self._render("Pro $20/month\nEnterprise (contact sales)")
+        md = self._render(
+            {
+                "plans": [
+                    {"name": "Pro", "tier": "pro", "monthly_price": 20},
+                    {"name": "Enterprise", "tier": "enterprise", "requires_quote": True},
+                ]
+            }
+        )
         assert "需询价" in md
 
     def test_render_no_data_falls_back_to_blob(self) -> None:
-        md = self._render("no pricing data at all")
+        md = self._render({"plans": []})
         assert "明细:" in md
         assert "未检测到定价信息" in md
 

@@ -43,8 +43,8 @@ def _slow_llm_client(delay: float) -> LLMClient:
 
 
 class TestRunAsync:
-    def test_run_async_produces_complete_report(self, fake_extractor) -> None:
-        orch = TeamOrchestrator(extractor=fake_extractor, use_llm=False)
+    def test_run_async_produces_complete_report(self, fake_extractor, mock_llm) -> None:
+        orch = TeamOrchestrator(extractor=fake_extractor, llm=mock_llm, use_llm=True)
         report = asyncio.run(orch.run_async("分析 Cursor"))
         assert report.competitor.name == "cursor"
         assert report.dimension_results
@@ -52,9 +52,9 @@ class TestRunAsync:
         assert "## 维度结论" in report.markdown_report
         assert orch.bus.history("draft")
 
-    def test_run_async_matches_serial_results(self, fake_extractor) -> None:
-        serial = TeamOrchestrator(extractor=fake_extractor, use_llm=False)
-        parallel = TeamOrchestrator(extractor=fake_extractor, use_llm=False)
+    def test_run_async_matches_serial_results(self, fake_extractor, mock_llm) -> None:
+        serial = TeamOrchestrator(extractor=fake_extractor, llm=mock_llm, use_llm=True)
+        parallel = TeamOrchestrator(extractor=fake_extractor, llm=mock_llm, use_llm=True)
         r_serial = serial.run("分析 Cursor")
         r_async = asyncio.run(parallel.run_async("分析 Cursor"))
 
@@ -85,8 +85,8 @@ class TestRunAsync:
 
         assert parallel_elapsed < serial_elapsed, f"并行 {parallel_elapsed:.2f}s 应快于串行 {serial_elapsed:.2f}s"
 
-    def test_api_analyze_team_async_end_to_end(self, fake_extractor) -> None:
-        api = CompetitorAnalysisAPI(extractor=fake_extractor, use_llm=False, enable_rag=False)
+    def test_api_analyze_team_async_end_to_end(self, fake_extractor, mock_llm) -> None:
+        api = CompetitorAnalysisAPI(extractor=fake_extractor, llm=mock_llm, use_llm=True, enable_rag=False)
         report = asyncio.run(api.analyze_team_async("分析 Cursor"))
         assert report.dimension_results
         assert report.terminal_state == "success"
@@ -95,7 +95,7 @@ class TestRunAsync:
 
 
 class TestArbitrationChain:
-    def test_arbitration_annotated_in_report(self, fake_extractor) -> None:
+    def test_arbitration_annotated_in_report(self, fake_extractor, mock_llm) -> None:
         """仲裁 → 报告标注链路：同维度多来源取优并保留 conflict_evidence"""
         winner = DimensionResult(
             dimension="pricing",
@@ -110,7 +110,7 @@ class TestArbitrationChain:
             evidence=[SourceEvidence(source_name="rumor", url="https://rumor.io/p", trust_level=0.3)],
         )
 
-        orch = TeamOrchestrator(extractor=fake_extractor, use_llm=False)
+        orch = TeamOrchestrator(extractor=fake_extractor, llm=mock_llm, use_llm=True)
         arbitrated = orch._validator.arbitrate([loser, winner])
         assert arbitrated["pricing"] is winner
         assert winner.conflict_evidence
@@ -126,7 +126,7 @@ class TestArbitrationChain:
 
 
 class TestRunAsyncCancellation:
-    def test_async_cancel_returns_cancelled_result(self, fake_extractor) -> None:
+    def test_async_cancel_returns_cancelled_result(self, fake_extractor, mock_llm) -> None:
         started = threading.Event()
         release = threading.Event()
 
@@ -141,7 +141,7 @@ class TestRunAsyncCancellation:
                 return fake_extractor.fetch(gap, context)
 
         sid = f"async_cancel_{uuid.uuid4().hex[:8]}"
-        api = CompetitorAnalysisAPI(extractor=BlockingExtractor(), use_llm=False, enable_rag=False)
+        api = CompetitorAnalysisAPI(extractor=BlockingExtractor(), llm=mock_llm, use_llm=True, enable_rag=False)
         holder: dict = {}
 
         def _run() -> None:
@@ -162,7 +162,7 @@ class TestRunAsyncCancellation:
         assert report.terminal_state == "cancelled"
         assert getattr(report, "cancelled", False)
 
-    def test_run_async_cancel_returns_degraded_without_error(self, fake_extractor) -> None:
+    def test_run_async_cancel_returns_degraded_without_error(self, fake_extractor, mock_llm) -> None:
         """TeamOrchestrator 层取消：返回部分结果（内部 degraded，facade 层转 cancelled）"""
         started = threading.Event()
         release = threading.Event()
@@ -174,7 +174,7 @@ class TestRunAsyncCancellation:
                 return fake_extractor.fetch(gap, context)
 
         sid = f"async_cancel2_{uuid.uuid4().hex[:8]}"
-        orch = TeamOrchestrator(extractor=BlockingExtractor(), use_llm=False, session_id=sid)
+        orch = TeamOrchestrator(extractor=BlockingExtractor(), llm=mock_llm, use_llm=True, session_id=sid)
         holder: dict = {}
 
         def _run() -> None:

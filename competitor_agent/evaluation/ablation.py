@@ -1,10 +1,11 @@
-"""消融 / 对比实验（设计文档 30）：有无 RAG / 有无 memory / 规则降级 vs LLM
+"""消融 / 对比实验（设计文档 30 / 47）：有无 RAG / 有无 memory
 
 AblationRunner 对同一批确定性评测用例逐变体跑 Benchmark，产出「变体 × 指标」对比表，
-回答简历/面试必问：加 RAG / 加记忆到底有没有用、规则降级 vs LLM 差多少。
+回答简历/面试必问：加 RAG / 加记忆到底有没有用。
 
 - 组件开关：CompetitorAnalysisAPI(enable_rag / enable_memory)，默认开启行为不变；
-- 变体矩阵：full / no-rag / no-memory / no-rag+no-memory / no-llm-rule 共 5 组；
+- 变体矩阵（设计文档 47：删除 no-llm-rule，主路径仅 LLM）：
+  full / no-rag / no-memory / no-rag+no-memory 共 4 组；
 - 按变体隔离并共享记忆与知识库：同一变体内跨用例累积（技能/成功率/检索片段），
   使 RAG / 记忆差分可测（no-rag 检索不到先前摄入的片段、no-memory 无技能提升）。
 """
@@ -42,13 +43,12 @@ class AblationVariant:
     use_llm: bool = True
 
 
-# 消融变体矩阵（设计文档 30 §2）：全链路 / 关 RAG / 关记忆 / 双关 / 纯规则降级
+# 消融变体矩阵（设计文档 30 §2 / 47）：全链路 / 关 RAG / 关记忆 / 双关（主路径仅 LLM）
 DEFAULT_VARIANTS: tuple[AblationVariant, ...] = (
     AblationVariant("full"),
     AblationVariant("no-rag", enable_rag=False),
     AblationVariant("no-memory", enable_memory=False),
     AblationVariant("no-rag+no-memory", enable_rag=False, enable_memory=False),
-    AblationVariant("no-llm-rule", use_llm=False),
 )
 
 # 对比表行：显示名 / AblationResult 属性 / 是否越高越好（幻觉率与命中排名越低越好）
@@ -160,21 +160,24 @@ class AblationRunner:
         store: CompetitorStore | None,
     ) -> CompetitorAnalysisAPI:
         """按变体构造 API：llm/use_llm 由变体决定，extractor 按用例取固定页面（确定性采集）。"""
-        llm: LLMClient | None = None
-        use_llm = False
-        if variant.use_llm:
-            if self._llm_mode == "mock":
-                llm = LLMClient(call_func=BenchmarkMockLLM().complete)
-            elif self._llm_mode == "real":
-                llm = LLMClient()
-            use_llm = True
+        # 设计文档 47：主路径仅 LLM（无 no-llm-rule 变体）；mock 确定性返回取自用例
+        if self._llm_mode == "mock":
+            mock = BenchmarkMockLLM(
+                competitor=str(getattr(case, "competitor", "")),
+                dimension=str(getattr(case, "dimension", "")),
+            )
+            llm: LLMClient | None = LLMClient(call_func=mock.complete)
+        elif self._llm_mode == "real":
+            llm = LLMClient()
+        else:
+            llm = None
         return CompetitorAnalysisAPI(
             extractor=BenchmarkExtractor(
                 page=getattr(case, "page", ""),
                 fail_urls=set(getattr(case, "fail_urls", None) or ()),
             ),
             llm=llm,
-            use_llm=use_llm,
+            use_llm=True,
             max_iterations=8,
             cost_limit=1.0,
             enable_rag=variant.enable_rag,
@@ -204,7 +207,7 @@ def render_ablation_table(results: list[AblationResult]) -> str:
         "# 消融 / 对比实验（设计文档 30）",
         f"\n> generated: {datetime.now(timezone.utc).isoformat(timespec='seconds')}",
         f"> fixtures: {ACCURACY_FIXTURE} + {STRATEGY_FIXTURE} | cases: {results[0].n_cases} | harness v{HARNESS_VERSION}",
-        "\n> 变体：full=完整链路 / no-rag=关 RAG / no-memory=关四层记忆 / no-rag+no-memory=双关 / no-llm-rule=纯规则降级（无 LLM）。粗体=该行最优。",
+        "\n> 变体：full=完整链路 / no-rag=关 RAG / no-memory=关四层记忆 / no-rag+no-memory=双关（主路径仅 LLM）。粗体=该行最优。",
         "\n| 指标 | " + " | ".join(r.variant.name for r in results) + " |",
         "|------|" + "------|" * len(results),
     ]

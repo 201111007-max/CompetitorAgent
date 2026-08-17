@@ -14,8 +14,8 @@ pytestmark = pytest.mark.integration
 
 
 class TestTeamFlow:
-    def test_analyze_team_produces_complete_report(self, fake_extractor) -> None:
-        api = CompetitorAnalysisAPI(extractor=fake_extractor, use_llm=False)
+    def test_analyze_team_produces_complete_report(self, fake_extractor, mock_llm) -> None:
+        api = CompetitorAnalysisAPI(extractor=fake_extractor, llm=mock_llm, use_llm=True)
         report = api.analyze_team("分析 Cursor")
 
         assert report.dimension_results
@@ -24,16 +24,16 @@ class TestTeamFlow:
         assert "# cursor 竞品分析报告" in report.markdown_report
         assert "## 维度结论" in report.markdown_report
 
-    def test_team_evidence_carries_source_url(self, fake_extractor) -> None:
-        api = CompetitorAnalysisAPI(extractor=fake_extractor, use_llm=False)
+    def test_team_evidence_carries_source_url(self, fake_extractor, mock_llm) -> None:
+        api = CompetitorAnalysisAPI(extractor=fake_extractor, llm=mock_llm, use_llm=True)
         report = api.analyze_team("分析 Cursor", max_retries=1)
 
         for result in report.dimension_results:
             assert result.evidence, "多 Agent 结论应携带证据链"
             assert all(ev.url and ev.url.startswith("https://") for ev in result.evidence)
 
-    def test_team_memory_sediments_skills(self, fake_extractor, memory) -> None:
-        api = CompetitorAnalysisAPI(extractor=fake_extractor, use_llm=False, memory=memory)
+    def test_team_memory_sediments_skills(self, fake_extractor, memory, mock_llm) -> None:
+        api = CompetitorAnalysisAPI(extractor=fake_extractor, llm=mock_llm, use_llm=True, memory=memory)
         api.analyze_team("分析 Cursor")
 
         assert memory.retrieve_skills("cursor"), "多 Agent 路径成功后应沉淀技能"

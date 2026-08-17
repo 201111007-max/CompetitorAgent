@@ -122,8 +122,8 @@ MCP 工具清单：
 from competitor_agent import CompetitorAnalysisAPI
 from competitor_agent.interfaces.context import ChatMessage
 
-# 基础分析
-api = CompetitorAnalysisAPI(use_llm=False)
+# 基础分析（设计文档 46/47：默认 use_llm=True，主路径仅 LLM；需配置 API Key）
+api = CompetitorAnalysisAPI(llm=LLMClient(...), use_llm=True)
 report = api.analyze("Claude Code")
 print(report.markdown_report)
 
@@ -137,7 +137,7 @@ report = api.analyze_team("Cursor")
 # 对比分析
 from competitor_agent import CompetitorAnalysisAPI
 
-api = CompetitorAnalysisAPI(use_llm=False)
+api = CompetitorAnalysisAPI(llm=LLMClient(...), use_llm=True)
 
 # 对比（可传两个竞品，或一个"对比 A 和 B"任务）
 result = api.compare("Cursor", "Windsurf")
@@ -157,6 +157,10 @@ history = api.get_history("cursor")
 api.cancel("sess_abc123")
 report = api.resume("sess_abc123")
 ```
+
+> **无 Key 语义（设计文档 47）**：主路径（任务解析 / 规划 / 竞品识别 / 维度分析）只走 LLM。
+> 未配置 API Key 时调用会抛 `LLMUnavailableError`（CLI 打印"需要配置 LLM API Key"退出码 2，
+> Web 返回 SSE `error` 事件），**不再静默降级规则**。
 
 ---
 
@@ -191,7 +195,7 @@ report = api.resume("sess_abc123")
 
 | 问题 | 处理 |
 |------|------|
-| 无 LLM Key | 自动走 fallback_analyzer，输出仍可用但质量降级 |
+| 无 LLM Key | 主路径仅 LLM（设计文档 47）：CLI 报"需要配置 LLM API Key"退出码 2，Web 返回 SSE `error` 事件，库调用抛 `LLMUnavailableError`——请先 `cli config set-key LLM_API_KEY` |
 | 官网解析不到内容 | SPA → 检查是否安装 Playwright；或换降级源 |
 | 成本超预算 | 分析被 BudgetController 终止，报告标注 reason=cost_limit_reached |
 | 缺口未关闭 | 报告 `gaps_pending` 列明原因，可 `resume` 继续 |

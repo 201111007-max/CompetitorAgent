@@ -146,13 +146,15 @@ class TestBenchmarkMockLLM:
         ]))
         assert out["details"]["plans"][0]["price"] == "20"
 
-    def test_parse_prompt_falls_back_to_rules(self):
+    def test_parse_prompt_infers_competitor_from_task(self):
+        # 设计文档 47：解析 mock 即固定 oracle——从任务文本推断竞品/分辨率（不再有规则回退）
         out = json.loads(BenchmarkMockLLM().complete([
             {"role": "system", "content": "你是竞品分析任务的语义解析器…"},
             {"role": "user", "content": "分析 cursor 定价"},
         ]))
-        assert out["competitors"] == []
+        assert out["competitors"] == ["cursor"]
         assert out["dimensions"] is None
+        assert out["resolution"] == "registry"
 
     def test_ecosystem_signals_collected(self):
         out = json.loads(BenchmarkMockLLM().complete([

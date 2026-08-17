@@ -23,17 +23,17 @@ _PAGE = (
 
 
 class TestBudgetTermination:
-    def test_iteration_budget_exhaustion_returns_partial(self, fake_extractor) -> None:
-        api = CompetitorAnalysisAPI(extractor=fake_extractor, use_llm=False, max_iterations=1, cost_limit=1.0)
+    def test_iteration_budget_exhaustion_returns_partial(self, fake_extractor, mock_llm) -> None:
+        api = CompetitorAnalysisAPI(extractor=fake_extractor, llm=mock_llm, use_llm=True, max_iterations=1, cost_limit=1.0)
         report = api.analyze("分析 Cursor", mode="single")
 
         assert report.terminal_state == "partial"
         assert api._budget.iteration_count == 1
         assert report.gaps_pending, "预算耗尽后未闭环缺口应随报告返回"
 
-    def test_cost_limit_terminates_after_single_source(self, fake_extractor) -> None:
+    def test_cost_limit_terminates_after_single_source(self, fake_extractor, mock_llm) -> None:
         api = CompetitorAnalysisAPI(
-            extractor=fake_extractor, use_llm=False, max_iterations=10, cost_limit=0.01
+            extractor=fake_extractor, llm=mock_llm, use_llm=True, max_iterations=10, cost_limit=0.01
         )
         report = api.analyze("分析 Cursor", mode="single")
 

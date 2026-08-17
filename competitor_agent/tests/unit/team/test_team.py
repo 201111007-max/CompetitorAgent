@@ -86,9 +86,9 @@ class TestCollectorAgent:
 
 
 class TestAnalyzerAgent:
-    def test_analyze_produces_dimension_results(self):
+    def test_analyze_produces_dimension_results(self, mock_llm):
         bus = MessageBus()
-        agent = AnalyzerAgent(bus, AnalyzerRegistry(use_llm=False))
+        agent = AnalyzerAgent(bus, AnalyzerRegistry(llm=mock_llm, use_llm=True))
         ev = SourceEvidence(source_name="web_extractor", trust_level=0.9)
         obs = [Observation(gap_field="pricing", source="web_extractor", raw_text="Pro plan $20", evidence=ev)]
         results = agent.analyze("cursor", obs)
@@ -122,9 +122,9 @@ class TestFactValidator:
 
 
 class TestTeamOrchestrator:
-    def test_full_pipeline_produces_draft(self):
+    def test_full_pipeline_produces_draft(self, mock_llm):
         bus = MessageBus()
-        orch = TeamOrchestrator(extractor=FakeExtractor(), bus=bus, use_llm=False)
+        orch = TeamOrchestrator(extractor=FakeExtractor(), bus=bus, llm=mock_llm, use_llm=True)
         report = orch.run("分析 cursor 的定价")
         assert report.competitor.name == "cursor"
         assert report.dimension_results
@@ -169,15 +169,15 @@ class TestCollectorAgentDecision:
 class TestOrchestratorDecision:
     """TeamOrchestrator 事件驱动 + 状态决策"""
 
-    def test_team_mode_via_api(self):
+    def test_team_mode_via_api(self, mock_llm):
         from competitor_agent.facade.api import CompetitorAnalysisAPI
 
-        api = CompetitorAnalysisAPI(extractor=FakeExtractor(), use_llm=False)
+        api = CompetitorAnalysisAPI(extractor=FakeExtractor(), llm=mock_llm, use_llm=True)
         report = api.analyze("分析 cursor 的定价", mode="team")
         assert report.competitor.name == "cursor"
         assert report.dimension_results
 
-    def test_retry_on_transient_failure(self):
+    def test_retry_on_transient_failure(self, mock_llm):
         """采集首次失败、重试成功后应产出报告"""
         calls = {"n": 0}
 
@@ -190,7 +190,7 @@ class TestOrchestratorDecision:
                     raise DataSourceUnavailableError("temporary")
                 return FakeExtractor().fetch(gap, context)
 
-        orch = TeamOrchestrator(extractor=FlakyExtractor(), use_llm=False, max_retries=2)
+        orch = TeamOrchestrator(extractor=FlakyExtractor(), llm=mock_llm, use_llm=True, max_retries=2)
         report = orch.run("分析 cursor 的定价")
         assert report.competitor.name == "cursor"
         assert calls["n"] >= 2

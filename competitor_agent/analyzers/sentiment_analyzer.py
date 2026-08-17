@@ -1,4 +1,4 @@
-"""SentimentAnalyzer — 社区口碑维度分析器（设计文档 24）
+"""SentimentAnalyzer — 社区口碑维度分析器（设计文档 24 / 47）
 
 从社区源（HN/Reddit/X/YouTube，经设计文档 23 的 CommunitySourceProvider）聚合：
 - signals：正/负/中信号（可追溯）
@@ -6,7 +6,7 @@
 - polarity_ratio：{pos, neg, neu} 占比
 - verdict：一句话口碑结论
 
-信号不足时返回低置信 [PARTIAL]，禁止编造。
+信号不足时返回低置信 [PARTIAL]，禁止编造。设计文档 47：仅 LLM 分析（无规则降级）。
 """
 from __future__ import annotations
 
@@ -17,11 +17,6 @@ from competitor_agent.analyzers.base import BaseCompetitorAnalyzer
 from competitor_agent.domain_types.enums import DimensionType
 from competitor_agent.domain_types.info_gap import InfoGap
 from competitor_agent.domain_types.observation import Observation
-
-_POSITIVE_MARKERS = ("好用", "好评", "推荐", "喜欢", "great", "awesome", "love", "fast", "recommend", "best")
-_NEGATIVE_MARKERS = ("难用", "差评", "吐槽", "失望", "bug", "slow", "bad", "terrible", "crash", "worse", "贵", "限制")
-
-_LOW_SIGNAL_VERDICT = "社区信号不足，无法形成可靠口碑结论（不编造）"
 
 
 class SentimentAnalyzer(BaseCompetitorAnalyzer):
@@ -57,78 +52,3 @@ class SentimentAnalyzer(BaseCompetitorAnalyzer):
             "polarity_ratio": {"type": "object"},
             "verdict": {"type": "string"},
         }
-
-    def _rule_extract(self, observation: Observation) -> dict[str, Any]:
-        text = observation.raw_text or ""
-        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-        low_lines = [ln.lower() for ln in lines]
-
-        signals: list[dict[str, str]] = []
-        positives: list[str] = []
-        negatives: list[str] = []
-
-        for idx, low in enumerate(low_lines):
-            if len(lines[idx]) > 200:
-                continue
-            has_pos = any(m in low for m in _POSITIVE_MARKERS)
-            has_neg = any(m in low for m in _NEGATIVE_MARKERS)
-            if not (has_pos or has_neg):
-                continue
-            polarity = "neu"
-            if has_pos and not has_neg:
-                polarity = "pos"
-            elif has_neg and not has_pos:
-                polarity = "neg"
-            signals.append(
-                {
-                    "polarity": polarity,
-                    "quote": lines[idx][:120],
-                    "source_url": observation.evidence.url,
-                }
-            )
-            if polarity == "pos":
-                positives.append(lines[idx][:80])
-            elif polarity == "neg":
-                negatives.append(lines[idx][:80])
-
-        pos_c, neg_c, neu_c = _count_polarity(signals)
-        total = pos_c + neg_c + neu_c
-        if total:
-            ratio = {
-                "pos": round(pos_c / total, 2),
-                "neg": round(neg_c / total, 2),
-                "neu": round(neu_c / total, 2),
-            }
-            verdict = f"社区口碑以{'正面' if pos_c >= neg_c else '负面'}为主（{pos_c}正/{neg_c}负/{neu_c}中）"
-            confidence = 0.6 if total >= 3 else 0.5
-        else:
-            ratio = {"pos": 0.0, "neg": 0.0, "neu": 0.0}
-            verdict = _LOW_SIGNAL_VERDICT
-            confidence = 0.1
-
-        return {
-            "summary": verdict,
-            "details": {
-                "signals": signals[:20],
-                "positives": _dedupe(positives)[:5],
-                "negatives": _dedupe(negatives)[:5],
-                "polarity_ratio": ratio,
-                "verdict": verdict,
-            },
-            "confidence": confidence,
-        }
-
-
-def _count_polarity(signals: list[dict[str, str]]) -> tuple[int, int, int]:
-    pos = sum(1 for s in signals if s.get("polarity") == "pos")
-    neg = sum(1 for s in signals if s.get("polarity") == "neg")
-    neu = sum(1 for s in signals if s.get("polarity") == "neu")
-    return pos, neg, neu
-
-
-def _dedupe(items: list[str]) -> list[str]:
-    out: list[str] = []
-    for item in items:
-        if item and item not in out:
-            out.append(item)
-    return out

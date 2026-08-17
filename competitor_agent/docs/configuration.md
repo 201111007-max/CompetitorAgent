@@ -55,7 +55,6 @@ llm:
   model: "deepseek-v4-flash"
   temperature: 0.1
   max_tokens: 2048
-  fallback_analyzer: true    # LLM 不可用时规则降级
   cache_enabled: true
 
 # ===== 记忆 =====
@@ -97,7 +96,6 @@ observability:
 | `dimensions.default_budget` | dict | — | 维度→迭代预算（可被战略循环覆盖） |
 | `collector.cache_ttl_seconds` | int | 86400 | 采集缓存有效期 |
 | `collector.use_playwright` | bool | false | SPA 采集开关（延迟安装依赖） |
-| `llm.fallback_analyzer` | bool | true | 无 LLM 时规则降级 |
 | `memory.data_dir` | str | ~/.competitor_agent | 记忆/向量库/凭据库根目录 |
 | `report.include_evidence_urls` | bool | true | 报告附证据链接（防幻觉透明化） |
 

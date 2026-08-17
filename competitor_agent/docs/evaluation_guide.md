@@ -214,13 +214,13 @@ python -m competitor_agent.evaluation.benchmark --llm real --out reports/benchma
 
 ## 8. 消融 / 对比实验（设计文档 30）
 
-回答「加 RAG / 加记忆到底有没有用、规则降级 vs LLM 差多少」——对同一批确定性用例
-逐变体跑真实执行链路，产出「变体 × 指标」对比表。
+回答「加 RAG / 加记忆到底有没有用」（设计文档 47：主路径仅 LLM，已删除 no-llm-rule 变体）——
+对同一批确定性用例逐变体跑真实执行链路，产出「变体 × 指标」对比表。
 
 ### 8.1 运行
 
 ```bash
-# 5 变体全跑 + 落盘 reports/ablation/ablation_<date>.md/.json
+# 4 变体全跑 + 落盘 reports/ablation/ablation_<date>.md/.json
 python -m competitor_agent.cli benchmark --ablate
 
 # 仅跑默认评测（不加消融）
@@ -235,7 +235,9 @@ python -m competitor_agent.cli benchmark
 | no-rag | ❌ | ✅ | ✅ | 关知识库检索 |
 | no-memory | ✅ | ❌ | ✅ | 关四层记忆副作用 |
 | no-rag+no-memory | ❌ | ❌ | ✅ | 双关 |
-| no-llm-rule | ✅ | ✅ | ❌ | 纯规则降级（无 LLM） |
+
+> 设计文档 47：主路径仅 LLM，`no-llm-rule` 变体已删除（确定性由 `BenchmarkMockLLM`
+> 在 LLM 版接口上固定返回承担，不依赖规则版）。
 
 每变体用独立目录的共享 `FourLayerMemory` 与 `CompetitorStore`（跨用例累积），
 使 RAG / 记忆差分可测（no-rag 检索不到先前摄入片段、no-memory 无成功率/技能累积）。

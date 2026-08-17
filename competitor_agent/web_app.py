@@ -94,15 +94,16 @@ async def _event_generator(
         except RuntimeError:
             pass
 
+    llm_client = LLMClient(
+        model=_config.llm.model,
+        base_url=_config.llm.api_base_url,
+        fallback_models=_config.llm.fallback_models,
+        timeout=_config.llm.timeout,
+        max_retries=_config.llm.max_retries,
+        pricing_per_1k=_config.llm.pricing_per_1k,
+    )
     api_with_sink = CompetitorAnalysisAPI(
-        llm=LLMClient(
-            model=_config.llm.model,
-            base_url=_config.llm.api_base_url,
-            fallback_models=_config.llm.fallback_models,
-            timeout=_config.llm.timeout,
-            max_retries=_config.llm.max_retries,
-            pricing_per_1k=_config.llm.pricing_per_1k,
-        ),
+        llm=llm_client,
         use_llm=True,
         memory=_get_memory(),
         event_sink=_on_event,
@@ -110,10 +111,13 @@ async def _event_generator(
     )
 
     # 启动后台分析任务（按 resolution 路由：DISCOVERY→发现对比 / COMPARE→N 向对比 / 其余→单竞品）
-    # 路由用规则解析（不触发真实 LLM/网络；实际分析在 api.discover/analyze 内部再走 LLM）
+    # 设计文档 47：路由也用真实 LLM 解析（无规则降级）；LLM 不可用 → 抛可读错误由外层转 SSE error
     async def _run_analysis() -> CompetitorReport | ComparisonReport:
         loop = asyncio.get_running_loop()
-        parsed = parse_task(task, llm=None, use_llm=False)
+        try:
+            parsed = parse_task(task, llm=llm_client, use_llm=True)
+        except Exception as exc:  # noqa: BLE001 - LLM 不可用 → 可读错误，Web 普查不崩溃
+            raise RuntimeError(f"需要配置 LLM API Key 才能分析（LLM 不可用: {exc}）") from exc
         if parsed.resolution == ResolutionDecision.DISCOVERY:
             return await loop.run_in_executor(None, api_with_sink.discover, task)
         if parsed.is_compare and len(parsed.competitors) >= 2:
