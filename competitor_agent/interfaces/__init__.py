@@ -1,6 +1,4 @@
-"""契约层：Protocol 定义与异常约定"""
-from competitor_agent.interfaces.analyzer import ICompetitorAnalyzer
-from competitor_agent.interfaces.collector import ICompetitorDataCollector, ICompetitorDataSource
+"""契约层：Protocol 定义与异常约定（planner/verifier/analyzer/collector 已删，设计文档 49）"""
 from competitor_agent.interfaces.context import (
     AnalysisContext,
     AnalysisSession,
@@ -20,9 +18,7 @@ from competitor_agent.interfaces.exceptions import (
     TaskNotSupportedError,
 )
 from competitor_agent.interfaces.memory import IFourLayerMemory
-from competitor_agent.interfaces.planner import IStrategicPlanner
 from competitor_agent.interfaces.reporter import IReportBuilder
-from competitor_agent.interfaces.verifier import IStopVerifier
 
 __all__ = [
     "AnalysisContext",
@@ -33,13 +29,8 @@ __all__ = [
     "ChatMessage",
     "CompetitorAgentError",
     "DataSourceUnavailableError",
-    "ICompetitorAnalyzer",
-    "ICompetitorDataCollector",
-    "ICompetitorDataSource",
     "IFourLayerMemory",
     "IReportBuilder",
-    "IStopVerifier",
-    "IStrategicPlanner",
     "LLMUnavailableError",
     "Skill",
     "SourceBlockedError",

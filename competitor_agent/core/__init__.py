@@ -1,7 +1,1 @@
-"""core 包：循环/预算/护栏/并行执行"""
-
-from competitor_agent.core.gap_executor import GapExecutor
-from competitor_agent.core.parallel_runner import ParallelRunner
-from competitor_agent.core.subagent import SubAgent
-
-__all__ = ["GapExecutor", "ParallelRunner", "SubAgent"]
+"""core 包：预算/检查点/任务解析等基础能力（规则管线已删除，设计文档 49）"""

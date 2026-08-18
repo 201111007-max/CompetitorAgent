@@ -27,12 +27,6 @@ class BudgetConfig:
 
 
 @dataclass
-class TerminationConfig:
-    core_priority_threshold: int = 8
-    core_confidence: float = 0.8
-
-
-@dataclass
 class ExecutionConfig:
     """执行调度配置（并行缺口分析）"""
 
@@ -45,8 +39,6 @@ class DimensionsConfig:
     enabled: list[str] = field(
         default_factory=lambda: ["feature", "pricing", "performance", "ecosystem", "sentiment", "roadmap"]
     )
-    default_budget: dict[str, int] = field(default_factory=dict)
-    analysis_order: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -66,13 +58,6 @@ class CollectorConfig:
     enable_marketplace: bool = True
     enable_community: bool = True
     enable_benchmark: bool = True
-
-
-@dataclass
-class StopVerifierConfig:
-    required_dimensions: list[str] = field(default_factory=lambda: ["pricing", "feature"])
-    min_confidence: float = 0.6
-    min_evidence_ratio: float = 0.7
 
 
 @dataclass
@@ -156,20 +141,6 @@ class ToolsConfig:
 
 
 @dataclass
-class OrchestrationConfig:
-    """[M3 删除] 旧 team 流水线编排开关——已被工具化/LLM 编排取代。
-
-    仅保留供 team/ 删除前的导入兼容（AppConfig 不再装配）。
-    """
-
-    reviewer_enabled: bool = False
-    freshness_delegation_enabled: bool = False
-    cross_dimension_conflict_enabled: bool = True
-    source_dedup_enabled: bool = True
-    experience_routing_enabled: bool = True
-
-
-@dataclass
 class AppConfig:
     """应用级配置聚合（对应 review_config.yaml 各 section）"""
 
@@ -179,11 +150,9 @@ class AppConfig:
     max_tokens: int = 2048
     llm: LLMConfig = field(default_factory=LLMConfig)
     budget: BudgetConfig = field(default_factory=BudgetConfig)
-    termination: TerminationConfig = field(default_factory=TerminationConfig)
     execution: ExecutionConfig = field(default_factory=ExecutionConfig)
     dimensions: DimensionsConfig = field(default_factory=DimensionsConfig)
     collector: CollectorConfig = field(default_factory=CollectorConfig)
-    stop_verifier: StopVerifierConfig = field(default_factory=StopVerifierConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     report: ReportConfig = field(default_factory=ReportConfig)
     freshness: FreshnessConfig = field(default_factory=FreshnessConfig)
@@ -222,11 +191,9 @@ def load_config(path: str | os.PathLike | None = None) -> AppConfig:
         max_tokens=raw.get("max_tokens", 2048),
         llm=_build_section(LLMConfig, raw.get("llm")),
         budget=_build_section(BudgetConfig, raw.get("budget")),
-        termination=_build_section(TerminationConfig, raw.get("termination")),
         execution=_build_section(ExecutionConfig, raw.get("execution")),
         dimensions=_build_section(DimensionsConfig, raw.get("dimensions")),
         collector=_build_section(CollectorConfig, raw.get("collector")),
-        stop_verifier=_build_section(StopVerifierConfig, raw.get("stop_verifier")),
         memory=_build_section(MemoryConfig, raw.get("memory")),
         report=_build_section(ReportConfig, raw.get("report")),
         freshness=_build_freshness(raw.get("freshness")),
