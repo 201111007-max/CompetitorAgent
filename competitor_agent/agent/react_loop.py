@@ -10,7 +10,7 @@ ReactLoop 负责跨轮次的预算控制、错误处理与 ProgressEvent 产出�
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable
 
 from competitor_agent.agent.react_agent import ReactAgent
@@ -31,6 +31,7 @@ class ReactRunResult:
     steps: int = 0
     cancelled: bool = False
     budget_exhausted: bool = False
+    transcript: list[dict] = field(default_factory=list)  # 工具步记录（设计文档 49 §3.5）
 
 
 class ReactLoop:
@@ -44,6 +45,9 @@ class ReactLoop:
         budget: 迭代预算（共享步数/成本，None 不限制）
         memory_context_fn: (task) -> 记忆召回文本（设计文档 35 的 recent_context，None 跳过）
         rag_fn: (task) -> 知识库检索文本（None 跳过）
+        system_prompt_override: 覆盖基础系统提示（Lead/子 Agent 专属提示 + skills，设计文档 49 §3.7）
+        plan_first: 首步强制 make_plan（设计文档 49 §3.5）；规划结果存入 self.plan
+        plan_sink: 可选自定义规划接收器（默认写 self.plan）
     """
 
     def __init__(
@@ -56,6 +60,9 @@ class ReactLoop:
         memory_context_fn: Callable[[str], str] | None = None,
         rag_fn: Callable[[str], str] | None = None,
         obs_max_chars: int | None = None,
+        system_prompt_override: str | None = None,
+        plan_first: bool = False,
+        plan_sink: Callable[[str], None] | None = None,
     ) -> None:
         self._agent = agent
         self._max_steps = max_steps
@@ -66,6 +73,10 @@ class ReactLoop:
         self._rag_fn = rag_fn
         # 单条 Observation 截断上限（设计文档 46 §3.2）：None 用 ReactAgent 默认值
         self._obs_max_chars = obs_max_chars
+        self._system_prompt_override = system_prompt_override
+        self._plan_first = plan_first
+        self._plan_sink = plan_sink
+        self.plan: dict | None = None  # make_plan 结果（供报告组装/记忆写侧）
 
     def run(self, task: str) -> str:
         """运行一次分析会话，返回最终结论文本（向后兼容：不携带取消/预算状态）。"""
@@ -77,6 +88,7 @@ class ReactLoop:
         返回完整结果（结论文本 + 步数 + 取消/预算耗尽标志），供结构化产物消费。
         """
         system_prompt = self._agent.build_system_prompt(
+            instructions=self._system_prompt_override or "",
             notes=self._memory_notes(task),
             knowledge=self._rag_knowledge(task),
         )
@@ -90,6 +102,9 @@ class ReactLoop:
                 max_steps=self._max_steps,
                 step_guard=self._step_guard(result),
                 obs_max_chars=self._obs_max_chars,
+                mandatory_first_tool="make_plan" if self._plan_first else None,
+                first_tool_sink=self._on_plan,
+                on_step=lambda rec: result.transcript.append(rec),
             )
             # 取消/预算中断时 ReactAgent 返回"已达最大步数"，此处覆盖为准确终止文案
             if result.cancelled:
@@ -108,6 +123,32 @@ class ReactLoop:
             self._emit(ProgressEvent(event="error", phase="react", message=str(exc)))
         self._emit(ProgressEvent(event="phase_complete", phase="react", message="ReAct 推理完成"))
         return result
+
+    def run_subagent(self, task: str) -> ReactRunResult:
+        """运行一个子 Agent 会话（设计文档 49 §3.5）：复用 run_with_result 语义。
+
+        子 Agent 不强制 make_plan（任务直接给定），独立预算/会话、共享取消/memory/RAG。
+        """
+        return self.run_with_result(task)
+
+    def _on_plan(self, plan_text: str) -> None:
+        """make_plan 结果接收器：尝试解析为 dict 存入 self.plan（供报告组装/记忆写侧）。
+
+        解析失败/非 dict 时 self.plan 保持 None（report 侧按无有效 plan → partial）。
+        """
+        import json
+
+        try:
+            parsed = json.loads(plan_text)
+        except (json.JSONDecodeError, TypeError):
+            logger.warning("make_plan 结果非 JSON，plan 未记录: %s", plan_text[:80])
+            self.plan = None
+            return
+        if isinstance(parsed, dict) and parsed.get("competitor"):
+            self.plan = parsed
+        else:
+            logger.warning("make_plan 结果缺 competitor，plan 未记录")
+            self.plan = None
 
     def _step_guard(self, result: ReactRunResult) -> Callable[[], bool] | None:
         """每步前置检查：先取消、后预算。返回 False 提前终止循环。"""
