@@ -827,3 +827,43 @@ dev:
   `[REVIEWED]` 标注、新鲜跳过采集复用归档/过期照常采集/未启用忽略归档、跨维度冲突渲染与开关）。
 - **回归**：全量 **958 passed / 6 skipped**（+55；1 个环境性失败同前：本机已装 playwright）；ruff 改动文件通过、
   mypy 改动文件不新增错误（远程既有 129 项另行处理）。
+
+## 21. 第七轮评审待办（多 Agent LLM 主导编排，设计文档 49 重写）
+
+> 状态背景：2026-08-18 用户决策——**吸收 deer-flow 多 Agent 模型，把 49 从"固定 TeamOrchestrator 流水线"
+> 重写为 LLM 主导编排**：Lead Agent 用 `delegate` 工具动态委派 + 独立 LLM 子 Agent 后台线程池并发 +
+> 结果以 Observation 回填 Lead 会话（仿 deer-flow `task_tool.py`/`subagents/executor.py` 的委派-回填模型，
+> **不引入 LangGraph**，复用本项目 `ReactAgent`/`ReactLoop`）。competitor_agent 独有流程/校验脚本保留为
+> **skill（知识注入）或工具（可调用函数）**；安全兜底（url_guard/注入防护/预算/取消/checkpoint/聚合渲染/评测）保持代码。
+> 上一版 49（team/ 固定流水线 + 5 项领域编排）**废弃删除**。设计文档见
+> `doc/plan/issue_designs/49_domain_agent_orchestration_design.md`（2026-08-18 重写，待实施）。
+
+| 项 | 内容 | 优先级 | 状态 |
+|---|---|---|---|
+| **49 多 Agent LLM 主导编排**（deer-flow 式，重写） | Lead = `ReactAgent`+`make_plan`+`delegate`（批量后台并发+回填）；子 Agent = `SubagentRegistry` 预注册 6 维度（独立 ReactLoop+维度 skill+工具子集，排除 analyze_competitor）；保留逻辑 → `select_source`/`validate_facts`/`detect_conflict`/`check_freshness`/`analyze_pricing`/`estimate_costs` 工具；`facade/react_report.py` 组 REPORT_SCHEMA→CompetitorReport；`BenchmarkMockLLM` ReAct-scripted + HARNESS_VERSION 0.7 重定门禁；删 team//strategic_loop/gap_executor/tactical_loop/single orchestrator/subagent/parallel_runner/stop_verifier/analyzers/source_selector | 中高 | 🚧 实施中（2026-08-18，M1 起） |
+
+### 21.1 实施里程碑
+
+| # | 里程碑 | 产出 | 状态 |
+|---|---|---|---|
+| 0 | 设计文档重写 + README 索引 + §21 登记 | 本段 + 索引 | ✅ 2026-08-18 |
+| 1 | 核心 agent | `react_schemas.py`/`subagent_registry.py`/`delegate_tool.py`/Lead+子 Agent prompt/`react_loop` plan-first+transcript/`tool_registry` exclude+extra | 🚧 |
+| 2 | facade 换核 | `react_report.py` assemble/`api.py` 收拢 ReAct+薄包装/`_record_memory_success` 单点/resume 重构/analyze_pricing 去 SourceSelector/cli/web_app | ⬜ |
+| 3 | 删除 | team//strategic_loop/gap_executor/tactical_loop/orchestrator/subagent/parallel_runner/stop_verifier/analyzers/source_selector/spa_extractor/providers + config 死字段 | ⬜ |
+| 4 | 评测 | benchmark 0.7 门禁/ablation no-tools/behavior_eval make_plan/test_orchestration_eval | ⬜ |
+| 5 | 测试迁移 | 删 ~15 文件 + 改写 ~30 文件，按目录分批跑到绿（最大） | ⬜ |
+| 6 | 文档 | README/CHANGELOG/docs/*.md 无流水线叙事 | ⬜ |
+
+### 21.2 保留逻辑 → skill / 工具 / 代码兜底映射
+
+- **skill 注入**（不进决策）：planning / 6×`<dim>_analysis` / fact_verification / confidence_disclosure → Lead 与子 Agent system prompt。
+- **工具化**：SourceSelector→`select_source`；FactValidator/`_count_numeric_conflicts`→`validate_facts`；
+  ConflictRegistry→`detect_conflict`；FreshnessGate→`check_freshness`；PricingAnalyzer 结构归一化/成本估算→`analyze_pricing`/`estimate_costs`。
+- **代码强制兜底**（不进 LLM）：url_guard / 注入防护 / 预算 / 取消 / checkpoint / 聚合渲染 / 归档导出 / 评测 harness。
+
+### 21.3 不变量（评审门禁）
+
+- `_isolate_llm_env` autouse fixture 保留（测试绝不触发真实 LLM）；不写 API key 配置值。
+- 安全兜底逻辑强制代码，LLM 决策不覆盖；`analyze_competitor` 从子 Agent/Lead 工具面排除（防递归）。
+- mock 全量门禁在 `subagents.enabled=true` 下通过（字段 ≥0.90 / 幻觉 ≤0.05 / 工具选择 ≥0.85 / trace 100%），HARNESS_VERSION 0.7.0。
+- 子 Agent 后台并发线程安全：复用已加锁 `IterationBudget`/`CompetitorStore` RLock。
