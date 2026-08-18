@@ -101,21 +101,18 @@ freshness:
     roadmap: 14
   refresh_check_enabled: true    # refresh_stale 定时重爬开关
 
-# ===== 多 Agent 领域差异化编排（设计文档 49）=====
-# 默认保守：评审/新鲜度委派默认关（零行为变化），冲突检测/去重/经验排序默认开（无副作用）。
-orchestration:
-  reviewer:
-    enabled: false          # 对抗式评审第 5 角色；开启后 Validator→Reviewer→Reporter，
-                            # needs_revision 回灌 Analyzer 修订 ≤1 轮，超限标注 [REVIEWED]
-  freshness_delegation:
-    enabled: false          # 新鲜度驱动委派：过期维度优先采集、新鲜维度跳过采集复用归档、
-                            # 时间线变更事件命中维度提权重采（委派期预防性跳过）
-  cross_dimension_conflict:
-    enabled: true           # 跨维度冲突检测：同源（content_hash）同键异值 → 冲突标注/评审
-  source_dedup:
-    enabled: true           # 跨竞品同源去重：URL→content_hash 缓存，compare 多竞品共享源省抓取
-  experience_routing:
-    enabled: true           # 经验路由委派：按 L4 模式排序缺口执行顺序（纯排序不改缺口集合）
+# ===== 多 Agent LLM 主导编排（设计文档 49）=====
+# analyze() 主路径 = Lead ReAct 编排：make_plan → delegate 维度子 Agent → 复核工具 → Final Answer。
+# 安全兜底（url_guard/注入防护/预算/取消/checkpoint/聚合渲染）保持代码，不进 LLM。
+subagents:
+  enabled: true            # analyze() 主路径 = Lead ReAct 编排
+  max_concurrent: 3        # delegate 一次最大并发子 Agent 数（对齐 budget.max_parallel_subagents）
+  timeout_seconds: 60      # 子 Agent 单次执行超时
+tools:
+  validate_facts: true     # 复核工具（事实/数值冲突核验）注册
+  detect_conflict: true    # 跨维度冲突检测工具注册
+  check_freshness: true    # 新鲜度查询工具注册
+  select_source: true      # 选源工具注册（确定性候选由代码生成）
 
 # ===== 可观测性 =====
 observability:

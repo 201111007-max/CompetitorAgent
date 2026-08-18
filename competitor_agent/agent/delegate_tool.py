@@ -145,7 +145,7 @@ def make_delegate_tool(
 
     registry = registry or get_subagent_registry()
 
-    def delegate(task: str, dimensions: list[str]) -> str:
+    def delegate(dimensions: list[str], task: str = "") -> str:
         dims = [d for d in (dimensions or []) if registry.get(d)]
         if not dims:
             available = ", ".join(registry.names())

@@ -21,18 +21,14 @@ from competitor_agent.domain_types.info_gap import InfoGap
 from competitor_agent.domain_types.observation import Observation
 from competitor_agent.domain_types.pricing import (
     DAILY_SCENARIOS,
-    PricingPlan,
     PricingProfile,
-    UsageBilling,
+    compose_summary,
+    estimate_costs,
+    extract_profile,
+    parse_plan,
+    parse_usage,
 )
 from competitor_agent.domain_types.report import DimensionResult
-
-_TIER_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("enterprise", ("enterprise", "ent ", "contact sales")),
-    ("business", ("business", "team", "teams")),
-    ("pro", ("pro", "plus", "standard", "start")),
-    ("free", ("free",)),
-)
 
 
 class PricingAnalyzer(BaseCompetitorAnalyzer):
@@ -104,158 +100,18 @@ class PricingAnalyzer(BaseCompetitorAnalyzer):
 # ── 结构抽取 ─────────────────────────────────────────────────────────
 
 
-def _parse_plan(data: Any) -> PricingPlan | None:
-    """plan dict（LLM 两种键形态）→ PricingPlan。"""
-    if not isinstance(data, dict):
-        return None
-    name = str(data.get("name") or "")
-    tier = str(data.get("tier") or "") or _detect_tier(name)
-    monthly = _to_maybe_float(data.get("monthly_price_usd"))
-    if monthly is None:
-        monthly = _to_maybe_float(data.get("monthly_price"))
-    annual = _to_maybe_float(data.get("annual_price_usd"))
-    if annual is None:
-        annual = _to_maybe_float(data.get("annual_price"))
-    if monthly is None and annual is None:
-        price = _to_maybe_float(data.get("price"))
-        period = str(data.get("period") or "").lower()
-        if price is not None and period in ("year", "yr", "annual", "yearly"):
-            annual = price
-        elif price is not None:
-            monthly = price
-    limits = dict(data.get("limits") or {})
-    requires_quote = bool(data.get("requires_quote", False))
-    if not requires_quote and tier == "enterprise" and monthly is None and annual is None:
-        requires_quote = True
-    return PricingPlan(
-        tier=tier,
-        name=name,
-        monthly_price_usd=monthly,
-        annual_price_usd=annual,
-        limits=limits,
-        requires_quote=requires_quote,
-    )
-
-
-def _parse_usage(data: Any) -> UsageBilling | None:
-    if not isinstance(data, dict):
-        return None
-    unit = str(data.get("unit") or "request")
-    per = _to_maybe_float(data.get("per_unit_usd", data.get("per_unit_price")))
-    included = _to_maybe_int(data.get("included_units", data.get("quantity")))
-    tiers: dict[str, float] = {}
-    raw = data.get("model_tiers") or {}
-    if isinstance(raw, dict):
-        for k, v in raw.items():
-            fv = _to_maybe_float(v)
-            if fv is not None:
-                tiers[str(k).lower()] = fv
-    if per is None and not tiers and included is None:
-        return None
-    return UsageBilling(unit=unit, per_unit_usd=per, model_tiers=tiers, included_units=included)
-
-
-def _extract_profile(details: dict[str, Any], evidence: list[Any]) -> PricingProfile:
-    """details（LLM 产物）→ PricingProfile（结构抽取，设计文档 27 §2.1）。"""
-    plans = [_parse_plan(d) for d in details.get("plans") or []]
-    plans = [p for p in plans if p is not None]
-    usage = _parse_usage(details.get("usage"))
-    urls = [str(getattr(e, "url", "")) for e in evidence if getattr(e, "url", "")]
-    return PricingProfile(
-        plans=plans,
-        usage=usage,
-        as_of=datetime.now(timezone.utc).isoformat(),
-        source_urls=urls,
-    )
-
-
-# ── 成本估算（设计文档 27 §2.2） ─────────────────────────────────────
-
-
-def _limit_requests(limits: dict[str, str]) -> int | None:
-    """计划限额里按请求/消息计的数值上限（用于无按量单价时判定超限）。"""
-    for value in limits.values():
-        m = re.search(r"(\d+)\s*(requests?|messages?|conversations?|runs?)\b", str(value), re.IGNORECASE)
-        if m:
-            return int(m.group(1))
-    return None
-
-
-def _plan_cost(plan: PricingPlan, usage: UsageBilling | None, monthly_requests: int) -> float | None:
-    """单档月成本：档价 + 超限额按量追加；无法定价时 None（不编造）。"""
-    if plan.requires_quote and plan.monthly_price_usd is None:
-        return None  # 企业档需询价：不猜数字
-    per = usage.per_unit_usd if usage else None
-    included = usage.included_units if usage else None
-    cap = _limit_requests(plan.limits)
-    if per is not None:
-        base = plan.monthly_price_usd if plan.monthly_price_usd is not None else 0.0
-        limit = included if included is not None else cap
-        overage = max(0, monthly_requests - (limit or 0))
-        return base + overage * per
-    base = plan.monthly_price_usd
-    if base is None:
-        return None
-    if cap is not None and monthly_requests > cap:
-        return None  # 超限额但无按量单价：无法估算
-    return base
-
-
-def _estimate_costs(profile: PricingProfile, scenarios: dict[str, int]) -> dict[str, float | None]:
-    """各典型用量场景 → 最低一档的月成本估算（无数据场景为 None，避免幻觉）。"""
-    out: dict[str, float | None] = {}
-    if not profile.plans:
-        return out
-    for label, daily in scenarios.items():
-        monthly = daily * 30
-        values = [_plan_cost(p, profile.usage, monthly) for p in profile.plans]
-        numeric = [v for v in values if v is not None]
-        out[label] = min(numeric) if numeric else None
-    return out
-
-
-# ── 业务辅助 ─────────────────────────────────────────────────────────
-
-
-def _compose_summary(base: str, profile: PricingProfile) -> str:
-    parts = [base] if base else []
-    costs = profile.cost_scenarios
-    if costs:
-        med = costs.get("medium")
-        if med is not None:
-            parts.append(f"中等用量（100 次/天）月成本估算 ≈ ${med:g}")
-        elif any(v is not None for v in costs.values()):
-            parts.append("成本估算仅覆盖部分场景")
-        else:
-            parts.append("成本估算需询价/数据不足，不编造")
-    if profile.usage is not None and profile.usage.per_unit_usd is not None:
-        parts.append(f"按量计费 ${profile.usage.per_unit_usd:g}/{profile.usage.unit or 'request'}")
-    if any(p.requires_quote for p in profile.plans):
-        parts.append("含需询价档位")
-    return "；".join(p for p in parts if p)
-
-
-def _detect_tier(name: str) -> str:
-    low = name.lower()
-    for tier, keywords in _TIER_KEYWORDS:
-        if any(keyword in low for keyword in keywords):
-            return tier
-    return "plan"
-
-
-def _to_maybe_float(value: Any) -> float | None:
-    if value is None:
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _to_maybe_int(value: Any) -> int | None:
-    if value is None:
-        return None
-    try:
-        return int(float(value))
-    except (TypeError, ValueError):
-        return None
+# ── 结构抽取 + 成本估算（设计文档 49 工具化迁入 domain_types/pricing.py）─────
+# 仅保留别名，行为与测试口径不变。
+from competitor_agent.domain_types.pricing import (  # noqa: E402
+    _TIER_KEYWORDS,
+    _compose_summary,
+    _detect_tier,
+    _estimate_costs,
+    _extract_profile,
+    _limit_requests,
+    _parse_plan,
+    _parse_usage,
+    _plan_cost,
+    _to_maybe_float,
+    _to_maybe_int,
+)

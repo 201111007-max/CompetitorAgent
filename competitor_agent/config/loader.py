@@ -137,10 +137,29 @@ class SecurityConfig:
 
 
 @dataclass
-class OrchestrationConfig:
-    """多 Agent 领域差异化编排开关（设计文档 49 §4.1）
+class SubagentsConfig:
+    """维度子 Agent（设计文档 49 §3.2/§4.1）：analyze() 主路径 = Lead ReAct 编排 + delegate 并发"""
 
-    默认全部保守：评审/新鲜度委派默认关（零行为变化），冲突检测/去重/经验排序默认开（无副作用）。
+    enabled: bool = True  # 主路径开关（Lead 编排委派子 Agent）
+    max_concurrent: int = 3  # delegate 一次最大并发子 Agent 数（对齐 budget.max_parallel_subagents）
+    timeout_seconds: float = 60  # 子 Agent 单次执行超时
+
+
+@dataclass
+class ToolsConfig:
+    """Lead 复核工具注册开关（设计文档 49 §4.1）：默认注册即用"""
+
+    validate_facts: bool = True  # 数值真值核对工具
+    detect_conflict: bool = True  # 跨维度冲突检测工具
+    check_freshness: bool = True  # 新鲜度查询工具
+    select_source: bool = True  # 选源工具（确定性候选由代码生成）
+
+
+@dataclass
+class OrchestrationConfig:
+    """[M3 删除] 旧 team 流水线编排开关——已被工具化/LLM 编排取代。
+
+    仅保留供 team/ 删除前的导入兼容（AppConfig 不再装配）。
     """
 
     reviewer_enabled: bool = False
@@ -170,7 +189,8 @@ class AppConfig:
     freshness: FreshnessConfig = field(default_factory=FreshnessConfig)
     observability: ObservabilityConfig = field(default_factory=ObservabilityConfig)
     security: SecurityConfig = field(default_factory=SecurityConfig)
-    orchestration: OrchestrationConfig = field(default_factory=OrchestrationConfig)
+    subagents: SubagentsConfig = field(default_factory=SubagentsConfig)
+    tools: ToolsConfig = field(default_factory=ToolsConfig)
 
 
 def _build_section(cls: type[Any], data: dict[str, Any] | None) -> Any:
@@ -212,7 +232,8 @@ def load_config(path: str | os.PathLike | None = None) -> AppConfig:
         freshness=_build_freshness(raw.get("freshness")),
         observability=_build_section(ObservabilityConfig, raw.get("observability")),
         security=_build_security(raw.get("security")),
-        orchestration=_build_orchestration(raw.get("orchestration")),
+        subagents=_build_section(SubagentsConfig, raw.get("subagents")),
+        tools=_build_section(ToolsConfig, raw.get("tools")),
     )
 
 
@@ -230,26 +251,4 @@ def _build_security(data: dict[str, Any] | None) -> SecurityConfig:
     """构造安全配置：token 优先从环境变量 COMPETITOR_AUTH_TOKEN 读取，不明文落码。"""
     cfg = _build_section(SecurityConfig, data)
     cfg.auth_token = os.environ.get("COMPETITOR_AUTH_TOKEN", cfg.auth_token)
-    return cfg
-
-
-def _build_orchestration(data: dict[str, Any] | None) -> OrchestrationConfig:
-    """构造编排配置：读取嵌套 ``orchestration.<feature>.enabled`` 结构（设计文档 49）。"""
-    cfg = OrchestrationConfig()
-    if not isinstance(data, dict):
-        return cfg
-
-    def _enabled(name: str, current: bool) -> bool:
-        section = data.get(name)
-        if isinstance(section, dict) and "enabled" in section:
-            return bool(section["enabled"])
-        return current
-
-    cfg.reviewer_enabled = _enabled("reviewer", cfg.reviewer_enabled)
-    cfg.freshness_delegation_enabled = _enabled("freshness_delegation", cfg.freshness_delegation_enabled)
-    cfg.cross_dimension_conflict_enabled = _enabled(
-        "cross_dimension_conflict", cfg.cross_dimension_conflict_enabled
-    )
-    cfg.source_dedup_enabled = _enabled("source_dedup", cfg.source_dedup_enabled)
-    cfg.experience_routing_enabled = _enabled("experience_routing", cfg.experience_routing_enabled)
     return cfg

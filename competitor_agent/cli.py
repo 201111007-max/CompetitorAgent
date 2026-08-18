@@ -297,7 +297,7 @@ def build_parser() -> argparse.ArgumentParser:
     analyze_p = sub.add_parser("analyze", help="单竞品/对比分析")
     analyze_p.add_argument("task", nargs="+", help="竞品名或分析任务")
     analyze_p.add_argument("--out", dest="out_dir", default=None, help="报告输出目录")
-    analyze_p.add_argument("--mode", default="team", choices=["single", "team"], help="执行模式: team=多 Agent 流水线(默认), single=单 Agent")
+    analyze_p.add_argument("--mode", default="team", choices=["single", "team"], help="[已废弃] 历史参数，统一走 Lead ReAct 编排（设计文档 49）")
 
     history_p = sub.add_parser("history", help="查询历史分析记录")
     history_p.add_argument("--competitor", default=None, help="按竞品过滤")
@@ -335,6 +335,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_analyze(api, args.oneshot, llm=llm, use_llm=use_llm)
 
     if args.command == "analyze":
+        if args.mode != "team":
+            print("[提示] --mode 已废弃，统一走 Lead ReAct 编排（设计文档 49），忽略 --mode=%s" % args.mode)
         task = " ".join(args.task)
         return _run_analyze(api, task, out_dir=args.out_dir, mode=args.mode, llm=llm, use_llm=use_llm)
     if args.command == "history":

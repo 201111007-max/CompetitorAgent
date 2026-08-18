@@ -109,27 +109,87 @@ class ConflictRegistry:
         return conflicts
 
     def _collect_claims(self, details: Any) -> list[tuple[str, Any]]:
-        """扁平化 details：收集命中共享事实键的叶子值（支持嵌套 dict / list）。"""
-        claims: list[tuple[str, Any]] = []
-        if not isinstance(details, dict):
-            return claims
-        stack: list[Any] = [details]
-        while stack:
-            node = stack.pop()
-            if not isinstance(node, dict):
-                continue
-            for key, value in node.items():
-                if (
-                    key in self._claim_keys
-                    and isinstance(value, (int, float, str))
-                    and not isinstance(value, bool)
-                ):
-                    claims.append((key, value))
-                elif isinstance(value, dict):
-                    stack.append(value)
-                elif isinstance(value, list):
-                    stack.extend(item for item in value if isinstance(item, dict))
+        return collect_claims(details, self._claim_keys)
+
+
+def collect_claims(details: Any, claim_keys: frozenset[str]) -> list[tuple[str, Any]]:
+    """扁平化 details：收集命中共享事实键的叶子值（支持嵌套 dict / list）。"""
+    claims: list[tuple[str, Any]] = []
+    if not isinstance(details, dict):
         return claims
+    stack: list[Any] = [details]
+    while stack:
+        node = stack.pop()
+        if not isinstance(node, dict):
+            continue
+        for key, value in node.items():
+            if (
+                key in claim_keys
+                and isinstance(value, (int, float, str))
+                and not isinstance(value, bool)
+            ):
+                claims.append((key, value))
+            elif isinstance(value, dict):
+                stack.append(value)
+            elif isinstance(value, list):
+                stack.extend(item for item in value if isinstance(item, dict))
+    return claims
 
 
-__all__ = ["CrossDimensionConflict", "ConflictRegistry", "_SHARED_CLAIM_KEYS"]
+def detect_conflicts_across(
+    dimension_payloads: list[dict[str, Any]],
+    claim_keys: frozenset[str] | None = None,
+) -> list[CrossDimensionConflict]:
+    """按证据 URL 跨维度检测同源同键冲突（设计文档 49 ReAct 路径）。
+
+    ReAct 路径无 ``content_hash``（LLM 只给 evidence_urls），故以
+    ``(claim_key × 首个证据 URL)`` 为同源键：不同维度引用同一 URL 却给不同值 → 冲突。
+    每个 payload：``{"dimension", "details", "evidence_urls": [...]}``。
+    """
+    keys = claim_keys if claim_keys is not None else _SHARED_CLAIM_KEYS
+    index: dict[tuple[str, str], dict[str, Any]] = {}
+    for payload in dimension_payloads:
+        dim = str(payload.get("dimension") or "")
+        if not dim:
+            continue
+        details = payload.get("details")
+        urls = [str(u) for u in (payload.get("evidence_urls") or []) if u]
+        if not urls:
+            continue
+        for claim_key, value in collect_claims(details, keys):
+            for url in urls:
+                by_dim = index.setdefault((claim_key, url), {})
+                by_dim[dim] = value
+    conflicts: list[CrossDimensionConflict] = []
+    for (claim_key, url), by_dim in index.items():
+        if len(by_dim) < 2:
+            continue
+        unique: dict[str, list[str]] = {}
+        for dimension, value in by_dim.items():
+            unique.setdefault(_value_key(value), []).append(dimension)
+        if len(unique) < 2:
+            continue
+        ordered = sorted(by_dim.items(), key=lambda kv: kv[0])
+        dim_a, value_a = ordered[0]
+        dim_b, value_b = next((d, v) for d, v in ordered if _value_key(v) != _value_key(value_a))
+        conflicts.append(
+            CrossDimensionConflict(
+                claim_key=claim_key,
+                dimension_a=dim_a,
+                dimension_b=dim_b,
+                value_a=value_a,
+                value_b=value_b,
+                evidence_hashes=[url],
+            )
+        )
+    conflicts.sort(key=lambda c: (c.claim_key, c.dimension_a, c.dimension_b))
+    return conflicts
+
+
+__all__ = [
+    "CrossDimensionConflict",
+    "ConflictRegistry",
+    "_SHARED_CLAIM_KEYS",
+    "collect_claims",
+    "detect_conflicts_across",
+]
