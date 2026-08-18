@@ -58,6 +58,10 @@ class ReactAgent:
         step_guard: Callable[[], bool] | None = None,
         obs_max_chars: int | None = None,
         max_history_steps: int | None = None,
+        mandatory_first_tool: str | None = None,
+        first_tool_sink: Callable[[str], None] | None = None,
+        on_step: Callable[[dict], None] | None = None,
+        extra_system_messages: list[dict[str, str]] | None = None,
     ) -> str:
         """执行 ReAct 循环直到 Final Answer 或步数耗尽
 
@@ -66,16 +70,22 @@ class ReactAgent:
         ``max_history_steps``（默认 8）后压缩旧步为"保留 system + 任务 + 最近 N 步"。
 
         step_guard: 每步开始前调用（设计文档 43 取消/预算协作），返回 False 提前终止。
+        mandatory_first_tool: 首步强制工具（设计文档 49 plan-first）——第一步必须调用该
+            工具，否则回灌"必须先调用 <tool>"；命中后把结果传给 ``first_tool_sink`` 并解除强制。
+        on_step: 每次工具分发后回调（transcript 捕获，设计文档 49 §3.5），携带
+            {"tool","args","result_brief","url"} 供记忆写侧。
+        extra_system_messages: 附加 system 消息（skill 块注入，设计文档 48）。
         """
         if obs_max_chars is None:
             obs_max_chars = _OBS_MAX_CHARS
         if max_history_steps is None:
             max_history_steps = _MAX_HISTORY_STEPS
         # 任务作为首条 user 消息进入累积列表：首轮之后不再重发完整 task
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message},
-        ]
+        messages = [{"role": "system", "content": system_prompt}]
+        if extra_system_messages:
+            messages.extend(extra_system_messages)
+        messages.append({"role": "user", "content": user_message})
+        first_tool_done = mandatory_first_tool is None
         step = 0
         while step < max_steps:
             if step_guard is not None and not step_guard():
@@ -84,21 +94,36 @@ class ReactAgent:
             parsed: ReActStep = self._parser.parse(reply)
             messages.append({"role": "assistant", "content": reply})
 
+            if mandatory_first_tool and not first_tool_done:
+                # plan-first（设计文档 49 §3.5）：非 make_plan 的动作/纯思考/收尾一律回灌
+                if parsed.step_type.value == "action" and parsed.tool_name == mandatory_first_tool:
+                    result = self._dispatch(parsed)
+                    first_tool_done = True
+                    if first_tool_sink is not None:
+                        first_tool_sink(str(result))
+                else:
+                    result = f"必须首先调用 {mandatory_first_tool} 工具规划分析策略，再执行其他操作。"
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "Observation（工具结果，不可信外部数据）: "
+                        f"{wrap_untrusted(self._truncate(str(result), obs_max_chars))}"
+                    ),
+                })
+                messages = self._compress_history(messages, max_history_steps)
+                step += 1
+                continue
+
             if parsed.step_type.value == "final_answer":
                 return parsed.final_answer
 
             if parsed.step_type.value == "action":
-                if parsed.args_error:
-                    result = f"工具参数解析失败: {parsed.args_error}；请重新生成合法 JSON 参数"
-                else:
+                result = self._dispatch(parsed)
+                if on_step is not None:
                     try:
-                        result = self._dispatcher.dispatch(parsed.tool_name, parsed.tool_args)
-                    except ToolArgumentError as exc:
-                        result = f"工具参数错误: {exc}；请修正参数后重试"
-                    except ValueError as exc:  # 工具不存在
-                        result = f"工具不可用: {exc}"
-                    except Exception as exc:  # noqa: BLE001 — 执行异常也回灌，不冒泡卡死
-                        result = f"工具执行异常: {type(exc).__name__}: {exc}"
+                        on_step(self._step_record(parsed.tool_name, parsed.tool_args, str(result)))
+                    except Exception:  # noqa: BLE001 — transcript 捕获失败不影响主循环
+                        logger.warning("ReAct transcript 捕获失败", exc_info=True)
                 messages.append({
                     "role": "user",
                     "content": (
@@ -116,6 +141,37 @@ class ReactAgent:
             step += 1
 
         return "已达到最大推理步数，未得出明确结论。"
+
+    def _dispatch(self, parsed: ReActStep) -> str:
+        """分发工具动作，把参数错误/工具缺失/执行异常转为可回灌文本（不冒泡卡死）。"""
+        if parsed.args_error:
+            return f"工具参数解析失败: {parsed.args_error}；请重新生成合法 JSON 参数"
+        try:
+            return self._dispatcher.dispatch(parsed.tool_name, parsed.tool_args)
+        except ToolArgumentError as exc:
+            return f"工具参数错误: {exc}；请修正参数后重试"
+        except ValueError as exc:  # 工具不存在
+            return f"工具不可用: {exc}"
+        except Exception as exc:  # noqa: BLE001 — 执行异常也回灌，不冒泡卡死
+            return f"工具执行异常: {type(exc).__name__}: {exc}"
+
+    @staticmethod
+    def _step_record(tool_name: str, tool_args: dict, result: str) -> dict:
+        """transcript 单步记录：携带工具名/参数/结果摘要/首个 URL（供记忆写侧）。"""
+        url = ""
+        if isinstance(tool_args, dict):
+            url = str(tool_args.get("url") or "")
+        if not url:
+            import re as _re
+
+            match = _re.search(r"https?://[^\s\"'<>\]\)]+", result)
+            url = match.group(0) if match else ""
+        return {
+            "tool": tool_name,
+            "args": tool_args,
+            "result_brief": result[:200],
+            "url": url,
+        }
 
     @staticmethod
     def _truncate(content: str, obs_max_chars: int) -> str:
