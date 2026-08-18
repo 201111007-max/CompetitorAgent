@@ -1,14 +1,13 @@
 """CompetitorAnalysisAPI — 外部唯一入口
 
-组装：StrategicLoop（规划）→ 逐缺口 TacticalLoop（采集+分析）
-     → BudgetController（终止）→ ReportBuilder（汇总）
-设计文档 46：默认 use_llm=True（LLM 驱动主路径）。
-设计文档 47：主路径仅 LLM 解析/规划/分析，无规则降级；无 Key 抛 LLMUnavailableError。
+主路径（设计文档 47/49）：Lead ReAct 编排的多 Agent 流程——
+``analyze()`` 即 Lead Agent 推理循环：首步强制 ``make_plan``，之后由 LLM 自主
+委派维度子 Agent（``delegate`` 后台并发 + 结果回填）、调用复核工具
+（validate_facts/detect_conflict/check_freshness/select_source）、补证收尾，
+最后以 REPORT_SCHEMA JSON 收尾 → ``react_report.assemble`` → CompetitorReport。
+无 Key / LLM 不可用 → LLMUnavailableError（无静默规则降级，47 语义）。
 
-M4 新增：
-- analyze_stream(): 流式分析（SSE 事件推送）
-- cancel() / resume(): 中断与断点续跑
-- get_history(): 历史查询
+M4 新增：analyze_stream()（流式 SSE）/ cancel() / resume() / get_history()。
 """
 
 from __future__ import annotations
@@ -21,18 +20,33 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Callable
 
+from competitor_agent.agent.delegate_tool import (
+    DelegateRunner,
+    SubagentRuntime,
+    make_delegate_tool,
+)
+from competitor_agent.agent.make_plan import build_make_plan_tool
+from competitor_agent.agent.prompts.react_system import build_lead_system_prompt
 from competitor_agent.agent.react_agent import ReactAgent
 from competitor_agent.agent.react_loop import ReactLoop, ReactRunResult
+from competitor_agent.agent.review_tools import (
+    build_check_freshness_tool,
+    build_detect_conflict_tool,
+    build_estimate_costs_tool,
+    build_select_source_tool,
+    build_validate_facts_tool,
+)
+from competitor_agent.agent.subagent_registry import (
+    build_subagent,
+    get_subagent_registry,
+)
 from competitor_agent.agent.tool_registry import build_react_dispatcher
-from competitor_agent.analyzers.registry import AnalyzerRegistry
-from competitor_agent.collector.providers import build_providers
-from competitor_agent.collector.source_selector import SourceSelector
 from competitor_agent.collector.web_extractor import WebExtractor
 from competitor_agent.config.loader import AppConfig, load_config
 from competitor_agent.core.alerting import Alert, AlertSink, ConsoleAlertSink
 from competitor_agent.core.alerting import report_diff as _diff_to_alerts
 from competitor_agent.core.budget import IterationBudget
-from competitor_agent.core.budget_controller import BudgetController, StopReason
+from competitor_agent.core.budget_controller import BudgetController
 from competitor_agent.core.checkpoint import (
     checkpoint_to_report,
     delete_checkpoint,
@@ -42,21 +56,16 @@ from competitor_agent.core.checkpoint import (
     set_cancel,
 )
 from competitor_agent.core.competitor_discoverer import CompetitorDiscoverer
-from competitor_agent.core.freshness_gate import FreshnessGate
 from competitor_agent.core.input_sanitizer import sanitize_task
-from competitor_agent.core.orchestrator import SingleOrchestrator
 from competitor_agent.core.report_builder import ReportBuilder
 from competitor_agent.core.report_exporter import (
     export_comparison_json,
     export_competitor_json,
 )
-from competitor_agent.core.source_dedup import SourceDedup
-from competitor_agent.core.stop_verifier import StopVerifier
-from competitor_agent.core.strategic_loop import StrategicPlanner
 from competitor_agent.core.task_parser import parse_task
 from competitor_agent.core.url_guard import URLError, guard_http_url
 from competitor_agent.domain_types.competitor import Competitor
-from competitor_agent.domain_types.enums import GapStatus, ResultStatus, TerminalState
+from competitor_agent.domain_types.enums import GapStatus, ResultStatus
 from competitor_agent.domain_types.events import ProgressEvent
 from competitor_agent.domain_types.freshness import ReportFreshness, stale_under_ttl
 from competitor_agent.domain_types.info_gap import InfoGap
@@ -67,7 +76,7 @@ from competitor_agent.domain_types.report import (
     CompetitorReport,
     DimensionResult,
 )
-from competitor_agent.domain_types.strategy import CompetitorStrategy
+from competitor_agent.facade import react_report
 from competitor_agent.interfaces.context import (
     AnalysisSession,
     ChatMessage,
@@ -84,9 +93,26 @@ from competitor_agent.observability.logger import (
     log_event,
     set_current_session,
 )
-from competitor_agent.team.orchestrator import TeamOrchestrator
 
 logger = logging.getLogger("competitor_agent.facade.api")
+
+# Lead Agent 推理步数上限（设计文档 49：make_plan → delegate → 复核 → Final Answer）
+_LEAD_MAX_STEPS = 12
+
+
+def _delegate_section_url(result: str, dimension: str) -> str:
+    """delegate 批量回填文本中该维度子结果块的首个 URL（按结果头切分）。"""
+    import re as _re
+
+    marker = f"[维度子 Agent 结果: {dimension}"
+    idx = result.find(marker)
+    if idx < 0:
+        marker = f"（请分析维度：{dimension}）"
+        idx = result.find(marker)
+    if idx < 0:
+        return ""
+    match = _re.search(r"https?://[^\s\"'<>\]\)]+", result[idx:])
+    return match.group(0) if match else ""
 
 
 class CompetitorAnalysisAPI:
@@ -108,7 +134,7 @@ class CompetitorAnalysisAPI:
         enable_memory: bool = True,  # 设计文档 30：消融开关（默认开启，行为不变）
         rag_store: object | None = None,  # 设计文档 30：消融可注入共享知识库实例
         vector_store: object | None = None,  # 设计文档 32：可注入向量层（测试/评测确定性 mock）
-        tool_dispatcher: object | None = None,  # 设计文档 44：链式分析工具补证分发器（可注入 mock）
+        tool_dispatcher: object | None = None,  # 历史兼容：已由 Lead 工具面取代，保留签名
     ) -> None:
         # 配置注入：显式参数优先，其次 config，最后默认值
         cfg = config or load_config()
@@ -121,42 +147,17 @@ class CompetitorAnalysisAPI:
         # enable_memory=False：门控全部记忆副作用（set_success_rates / _apply_memory_boost /
         # record_skill / record_outcome / archive_session），下游均判 `self._memory is None`
         self._memory = memory if enable_memory else None
+        self._tool_dispatcher = tool_dispatcher
 
-        self._planner = StrategicPlanner(
-            llm=llm,
-            use_llm=use_llm,
-            experience_routing=cfg.orchestration.experience_routing_enabled,
-        )
-        # 跨竞品同源去重（设计文档 49 §3.4）：单实例跨 analyze/compare 共享，命中省抓取
-        self._source_dedup: SourceDedup | None = (
-            SourceDedup() if cfg.orchestration.source_dedup_enabled else None
-        )
-        # 外部源提供方（设计文档 23）：按 config 构造；主开关默认关闭（无网络/无 Key 不触发真实网络）
-        providers = build_providers(cfg.collector)
-        self._providers: dict[str, object] = {p.kind: p for p in providers}
-        self._selector = SourceSelector(providers=providers)
-        if self._memory is not None:
-            self._selector.set_success_rates(self._memory.source_success_rates())
         self._extractor = extractor or WebExtractor()
-        # 工具补证分发器（设计文档 44）：链式分析触发时经 web_search/web_extract 补证。
-        # 未注入时用 MCP 工具集同源构建，web_extract 走真实采集链路 + URL 守卫（与 ReAct 同语义）；
-        # 构建只注册函数不触发网络（可注入 mock 供测试/评测确定性）。
-        self._verify_dispatcher = tool_dispatcher or build_react_dispatcher(
-            config=cfg,
-            web_extract=self._react_web_extract,
-        )
-        self._analyzers = AnalyzerRegistry(
-            llm=llm, use_llm=use_llm, tool_dispatcher=self._verify_dispatcher
-        )
         # 新鲜度 TTL（设计文档 26）：build() 为报告计算 freshness 元数据
         self._builder = ReportBuilder(dimension_ttl_days=cfg.freshness.dimension_ttl_days)
         self._budget = BudgetController(max_iterations=max_iterations, cost_limit=cost_limit)
-        self._verifier = StopVerifier()
         # 竞品时间线记忆（设计文档 26 §3.4）：跨分析 diff，独立于四层记忆
         self._timeline = timeline or TimelineMemory()
 
-        # RAG 知识库：采集后摄入 + 分析前检索注入（外部事实依据，降低幻觉）
-        # enable_rag=False：不组装知识库，GapExecutor/分析器对 None 走"跳过摄入/跳过检索"路径
+        # RAG 知识库：分析后摄入 + Lead/子 Agent 检索注入（外部事实依据，降低幻觉）
+        # enable_rag=False：不组装知识库，Lead/子 Agent 对 None 走"跳过检索"路径
         if enable_rag:
             from competitor_agent.knowledge_base.competitor_store import CompetitorStore
             from competitor_agent.knowledge_base.ingester import Ingester
@@ -177,9 +178,6 @@ class CompetitorAnalysisAPI:
             self._ingester = None
             self._retriever = None
             self._vector_store = None
-            self._store = None
-            self._ingester = None
-            self._retriever = None
 
         # 竞品发现器（设计文档 20）：仅 DISCOVERY 意图时被调用，web_tool 可注入
         self._discoverer = CompetitorDiscoverer(llm=llm, use_llm=use_llm, web_tool=web_tool)
@@ -191,77 +189,41 @@ class CompetitorAnalysisAPI:
         mode: str = "team",
         session_id: str | None = None,
     ) -> CompetitorReport:
-        """单竞品分析：输入任务文本 → CompetitorReport
+        """单竞品分析（设计文档 49）：Lead ReAct 编排 → CompetitorReport。
 
         Args:
             task: 用户任务文本（入站先做浅清洗 sanitize_task）
             conversation_history: 上一轮对话历史（ChatMessage 列表），
                 传入则把前序上下文摘要并入任务解析，支持多轮追问。
-            mode: 执行模式，team=多 Agent 流水线（默认），single=单 Agent 串行。
+            mode: 已废弃（历史兼容，仅告警）；统一走 Lead ReAct 编排。
             session_id: 外部会话 ID（如 Web 端 sid）。传入时复用，使内部取消标志
                 与外部一致（解决 Web 取消断链）；留空则自动生成。
         """
+        if mode != "team":
+            logger.warning("mode 参数已废弃（历史兼容），统一走 Lead ReAct 编排，忽略 mode=%s", mode)
         task = sanitize_task(task)
         task = self._disambiguate_with_history(task, conversation_history)
         sid = session_id or f"sess_{uuid.uuid4().hex[:8]}"
         set_current_session(sid)
-        # 同源去重按"单次分析"为界：每次独立分析清空缓存，保证重新抓取
-        # （否则时间线/新鲜度（设计文档 26）无法感知竞品变化）
-        if self._source_dedup is not None:
-            self._source_dedup.clear()
-        if mode == "team":
-            # team 路径自含 session_started 与规划埋点（analyze_team 内部统一）
-            return self.analyze_team(task, session_id=sid)
         slog = get_session_logger(sid)
         log_event(slog, "session_started", "init", f"会话 {sid} 启动", task=task)
-        self._emit(ProgressEvent(event="phase_start", phase="strategic", message=f"规划: {task}"))
-
-        strategy = self._planner.plan(task, memory=self._memory)
-        self._set_selector_penalties(strategy.competitor.name)
         self._emit(
-            ProgressEvent(
-                event="phase_complete",
-                phase="strategic",
-                message=f"识别竞品 {strategy.competitor.name}，{len(strategy.gaps)} 个缺口",
-            )
-        )
-        log_event(
-            slog, "competitor.resolved", "strategic",
-            f"识别竞品 {strategy.competitor.name}",
-            competitor=strategy.competitor.name,
-            source="registry" if strategy.competitor.official_links else "unknown",
-        )
-        log_event(
-            slog, "gaps.planned", "strategic",
-            f"规划 {len(strategy.gaps)} 个缺口",
-            gap_fields=[g.field for g in strategy.gaps],
+            ProgressEvent(event="phase_start", phase="react", message=f"Lead 编排: {task}")
         )
 
-        results: list[DimensionResult] = []
-        iteration_budget = IterationBudget(
-            max_iterations=self._budget.max_iterations,
-            cost_limit=self._budget.cost_limit,
+        loop, result = self._run_react_loop(task, sid)
+        terminal = (
+            "cancelled"
+            if result.cancelled
+            else ("partial" if result.budget_exhausted else "success")
         )
-
-        results = self._orchestrator_for("single").run(
-            strategy, iteration_budget, sid, task,
-            event_sink=self._emit, memory=self._memory,
-        )
-
-        stop = self._budget.should_stop(strategy.gaps)
-        pending = [g for g in strategy.gaps if not g.is_closed]
-        terminal = self._terminal_state(stop.reason, strategy)
-        log_event(
-            slog, "analysis.terminated", "terminate",
-            f"分析终止，终态={terminal.value}，原因={stop.reason}",
-            terminal_state=terminal.value, reason=stop.reason,
-        )
-
-        report = self._builder.build(
-            competitor=strategy.competitor,
-            results=results,
-            gaps_pending=pending,
-            terminal_state=terminal.value,
+        report = react_report.assemble(
+            lead_answer=result.answer,
+            competitor=self._lead_competitor(task, loop.plan),
+            loop_plan=loop.plan,
+            transcript=result.transcript,
+            builder=self._builder,
+            terminal_state=terminal,
         )
         log_event(
             slog, "report.built", "report",
@@ -269,15 +231,18 @@ class CompetitorAnalysisAPI:
             dimension_count=len(report.dimension_results),
             overall_confidence=round(report.overall_confidence, 3),
         )
+        # 记忆沉淀（唯一写侧）：成功与取消部分结果都沉淀（对齐 single 路径）
+        self._record_memory_success(report, result.transcript)
         if is_cancelled(sid):
             # 取消完成：保留 checkpoint 供 /resume 续跑，返回带部分结果的取消报告
-            logger.info("会话 %s 取消后返回部分结果（%d 个维度）", sid, len(results))
+            logger.info("会话 %s 取消后返回部分结果（%d 个维度）", sid, len(report.dimension_results))
+            self._save_checkpoint_for_resume(sid, task, report)
             close_session_log(sid)
             self._emit(
                 ProgressEvent(
                     event="cancelled",
                     phase="report",
-                    message=f"分析已取消，返回 {len(results)} 个已完成维度",
+                    message=f"分析已取消，返回 {len(report.dimension_results)} 个已完成维度",
                 )
             )
             return CancelledResult(
@@ -302,26 +267,10 @@ class CompetitorAnalysisAPI:
                 event="report",
                 phase="report",
                 progress=1.0,
-                message=f"报告生成完成，终态={terminal.value}",
+                message=f"报告生成完成，终态={terminal}",
             )
         )
         return report
-
-    # ── 统一编排：single 委托 SingleOrchestrator（问题 20 收敛缺口执行闭环）──
-
-    def _orchestrator_for(self, mode: str) -> SingleOrchestrator:
-        """按 mode 返回编排器：single 用缺口级闭环（复用 GapExecutor 采集分析段）。"""
-        return SingleOrchestrator(
-            config=self._config,
-            budget=self._budget,
-            selector=self._selector,
-            extractor=self._extractor,
-            analyzers=self._analyzers,
-            ingester=self._ingester,
-            retriever=self._retriever,
-            memory=self._memory,
-            providers=self._providers,
-        )
 
     @property
     def memory(self) -> IFourLayerMemory | None:
@@ -451,7 +400,7 @@ class CompetitorAnalysisAPI:
                     message=f"定时重爬过期竞品: {name}",
                 )
             )
-            report = self.analyze(name, mode="team", session_id=f"schedule_{uuid.uuid4().hex[:8]}")
+            report = self.analyze(name, session_id=f"schedule_{uuid.uuid4().hex[:8]}")
             refreshed.append(report)
             if prev is not None:
                 for alert in self.report_diff(prev, report):
@@ -494,63 +443,132 @@ class CompetitorAnalysisAPI:
         return self._timeline.report_for(name)
 
     def analyze_react(self, task: str, session_id: str | None = None) -> str:
-        """ReAct 模式：LLM 驱动工具调用（需 LLM Key），返回结论文本。
+        """ReAct 交互入口（设计文档 40/49）：Lead 编排循环，返回结论文本。
 
-        MCP 工具集多工具自主调用（设计文档 40）：web_search/github/pricing 等统一经
-        build_react_dispatcher 注册；web_extract 复用真实采集链路 + URL 守卫（设计文档 41）。
-        与主路径共享统一会话上下文（设计文档 43 §2.2）：session_id 取消协作、
-        IterationBudget 步数预算、记忆/RAG 注入、事件推送，步数计入共享 BudgetController。
+        与 analyze() 同源（make_plan 首步 + delegate + 复核工具），仅返回裸文本。
         """
-        loop = self._react_loop(task, session_id)
-        result = loop.run_with_result(task)
-        if result.steps:
-            self._budget.record_iteration(cost=0.01 * result.steps)
+        _, result = self._run_react_loop(task, session_id)
         return result.answer
 
     def analyze_react_report(self, task: str, session_id: str | None = None) -> CompetitorReport:
-        """ReAct 模式结构化入口（设计文档 43 §2.3）：产物入 CompetitorReport 而非裸字符串。
+        """ReAct 结构化入口（设计文档 43 §2.3 兼容）：产物入 CompetitorReport。
 
-        共享与 analyze 同源的会话上下文；结论文本优先按结构化 JSON
-        （summary/details/confidence，对齐设计文档 34 schema）解析为 DimensionResult，
-        非 JSON 时降级为单个 react 维度（summary=结论文本）。取消/预算耗尽 → 终态标注。
+        复用与 analyze() 同源的 Lead 编排；结论文本按 REPORT_SCHEMA JSON
+        组装为多维度报告，非 JSON 降级为单 react 维度（react_report.assemble）。
         """
-        loop = self._react_loop(task, session_id)
-        result = loop.run_with_result(task)
-        if result.steps:
-            self._budget.record_iteration(cost=0.01 * result.steps)
+        loop, result = self._run_react_loop(task, session_id)
         terminal = (
             "cancelled"
             if result.cancelled
             else ("partial" if result.budget_exhausted else "success")
         )
-        dr = self._react_dimension_result(result)
-        report = self._builder.build(
-            competitor=self._react_competitor(task),
-            results=[dr] if dr is not None else [],
-            gaps_pending=[],
+        return react_report.assemble(
+            lead_answer=result.answer,
+            competitor=self._lead_competitor(task, loop.plan),
+            loop_plan=loop.plan,
+            transcript=result.transcript,
+            builder=self._builder,
             terminal_state=terminal,
         )
-        return report
+
+    def _run_react_loop(self, task: str, session_id: str | None) -> tuple[ReactLoop, ReactRunResult]:
+        """构建 Lead ReactLoop 并运行；会话收尾统一回收子 Agent 线程池。"""
+        loop = self._react_loop(task, session_id)
+        try:
+            result = loop.run_with_result(task)
+        finally:
+            runner = getattr(self, "_delegate_runner", None)
+            if runner is not None:
+                runner.shutdown()
+                self._delegate_runner = None
+        if result.steps:
+            self._budget.record_iteration(cost=0.01 * result.steps)
+        return loop, result
 
     def _react_loop(self, task: str, session_id: str | None) -> ReactLoop:
-        """组装共享会话上下文的 ReactLoop（取消/预算/记忆/RAG/事件，与 analyze 同源）。"""
+        """组装 Lead ReactLoop（设计文档 49 §3.5/3.6）：plan-first + delegate + 复核工具。
+
+        - ``exclude=("analyze_competitor",)``：防递归调用 analyze()；
+        - ``extra_tools``：make_plan（首步强制）+ delegate（后台并发委派）+ 复核工具；
+        - 子 Agent 运行时经 ``DelegateRunner`` 后台线程池执行，共享取消/记忆/RAG。
+        """
+        if not self._config.subagents.enabled:
+            from competitor_agent.interfaces.exceptions import CompetitorAgentError
+
+            raise CompetitorAgentError("subagents.enabled=false 时 analyze() 主路径不可用（设计文档 49）")
+        max_concurrent = self._config.subagents.max_concurrent
+        timeout_seconds = self._config.subagents.timeout_seconds
+        lead_competitor = self._react_competitor(task)
+
+        def _subagent_loop(name: str, sub_task: str) -> ReactLoop:
+            # 子 Agent 步数由其 max_steps 兜底；diminishing_threshold=0 关闭"边际递减"
+            # 启发（ReAct 恒传 delta_tokens=0，否则第 3 步后必然误判预算耗尽）
+            budget = IterationBudget(
+                max_iterations=6,
+                cost_limit=self._budget.cost_limit,
+                diminishing_threshold=0,
+            )
+            return build_subagent(
+                name,
+                self._llm or LLMClient(),
+                config=self._config,
+                web_extract=self._react_web_extract,
+                session_id=session_id,
+                budget=budget,
+                memory_context_fn=lambda t: self._memory_ctx_for(lead_competitor.name, t),
+                rag_fn=lambda t: self._rag_ctx_for(lead_competitor.name, t),
+                event_sink=self._event_sink,
+                obs_max_chars=self._config.collector.max_content_chars,
+                max_steps=6,
+            )
+
+        runner = DelegateRunner(
+            runtime_factory=lambda name: SubagentRuntime(
+                name=name,
+                run=lambda sub_task: _subagent_loop(name, sub_task).run_subagent(sub_task),
+            ),
+            max_concurrent=max_concurrent,
+            timeout_seconds=timeout_seconds,
+        )
+        self._delegate_runner = runner  # analyze() 收尾统一 shutdown
+        extra_tools: dict[str, Callable[..., str]] = {
+            "make_plan": build_make_plan_tool(),
+            "delegate": make_delegate_tool(runner, registry=get_subagent_registry()),
+        }
+        if self._config.tools.validate_facts:
+            extra_tools["validate_facts"] = build_validate_facts_tool()
+        if self._config.tools.detect_conflict:
+            extra_tools["detect_conflict"] = build_detect_conflict_tool()
+        if self._config.tools.check_freshness:
+            extra_tools["check_freshness"] = build_check_freshness_tool(self._check_freshness)
+        if self._config.tools.select_source:
+            extra_tools["select_source"] = build_select_source_tool(self._select_source)
+
         dispatcher = build_react_dispatcher(
             config=self._config,
             web_extract=self._react_web_extract,
+            exclude=("analyze_competitor",),
+            extra_tools=extra_tools,
         )
         agent = ReactAgent(llm=self._llm or LLMClient(), dispatcher=dispatcher)
+        # Lead 步数上限 = max_steps（≈12）；diminishing_threshold=0 关闭"边际递减"
+        # 启发（ReAct 恒传 delta_tokens=0，否则第 3 步后必然误判预算耗尽）
         budget = IterationBudget(
-            max_iterations=self._budget.max_iterations,
+            max_iterations=_LEAD_MAX_STEPS,
             cost_limit=self._budget.cost_limit,
+            diminishing_threshold=0,
         )
         return ReactLoop(
             agent,
+            max_steps=_LEAD_MAX_STEPS,
             event_sink=self._event_sink,
             session_id=session_id,
             budget=budget,
             memory_context_fn=self._react_memory_context,
             rag_fn=self._react_rag_context,
             obs_max_chars=self._config.collector.max_content_chars,
+            system_prompt_override=build_lead_system_prompt(),
+            plan_first=True,
         )
 
     def _react_competitor(self, task: str) -> Competitor:
@@ -562,50 +580,61 @@ class CompetitorAnalysisAPI:
         except Exception:  # noqa: BLE001 — 解析失败不影响 ReAct 产物
             name = ""
         if name and name != "unknown":
-            competitor = resolve_competitor(name)
+            try:
+                competitor = resolve_competitor(name)
+            except ValueError:
+                competitor = None
             if competitor is not None:
                 return competitor
         return Competitor(name=name or "unknown")
 
+    def _lead_competitor(self, task: str, plan: dict | None) -> Competitor:
+        """报告竞品：优先用 plan 的 competitor（注册表命中带官方源），否则从任务解析。"""
+        from competitor_agent.core.competitor_registry import resolve_competitor
+
+        name = str((plan or {}).get("competitor") or "").strip()
+        if name:
+            try:
+                competitor = resolve_competitor(name)
+                if competitor is not None:
+                    return competitor
+            except Exception:  # noqa: BLE001 — 注册表解析失败退化为裸名
+                pass
+            return Competitor(name=name)
+        return self._react_competitor(task)
+
     def _react_memory_context(self, task: str) -> str:
-        """记忆召回（设计文档 35 recent_context，与 single 路径同口径）：失败静默降级。"""
+        """记忆召回（设计文档 35 recent_context）：失败静默降级。"""
         if self._memory is None:
             return ""
-        comp = self._react_competitor(task).name
-        if not comp or comp == "unknown":
+        return self._memory_ctx_for(self._react_competitor(task).name, task)
+
+    def _memory_ctx_for(self, competitor: str, task: str) -> str:
+        """按已知竞品名做记忆召回（子 Agent 复用，避免逐子 Agent 重复解析任务）。"""
+        if self._memory is None or not competitor or competitor == "unknown":
             return ""
         try:
-            return "\n".join(self._memory.recent_context(comp, top_k=3, query=task))
+            return "\n".join(self._memory.recent_context(competitor, top_k=3, query=task))
         except Exception:
-            logger.warning("ReAct 记忆召回失败: %s", comp, exc_info=True)
+            logger.warning("ReAct 记忆召回失败: %s", competitor, exc_info=True)
             return ""
-
-    def _set_selector_penalties(self, competitor: str) -> None:
-        """L4 失败反例 → 源选择降级（设计文档 45）：分析某竞品前把失败源注入 selector。
-
-        与 set_success_rates（init 时一次性注入全局成功率）不同，失败反例按竞品区分，
-        故在每次规划出竞品后设置；无记忆或提取失败静默跳过。
-        """
-        if self._memory is None:
-            self._selector.set_failure_penalties([])
-            return
-        try:
-            self._selector.set_failure_penalties(self._memory.failure_patterns_for(competitor))
-        except Exception:
-            logger.warning("L4 失败反例提取失败，跳过源降级: %s", competitor, exc_info=True)
-            self._selector.set_failure_penalties([])
 
     def _react_rag_context(self, task: str) -> str:
         """RAG 检索（与 GapExecutor._retrieve_rag 同口径）：失败静默降级。"""
         if self._retriever is None:
             return ""
-        comp = self._react_competitor(task).name
+        return self._rag_ctx_for(self._react_competitor(task).name, task)
+
+    def _rag_ctx_for(self, competitor: str, task: str) -> str:
+        """按已知竞品名做 RAG 检索（子 Agent 复用，避免逐子 Agent 重复解析任务）。"""
+        if self._retriever is None:
+            return ""
         try:
             chunks = self._retriever.retrieve(
-                query=task, competitor=comp, dimension="", top_k=5
+                query=task, competitor=competitor, dimension="", top_k=5
             )
         except Exception:  # 检索失败不影响推理
-            logger.warning("ReAct RAG 检索失败: %s", comp, exc_info=True)
+            logger.warning("ReAct RAG 检索失败: %s", competitor, exc_info=True)
             return ""
         if not chunks:
             return ""
@@ -614,45 +643,6 @@ class CompetitorAnalysisAPI:
             src = f"（来源: {c.source_url}）" if c.source_url else ""
             lines.append(f"- [{c.competitor}/{c.dimension}]{src} {c.text[:300]}")
         return "\n".join(lines)
-
-    def _react_dimension_result(self, result: ReactRunResult) -> DimensionResult | None:
-        """把 ReAct 结论文本归一化为 DimensionResult（结构化 JSON 优先，降级为单 react 维度）。
-
-        LLM 不可用等降级文案 → PARTIAL 低置信（不把"服务不可用"标成 COMPLETE）。
-        """
-        answer = (result.answer or "").strip()
-        parsed = None
-        if answer.startswith("{"):
-            try:
-                parsed = json.loads(answer)
-            except json.JSONDecodeError:
-                parsed = None
-        if isinstance(parsed, dict) and "summary" in parsed:
-            confidence = float(parsed.get("confidence", 0.7))
-            return DimensionResult(
-                dimension="react",
-                summary=str(parsed.get("summary", "")),
-                details=parsed.get("details", {}) if isinstance(parsed.get("details"), dict) else {},
-                confidence=confidence,
-                status=ResultStatus.COMPLETE if confidence >= 0.5 else ResultStatus.PARTIAL,
-            )
-        if not answer:
-            return None
-        if "LLM 服务不可用" in answer:
-            return DimensionResult(
-                dimension="react",
-                summary=answer,
-                details={},
-                confidence=0.0,
-                status=ResultStatus.PARTIAL,
-            )
-        return DimensionResult(
-            dimension="react",
-            summary=answer,
-            details={},
-            confidence=0.7,
-            status=ResultStatus.COMPLETE,
-        )
 
     def _react_web_extract(self, url: str) -> str:
         """ReAct 工具：真实抓取给定 URL 的页面文本（失败返回可读信息）。
@@ -674,35 +664,156 @@ class CompetitorAnalysisAPI:
         max_chars = self._config.collector.max_content_chars
         return (obs.raw_text or "").strip()[:max_chars] or "（页面无文本内容）"
 
+    # ── 复核工具提供方（设计文档 49：代码确定性兜底，不进 LLM 决策）────────
+
+    def _check_freshness(self, competitor: str, dimensions: list[str]) -> dict[str, str]:
+        """维度新鲜度判定：读归档年龄（ReportFreshness.dimension_ages）→ {dim: stale/fresh/skip}。"""
+        decisions: dict[str, str] = {}
+        if self._memory is None:
+            return decisions
+        try:
+            sessions = self._memory.list_sessions(competitor)
+            ages: dict[str, float] = {}
+            if sessions:
+                raw = getattr(sessions[0], "raw", None) or {}
+                freshness = ReportFreshness.from_dict(raw.get("freshness"))
+                if freshness is not None:
+                    ages = dict(freshness.dimension_ages)
+        except Exception:  # noqa: BLE001 — 新鲜度查询失败不阻塞
+            logger.warning("check_freshness 归档读取失败: %s", competitor, exc_info=True)
+            return decisions
+        ttl = dict(self._config.freshness.dimension_ttl_days)
+        for dim in dimensions:
+            age = ages.get(dim)
+            if age is None:
+                decisions[dim] = "skip"  # 无归档年龄 → 正常采集
+            elif age <= float(ttl.get(dim, 30)):
+                decisions[dim] = "fresh"
+            else:
+                decisions[dim] = "stale"
+        return decisions
+
+    def _select_source(self, competitor: str, dimension: str) -> list[str]:
+        """确定性候选源：注册表 official_links + 常见路径探测（原 SourceSelector 语义）。"""
+        from urllib.parse import urlsplit
+
+        from competitor_agent.core.competitor_registry import resolve_competitor
+
+        links: dict[str, str] = {}
+        try:
+            comp = resolve_competitor(competitor)
+            links = dict(comp.official_links or {}) if comp is not None else {}
+        except Exception:  # noqa: BLE001 — 选源失败不阻塞
+            logger.warning("select_source 注册表解析失败: %s", competitor, exc_info=True)
+        candidates: list[str] = []
+        key = {"pricing": "pricing", "roadmap": "changelog", "feature": "docs"}.get(dimension)
+        if key and links.get(key):
+            candidates.append(links[key])
+        home = links.get("home")
+        if home and home not in candidates:
+            candidates.append(home)
+        # 常见路径探测（确定性）：官方站点按维度拼接，优先级最低
+        base = home or (candidates[0] if candidates else "")
+        if base:
+            try:
+                host = urlsplit(base).netloc
+                path = {
+                    "pricing": "/pricing",
+                    "feature": "/features",
+                    "roadmap": "/changelog",
+                    "ecosystem": "/integrations",
+                    "performance": "/benchmarks",
+                }.get(dimension)
+                if path:
+                    candidate = f"https://{host}{path}"
+                    if candidate not in candidates:
+                        candidates.append(candidate)
+            except Exception:  # noqa: BLE001 — 路径探测失败不影响已得候选
+                pass
+        return candidates
+
+    # ── 记忆写侧（设计文档 49：唯一沉淀点）───────────────────────────────
+
+    def _record_memory_success(self, report: CompetitorReport, transcript: list[dict]) -> None:
+        """记忆沉淀（唯一写侧）：每维度取 transcript 首个 URL 源 → skill/outcome/pattern。
+
+        transcript 步（tool/args/result_brief/url）中匹配到该维度或 delegate 批量
+        回填的首个 URL 作为来源键（L4 源成功率按 URL 计量）；无则回退报告证据 URL。
+        """
+        if self._memory is None:
+            return
+        competitor = report.competitor.name
+        for r in report.dimension_results:
+            source = self._first_url_for(transcript, r.dimension)
+            if not source and r.evidence:
+                source = r.evidence[0].url
+            if not source:
+                continue
+            self._memory.record_skill(
+                Skill(competitor_name=competitor, gap_field=r.dimension, source_name=source, success=True)
+            )
+            self._memory.record_outcome(source, True)
+            # 设计文档 35：沉淀进化经验（成功模式）
+            self._memory.note_pattern(
+                competitor,
+                r.dimension,
+                pattern=f"缺口 {r.dimension} 由源 {source} 有效",
+                outcome="success",
+            )
+
+    @staticmethod
+    def _first_url_for(transcript: list[dict], dimension: str) -> str:
+        """transcript 中命中维度的首个 URL，供记忆写侧。
+
+        delegate 批量回填按子结果块切分，避免全部维度都指向首块 URL。
+        """
+        for step in transcript or []:
+            if not isinstance(step, dict):
+                continue
+            url = str(step.get("url") or "")
+            blob = f"{step.get('result_brief') or ''} {step.get('args') or ''}"
+            if step.get("tool") == "delegate":
+                section = _delegate_section_url(str(step.get("result_brief") or ""), dimension)
+                if section:
+                    return section
+                continue
+            if url and dimension in blob:
+                return url
+        return ""
+
+    def _save_checkpoint_for_resume(
+        self, session_id: str, task: str, report: CompetitorReport
+    ) -> None:
+        """取消时保留 checkpoint（设计文档 14）：未关闭缺口 + 已完成维度，供 /resume 续跑。"""
+        gaps = [
+            InfoGap(field=g.field, priority=g.priority, status=GapStatus.OPEN)
+            for g in report.gaps_pending
+        ]
+        save_checkpoint(
+            session_id=session_id,
+            task=task,
+            competitor_name=report.competitor.name,
+            gaps=gaps,
+            dimension_results=report.dimension_results,
+            iterations_used=self._budget.iteration_count,
+            max_iterations=self._budget.max_iterations,
+            cost_used=self._budget.total_cost,
+            cost_limit=self._budget.cost_limit,
+            sources_tried=[e.url for r in report.dimension_results for e in r.evidence],
+        )
+
+    # ── team 兼容薄包装（设计文档 49：内部固定流水线删除，保留入口）────────
+
     def analyze_team(
         self,
         task: str,
         session_id: str | None = None,
         max_retries: int = 1,
     ) -> CompetitorReport:
-        """多 Agent 流水线：Collector→Analyzer→Validator→Reporter 协作产出草稿报告
-
-        事件驱动 + 状态决策：各 Agent 基于 AgentResult 状态决定继续、重试或降级。
-        与 single 对齐的统一语义（设计文档 18 §2）：同一规划埋点、同一 BudgetController、
-        同一 checkpoint 落盘/清理、取消后保留 checkpoint 供 resume。
-        """
-        strategy, orch, slog = self._begin_team(task, session_id, max_retries)
-
-        # 预算一致性：与 single 共用 BudgetController，耗尽即提前终止
-        stop = self._budget.should_stop(strategy.gaps)
-        if stop.should_stop:
-            logger.info("预算已耗尽（%s），team 提前终止", stop.reason)
-            report = self._builder.build(
-                competitor=strategy.competitor,
-                results=[],
-                gaps_pending=list(strategy.gaps),
-                terminal_state=self._terminal_state(stop.reason, strategy).value,
-            )
-        else:
-            report = orch.run(task, strategy=strategy)
-            self._budget.record_iteration(cost=0.01)
-
-        return self._finish_team(report, task, session_id, strategy, slog)
+        """历史兼容入口：委托 analyze()（Lead ReAct 编排，设计文档 49）。"""
+        if max_retries != 1:
+            logger.warning("analyze_team 的 max_retries 参数已废弃，忽略")
+        return self.analyze(task, session_id=session_id)
 
     async def analyze_team_async(
         self,
@@ -711,210 +822,19 @@ class CompetitorAnalysisAPI:
         max_retries: int = 1,
         max_parallel: int = 4,
     ) -> CompetitorReport:
-        """异步多 Agent 流水线（设计文档 33）：与 analyze_team 语义一致，
-        但编排走 TeamOrchestrator.run_async——Collector 总线驱动、Analyzer 按缺口并行、
-        Validator 冲突仲裁。默认入口仍为同步 run()（回归安全网），本方法为可选 async 入口。
-        """
-        strategy, orch, slog = self._begin_team(task, session_id, max_retries, max_parallel)
+        """历史兼容异步入口：线程池包装 analyze()（签名不变，设计文档 49）。"""
+        if max_retries != 1 or max_parallel != 4:
+            logger.warning("analyze_team_async 的 max_retries/max_parallel 参数已废弃，忽略")
+        import asyncio
 
-        # 预算一致性：与 single 共用 BudgetController，耗尽即提前终止
-        stop = self._budget.should_stop(strategy.gaps)
-        if stop.should_stop:
-            logger.info("预算已耗尽（%s），team 提前终止", stop.reason)
-            report = self._builder.build(
-                competitor=strategy.competitor,
-                results=[],
-                gaps_pending=list(strategy.gaps),
-                terminal_state=self._terminal_state(stop.reason, strategy).value,
-            )
-        else:
-            report = await orch.run_async(task, strategy=strategy)
-            self._budget.record_iteration(cost=0.01)
-
-        return self._finish_team(report, task, session_id, strategy, slog)
-
-    def _begin_team(
-        self,
-        task: str,
-        session_id: str | None,
-        max_retries: int,
-        max_parallel: int = 4,
-    ) -> tuple[CompetitorStrategy, TeamOrchestrator, object]:
-        """analyze_team / analyze_team_async 共用前置：会话埋点 + 统一规划 + 组装编排器。"""
-        self._emit(ProgressEvent(event="phase_start", phase="strategic", message=f"规划: {task}"))
-        set_current_session(session_id)
-        slog = get_session_logger(session_id)
-        log_event(slog, "session_started", "init", f"会话 {session_id} 启动（team 模式）", task=task)
-
-        # 统一规划（与 single 一致：competitor.resolved / gaps.planned 埋点）
-        strategy = self._planner.plan(task, memory=self._memory)
-        self._set_selector_penalties(strategy.competitor.name)
-        log_event(
-            slog, "competitor.resolved", "strategic",
-            f"识别竞品 {strategy.competitor.name}",
-            competitor=strategy.competitor.name,
-            source="registry" if strategy.competitor.official_links else "unknown",
-        )
-        log_event(
-            slog, "gaps.planned", "strategic",
-            f"规划 {len(strategy.gaps)} 个缺口",
-            gap_fields=[g.field for g in strategy.gaps],
-        )
-
-        orch = TeamOrchestrator(
-            extractor=self._extractor,
-            llm=self._llm,
-            use_llm=self._use_llm,
-            memory=self._memory,
-            max_retries=max_retries,
-            max_parallel=max_parallel,
-            ingester=self._ingester,
-            retriever=self._retriever,
-            session_id=session_id,
-            providers=self._providers,
-            builder=self._builder,
-            selector=self._selector,
-            tool_dispatcher=self._verify_dispatcher,  # 设计文档 44：team 分析器同样可工具补证
-            # 领域差异化编排（设计文档 49）：开关 + 新鲜度委派 + 同源去重（默认保守，零行为变化）
-            orchestration=self._config.orchestration,
-            freshness_gate=self._freshness_gate_for(strategy.competitor.name),
-            archive_results=self._archive_results_for(strategy.competitor.name),
-            archive_freshness=self._archive_freshness_for(strategy.competitor.name),
-            timeline_events=self._timeline.events(strategy.competitor.name),
-            dedup=self._source_dedup,
-        )
-        return strategy, orch, slog
-
-    # ── 新鲜度驱动委派（设计文档 49 §3.2）──────────────────────────
-
-    def _freshness_gate_for(self, competitor: str) -> FreshnessGate | None:
-        """按配置装配 FreshnessGate；未启用时返回 None（编排器零行为变化）。"""
-        if not self._config.orchestration.freshness_delegation_enabled:
-            return None
-        return FreshnessGate(ttl_days=self._config.freshness.dimension_ttl_days)
-
-    def _archive_freshness_for(self, competitor: str) -> dict[str, float]:
-        """取竞品最新归档的维度年龄（ReportFreshness.dimension_ages）；无/失败 → {}。"""
-        if not self._config.orchestration.freshness_delegation_enabled or self._memory is None:
-            return {}
-        try:
-            sessions = self._memory.list_sessions(competitor)
-        except Exception:  # noqa: BLE001 — 归档读取失败不影响主流程
-            return {}
-        if not sessions:
-            return {}
-        raw = getattr(sessions[0], "raw", None) or {}
-        freshness = ReportFreshness.from_dict(raw.get("freshness"))
-        return dict(freshness.dimension_ages) if freshness else {}
-
-    def _archive_results_for(self, competitor: str) -> list:
-        """取时间线快照重建的归档结论（新鲜维度直接复用，含 details/evidence）。"""
-        if not self._config.orchestration.freshness_delegation_enabled:
-            return []
-        try:
-            prev = self._timeline.report_for(competitor)
-        except Exception:  # noqa: BLE001 — 时间线读取失败不影响主流程
-            return []
-        return list(prev.dimension_results) if prev is not None else []
-
-    def _finish_team(
-        self,
-        report: CompetitorReport,
-        task: str,
-        session_id: str | None,
-        strategy: CompetitorStrategy,
-        slog: object,
-    ) -> CompetitorReport:
-        """analyze_team / analyze_team_async 共用收尾：记忆沉淀 + checkpoint + 埋点 + 取消/归档。"""
-        # 记忆闭环：分析成功后沉淀技能 + 记录数据源成功率（与单 Agent 路径对齐）
-        self._record_team_memory_success(report)
-
-        # checkpoint：无论成功/取消均落盘（供 resume 续跑，与 single 对齐）
-        if session_id:
-            save_checkpoint(
-                session_id=session_id,
-                task=task,
-                competitor_name=strategy.competitor.name,
-                gaps=strategy.gaps,
-                dimension_results=report.dimension_results,
-                iterations_used=self._budget.iteration_count,
-                max_iterations=self._budget.max_iterations,
-                cost_used=self._budget.total_cost,
-                cost_limit=self._budget.cost_limit,
-                sources_tried=[s for g in strategy.gaps for s in g.sources_tried],
-            )
-
-        log_event(
-            slog, "analysis.terminated", "terminate",
-            f"多 Agent 分析终止，终态={report.terminal_state}",
-            terminal_state=report.terminal_state or "success",
-            dimension_count=len(report.dimension_results),
-        )
-        log_event(
-            slog, "report.built", "report",
-            f"报告生成，{len(report.dimension_results)} 个维度",
-            dimension_count=len(report.dimension_results),
-            overall_confidence=round(report.overall_confidence, 3),
-        )
-        self._emit(
-            ProgressEvent(
-                event="report",
-                phase="team_orchestrator",
-                progress=1.0,
-                message=f"多 Agent 报告生成完成，{len(report.dimension_results)} 个维度",
-            )
-        )
-        if session_id and is_cancelled(session_id):
-            # 取消：保留 checkpoint 供 /resume 续跑（与 single 语义一致）
-            logger.info("会话 %s 取消后返回部分结果（%d 个维度）", session_id, len(report.dimension_results))
-            close_session_log(session_id)
-            return CancelledResult(
-                competitor=report.competitor,
-                dimension_results=report.dimension_results,
-                overall_score=report.overall_score,
-                overall_confidence=report.overall_confidence,
-                gaps_pending=report.gaps_pending,
-                markdown_report=report.markdown_report,
-                terminal_state="cancelled",
-                created_at=report.created_at,
-                cancelled=True,
-            )
-        # 设计文档 26：记录时间线 diff + 归档带新鲜度的会话（多 Agent 路径同样对齐）
-        self._record_timeline(report)
-        self._archive_report(report, task, session_id or "")
-        self._export_competitor_json(report, session_id or "")
-        delete_checkpoint(session_id) if session_id else None
-        close_session_log(session_id)
-        return report
-
-    def _record_team_memory_success(self, report: CompetitorReport) -> None:
-        """多 Agent 路径的记忆沉淀：按报告维度结果记录技能与数据源成功率。"""
-        if self._memory is None:
-            return
-        competitor = report.competitor.name
-        for r in report.dimension_results:
-            if not r.evidence:
-                continue
-            source = r.evidence[0].source_name
-            if source:
-                self._memory.record_skill(
-                    Skill(competitor_name=competitor, gap_field=r.dimension, source_name=source, success=True)
-                )
-                self._memory.record_outcome(source, True)
-                # 设计文档 35：多 Agent 路径同样沉淀进化经验（成功模式）
-                self._memory.note_pattern(
-                    competitor,
-                    r.dimension,
-                    pattern=f"缺口 {r.dimension} 由源 {source} 有效",
-                    outcome="success",
-                )
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self.analyze, task, None, "team", session_id)
 
     # ── M4: 流式分析 ──────────────────────────────────────────────────
 
     async def analyze_stream(self, task: str, session_id: str | None = None) -> AsyncIterator[ProgressEvent]:
         """流式分析：逐条 yield ProgressEvent（供 Web SSE 消费）"""
         sid = session_id or f"sess_{uuid.uuid4().hex[:8]}"
-
 
         yield ProgressEvent(
             event="session_started",
@@ -972,14 +892,13 @@ class CompetitorAnalysisAPI:
         logger.info("已请求取消会话: %s", session_id)
 
     def resume(self, session_id: str) -> CompetitorReport:
-        """从 checkpoint 恢复：重建缺口状态与剩余预算，真正重跑未关闭缺口。"""
+        """从 checkpoint 恢复：预置已完成维度，未关闭缺口合成 Lead ReAct 续跑任务。"""
         cp = load_checkpoint(session_id)
         if cp is None:
             raise ValueError(f"会话 {session_id} 无 checkpoint，无法恢复")
         logger.info("从 checkpoint 恢复会话: %s (%d gaps)", session_id, len(cp.gaps))
 
-        # 1. 重建策略与缺口状态
-        # 用注册表恢复官方源（official_links），否则候选源为空、重跑缺口产出 0 结果
+        # 1. 重建竞品与缺口状态（用注册表恢复官方源）
         from competitor_agent.core.competitor_registry import resolve_competitor
 
         competitor = None
@@ -993,17 +912,8 @@ class CompetitorAnalysisAPI:
         else:
             competitor = Competitor(name=cp.competitor_name)
         gaps = self._reconstruct_gaps_from_checkpoint(cp.gaps)
-        strategy = CompetitorStrategy(competitor=competitor, gaps=gaps)
 
-        # 2. 重建剩余预算（已消耗部分已预置）
-        iteration_budget = IterationBudget(
-            max_iterations=cp.max_iterations,
-            cost_limit=cp.cost_limit,
-        )
-        iteration_budget._used_iterations = cp.iterations_used
-        iteration_budget._used_cost = cp.cost_used
-
-        # 3. 预置已完成维度（不重跑已关闭缺口）
+        # 2. 预置已完成维度（不重跑已关闭缺口）
         completed: list[DimensionResult] = [
             checkpoint_to_report._result_from_dict(r) if hasattr(checkpoint_to_report, '_result_from_dict') else
             DimensionResult(
@@ -1027,30 +937,33 @@ class CompetitorAnalysisAPI:
             for r in cp.dimension_results
         ]
 
-        # 4. 仅重跑未关闭缺口
-        open_gaps = [g for g in strategy.gaps if not g.is_closed]
+        # 3. 未关闭缺口 → 合成 Lead ReAct 续跑任务（已完成维度由 checkpoint 预置）
+        open_gaps = [g for g in gaps if not g.is_closed]
         if open_gaps:
-            new_results = self._orchestrator_for("single").run(
-                strategy, iteration_budget, session_id, cp.task,
-                event_sink=self._emit, memory=self._memory,
-            )
-            # 合并已关闭维度 + 新完成维度
+            task = self._resume_task(cp.task, [g.field for g in open_gaps])
+            resumed = self.analyze(task, session_id=session_id)
             by_dim = {r.dimension: r for r in completed}
-            for r in new_results:
+            for r in resumed.dimension_results:
                 by_dim[r.dimension] = r
             results = list(by_dim.values())
+            # 续跑后仍未产出的缺口（交集）留作 pending
+            produced = {r.dimension for r in results}
+            pending = [
+                g for g in resumed.gaps_pending
+                if g.field not in produced and g.field in {og.field for og in open_gaps}
+            ]
+            terminal = resumed.terminal_state
         else:
             results = completed
-
-        # 5. 删除 checkpoint（一次性消费），返回当前进度
-        pending = [g for g in strategy.gaps if not g.is_closed]
-        delete_checkpoint(session_id)
+            pending = []
+            terminal = "success"
+            delete_checkpoint(session_id)
 
         report = self._builder.build(
             competitor=competitor,
             results=results,
             gaps_pending=pending,
-            terminal_state="success" if not pending else "partial",
+            terminal_state=terminal,
         )
 
         if is_cancelled(session_id):
@@ -1071,6 +984,12 @@ class CompetitorAnalysisAPI:
         self._record_timeline(report)
         self._emit(ProgressEvent(event="report", phase="report", progress=1.0, message="续跑完成"))
         return report
+
+    @staticmethod
+    def _resume_task(base_task: str, dimensions: list[str]) -> str:
+        """把待续跑维度声明进任务文本，供 Lead 重排（已完成维度由 checkpoint 预置）。"""
+        dim_text = "、".join(dimensions) or "全部维度"
+        return f"{base_task}（续跑：请补齐维度 {dim_text}，已完成维度直接复用）"
 
     @staticmethod
     def _reconstruct_gaps_from_checkpoint(gaps_data: list[dict]) -> list[InfoGap]:
@@ -1193,7 +1112,7 @@ class CompetitorAnalysisAPI:
         if self._config.execution.mode == "parallel" and len(names) >= 2:
             reports = self._compare_parallel(names)
         else:
-            reports = [self.analyze(name, mode="team") for name in names]
+            reports = [self.analyze(name) for name in names]
         comparison = self._builder.build_comparison(reports)
         self._export_comparison_json(comparison)
         return comparison
@@ -1213,7 +1132,7 @@ class CompetitorAnalysisAPI:
         )
         done: list[CompetitorReport] = []
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="cmp") as pool:
-            futures = {pool.submit(self.analyze, name, None, "team"): name for name in names}
+            futures = {pool.submit(self.analyze, name): name for name in names}
             for future in as_completed(futures):
                 try:
                     done.append(future.result())
@@ -1250,15 +1169,15 @@ class CompetitorAnalysisAPI:
                 payload={"candidates": names},
             )
         )
-        reports = [self.analyze(self._task_with_sources(c), mode="team") for c in competitors]
+        reports = [self.analyze(self._task_with_sources(c)) for c in competitors]
         return self._builder.build_comparison(reports)
 
     @staticmethod
     def _task_with_sources(competitor: Competitor) -> str:
-        """把发现竞品的 official_links 注入任务文本，使规划/采集拿到官方源。
+        """把发现竞品的 official_links 注入任务文本，使 Lead 拿到官方源。
 
         复用 parse_task 的 custom_sources 提取（"官网是 …"/"定价页是 …"），
-        避免发现出的未知竞品因无 official_links 而 0 候选 → 0 维度。
+        避免发现出的未知竞品因无官方源而 0 候选 → 0 维度。
         """
         parts = [f"分析 {competitor.name}"]
         label = {"home": "官网是", "pricing": "定价页是", "docs": "文档是", "changelog": "更新日志是"}
@@ -1310,7 +1229,7 @@ class CompetitorAnalysisAPI:
             stale = stale_under_ttl(getattr(session, "raw", None) or {}, ttl) if not recompute_all else []
             if not recompute_all and not stale:
                 continue
-            report = self.analyze(comp, mode="team", session_id=f"refresh_{uuid.uuid4().hex[:8]}")
+            report = self.analyze(comp, session_id=f"refresh_{uuid.uuid4().hex[:8]}")
             refreshed.append(report)
             self._emit(
                 ProgressEvent(
@@ -1322,15 +1241,6 @@ class CompetitorAnalysisAPI:
             )
         return refreshed
 
-    def _terminal_state(self, reason: str, strategy: CompetitorStrategy) -> TerminalState:
-        if reason in (StopReason.ALL_GAPS_CLOSED, StopReason.CORE_SATISFACTION_REACHED, StopReason.NO_GAPS):
-            return TerminalState.SUCCESS
-        if reason in (StopReason.ITERATION_BUDGET_EXHAUSTED, StopReason.COST_LIMIT_REACHED):
-            return TerminalState.PARTIAL
-        return TerminalState.DEGRADED
-
     def _emit(self, event: ProgressEvent) -> None:
         if self._event_sink is not None:
             self._event_sink(event)
-
-
