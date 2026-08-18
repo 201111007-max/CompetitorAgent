@@ -71,6 +71,7 @@ class StrategicPlanner:
         default_budget: dict[str, int] | None = None,
         llm: LLMClient | None = None,
         use_llm: bool = True,
+        experience_routing: bool = True,  # 经验路由委派（设计文档 49 §3.5），默认开（纯排序）
     ) -> None:
         self._enabled = enabled_dimensions or list(DIMENSION_PRIORITY.keys())
         self._budget = default_budget or {
@@ -83,6 +84,7 @@ class StrategicPlanner:
         }
         self._llm = llm
         self._use_llm = use_llm
+        self._experience_routing = experience_routing
 
     def plan(self, task: str, memory: IFourLayerMemory | None = None) -> CompetitorStrategy:
         """仅 LLM 结构化规划（complete_json + PLAN_SCHEMA）；失败抛 LLMUnavailableError。"""
@@ -150,6 +152,7 @@ class StrategicPlanner:
         gaps = self._gaps_from_llm(parsed, dimensions)
         self._apply_memory_boost(gaps, competitor, memory)
         self._apply_pattern_boost(gaps, competitor, memory)
+        gaps = self._order_gaps_by_experience(gaps, competitor, memory)
         budget = self._llm_budget(parsed.get("budget"), dimensions)
         return CompetitorStrategy(
             competitor=competitor,
@@ -272,3 +275,30 @@ class StrategicPlanner:
                     gap.confidence = min(gap.confidence + 0.1, 0.9)
                 elif outcome in ("failure", "degraded") and gap.confidence == 0:
                     gap.priority = max(gap.priority - 1, 1)
+
+    def _order_gaps_by_experience(
+        self,
+        gaps: list[InfoGap],
+        competitor: Competitor,
+        memory: IFourLayerMemory | None,
+    ) -> list[InfoGap]:
+        """经验路由委派（设计文档 49 §3.5）：按 L4 模式排序缺口执行顺序。
+
+        成功模式维度提前、失败/降级反例命中维度后置（降权委派）；
+        纯排序不改变缺口集合与 LLM 调用结构；无经验/未启用/记忆失败 → 顺序不变。
+        """
+        if not self._experience_routing or memory is None:
+            return gaps
+        scored: list[tuple[int, int, InfoGap]] = []
+        for idx, gap in enumerate(gaps):
+            try:
+                entries = memory.retrieve_patterns_with_outcome(competitor.name, gap.field)
+            except Exception:  # 记忆层损坏不影响规划
+                logger.warning("L4 模式取回失败，跳过经验路由: field=%s", gap.field, exc_info=True)
+                scored.append((0, idx, gap))
+                continue
+            success = sum(1 for _p, o in entries if o == "success")
+            failure = sum(1 for _p, o in entries if o in ("failure", "degraded"))
+            scored.append((failure - success, idx, gap))
+        scored.sort(key=lambda t: (t[0], t[1]))  # 同分按原顺序（稳定）
+        return [g for _, _, g in scored]

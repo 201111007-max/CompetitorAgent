@@ -137,6 +137,20 @@ class SecurityConfig:
 
 
 @dataclass
+class OrchestrationConfig:
+    """多 Agent 领域差异化编排开关（设计文档 49 §4.1）
+
+    默认全部保守：评审/新鲜度委派默认关（零行为变化），冲突检测/去重/经验排序默认开（无副作用）。
+    """
+
+    reviewer_enabled: bool = False
+    freshness_delegation_enabled: bool = False
+    cross_dimension_conflict_enabled: bool = True
+    source_dedup_enabled: bool = True
+    experience_routing_enabled: bool = True
+
+
+@dataclass
 class AppConfig:
     """应用级配置聚合（对应 review_config.yaml 各 section）"""
 
@@ -156,6 +170,7 @@ class AppConfig:
     freshness: FreshnessConfig = field(default_factory=FreshnessConfig)
     observability: ObservabilityConfig = field(default_factory=ObservabilityConfig)
     security: SecurityConfig = field(default_factory=SecurityConfig)
+    orchestration: OrchestrationConfig = field(default_factory=OrchestrationConfig)
 
 
 def _build_section(cls: type[Any], data: dict[str, Any] | None) -> Any:
@@ -197,6 +212,7 @@ def load_config(path: str | os.PathLike | None = None) -> AppConfig:
         freshness=_build_freshness(raw.get("freshness")),
         observability=_build_section(ObservabilityConfig, raw.get("observability")),
         security=_build_security(raw.get("security")),
+        orchestration=_build_orchestration(raw.get("orchestration")),
     )
 
 
@@ -214,4 +230,26 @@ def _build_security(data: dict[str, Any] | None) -> SecurityConfig:
     """构造安全配置：token 优先从环境变量 COMPETITOR_AUTH_TOKEN 读取，不明文落码。"""
     cfg = _build_section(SecurityConfig, data)
     cfg.auth_token = os.environ.get("COMPETITOR_AUTH_TOKEN", cfg.auth_token)
+    return cfg
+
+
+def _build_orchestration(data: dict[str, Any] | None) -> OrchestrationConfig:
+    """构造编排配置：读取嵌套 ``orchestration.<feature>.enabled`` 结构（设计文档 49）。"""
+    cfg = OrchestrationConfig()
+    if not isinstance(data, dict):
+        return cfg
+
+    def _enabled(name: str, current: bool) -> bool:
+        section = data.get(name)
+        if isinstance(section, dict) and "enabled" in section:
+            return bool(section["enabled"])
+        return current
+
+    cfg.reviewer_enabled = _enabled("reviewer", cfg.reviewer_enabled)
+    cfg.freshness_delegation_enabled = _enabled("freshness_delegation", cfg.freshness_delegation_enabled)
+    cfg.cross_dimension_conflict_enabled = _enabled(
+        "cross_dimension_conflict", cfg.cross_dimension_conflict_enabled
+    )
+    cfg.source_dedup_enabled = _enabled("source_dedup", cfg.source_dedup_enabled)
+    cfg.experience_routing_enabled = _enabled("experience_routing", cfg.experience_routing_enabled)
     return cfg

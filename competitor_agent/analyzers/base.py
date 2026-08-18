@@ -418,6 +418,10 @@ class BaseCompetitorAnalyzer:
             confidence=confidence,
             evidence=[observation.evidence],
             status=status,
+            # 证据链哈希（设计文档 49 §3.1）：供编排层跨维度同源冲突核对
+            evidence_hashes=[observation.evidence.content_hash]
+            if observation.evidence and observation.evidence.content_hash
+            else [],
         )
 
 

@@ -47,6 +47,8 @@ class ReporterAgent(BaseAgent):
                 results=results,
                 validation=validation,
                 gaps_pending=[g for g in ctx.strategy.gaps if not g.is_closed],
+                cross_dimension_conflicts=ctx.extra.get("cross_dimension_conflicts"),
+                review=ctx.extra.get("review"),
             )
         except Exception as exc:  # noqa: BLE001 — 汇总失败统一走重试/降级
             return self._retry(ctx, exc)
@@ -58,6 +60,8 @@ class ReporterAgent(BaseAgent):
         results: list[DimensionResult],
         validation: ValidationResult,
         gaps_pending: list[InfoGap] | None = None,
+        cross_dimension_conflicts: list | None = None,
+        review: object | None = None,  # ReviewResult（设计文档 49 §3.3）
     ) -> CompetitorReport:
         # 冲突项从正文剔除，仍计入待办缺口
         conflict_dims = {i.dimension for i in validation.issues if i.kind == "conflict"}
@@ -68,11 +72,19 @@ class ReporterAgent(BaseAgent):
             gaps_pending=gaps_pending or [],
             terminal_state="success" if validation.passed else "degraded",
         )
-        report.markdown_report = self._render_draft(report, validation)
+        report.markdown_report = self._render_draft(
+            report, validation, cross_dimension_conflicts, review
+        )
         self._bus.publish(T_DRAFT, {"competitor": competitor.name, "report": report})
         return report
 
-    def _render_draft(self, report: CompetitorReport, validation: ValidationResult) -> str:
+    def _render_draft(
+        self,
+        report: CompetitorReport,
+        validation: ValidationResult,
+        cross_dimension_conflicts: list | None = None,
+        review: object | None = None,
+    ) -> str:
         lines = [report.markdown_report]
         if validation.issues:
             lines.append("\n## 校验备注")
@@ -84,4 +96,12 @@ class ReporterAgent(BaseAgent):
             for result in conflicts:
                 for note in result.conflict_evidence:
                     lines.append(f"- {result.dimension}: 采纳现结论，丢弃 {note}")
+        if cross_dimension_conflicts:
+            lines.append("\n## 跨维度冲突备注")
+            for conflict in cross_dimension_conflicts:
+                lines.append(f"- {conflict.summary}")
+        if review is not None and getattr(review, "issues", None):
+            lines.append("\n## 对抗式评审备注")
+            for issue in review.issues:
+                lines.append(f"- [REVIEWED] {issue.dimension}: {issue.message}")
         return "\n".join(lines)

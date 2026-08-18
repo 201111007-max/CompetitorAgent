@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 
+from competitor_agent.domain_types.conflict import ConflictRegistry, CrossDimensionConflict
 from competitor_agent.domain_types.report import DimensionResult
 from competitor_agent.interfaces.memory import IFourLayerMemory
 from competitor_agent.team.base_agent import AgentContext, AgentResult, AgentStatus, BaseAgent
@@ -151,6 +152,19 @@ class FactValidator:
         sources = ", ".join(e.source_name for e in result.evidence) or "无证据"
         return f"{result.dimension}: {result.summary[:120]}（来源 {sources}，置信 {result.confidence:.2f}）"
 
+    def detect_cross_dimension_conflicts(
+        self, results: list[DimensionResult]
+    ) -> list[CrossDimensionConflict]:
+        """跨维度冲突检测（设计文档 49 §3.1）：同源（content_hash）同事实键异值 → 冲突清单。
+
+        在 ``arbitrate``（同维度多来源取优）之后执行——这是**跨维度**核对，
+        不改仲裁语义，只产出冲突标注/回灌依据。
+        """
+        registry = ConflictRegistry()
+        for result in results:
+            registry.register(result)
+        return registry.detect()
+
 
 class ValidatorAgent(BaseAgent):
     """校验 Agent：包装 FactValidator，发布校验结果"""
@@ -200,3 +214,9 @@ class ValidatorAgent(BaseAgent):
     def arbitrate(self, results: list[DimensionResult]) -> dict[str, DimensionResult]:
         """同维度多来源仲裁（委托 FactValidator，设计文档 33 §3.3）"""
         return self._validator.arbitrate(results)
+
+    def detect_cross_dimension_conflicts(
+        self, results: list[DimensionResult]
+    ) -> list[CrossDimensionConflict]:
+        """跨维度冲突检测（委托 FactValidator，设计文档 49 §3.1）"""
+        return self._validator.detect_cross_dimension_conflicts(results)

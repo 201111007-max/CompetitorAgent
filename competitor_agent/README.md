@@ -96,7 +96,7 @@ competitor_agent/
 - 架构总纲：`../doc/ai_coding_agent_competitor_analysis_architecture.md`
 - 分步实现计划：`../doc/plan/implementation_plan.md`
 - 各模块契约/规范：`docs/`（interfaces/domain_models/prompts/data_sources/configuration/evaluation_guide/testing/usage/api）
-- 逐期设计文档：`../doc/plan/issue_designs/`（含 26_freshness_timeline_design.md：新鲜度 TTL / 过期提示 / refresh_stale / 时间线事件；27_pricing_modeling_design.md：结构化定价画像 / 成本估算；28_structured_export_design.md：结构化导出 / 定时调度轮 / 异动告警；47_llm_only_pipeline_design.md：主路径仅 LLM 解析，无规则降级；48_skill_guided_pipeline_design.md：写死代码知识型规则 → skill 化，主体流程 LLM 驱动 + 保证型逻辑代码兜底）
+- 逐期设计文档：`../doc/plan/issue_designs/`（含 26_freshness_timeline_design.md：新鲜度 TTL / 过期提示 / refresh_stale / 时间线事件；27_pricing_modeling_design.md：结构化定价画像 / 成本估算；28_structured_export_design.md：结构化导出 / 定时调度轮 / 异动告警；47_llm_only_pipeline_design.md：主路径仅 LLM 解析，无规则降级；48_skill_guided_pipeline_design.md：写死代码知识型规则 → skill 化，主体流程 LLM 驱动 + 保证型逻辑代码兜底；49_domain_agent_orchestration_design.md：多 Agent 领域差异化编排——证据链回填+跨维度冲突 / 新鲜度驱动委派 / 对抗式评审 / 跨竞品同源去重 / 经验路由）
 
 ## skill 机制（设计文档 48）
 
@@ -104,6 +104,23 @@ competitor_agent/
 规划规范（planning）、6 个维度抽取规范、真值/事实边界（fact_verification）、置信度披露（confidence_disclosure），
 经 `SkillLoader` 以独立 `<skill name="...">` system 消息注入分析/规划 prompt；保证型逻辑（安全/路由/校验/阈值/聚合）仍由代码兜底。
 目录缺省 `skills/`，可用环境变量 `SKILLS_DIR` 覆盖（测试/评测注入确定性内容）；文件缺失静默跳过。
+
+## 多 Agent 领域差异化编排（设计文档 49）
+
+`TeamOrchestrator` 固定流水线（Collector→Analyzer→Validator→Reporter）之上追加 5 项**领域差异化编排**
+（对比 deer-flow 通用骨架后确认 team 已等价其委派模型，缺的是竞品分析领域的编排智能）：
+
+1. **证据链回填 + 跨维度冲突检测**——`DimensionResult.evidence_hashes` + `FactValidator.detect_cross_dimension_conflicts`：
+   同 `content_hash` 来源在同一事实键上输出不同值 → 冲突标注/回灌（同维度 `arbitrate` 之外的**跨维度**核对）。
+2. **新鲜度驱动委派**——`FreshnessGate` 把 TTL 从报告层提升到编排层：过期维度优先委派采集、新鲜维度跳过采集直入分析、
+   时间线变更事件（设计文档 26）提权重采。
+3. **对抗式评审 ReviewerAgent（第 5 角色）**——对草稿维度结论主动证伪（复用设计文档 44 `_verify_via_tools` 反方核对），
+   `needs_revision` 回灌命中维度重分析（≤1 轮），超限报告标注 `[REVIEWED]`。
+4. **跨竞品同源去重**——`SourceDedup` URL→`content_hash` 缓存，`compare` 多竞品共享官网/榜单源省抓取。
+5. **经验路由委派**——按 L4 模式排序缺口执行顺序、失败反例降权委派（与设计文档 45 选源成功率/失败惩罚叠加）。
+
+`orchestration` 配置：`reviewer`/`freshness_delegation` 默认关（零行为变化），冲突检测/去重/经验排序默认开（无副作用）；
+mock 无缺陷零回灌 → LLM 调用次数不变（设计文档 47/48 不变量）。**不引入 LangGraph/独立子会话轮询**。
 
 ## 里程碑状态
 

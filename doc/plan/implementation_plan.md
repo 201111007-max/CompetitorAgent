@@ -772,3 +772,58 @@ dev:
 - **可改为 skill（知识型）**：各维度抽取规范（`_build_prompt`）、真值/事实边界指导（`_count_numeric_conflicts` 语义 → skill，**代码核对动作保留兜底**）、置信度披露（`FactValidator` 阈值语义 → skill，**阈值判定保留代码**）、规划规范（`_PLAN_PROMPT`）、补证查询关键词（`_DIMENSION_VERIFY_QUERIES`）。
 - **不宜改（保证型，保持代码）**：注入防护（`detect_injection`/`wrap_untrusted`，安全）、选源路由表（`source_selector.py`，确定性/评测门禁）、降级链/预算/取消/checkpoint、真值校验动作与链式停止（`_UNHELPFUL_TOOL_MARKERS`/`_MAX_CHAIN_STEPS`）、仲裁/校验阈值（`validator_agent.py`）、聚合权重/渲染、schema 修复重试（`llm/client.py`）、名称规范化、定价结构抽取。
 - **范围外（不修改）**：`task_parser` 提示词（已走 LLM）、ReAct 路径、已走 LLM 的调用结构与次数。
+
+## 20. 第六轮评审待办（多 Agent 领域差异化编排，设计文档 49）
+
+> 状态背景：2026-08-18 对比 bytedance/deer-flow（`/home/d00841237/code/deer-flow`）的多 Agent 机制——
+> deer-flow 是通用骨架（Lead Agent 用 `task()` 工具动态委派 + `SubagentExecutor` 后台线程池 + 轮询
+> `get_background_task_result` 以 ToolMessage 回填主 Agent）；competitor_agent 的 team（`team/orchestrator.py`）
+> 已是"事件驱动 + 状态决策"的固定流水线（Collector→Analyzer→Validator→Reporter），且 33 的
+> `MessageBus.publish_async(await_result=True)` 已等价其回填模型。**决策：不引入 LangGraph/独立子会话轮询**，
+> 在现有骨架上做 5 项**领域差异化编排**（证据链回填+跨维度冲突检测 / 新鲜度驱动委派 / 对抗式评审 / 跨竞品同源去重 /
+> 经验路由委派），把本项目已有资产（证据链、新鲜度 TTL、链式校验、L3/L4 记忆、content_hash）提升到编排层。
+> **49 已于 2026-08-18 实现（见 §20.2）**。
+> 设计文档见 `doc/plan/issue_designs/49_domain_agent_orchestration_design.md`，索引与状态见 `issue_designs/README.md`。
+
+| 项 | 内容 | 优先级 | 状态 |
+|---|---|---|---|
+| **49 多 Agent 领域差异化编排**（`team/` + `analyzers/base.py` + `core/` + `config/`） | ① **证据链回填 + 跨维度冲突检测**：`DimensionResult.evidence_hashes`（从 `SourceEvidence.content_hash` 收集，缺省空向后兼容）+ `FactValidator.detect_cross_dimension_conflicts`（同 `content_hash` 同键异值 → `CrossDimensionConflict`，报告标注「跨维度冲突备注」/回灌）；② **新鲜度驱动委派**：`core/freshness_gate.py::FreshnessGate.decide`（TTL 从报告层提升到编排层——过期维度优先采集、新鲜维度跳过采集直入分析、时间线变更事件提权），Collector 委派前注入；③ **对抗式评审 ReviewerAgent**：新 `team/reviewer_agent.py`（第 5 角色，复用 44 `_verify_via_tools` 做反方证伪 → `ReviewVerdict(ok, issues)`，`needs_revision` 回灌命中维度重分析 `_MAX_REVISION_ROUNDS=1`，超限报告标注 `[REVIEWED]`）；④ **跨竞品同源去重**：`core/source_dedup.py`（URL→content_hash 缓存，`compare` 多竞品共享源省抓取）；⑤ **经验路由委派**：`_order_gaps_by_experience`（按 L4 `retrieve_patterns_with_outcome` 排序缺口执行/失败反例降权，与 45 `_apply_pattern_boost`/`set_failure_penalties` 叠加）。`orchestration` 配置：`reviewer`/`freshness_delegation` 默认关（零行为变化）、`cross_dimension_conflict`/`source_dedup`/`experience_routing` 默认开（无副作用）；mock 无缺陷零回灌 → 47 调用次数不变量保持 | 中高 | ✅ 已实现（2026-08-18） |
+
+### 20.1 实施顺序与依赖
+
+> 依赖：47/48（单轨 LLM + skill 不变量）、33（team 真协作/`arbitrate`）、44（`_verify_via_tools` 复用）、
+> 26（新鲜度 TTL/`refresh_stale`/`TimelineMemory`）、45（L3 `SkillStore`/L4 pattern → selector 成功率/失败惩罚）。
+> 实施顺序建议：**③ 对抗式评审（P0，独立角色收益最高）→ ② 新鲜度驱动委派（P1）→ ① 证据链回填+跨维度冲突（P2）→
+> ④ 同源去重 + ⑤ 经验路由（P3）**。每项独立提交；`reviewer.enabled` 默认关，回归全量 916 + benchmark mock 门禁不变。
+> 范围外：deer-flow 通用骨架（不引入 LangGraph/独立子会话轮询）、已走 LLM 的调用结构、保证型逻辑清单（§3.6）。
+
+### 20.2 49 完成说明（2026-08-18）
+
+- **① 证据链回填 + 跨维度冲突检测**：`DimensionResult` 新增 `evidence_hashes`（`analyzers/base._make_result` 按
+  `observation.evidence.content_hash` 回填，缺省空向后兼容）；新模块 `domain_types/conflict.py`——`ConflictRegistry` 按
+  `(claim_key × content_hash)` 索引各维度结论（`_SHARED_CLAIM_KEYS` 对齐 `_VERIFY_NUMERIC_KEYS`，嵌套 details 扁平化），
+  同源同键异值 → `CrossDimensionConflict`；`FactValidator`/`ValidatorAgent` 增 `detect_cross_dimension_conflicts`，
+  `TeamOrchestrator` 在 arbitrate 后检测（默认开，失败静默降级），`ReporterAgent` 渲染「## 跨维度冲突备注」。
+- **② 新鲜度驱动委派**：新模块 `core/freshness_gate.py::FreshnessGate`（`decide`：过期 `stale` 优先采集 / 新鲜 `fresh`
+  跳过采集直入分析 / 无归档 `skip` 正常采集；时间线事件命中维度提权强制重采——复用 26 `_EVENT_TYPE_BY_DIM`）；
+  `TeamOrchestrator` 增 `_collect_plan`（新鲜维度跳过采集复用 `archive_results`），`facade/api._begin_team` 装配
+  gate + 归档新鲜度 + 时间线事件（`_freshness_gate_for`/`_archive_freshness_for`/`_archive_results_for`）。
+- **③ 对抗式评审 ReviewerAgent**：新 `team/reviewer_agent.py`（第 5 角色，纯代码证伪无 LLM——`_check_numeric` 复用
+  `_count_numeric_conflicts` 反方核对 / `_check_confidence` 仅拦 COMPLETE 低置信——PARTIAL 诚实低置信不判缺陷，
+  保 mock 零回灌不变量 / 消费 `CrossDimensionConflict`）；`TeamOrchestrator` 在 Validator 后插入 `_review_sync`/`_review_async`
+  ——`needs_revision` 命中维度重入分析器修订 **≤1 轮**（`_MAX_REVISION_ROUNDS=1`），超限报告标注「## 对抗式评审备注」+
+  `[REVIEWED]`，修订后结论回写 `ctx.extra["results"]` 供 Reporter 汇总最新版本。
+- **④ 跨竞品同源去重**：新模块 `core/source_dedup.py::SourceDedup`（规范化 URL → Observation 缓存 + `content_hash`
+  同内容复用 + FIFO 有界淘汰），`CollectorAgent._fetch` 经其 `get_or_fetch`，`facade/api` 注入共享实例；**按"单次分析"为界**
+  ——`analyze()` 起始 `clear()`，保证跨独立分析重新抓取（否则 26 时间线/新鲜度无法感知竞品变化，集成测试回归修复点）。
+- **⑤ 经验路由委派**：`StrategicPlanner._order_gaps_by_experience`（按 L4 `retrieve_patterns_with_outcome` 计
+  `failure-success` 分稳定排序，成功维度提前、失败反例后置；纯排序不改缺口集合与 LLM 调用结构），与 45
+  `_apply_pattern_boost` 叠加。
+- **配置**：`config/loader.py` 新增 `OrchestrationConfig`（`reviewer_enabled`/`freshness_delegation_enabled` 默认关=零行为变化，
+  `cross_dimension_conflict_enabled`/`source_dedup_enabled`/`experience_routing_enabled` 默认开=无副作用），
+  `review_config.yaml` 新增 `orchestration` section。
+- **测试**：新增 45 单测（conflict 9 / freshness_gate 8 / source_dedup 11 / reviewer 8 / experience_routing 9）+ 10 集成
+  （`tests/integration/test_domain_orchestration.py`：零缺陷评审零回灌且 LLM 调用次数不变、低置信回灌 ≤1 轮修订与
+  `[REVIEWED]` 标注、新鲜跳过采集复用归档/过期照常采集/未启用忽略归档、跨维度冲突渲染与开关）。
+- **回归**：全量 **958 passed / 6 skipped**（+55；1 个环境性失败同前：本机已装 playwright）；ruff 改动文件通过、
+  mypy 改动文件不新增错误（远程既有 129 项另行处理）。

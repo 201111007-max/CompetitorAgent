@@ -71,14 +71,22 @@ report:
   include_evidence_urls: true
   output_dir: "reports/competitor"
 
+# ===== 多 Agent 领域差异化编排（设计文档 49）=====
+orchestration:
+  reviewer:
+    enabled: false          # 对抗式评审第 5 角色：Validator→Reviewer→Reporter，needs_revision 回灌修订 ≤1 轮，超限标注 [REVIEWED]
+  freshness_delegation:
+    enabled: false          # 新鲜度驱动委派：过期维度优先采集、新鲜维度跳过采集复用归档、时间线事件提权重采
+  cross_dimension_conflict:
+    enabled: true           # 跨维度冲突检测：同源（content_hash）同键异值 → 冲突标注/评审
+  source_dedup:
+    enabled: true           # 跨竞品同源去重：URL→content_hash 缓存，多竞品共享源省抓取
+  experience_routing:
+    enabled: true           # 经验路由委派：按 L4 模式排序缺口执行顺序（纯排序不改缺口集合）
+
 # ===== 可观测性 =====
 observability:
   log_level: "INFO"
-  tracing: true
-  metrics: true
-  langfuse_enabled: false
-  langfuse_public_key_env: "LANGFUSE_PUBLIC_KEY"
-  langfuse_secret_key_env: "LANGFUSE_SECRET_KEY"
 ```
 
 ---
@@ -96,6 +104,11 @@ observability:
 | `dimensions.default_budget` | dict | — | 维度→迭代预算（可被战略循环覆盖） |
 | `collector.cache_ttl_seconds` | int | 86400 | 采集缓存有效期 |
 | `collector.use_playwright` | bool | false | SPA 采集开关（延迟安装依赖） |
+| `orchestration.reviewer.enabled` | bool | false | 对抗式评审（设计文档 49）：低置信 COMPLETE 命中维度回灌修订 ≤1 轮，超限标注 `[REVIEWED]` |
+| `orchestration.freshness_delegation.enabled` | bool | false | 新鲜度驱动委派：新鲜维度跳过采集复用归档、过期维度照常采集、时间线事件提权重采 |
+| `orchestration.cross_dimension_conflict.enabled` | bool | true | 跨维度冲突检测：同源（content_hash）同键异值 → 报告「跨维度冲突备注」 |
+| `orchestration.source_dedup.enabled` | bool | true | 跨竞品同源去重：URL→content_hash 缓存，按"单次分析"为界（不破坏时间线/新鲜度语义） |
+| `orchestration.experience_routing.enabled` | bool | true | 经验路由委派：按 L4 模式排序缺口执行顺序 |
 | `memory.data_dir` | str | ~/.competitor_agent | 记忆/向量库/凭据库根目录 |
 | `report.include_evidence_urls` | bool | true | 报告附证据链接（防幻觉透明化） |
 
