@@ -42,6 +42,7 @@ from competitor_agent.core.checkpoint import (
     set_cancel,
 )
 from competitor_agent.core.competitor_discoverer import CompetitorDiscoverer
+from competitor_agent.core.freshness_gate import FreshnessGate
 from competitor_agent.core.input_sanitizer import sanitize_task
 from competitor_agent.core.orchestrator import SingleOrchestrator
 from competitor_agent.core.report_builder import ReportBuilder
@@ -49,6 +50,7 @@ from competitor_agent.core.report_exporter import (
     export_comparison_json,
     export_competitor_json,
 )
+from competitor_agent.core.source_dedup import SourceDedup
 from competitor_agent.core.stop_verifier import StopVerifier
 from competitor_agent.core.strategic_loop import StrategicPlanner
 from competitor_agent.core.task_parser import parse_task
@@ -56,7 +58,7 @@ from competitor_agent.core.url_guard import URLError, guard_http_url
 from competitor_agent.domain_types.competitor import Competitor
 from competitor_agent.domain_types.enums import GapStatus, ResultStatus, TerminalState
 from competitor_agent.domain_types.events import ProgressEvent
-from competitor_agent.domain_types.freshness import stale_under_ttl
+from competitor_agent.domain_types.freshness import ReportFreshness, stale_under_ttl
 from competitor_agent.domain_types.info_gap import InfoGap
 from competitor_agent.domain_types.observation import SourceEvidence
 from competitor_agent.domain_types.report import (
@@ -120,7 +122,15 @@ class CompetitorAnalysisAPI:
         # record_skill / record_outcome / archive_session），下游均判 `self._memory is None`
         self._memory = memory if enable_memory else None
 
-        self._planner = StrategicPlanner(llm=llm, use_llm=use_llm)
+        self._planner = StrategicPlanner(
+            llm=llm,
+            use_llm=use_llm,
+            experience_routing=cfg.orchestration.experience_routing_enabled,
+        )
+        # 跨竞品同源去重（设计文档 49 §3.4）：单实例跨 analyze/compare 共享，命中省抓取
+        self._source_dedup: SourceDedup | None = (
+            SourceDedup() if cfg.orchestration.source_dedup_enabled else None
+        )
         # 外部源提供方（设计文档 23）：按 config 构造；主开关默认关闭（无网络/无 Key 不触发真实网络）
         providers = build_providers(cfg.collector)
         self._providers: dict[str, object] = {p.kind: p for p in providers}
@@ -195,6 +205,10 @@ class CompetitorAnalysisAPI:
         task = self._disambiguate_with_history(task, conversation_history)
         sid = session_id or f"sess_{uuid.uuid4().hex[:8]}"
         set_current_session(sid)
+        # 同源去重按"单次分析"为界：每次独立分析清空缓存，保证重新抓取
+        # （否则时间线/新鲜度（设计文档 26）无法感知竞品变化）
+        if self._source_dedup is not None:
+            self._source_dedup.clear()
         if mode == "team":
             # team 路径自含 session_started 与规划埋点（analyze_team 内部统一）
             return self.analyze_team(task, session_id=sid)
@@ -761,8 +775,47 @@ class CompetitorAnalysisAPI:
             builder=self._builder,
             selector=self._selector,
             tool_dispatcher=self._verify_dispatcher,  # 设计文档 44：team 分析器同样可工具补证
+            # 领域差异化编排（设计文档 49）：开关 + 新鲜度委派 + 同源去重（默认保守，零行为变化）
+            orchestration=self._config.orchestration,
+            freshness_gate=self._freshness_gate_for(strategy.competitor.name),
+            archive_results=self._archive_results_for(strategy.competitor.name),
+            archive_freshness=self._archive_freshness_for(strategy.competitor.name),
+            timeline_events=self._timeline.events(strategy.competitor.name),
+            dedup=self._source_dedup,
         )
         return strategy, orch, slog
+
+    # ── 新鲜度驱动委派（设计文档 49 §3.2）──────────────────────────
+
+    def _freshness_gate_for(self, competitor: str) -> FreshnessGate | None:
+        """按配置装配 FreshnessGate；未启用时返回 None（编排器零行为变化）。"""
+        if not self._config.orchestration.freshness_delegation_enabled:
+            return None
+        return FreshnessGate(ttl_days=self._config.freshness.dimension_ttl_days)
+
+    def _archive_freshness_for(self, competitor: str) -> dict[str, float]:
+        """取竞品最新归档的维度年龄（ReportFreshness.dimension_ages）；无/失败 → {}。"""
+        if not self._config.orchestration.freshness_delegation_enabled or self._memory is None:
+            return {}
+        try:
+            sessions = self._memory.list_sessions(competitor)
+        except Exception:  # noqa: BLE001 — 归档读取失败不影响主流程
+            return {}
+        if not sessions:
+            return {}
+        raw = getattr(sessions[0], "raw", None) or {}
+        freshness = ReportFreshness.from_dict(raw.get("freshness"))
+        return dict(freshness.dimension_ages) if freshness else {}
+
+    def _archive_results_for(self, competitor: str) -> list:
+        """取时间线快照重建的归档结论（新鲜维度直接复用，含 details/evidence）。"""
+        if not self._config.orchestration.freshness_delegation_enabled:
+            return []
+        try:
+            prev = self._timeline.report_for(competitor)
+        except Exception:  # noqa: BLE001 — 时间线读取失败不影响主流程
+            return []
+        return list(prev.dimension_results) if prev is not None else []
 
     def _finish_team(
         self,

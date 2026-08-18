@@ -194,6 +194,23 @@ $env:SKILLS_DIR = "D:\my_skills"; python -m competitor_agent.cli analyze "Cursor
 目录缺省 `competitor_agent/skills/`；文件缺失 / 解析失败时注入点静默跳过（主流程不受影响）。
 保证型逻辑（安全 / 选源路由 / 校验 / 阈值 / 聚合）不随 skill 改变，仍由代码兜底。
 
+### 多 Agent 领域差异化编排（设计文档 49）
+
+team 流水线在 Validator 之后、Reporter 之前追加 5 项**领域差异化编排**，由 `config/review_config.yaml` 的
+`orchestration` section 控制：
+
+- **对抗式评审**（`orchestration.reviewer.enabled`，默认关）：第 5 角色 ReviewerAgent 对草稿结论主动证伪
+  （数值反方核对 + COMPLETE 低置信拦截）；`needs_revision` 命中维度回灌分析器修订 **≤1 轮**，仍不达标报告标注
+  「## 对抗式评审备注」+ `[REVIEWED]`。mock 零缺陷 → 零回灌、LLM 调用次数不变。
+- **新鲜度驱动委派**（`orchestration.freshness_delegation.enabled`，默认关）：新鲜维度跳过采集、直接复用归档结论；
+  过期维度照常采集；时间线变更事件（设计文档 26）命中维度强制重采。
+- **跨维度冲突检测**（`orchestration.cross_dimension_conflict.enabled`，默认开）：同 `content_hash` 来源在
+  `monthly_price_usd` 等共享事实键上输出不同值 → 报告渲染「## 跨维度冲突备注」。
+- **跨竞品同源去重**（`orchestration.source_dedup.enabled`，默认开）：URL→`content_hash` 缓存，`compare` 多竞品
+  共享官网/榜单源省抓取；按"单次分析"为界清空，不破坏时间线/新鲜度对变化的感知。
+- **经验路由委派**（`orchestration.experience_routing.enabled`，默认开）：按 L4 成功/失败模式稳定排序缺口执行顺序
+  （纯排序，不改缺口集合）。
+
 ---
 
 ## 4. 输出说明

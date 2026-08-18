@@ -24,6 +24,9 @@ class DimensionResult:
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     status: ResultStatus = ResultStatus.PARTIAL
     conflict_evidence: list[str] = field(default_factory=list)  # 仲裁丢弃的其他来源（设计文档 33）
+    # 证据链哈希（设计文档 49 §3.1）：结论引用的证据 content_hash，供编排层跨维度同源核对；
+    # 缺省空（向后兼容，未走分析器的构造路径不填）。
+    evidence_hashes: list[str] = field(default_factory=list)
 
 
 @dataclass

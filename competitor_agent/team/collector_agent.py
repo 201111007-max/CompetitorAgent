@@ -14,6 +14,7 @@ from typing import Any
 from competitor_agent.collector.source_selector import SourceSelector
 from competitor_agent.core.checkpoint import is_cancelled
 from competitor_agent.core.gap_executor import fetch_candidate
+from competitor_agent.core.source_dedup import SourceDedup
 from competitor_agent.domain_types.enums import ObservationStatus
 from competitor_agent.domain_types.observation import Observation
 from competitor_agent.domain_types.strategy import CompetitorStrategy
@@ -38,6 +39,7 @@ class CollectorAgent(BaseAgent):
         ingester: Any | None = None,
         session_id: str | None = None,
         providers: dict[str, object] | None = None,
+        dedup: SourceDedup | None = None,  # 跨竞品同源去重（设计文档 49 §3.4），None → 原行为
     ) -> None:
         super().__init__("collector", bus, memory)
         self._selector = selector
@@ -45,6 +47,7 @@ class CollectorAgent(BaseAgent):
         self._ingester = ingester
         self._session_id = session_id or ""
         self._providers = dict(providers or {})
+        self._dedup = dedup
 
     def run(self, ctx: AgentContext) -> AgentResult:
         """决策入口：采集缺口数据，产出 Observation 列表。"""
@@ -69,9 +72,7 @@ class CollectorAgent(BaseAgent):
                 break
             for candidate in self._selector.candidates(gap, strategy.competitor):
                 try:
-                    obs = fetch_candidate(
-                        gap, candidate, strategy.competitor, self._extractor, providers=self._providers
-                    )
+                    obs = self._fetch(gap, candidate, strategy)
                 except DataSourceUnavailableError as exc:
                     gap.record_source_try(candidate.source_name)
                     logger.info("候选源失败 %s: %s", candidate.source_name, exc)
@@ -83,6 +84,22 @@ class CollectorAgent(BaseAgent):
                     break  # 该缺口已有可分析内容，停止降级
         self._bus.publish(T_COLLECTED, {"competitor": strategy.competitor.name, "observations": observations})
         return observations
+
+    def _fetch(
+        self,
+        gap: InfoGap,
+        candidate: Any,
+        strategy: CompetitorStrategy,
+    ) -> Observation:
+        """抓取候选源；装配 SourceDedup 时经其缓存（同 URL / 同 content_hash 复用，设计文档 49 §3.4）。"""
+        def _do_fetch() -> Observation:
+            return fetch_candidate(
+                gap, candidate, strategy.competitor, self._extractor, providers=self._providers
+            )
+
+        if self._dedup is None or not candidate.url:
+            return _do_fetch()
+        return self._dedup.get_or_fetch(candidate.url, _do_fetch)
 
     def _ingest_observation(self, observation: Observation, competitor: str, dimension: str) -> None:
         """采集到有效文本后摄入知识库（RAG 灌库链路）"""

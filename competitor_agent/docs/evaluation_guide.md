@@ -195,6 +195,11 @@ python -m competitor_agent.evaluation.benchmark --llm real --out reports/benchma
 > 工具选择 ≥0.85 / trace 100%）与既有断言保持（`tests/evaluation/test_skill_injection.py` 验证）。
 > 技能目录可用 `SKILLS_DIR` 环境变量覆盖（评测注入确定性内容），注入点对缺失静默降级。
 
+> **编排开关与 mock 不变量（设计文档 49）**：`orchestration.reviewer.enabled` / `freshness_delegation.enabled`
+> 默认关（零行为变化）；mock 零缺陷评审零回灌 → 开启评审不增加 LLM 调用次数、不改变 mock 门禁
+> （`tests/integration/test_domain_orchestration.py::TestReviewerZeroDefectInvariant` 验证）；`source_dedup` 按
+> "单次分析"为界清空，不缓存跨用例采集 → benchmark 逐 case 独立抓取不受污染。
+
 ---
 
 ## 6. 新增用例流程
