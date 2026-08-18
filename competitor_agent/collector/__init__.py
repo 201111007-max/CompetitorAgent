@@ -1,6 +1,4 @@
-"""collector 包：数据源采集器"""
-from competitor_agent.collector.source_selector import SourceCandidate, SourceSelector
-from competitor_agent.collector.spa_extractor import SpaExtractor
+"""collector 包：数据源采集器（SourceSelector/SPA 已删除，设计文档 49）"""
 from competitor_agent.collector.web_extractor import WebExtractor
 
-__all__ = ["SourceCandidate", "SourceSelector", "SpaExtractor", "WebExtractor"]
+__all__ = ["WebExtractor"]

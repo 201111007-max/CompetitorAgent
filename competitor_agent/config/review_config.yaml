@@ -28,27 +28,14 @@ budget:
   token_high_water_mark: 120000  # 上下文 token 高水位，触发压缩
   token_compression_target: 80000 # 压缩后目标 token
 
-# ===== 终止阈值 =====
-termination:
-  core_priority_threshold: 8  # 核心缺口优先级判定线
-  core_confidence: 0.8        # 核心缺口关闭所需置信度
-
 # ===== 执行调度（并行缺口分析）=====
 execution:
   mode: "single"              # single 串行（默认，兼容）；parallel 并行执行独立缺口
   max_parallel_subagents: 4   # 并行子代理上限
 
-# ===== 维度清单与预算分配 =====
+# ===== 维度清单 =====
 dimensions:
   enabled: [feature, pricing, performance, ecosystem, sentiment, roadmap]
-  default_budget:
-    feature: 3
-    pricing: 2
-    performance: 3
-    ecosystem: 2
-    sentiment: 2
-    roadmap: 1
-  analysis_order: [pricing, feature, performance, ecosystem, sentiment, roadmap]
 
 # ===== 数据源 =====
 collector:
@@ -65,14 +52,6 @@ collector:
   enable_marketplace: true
   enable_community: true
   enable_benchmark: true
-
-# ===== 停止验证 =====
-stop_verifier:
-  required_dimensions:
-    - "pricing"
-    - "feature"
-  min_confidence: 0.6
-  min_evidence_ratio: 0.7
 
 # ===== 记忆 =====
 memory:
