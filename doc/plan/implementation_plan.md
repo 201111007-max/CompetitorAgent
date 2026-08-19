@@ -840,19 +840,19 @@ dev:
 
 | 项 | 内容 | 优先级 | 状态 |
 |---|---|---|---|
-| **49 多 Agent LLM 主导编排**（deer-flow 式，重写） | Lead = `ReactAgent`+`make_plan`+`delegate`（批量后台并发+回填）；子 Agent = `SubagentRegistry` 预注册 6 维度（独立 ReactLoop+维度 skill+工具子集，排除 analyze_competitor）；保留逻辑 → `select_source`/`validate_facts`/`detect_conflict`/`check_freshness`/`analyze_pricing`/`estimate_costs` 工具；`facade/react_report.py` 组 REPORT_SCHEMA→CompetitorReport；`BenchmarkMockLLM` ReAct-scripted + HARNESS_VERSION 0.7 重定门禁；删 team//strategic_loop/gap_executor/tactical_loop/single orchestrator/subagent/parallel_runner/stop_verifier/analyzers/source_selector | 中高 | 🚧 实施中（2026-08-18，M1 起） |
+| **49 多 Agent LLM 主导编排**（deer-flow 式，重写） | Lead = `ReactAgent`+`make_plan`+`delegate`（批量后台并发+回填）；子 Agent = `SubagentRegistry` 预注册 6 维度（独立 ReactLoop+维度 skill+工具子集，排除 analyze_competitor）；保留逻辑 → `select_source`/`validate_facts`/`detect_conflict`/`check_freshness`/`analyze_pricing`/`estimate_costs` 工具；`facade/react_report.py` 组 REPORT_SCHEMA→CompetitorReport；`BenchmarkMockLLM` ReAct-scripted + HARNESS_VERSION 0.7 重定门禁；删 team//strategic_loop/gap_executor/tactical_loop/single orchestrator/subagent/parallel_runner/stop_verifier/analyzers/source_selector | 中高 | ✅ 已实现（2026-08-19，见 §21.4） |
 
 ### 21.1 实施里程碑
 
 | # | 里程碑 | 产出 | 状态 |
 |---|---|---|---|
 | 0 | 设计文档重写 + README 索引 + §21 登记 | 本段 + 索引 | ✅ 2026-08-18 |
-| 1 | 核心 agent | `react_schemas.py`/`subagent_registry.py`/`delegate_tool.py`/Lead+子 Agent prompt/`react_loop` plan-first+transcript/`tool_registry` exclude+extra | 🚧 |
-| 2 | facade 换核 | `react_report.py` assemble/`api.py` 收拢 ReAct+薄包装/`_record_memory_success` 单点/resume 重构/analyze_pricing 去 SourceSelector/cli/web_app | ⬜ |
-| 3 | 删除 | team//strategic_loop/gap_executor/tactical_loop/orchestrator/subagent/parallel_runner/stop_verifier/analyzers/source_selector/spa_extractor/providers + config 死字段 | ⬜ |
-| 4 | 评测 | benchmark 0.7 门禁/ablation no-tools/behavior_eval make_plan/test_orchestration_eval | ⬜ |
-| 5 | 测试迁移 | 删 ~15 文件 + 改写 ~30 文件，按目录分批跑到绿（最大） | ⬜ |
-| 6 | 文档 | README/CHANGELOG/docs/*.md 无流水线叙事 | ⬜ |
+| 1 | 核心 agent | `react_schemas.py`/`subagent_registry.py`/`delegate_tool.py`/Lead+子 Agent prompt/`react_loop` plan-first+transcript/`tool_registry` exclude+extra | ✅ 2026-08-18（fceff05） |
+| 2 | facade 换核 | `react_report.py` assemble/`api.py` 收拢 ReAct+薄包装/`_record_memory_success` 单点/resume 重构/analyze_pricing 去 SourceSelector/cli/web_app | ✅ 2026-08-18（f46d56e） |
+| 3 | 删除 | team//strategic_loop/gap_executor/tactical_loop/orchestrator/subagent/parallel_runner/stop_verifier/analyzers/source_selector/spa_extractor/providers + config 死字段 | ✅ 2026-08-18（7378b63） |
+| 4 | 评测 | benchmark 0.7 门禁/ablation no-tools/behavior_eval make_plan/test_orchestration_eval | ✅ 2026-08-18（433d0ba） |
+| 5 | 测试迁移 | 删 ~15 文件 + 改写 ~30 文件，按目录分批跑到绿（最大） | ✅ 2026-08-19（916070e/ae86246，全绿 730 passed / 6 skipped） |
+| 6 | 文档 | README/CHANGELOG/docs/*.md 无流水线叙事 | ✅ 2026-08-19 |
 
 ### 21.2 保留逻辑 → skill / 工具 / 代码兜底映射
 
@@ -867,3 +867,31 @@ dev:
 - 安全兜底逻辑强制代码，LLM 决策不覆盖；`analyze_competitor` 从子 Agent/Lead 工具面排除（防递归）。
 - mock 全量门禁在 `subagents.enabled=true` 下通过（字段 ≥0.90 / 幻觉 ≤0.05 / 工具选择 ≥0.85 / trace 100%），HARNESS_VERSION 0.7.0。
 - 子 Agent 后台并发线程安全：复用已加锁 `IterationBudget`/`CompetitorStore` RLock。
+
+### 21.4 49（重写版）完成说明（2026-08-19）
+
+- **M1 核心 agent（fceff05）**：`agent/react_schemas.py`（DIMENSIONS 6 维枚举 + PLAN_SCHEMA + REPORT_SCHEMA +
+  SUBAGENT_RESULT_SCHEMA）；`agent/subagent_registry.py`（预注册 6 维度子 Agent = 独立 ReactAgent + 维度 skill +
+  fact_verification/confidence_disclosure + 工具子集，排除 `analyze_competitor`）；`agent/make_plan.py` +
+  `agent/delegate_tool.py`（`delegate(task, dimensions=[...])` 批量后台线程池并发 + 阻塞聚合回填 Observation，
+  `wrap_untrusted` 包裹）；`agent/review_tools.py`（`select_source`/`validate_facts`/`detect_conflict`/`check_freshness`）；
+  `react_loop` plan-first 强制（首步非 make_plan → 回灌提示）+ `loop.plan` + transcript（tool/args/result/url）捕获。
+- **M2 facade 换核（f46d56e）**：`facade/react_report.py` `assemble`（REPORT_SCHEMA JSON → 多维度 DimensionResult →
+  CompetitorReport，details 键名沿用 plans/features/benchmarks 命名空间；非 JSON → 单 react 维度 PARTIAL，
+  gaps_pending 取 plan 声明未产出维度）；`api.analyze()` 收拢为 Lead ReAct（mode 兼容接受+告警），
+  `analyze_team`/`analyze_team_async` 薄包装；`_record_memory_success(report, transcript)` 单点记忆写侧；
+  resume 从 checkpoint pending 缺口合成 ReAct 任务并合并已完成维度（补 `clear_cancel` 修复续跑空转）；
+  `analyze_pricing` 去 SourceSelector（registry + WebExtractor 直抓）；cli/web_app 无 Key 显式报错。
+- **M3 删除（7378b63）**：team/、analyzers/、strategic_loop/gap_executor/tactical_loop/orchestrator/subagent/
+  parallel_runner/stop_verifier、source_selector/spa_extractor/providers、interfaces 四契约、
+  config 死字段；全仓 grep 确认 `_parse_task_rule`/`_analyze_with_rules`/`candidates(` 不复存在。
+- **M4 评测（433d0ba）**：`BenchmarkMockLLM` ReAct-scripted（conversation-safe 按消息推导阶段：make_plan →
+  delegate → 子 Agent 确定性抽取复用现有命名空间 → REPORT_SCHEMA）；HARNESS_VERSION 0.7.0 重定门禁；
+  ablation `no-llm-rule` → `no-tools` 保 5 列；behavior_eval 脚本补 make_plan 首步。
+- **M5 测试迁移（916070e/ae86246）**：删除已删模块全部测试（team/analyzers/规则管线/planner/selector）；
+  改写 facade/integration/e2e/evaluation 至 Lead ReAct 语义；修 4 个真实生产缺口——定价消费侧统一
+  `profile_from_details`（markdown_renderer/report_exporter/timeline/archive，doc-49 `details["plans"]`
+  命名空间下定价表恢复渲染）、resume 未清取消标志致续跑空转、fallback 报告 gaps_pending 丢失、
+  `extract_profile` 对畸形 plans 不健壮。全量 **730 passed / 6 skipped / 0 failed**。
+- **M6 文档收口**：README 目录结构/编排叙事/里程碑 M8-M11、CHANGELOG M11（Added + Removed）、
+  docs/*.md 去流水线叙事、§21 登记收口。

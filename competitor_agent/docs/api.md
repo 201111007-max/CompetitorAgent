@@ -39,7 +39,7 @@ class CompetitorAnalysisAPI:
 > 只走 LLM，不再有规则降级。未配置 API Key 或 LLM 调用失败时：
 > - `parse_task` / `plan` 抛 `LLMUnavailableError`（由调用方决定处理；CLI 打印"需要配置 LLM API Key"退出码 2，
 >   Web 返回 SSE `error` 事件）；
-> - 维度分析器 `analyze` **不抛错**，返回 `DimensionResult(status=PARTIAL, confidence=0.1)`（报告标注"该维度未分析"）；
+> - 单维度产出失败**不炸报告**，该维度以 `DimensionResult(status=PARTIAL)` 低置信落入报告（报告如实标注）；
 > - `competitor_registry.resolve_competitor` 未命中抛 `ValueError`（竞品识别已归 LLM）。
 
 ### 方法
@@ -66,7 +66,8 @@ ReAct 模式：LLM 驱动工具调用（需 LLM Key）。
 
 #### `analyze_team(task: str) -> CompetitorReport`
 
-多 Agent 流水线模式：Collector→Analyzer→Validator→Reporter 协作产出草稿报告。
+多 Agent 编排入口（设计文档 49）：与 `analyze()` 同一条 Lead ReAct 路径的薄包装
+（Lead LLM 经 `delegate` 委派独立维度子 Agent 并发执行），保留仅为调用方兼容。
 
 #### `async analyze_stream(task: str, session_id: str | None = None) -> AsyncIterator[ProgressEvent]`
 

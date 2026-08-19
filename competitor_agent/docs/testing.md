@@ -10,10 +10,11 @@
 ```
 tests/
 ├── unit/            # 纯逻辑，无网络/无 LLM，毫秒级
-│   ├── core/        # budget / budget_controller / loops / report
-│   ├── agent/       # react / parser / tool_guard / injection
+│   ├── core/        # budget / checkpoint / report / url_guard
+│   ├── agent/       # react_loop / parser / dispatcher / make_plan / delegate / subagent_registry
 │   ├── collector/   # 各数据源（respx mock HTTP）
-│   ├── analyzers/   # 维度分析器（注入假 LLM）
+│   ├── facade/      # 入口编排与 react_report 组装（注入假 LLM）
+│   ├── skills/      # skill 加载与注入
 │   ├── memory/      # 四层记忆
 │   ├── interfaces/  # Protocol 冒烟
 │   └── config/      # 配置校验
@@ -73,12 +74,11 @@ class FakeLLMClient:
 
 | 模块 | 行覆盖率目标 |
 |------|-------------|
-| core/（budget/controller/stop_verifier/loops） | ≥ 90% |
-| agent/（parser/guard/injection/react_loop） | ≥ 85% |
+| core/（budget/controller/checkpoint/report/guard） | ≥ 90% |
+| agent/（parser/dispatch/react_loop/delegate） | ≥ 85% |
 | memory/ | ≥ 80% |
 | collector/ | ≥ 75% |
-| analyzers/ | ≥ 70% |
-| facade/ | ≥ 80% |
+| facade/（api/react_report） | ≥ 80% |
 | **整体** | **≥ 80%** |
 
 CI 用 `--cov --cov-fail-under=80` 门禁。
@@ -126,7 +126,7 @@ CI 用 `--cov --cov-fail-under=80` 门禁。
 
 | 用例 | 断言 |
 |------|------|
-| LLM 不可用 | fallback_analyzer 产出报告不崩溃 |
+| LLM 不可用（无 API Key） | 显式抛 `LLMUnavailableError`，无静默规则降级（设计文档 47/49） |
 | 数据源全失败 | 缺口 BLOCKED，报告如实标注 |
 
 ---
