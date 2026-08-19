@@ -42,8 +42,12 @@ class RecoveryScenario:
     """一个"会出错"的 ReAct 自恢复场景（脚本化回放输入）"""
     name: str
     task: str
-    first_error: str                 # 首轮输出：非法参数 / 不存在工具
+    first_error: str                 # 出错轮输出：非法参数 / 不存在工具
     correction: str                  # 收到 Observation 回灌后输出：合法调用
+    first_plan: str = (             # 首步 make_plan（设计文档 49 plan-first 强制）
+        'Thought: 先规划分析策略\nAction: make_plan\n'
+        'Args: {"plan_json": {"competitor": "cursor", "dimensions": ["pricing"]}}'
+    )
     final_answer: str = "Final Answer: 自恢复成功"
     valid_tool: str = "web_extract"  # 应成功调用的合法工具
     valid_args: dict[str, Any] = field(default_factory=dict)
@@ -109,10 +113,11 @@ def default_retrieval_cases() -> list[RetrievalCase]:
 
 
 class ScriptedLLM:
-    """确定性脚本化 mock LLM：首轮故意输出错误，收到 Observation 回灌后修正（自恢复）
+    """确定性脚本化 mock LLM：首步 make_plan → 故意输出错误 → 收到回灌后修正（自恢复）
 
-    第 1 轮输出 first_error（非法参数/不存在工具）；第 2 轮若 Observation 含设计文档 38
-    错误反馈关键词则输出 correction（合法调用）；之后输出 final_answer。无真实 Key 依赖。
+    第 1 轮输出 first_plan（make_plan，设计文档 49 plan-first）；第 2 轮输出 first_error
+    （非法参数/不存在工具）；第 3 轮若 Observation 含设计文档 38 错误反馈关键词则输出
+    correction（合法调用）；之后输出 final_answer。无真实 Key 依赖。
     """
 
     def __init__(self, scenario: RecoveryScenario) -> None:
@@ -122,10 +127,12 @@ class ScriptedLLM:
     def complete(self, messages: list[dict[str, str]], model: str | None = None) -> str:
         self._round += 1
         if self._round == 1:
+            return self._scenario.first_plan
+        if self._round == 2:
             return self._scenario.first_error
-        # 第 2 轮后：读最近一条 Observation（react_agent 把 task 追加在 Observation 之后，
+        # 第 3 轮起：读最近一条 Observation（react_agent 把 task 追加在 Observation 之后，
         # 故按内容前缀定位），含设计文档 38 错误反馈关键词即输出合法调用（自恢复）
-        if self._round == 2 and any(m in self._last_observation(messages) for m in _ERROR_MARKERS):
+        if self._round == 3 and any(m in self._last_observation(messages) for m in _ERROR_MARKERS):
             return self._scenario.correction
         return self._scenario.final_answer
 
@@ -159,7 +166,8 @@ class RecoveryEvaluator:
             dispatcher = self._dispatcher or self._build_dispatcher(recorder)
             llm = self._llm or LLMClient(call_func=ScriptedLLM(scenario).complete)
             agent = ReactAgent(llm=llm, dispatcher=dispatcher)
-            answer = ReactLoop(agent).run(scenario.task)
+            # plan_first：首步强制 make_plan（设计文档 49），与主路径 Lead 语义一致
+            answer = ReactLoop(agent, plan_first=True).run(scenario.task)
             if _scenario_recovered(scenario, answer, recorder):
                 recovered += 1
         return round(recovered / len(scenarios), 4), len(scenarios)
@@ -184,6 +192,10 @@ class RecoveryEvaluator:
         for name, spec in TOOL_SPECS.items():
             func = fake_web_extract if name == "web_extract" else TOOLS[name]
             dispatcher.register(name, record(name, func), spec=spec)
+        # plan-first 首步强制工具（设计文档 49），Lead 与子 Agent 同源
+        from competitor_agent.agent.make_plan import make_plan as _make_plan
+
+        dispatcher.register("make_plan", record("make_plan", _make_plan))
         return dispatcher
 
 

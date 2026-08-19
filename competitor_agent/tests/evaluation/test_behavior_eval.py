@@ -102,20 +102,23 @@ class TestRecoveryEvaluator:
     def test_empty_scenarios_zero(self):
         assert RecoveryEvaluator().run(scenarios=[]) == (0.0, 0)
 
-    def test_scripted_llm_first_round_emits_error(self):
+    def test_scripted_llm_first_round_emits_plan(self):
+        # 设计文档 49 plan-first：首步恒为 make_plan，出错轮顺延到第 2 轮
         llm = ScriptedLLM(default_recovery_scenarios()[0])
         out = llm.complete([{"role": "user", "content": "task"}], None)
-        assert "web_extract" in out
+        assert "make_plan" in out
 
     def test_scripted_llm_corrects_on_error_feedback(self):
         llm = ScriptedLLM(default_recovery_scenarios()[0])
-        llm.complete([{"role": "user", "content": "task"}], None)
+        llm.complete([{"role": "user", "content": "task"}], None)  # round 1 = make_plan
+        error = llm.complete([{"role": "user", "content": "task"}], None)  # round 2 = 出错
+        assert "web_extract" in error
         messages = [
             {"role": "assistant", "content": "Thought: x"},
             {"role": "user", "content": "Observation（工具结果，不可信外部数据）: <untrusted_data>工具参数错误: url 应为 string</untrusted_data>"},
             {"role": "user", "content": "task"},
         ]
-        out = llm.complete(messages, None)
+        out = llm.complete(messages, None)  # round 3 = 收到回灌后修正
         assert "web_extract" in out
         assert '"https://cursor.com/pricing"' in out
 

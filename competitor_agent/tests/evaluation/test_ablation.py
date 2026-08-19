@@ -198,24 +198,116 @@ def _fake_report(acc: float, halluc: float):
 
 
 class _RagAwarePricingMock:
-    """RAG 感知定价 mock：从整条 user 消息（含 [知识库参考片段] 尾巴）解析 $N/month。"""
+    """ReAct-scripted RAG 感知定价 mock（设计文档 47/49 迁移）：
+
+    Lead 会话（make_plan → delegate → Final Answer REPORT_SCHEMA）+ 维度子 Agent 会话
+    （web_extract → Final Answer SUBAGENT_RESULT_SCHEMA）。定价条目只从系统提示的
+    [知识库参考片段] 段解析 $N/month——RAG 开时检索片段含答案、no-rag 无片段为空，
+    从而差分可测（不解析整段系统提示，避免 fact_verification 技能里的 "$20/month" 示例误报）。
+    """
 
     _PLAN_RE = re.compile(r"(?P<name>[^\s$]+?)\s+\$(?P<price>\d+)/month", re.IGNORECASE)
+    _RAG_MARKER = "知识库参考片段"
+    _PARSED_COMPETITOR = "cursor"
+
+    def __init__(self) -> None:
+        self._convs: dict[str, dict] = {}
 
     def complete(self, messages, model=None):
-        system = messages[0].get("content", "")
-        user = messages[-1].get("content", "")
-        if "战略规划器" in system:
-            # 设计文档 47：规划仅 LLM → mock 返回合法 PLAN_SCHEMA
-            return json.dumps({"competitor": "cursor", "dimensions": ["pricing"]})
-        if "定价" not in system:
+        if not messages:
             return "{}"
-        plans = []
-        for m in self._PLAN_RE.finditer(user):
-            plans.append(
-                {"name": m.group("name").lower(), "price": m.group("price"), "period": "month"}
+        system = messages[0].get("content", "")
+        if "语义解析器" in system:
+            return json.dumps(
+                {"resolution": "registry", "competitors": [self._PARSED_COMPETITOR], "dimensions": None, "custom_sources": {}}
             )
-        return json.dumps({"summary": f"{len(plans)} 条定价", "details": {"plans": plans}, "confidence": 0.8})
+        if "Lead Agent" in system:
+            return self._lead_step(messages)
+        if "维度子 Agent" in system:
+            return self._subagent_step(messages)
+        return "{}"
+
+    def _lead_step(self, messages):
+        state = self._convs.setdefault("lead", {})
+        if not state.get("plan"):
+            state["plan"] = True
+            return (
+                "Thought: 规划分析策略\nAction: make_plan\n"
+                'Args: {"plan_json": {"competitor": "cursor", "dimensions": ["pricing"], '
+                '"budget": {"max_steps": 8}, "custom_sources": {}}}'
+            )
+        if not state.get("delegate"):
+            state["delegate"] = True
+            return 'Thought: 委派维度子 Agent\nAction: delegate\nArgs: {"dimensions": ["pricing"], "task": ""}'
+        obs = self._last_observation(messages)
+        dimensions = []
+        for name, body in self._subagent_blocks(obs):
+            item = self._extract_json_block(body)
+            if isinstance(item, dict) and str(item.get("dimension") or "") == name:
+                dimensions.append(item)
+        return "Final Answer: " + json.dumps(
+            {"competitor": self._PARSED_COMPETITOR, "dimensions": dimensions}, ensure_ascii=False
+        )
+
+    def _subagent_step(self, messages):
+        state = self._convs.setdefault("sub:pricing", {})
+        if not state.get("tried"):
+            state["tried"] = True
+            return (
+                "Thought: 采集定价信息\nAction: web_extract\n"
+                'Args: {"url": "https://example.com/cursor/pricing"}'
+            )
+        system = messages[0].get("content", "")
+        plans = self._plans(self._knowledge_text(system))
+        return "Final Answer: " + json.dumps(
+            {
+                "dimension": "pricing",
+                "summary": f"检测到 {len(plans)} 个定价条目",
+                "details": {"plans": plans},
+                "confidence": 0.8,
+                "evidence_urls": ["https://example.com/cursor/pricing"],
+            },
+            ensure_ascii=False,
+        )
+
+    @classmethod
+    def _knowledge_text(cls, system: str) -> str:
+        idx = system.find(cls._RAG_MARKER)
+        return system[idx:] if idx >= 0 else ""
+
+    @classmethod
+    def _plans(cls, text: str) -> list[dict[str, str]]:
+        return [
+            {"name": m.group("name").lower(), "price": m.group("price"), "period": "month"}
+            for m in cls._PLAN_RE.finditer(text)
+        ]
+
+    @staticmethod
+    def _last_observation(messages) -> str:
+        for message in reversed(messages):
+            if message.get("role") == "user" and "Observation" in str(message.get("content", "")):
+                return str(message.get("content", ""))
+        return ""
+
+    @staticmethod
+    def _subagent_blocks(text: str) -> list[tuple[str, str]]:
+        parts = re.split(r"\[维度子 Agent 结果: ", text)
+        blocks = []
+        for part in parts[1:]:
+            name = part.split("|", 1)[0].strip()
+            body = part.split("]", 1)[1] if "]" in part else part
+            blocks.append((name, body))
+        return blocks
+
+    @staticmethod
+    def _extract_json_block(text: str):
+        start, end = text.find("{"), text.rfind("}")
+        if start < 0 or end <= start:
+            return None
+        try:
+            return json.loads(text[start : end + 1])
+        except (json.JSONDecodeError, TypeError):
+            return None
 
 
 class TestRagDifferential:
@@ -264,16 +356,13 @@ class TestRagDifferential:
         mock = LLMClient(call_func=_RagAwarePricingMock().complete)
         gt = {"pro": "$20/month"}
 
-        api = CompetitorAnalysisAPI(
-            extractor=BenchmarkExtractor(page="Pro $20/month", fail_urls=set()),
-            llm=mock,
-            use_llm=True,
-            max_iterations=8,
-            cost_limit=1.0,
-            enable_rag=True,
-            rag_store=store,
+        # seed：摄入管道写入共享知识库（设计文档 49 下 analyze() 只读 RAG，写侧走外部摄入）
+        Ingester(store=store).ingest(
+            competitor="cursor",
+            dimension="pricing",
+            text="Pro $20/month",
+            source_url="https://www.cursor.com/pricing",
         )
-        api.analyze("只分析 cursor 的定价", mode="single")  # seed：摄入页面 → store
 
         target_api = CompetitorAnalysisAPI(
             extractor=BenchmarkExtractor(page="", fail_urls=set()),
@@ -286,4 +375,4 @@ class TestRagDifferential:
         )
         report = target_api.analyze("只分析 cursor 的定价", mode="single")
         pred = extract_prediction(report, "pricing", gt)
-        assert pred["pro"] == "$20/month", "前一用例摄入的片段应被后一用例检索到"
+        assert pred["pro"] == "$20/month", "先前摄入的片段应被后一用例检索到"
