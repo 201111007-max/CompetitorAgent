@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from competitor_agent.config.loader import AppConfig, CollectorConfig
 from competitor_agent.domain_types.enums import ObservationStatus
 from competitor_agent.domain_types.observation import Observation, SourceEvidence
 from competitor_agent.evaluation.accuracy_eval import AccuracyEvaluator, AccuracyMetrics, EvalCase
@@ -41,7 +42,10 @@ STRATEGY_FIXTURE = "strategy_cases.json"
 # 评测 harness 版本：分数 = benchmark + subset + harness。任何评测输出必须带此版本号。
 # 0.4.0 → 0.5.0：新增失败类型分类与聚合（设计文档 31）。
 # 0.5.0 → 0.6.0：新增真实 LLM 评测报告字段（llm_mode / cost_usd / per_case_cost，设计文档 37）。
-HARNESS_VERSION = "0.6.0"
+# 0.6.0 → 0.7.0：主路径 ReAct 化（设计文档 47/49）——mock LLM 改 ReAct-scripted
+#   （make_plan → delegate → 子 Agent web_extract → Final Answer REPORT_SCHEMA），
+#   门禁基于多 Agent 链路真实输出重定。
+HARNESS_VERSION = "0.7.0"
 
 # 单次采集/工具的估算成本（与主流程 IterationBudget 单次 0.01 对齐）
 UNIT_COST = 0.01
@@ -190,13 +194,19 @@ class BenchmarkExtractor:
 
 
 class BenchmarkMockLLM:
-    """确定性 mock LLM：在 LLM 版接口上按 prompt 维度返回固定规范化 JSON。
+    """确定性 mock LLM：ReAct-scripted（设计文档 47/49）——在 Lead/子 Agent ReAct 会话上
+    脚本化回放决策序列（make_plan → delegate → 子 Agent web_extract → Final Answer
+    REPORT_SCHEMA/SUBAGENT_RESULT_SCHEMA JSON），CI 无 Key 仍可复现完整多 Agent 链路。
 
-    设计文档 47：确定性从"规则版降级"转移到 mock 固定返回——解析/规划/分析
-    都走 LLM 版代码路径，CI 无 Key 仍可复现：
-    - 解析 prompt → 从任务文本提取竞品/分辨率（mock 即固定 oracle，非主路径规则）；
-    - 规划 prompt → 返回合法 PLAN_SCHEMA（competitor 优先取自用例，否则从任务推断）；
-    - 分析 prompt → 维持现有"按维度抽取规范化 JSON"逻辑（只依赖固定页面）。
+    设计文档 47：确定性从"规则版降级"转移到 mock 固定返回——解析/规划/分析/委派
+    都走 LLM 版代码路径（make_plan 校验、delegate 后台并发、react_report 组装），
+    确定性由 mock 在 ReAct 会话上"固定脚本化决策"承担：
+    - 任务解析 prompt → 从任务文本提取竞品/分辨率（mock 即固定 oracle，非主路径规则）；
+    - Lead 会话（系统提示含 "Lead Agent"）→ make_plan → delegate → Final Answer
+      REPORT_SCHEMA JSON（从 delegate 回填块聚合各子 Agent 结果）；
+    - 子 Agent 会话（系统提示含 "维度子 Agent"）→ web_extract（首选源失败则回退
+      best_url）→ Final Answer SUBAGENT_RESULT_SCHEMA JSON（按维度抽取固定页面）；
+    - 历史分析 prompt（"定价"/"功能"/... 标记）→ 维持"按维度抽取规范化 JSON"兼容分支。
     """
 
     _PLAN_RE = re.compile(
@@ -222,10 +232,31 @@ class BenchmarkMockLLM:
     )
     _COMPARE_MARKERS = ("对比", "比较", "compare", "vs")
 
-    def __init__(self, competitor: str = "", dimension: str = "") -> None:
-        """competitor/dimension 取自评测用例（规划 prompt 的确定性返回）。"""
+    def __init__(
+        self,
+        competitor: str = "",
+        dimension: str = "",
+        *,
+        page: str = "",
+        best_url: str = "",
+        fail_urls: list[str] | None = None,
+        no_tools: bool = False,
+    ) -> None:
+        """competitor/dimension 取自评测用例；page/best_url/fail_urls 供子 Agent 脚本化。
+
+        - ``best_url``：应命中的来源 URL（strategy 用例标注最优源）；
+        - ``fail_urls``：模拟首候选源故障的 URL（子 Agent 先试失败再回退 best_url）；
+        - ``no_tools``：消融变体——Lead 只 make_plan 后直接 Final Answer（不委派/不采集）。
+        """
         self._competitor = (competitor or "").strip()
         self._dimensions = [dimension] if dimension else []
+        self._page = page or ""
+        self._best_url = best_url or ""
+        self._fail_urls = list(fail_urls or ())
+        self._no_tools = no_tools
+        self._parsed_competitors: list[str] = []
+        self._parsed_dimensions: list[str] | None = None
+        self._convs: dict[str, dict] = {}  # 会话级状态（Lead 与各子 Agent 分 key，可并发）
 
     def complete(self, messages: list[dict[str, str]], model: str | None = None) -> str:
         if not messages:
@@ -234,13 +265,13 @@ class BenchmarkMockLLM:
         user = self._user_text(messages)
         if "语义解析器" in system:
             # 任务解析 prompt：从任务文本提取竞品 + 分辨率（mock 固定 oracle）
-            competitors = self._registry_competitors(user)
-            resolution = "compare" if len(competitors) >= 2 else (
-                "discovery" if any(m in user.lower() for m in self._DISCOVERY_MARKERS) else "registry"
-            )
-            return json.dumps(
-                {"resolution": resolution, "competitors": competitors, "dimensions": None, "custom_sources": {}}
-            )
+            return self._parse_task(user)
+        if "Lead Agent" in system:
+            # 主路径 Lead 会话（先于"维度子 Agent"判定——Lead 提示也含该词）
+            return self._lead_step(messages)
+        if "维度子 Agent" in system:
+            # 维度子 Agent 会话（独立完整 agent 自己的 ReAct 会话）
+            return self._subagent_step(messages, user)
         if "战略规划器" in system:
             # 设计文档 47 规划 prompt：返回合法 PLAN_SCHEMA（competitor 优先取自用例）
             competitor = self._competitor or self._infer_competitor(user)
@@ -326,6 +357,225 @@ class BenchmarkMockLLM:
             return user[:idx]
         idx = user.find(BenchmarkMockLLM._MEMORY_MARKER)
         return user[:idx] if idx >= 0 else user
+
+    # ── ReAct-scripted 主路径（设计文档 49 §3.5）────────────────────────
+
+    def _parse_task(self, user: str) -> str:
+        """任务解析 prompt：提取竞品 + 分辨率（mock 固定 oracle），并缓存供 Lead 规划复用。"""
+        competitors = self._registry_competitors(user)
+        self._parsed_competitors = list(competitors)
+        self._parsed_dimensions = None
+        resolution = "compare" if len(competitors) >= 2 else (
+            "discovery" if any(m in user.lower() for m in self._DISCOVERY_MARKERS) else "registry"
+        )
+        return json.dumps(
+            {"resolution": resolution, "competitors": competitors, "dimensions": None, "custom_sources": {}}
+        )
+
+    def _lead_step(self, messages: list[dict[str, str]]) -> str:
+        """Lead 会话状态机：make_plan → delegate → Final Answer（REPORT_SCHEMA）。
+
+        ``no_tools`` 消融变体：make_plan 后直接 Final Answer（无工具循环，测委派价值）。
+        """
+        state = self._conv("lead")
+        if not state.get("plan"):
+            state["plan"] = True
+            return self._make_plan_action(messages)
+        if self._no_tools or state.get("delegate"):
+            return self._lead_final(messages)
+        state["delegate"] = True
+        return self._delegate_action()
+
+    def _make_plan_action(self, messages: list[dict[str, str]]) -> str:
+        from competitor_agent.agent.react_schemas import DIMENSIONS
+
+        user = self._user_text(messages)
+        competitor = (
+            self._competitor
+            or (self._parsed_competitors[0] if self._parsed_competitors else "")
+            or self._infer_competitor(user)
+        )
+        dimensions = self._dimensions or self._parsed_dimensions or list(DIMENSIONS)
+        plan = {
+            "competitor": competitor,
+            "dimensions": dimensions,
+            "budget": {"max_steps": 8},
+            "custom_sources": {},
+        }
+        return (
+            "Thought: 规划分析策略\nAction: make_plan\n"
+            f"Args: {json.dumps({'plan_json': plan}, ensure_ascii=False)}"
+        )
+
+    def _delegate_action(self) -> str:
+        from competitor_agent.agent.react_schemas import DIMENSIONS
+
+        dimensions = self._dimensions or self._parsed_dimensions or list(DIMENSIONS)
+        return (
+            "Thought: 委派维度子 Agent 并行采集\nAction: delegate\n"
+            f"Args: {json.dumps({'dimensions': dimensions, 'task': ''}, ensure_ascii=False)}"
+        )
+
+    def _lead_final(self, messages: list[dict[str, str]]) -> str:
+        """Final Answer：把 delegate 回填块中各子 Agent 结果聚合成 REPORT_SCHEMA JSON。"""
+        obs = self._last_observation(messages)
+        dimensions: list[dict[str, Any]] = []
+        for name, body in self._subagent_blocks(obs):
+            item = self._extract_json_block(body)
+            if not isinstance(item, dict) or str(item.get("dimension") or "") != name:
+                item = {
+                    "dimension": name,
+                    "summary": f"{name} 分析完成（子 Agent 结果未解析）",
+                    "details": {},
+                    "confidence": 0.5,
+                }
+            dimensions.append(item)
+        competitor = self._competitor or (
+            self._parsed_competitors[0] if self._parsed_competitors else "unknown"
+        )
+        return "Final Answer: " + json.dumps(
+            {"competitor": competitor, "dimensions": dimensions}, ensure_ascii=False
+        )
+
+    def _subagent_step(self, messages: list[dict[str, str]], user: str) -> str:
+        """子 Agent 会话状态机：web_extract（首候选源失败则回退 best_url）→ Final Answer。
+
+        独立 LLM 子 Agent 走与 Lead 相同的 ReAct 代码路径；本 mock 只负责确定性地
+        脚本化工具选择与收尾 JSON（SUBAGENT_RESULT_SCHEMA）。
+        """
+        dim = self._subagent_dimension(user)
+        state = self._conv(f"sub:{dim}")
+        tried = list(state.get("tried", []))
+        last_obs = self._last_observation(messages)
+        if not tried:
+            # 首步：模拟"首候选源"——标注 fail_urls 先试故障源（降级恢复路径）；
+            # 否则首选最优源 best_url（rumor 低信任源拒绝，改用官方兜底 URL）
+            url = self._preferred_url(dim)
+            tried.append(url)
+            state["tried"] = tried
+            return self._web_extract_action(url)
+        if "抓取失败" in last_obs:
+            # 上一步失败 → 回退到标注最优源/兜底 URL
+            url = self._best_url or self._target_url(dim)
+            if url not in tried:
+                tried.append(url)
+                state["tried"] = tried
+                return self._web_extract_action(url)
+        return self._subagent_final(dim, tried, last_obs)
+
+    def _subagent_final(self, dim: str, tried: list[str], last_obs: str) -> str:
+        page = self._page or self._page_from_observation(last_obs)
+        if dim == "pricing":
+            plans = self._plans(page)
+            details: dict[str, Any] = {"plans": plans}
+            summary = f"检测到 {len(plans)} 个定价条目"
+            confidence = 0.8
+        elif dim == "feature":
+            features = self._features(page)
+            details = {"features": features}
+            summary = f"检测到 {len(features)} 个功能相关描述"
+            confidence = 0.8
+        elif dim == "performance":
+            benchmarks = self._benchmarks(page)
+            details = {"benchmarks": benchmarks}
+            summary = f"检测到 {len(benchmarks)} 条性能记录"
+            confidence = 0.8
+        elif dim == "ecosystem":
+            details = self._ecosystem(page)
+            summary = (
+                f"生态盘点：MCP {len(details['mcp_servers'])} 个、"
+                f"插件 {details['plugins']['count']} 条、IDE {', '.join(details['ide_support']) or '未知'}"
+            )
+            confidence = 0.7
+        elif dim == "sentiment":
+            details, confidence = self._sentiment(page)
+            summary = details["verdict"]
+        elif dim == "roadmap":
+            details = {"events": [], "releases": [], "upcoming": []}
+            summary = "路线图数据有限（首轮无基线，不产生时间线事件）"
+            confidence = 0.3
+        else:
+            details, summary, confidence = {}, "", 0.5
+        return "Final Answer: " + json.dumps(
+            {
+                "dimension": dim,
+                "summary": summary,
+                "details": details,
+                "confidence": confidence,
+                # 证据只含成功来源（最后一次成功抓取的 URL），不含失败的首候选源
+                "evidence_urls": list(tried[-1:]),
+            },
+            ensure_ascii=False,
+        )
+
+    def _preferred_url(self, dim: str) -> str:
+        """子 Agent 首选源：标注 fail_urls 先试故障源（降级恢复）；否则首选最优源
+        best_url——rumor 低信任源拒绝（设计文档 30 rumor-miss 用例：官方源优先），
+        无 best_url 用兜底 example.com（accuracy 用例）。"""
+        if self._fail_urls:
+            return self._fail_urls[0]
+        if self._best_url and "rumor" not in self._best_url:
+            return self._best_url
+        return self._target_url(dim)
+
+    def _web_extract_action(self, url: str) -> str:
+        return (
+            "Thought: 采集该来源信息\nAction: web_extract\n"
+            f"Args: {json.dumps({'url': url}, ensure_ascii=False)}"
+        )
+
+    def _target_url(self, dim: str) -> str:
+        """兜底 URL（accuracy 用例未标注 best_url 时）：确定性可复现的假源。"""
+        base = self._competitor or (self._parsed_competitors[0] if self._parsed_competitors else "unknown")
+        return f"https://example.com/{base}/{dim}"
+
+    def _subagent_dimension(self, user: str) -> str:
+        for dim in self._dimensions or []:
+            if f"（请分析维度：{dim}）" in user:
+                return dim
+        return self._dimensions[0] if self._dimensions else "pricing"
+
+    def _conv(self, key: str) -> dict:
+        return self._convs.setdefault(key, {})
+
+    @staticmethod
+    def _last_observation(messages: list[dict[str, str]]) -> str:
+        for message in reversed(messages):
+            if message.get("role") == "user" and "Observation" in str(message.get("content", "")):
+                return str(message.get("content", ""))
+        return ""
+
+    @classmethod
+    def _subagent_blocks(cls, text: str) -> list[tuple[str, str]]:
+        """按「[维度子 Agent 结果: <name>」标记切分 delegate 回填文本 → [(name, body)]。"""
+        parts = re.split(r"\[维度子 Agent 结果: ", text)
+        blocks: list[tuple[str, str]] = []
+        for part in parts[1:]:
+            name = part.split("|", 1)[0].strip()
+            body = part.split("]", 1)[1] if "]" in part else part
+            blocks.append((name, body))
+        return blocks
+
+    @classmethod
+    def _extract_json_block(cls, text: str) -> Any:
+        """从回填块正文（untrusted 包裹 + 说明文字）提取首个 JSON 对象。"""
+        start, end = text.find("{"), text.rfind("}")
+        if start < 0 or end <= start:
+            return None
+        try:
+            return json.loads(text[start : end + 1])
+        except (json.JSONDecodeError, TypeError):
+            return None
+
+    @classmethod
+    def _page_from_observation(cls, obs: str) -> str:
+        """从 Observation 提取 untrusted 数据块内的页面文本（无则返回整段）。"""
+        start = obs.find("<untrusted_data>")
+        if start < 0:
+            return obs
+        start += len("<untrusted_data>")
+        end = obs.find("</untrusted_data>", start)
+        return obs[start:end] if end > start else obs[start:]
 
     @classmethod
     def _plans(cls, text: str) -> list[dict[str, Any]]:
@@ -638,6 +888,10 @@ def build_benchmark_api(
             mock = BenchmarkMockLLM(
                 competitor=str(getattr(case, "competitor", "")),
                 dimension=str(getattr(case, "dimension", "")),
+                page=str(getattr(case, "page", "") or ""),
+                best_url=str(getattr(case, "best_url", "") or ""),
+                fail_urls=list(getattr(case, "fail_urls", None) or ()),
+                no_tools=bool(getattr(case, "no_tools", False)),
             )
             llm = LLMClient(call_func=mock.complete)
         elif llm_mode == "real":
@@ -648,6 +902,9 @@ def build_benchmark_api(
     )
     if timeline is None:
         timeline = TimelineMemory(data_dir=Path(tempfile.mkdtemp(prefix="benchmark_timeline_")))
+    # URL 守卫（DNS 解析）在无网络评测环境对所有真实域名抛错，会掩盖 fail_urls/page 的
+    # 确定性分发；benchmark 由 BenchmarkExtractor 直接供给页面内容/失败，故关闭守卫。
+    cfg = AppConfig(collector=CollectorConfig(block_private_urls=False))
     return CompetitorAnalysisAPI(
         extractor=extractor,
         llm=llm,
@@ -659,6 +916,7 @@ def build_benchmark_api(
         memory=memory,  # type: ignore[arg-type]
         rag_store=rag_store,
         timeline=timeline,  # type: ignore[arg-type]
+        config=cfg,
     )
 
 

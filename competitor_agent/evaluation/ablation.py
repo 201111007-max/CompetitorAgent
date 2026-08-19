@@ -4,8 +4,9 @@ AblationRunner 对同一批确定性评测用例逐变体跑 Benchmark，产出�
 回答简历/面试必问：加 RAG / 加记忆到底有没有用。
 
 - 组件开关：CompetitorAnalysisAPI(enable_rag / enable_memory)，默认开启行为不变；
-- 变体矩阵（设计文档 47：删除 no-llm-rule，主路径仅 LLM）：
-  full / no-rag / no-memory / no-rag+no-memory 共 4 组；
+- 变体矩阵（设计文档 47 删 no-llm-rule，主路径仅 LLM；设计文档 49 加 no-tools）：
+  full / no-rag / no-memory / no-rag+no-memory / no-tools 共 5 组
+  （no-tools = Lead 只 make_plan 后直接 Final Answer，不委派/不采集，测多 Agent 委派价值）；
 - 按变体隔离并共享记忆与知识库：同一变体内跨用例累积（技能/成功率/检索片段），
   使 RAG / 记忆差分可测（no-rag 检索不到先前摄入的片段、no-memory 无技能提升）。
 """
@@ -18,6 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from competitor_agent.config.loader import AppConfig, CollectorConfig
 from competitor_agent.evaluation.benchmark import (
     ACCURACY_FIXTURE,
     FIXTURES_DIR,
@@ -41,14 +43,16 @@ class AblationVariant:
     enable_rag: bool = True
     enable_memory: bool = True
     use_llm: bool = True
+    no_tools: bool = False  # 设计文档 49：去掉委派/工具循环（测 LLM 主导编排的委派价值）
 
 
-# 消融变体矩阵（设计文档 30 §2 / 47）：全链路 / 关 RAG / 关记忆 / 双关（主路径仅 LLM）
+# 消融变体矩阵（设计文档 30 §2 / 47 / 49）：全链路 / 关 RAG / 关记忆 / 双关 / 无工具
 DEFAULT_VARIANTS: tuple[AblationVariant, ...] = (
     AblationVariant("full"),
     AblationVariant("no-rag", enable_rag=False),
     AblationVariant("no-memory", enable_memory=False),
     AblationVariant("no-rag+no-memory", enable_rag=False, enable_memory=False),
+    AblationVariant("no-tools", no_tools=True),
 )
 
 # 对比表行：显示名 / AblationResult 属性 / 是否越高越好（幻觉率与命中排名越低越好）
@@ -160,17 +164,24 @@ class AblationRunner:
         store: CompetitorStore | None,
     ) -> CompetitorAnalysisAPI:
         """按变体构造 API：llm/use_llm 由变体决定，extractor 按用例取固定页面（确定性采集）。"""
-        # 设计文档 47：主路径仅 LLM（无 no-llm-rule 变体）；mock 确定性返回取自用例
+        # 设计文档 47/49：主路径仅 LLM；mock ReAct-scripted，确定性取自用例
         if self._llm_mode == "mock":
             mock = BenchmarkMockLLM(
                 competitor=str(getattr(case, "competitor", "")),
                 dimension=str(getattr(case, "dimension", "")),
+                page=str(getattr(case, "page", "") or ""),
+                best_url=str(getattr(case, "best_url", "") or ""),
+                fail_urls=list(getattr(case, "fail_urls", None) or ()),
+                no_tools=variant.no_tools,
             )
             llm: LLMClient | None = LLMClient(call_func=mock.complete)
         elif self._llm_mode == "real":
             llm = LLMClient()
         else:
             llm = None
+        # URL 守卫（DNS 解析）在无网络评测环境对所有真实域名抛错，会掩盖 fail_urls/page 的
+        # 确定性分发；消融与 benchmark 同口径：由 BenchmarkExtractor 直接供给页面内容/失败。
+        cfg = AppConfig(collector=CollectorConfig(block_private_urls=False))
         return CompetitorAnalysisAPI(
             extractor=BenchmarkExtractor(
                 page=getattr(case, "page", ""),
@@ -184,6 +195,7 @@ class AblationRunner:
             enable_memory=variant.enable_memory,
             memory=memory,
             rag_store=store,
+            config=cfg,
         )
 
     def _new_memory(self, variant: AblationVariant, index: int) -> FourLayerMemory | None:
@@ -207,7 +219,7 @@ def render_ablation_table(results: list[AblationResult]) -> str:
         "# 消融 / 对比实验（设计文档 30）",
         f"\n> generated: {datetime.now(timezone.utc).isoformat(timespec='seconds')}",
         f"> fixtures: {ACCURACY_FIXTURE} + {STRATEGY_FIXTURE} | cases: {results[0].n_cases} | harness v{HARNESS_VERSION}",
-        "\n> 变体：full=完整链路 / no-rag=关 RAG / no-memory=关四层记忆 / no-rag+no-memory=双关（主路径仅 LLM）。粗体=该行最优。",
+        "\n> 变体：full=完整链路 / no-rag=关 RAG / no-memory=关四层记忆 / no-rag+no-memory=双关（主路径仅 LLM）/ no-tools=Lead 不委派不采集。粗体=该行最优。",
         "\n| 指标 | " + " | ".join(r.variant.name for r in results) + " |",
         "|------|" + "------|" * len(results),
     ]
