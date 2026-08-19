@@ -1,7 +1,7 @@
 """竞品异动告警（设计文档 28 §3.3）
 
 ``Alert`` 描述一次竞品变化（价格 / 功能 / 版本 / 榜单 / 路线图）；``AlertSink``
-为输出协议，``FileAlertSink`` 追加写入 ``reports/alerts/<date>.md``（控制台可用
+为输出协议，``FileAlertSink`` 追加写入 ``<data_dir>/reports/alerts/<date>.md``（控制台可用
 ``ConsoleAlertSink``）。``report_diff`` 复用设计文档 26 的 ``TimelineMemory.diff``
 把时间线事件映射为告警。
 """
@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol
+
+from competitor_agent.secret_vault import get_reports_dir
 
 logger = logging.getLogger("competitor_agent.core.alerting")
 
@@ -52,10 +54,13 @@ class ConsoleAlertSink:
 
 
 class FileAlertSink:
-    """追加写入 reports/alerts/<date>.md（按日聚合，线程安全追加）。"""
+    """追加写入 <data_dir>/reports/alerts/<date>.md（按日聚合，线程安全追加）。"""
 
     def __init__(self, output_dir: str | Path | None = None) -> None:
-        self._dir = Path(output_dir).expanduser() if output_dir else Path("reports/alerts")
+        if output_dir:
+            self._dir = Path(output_dir).expanduser()
+        else:
+            self._dir = get_reports_dir() / "alerts"
         self._lock = threading.Lock()
 
     def _resolve(self) -> Path:

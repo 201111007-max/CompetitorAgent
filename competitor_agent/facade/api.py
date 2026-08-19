@@ -329,7 +329,7 @@ class CompetitorAnalysisAPI:
         )
 
     def _export_competitor_json(self, report: CompetitorReport, session_id: str) -> Path | None:
-        """设计文档 28：config.report.export_json 开启时导出 reports/competitor/<竞品>.json。
+        """设计文档 28：config.report.export_json 开启时导出 <data_dir>/reports/competitor/<竞品>.json。
 
         结构化副本与 .md 同目录同名；成功后在报告正文末尾追加"已导出 JSON 路径"提示。
         失败仅告警不影响主流程；成功返回落盘路径。
@@ -350,7 +350,7 @@ class CompetitorAnalysisAPI:
         return path
 
     def _export_comparison_json(self, report: ComparisonReport) -> Path | None:
-        """设计文档 28：比较报告导出 reports/comparison/<names>.json（品类矩阵）。"""
+        """设计文档 28：比较报告导出 <data_dir>/reports/comparison/<names>.json（品类矩阵）。"""
         if not self._config.report.export_json:
             return None
         try:
