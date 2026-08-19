@@ -33,6 +33,7 @@ from competitor_agent.interfaces.context import SourceContext
 from competitor_agent.interfaces.exceptions import DataSourceUnavailableError
 from competitor_agent.llm.client import LLMClient
 from competitor_agent.memory.timeline_memory import TimelineMemory
+from competitor_agent.secret_vault import get_reports_dir
 
 FIXTURES_DIR = Path(__file__).resolve().parent.parent / "tests" / "evaluation" / "fixtures"
 
@@ -1450,8 +1451,8 @@ def main(argv: list[str] | None = None) -> int:
         dest="cost_limit",
         help="真实评测成本护栏上限（美元），缺省 real 模式 $1.0；超限中止并标注预算中止",
     )
-    parser.add_argument("--out", type=Path, default=None, help="CSV 输出路径（缺省 reports/benchmark[_real]_<date>.csv）")
-    parser.add_argument("--report", type=Path, default=None, help="Markdown 报告路径（缺省 reports/benchmark[_real]_<date>.md）")
+    parser.add_argument("--out", type=Path, default=None, help="CSV 输出路径（缺省 <data_dir>/reports/benchmark[_real]_<date>.csv，仓库外）")
+    parser.add_argument("--report", type=Path, default=None, help="Markdown 报告路径（缺省 <data_dir>/reports/benchmark[_real]_<date>.md）")
     args = parser.parse_args(argv)
 
     # 设计文档 37 §4：real 无 Key 明确报错，不静默回退 mock（防误读 mock 数字）
@@ -1459,6 +1460,7 @@ def main(argv: list[str] | None = None) -> int:
         print("真实 LLM 评测需要配置 API Key（OPENAI_API_KEY / DEEPSEEK_API_KEY / LLM_API_KEY）。请配置后重试，勿静默回退 mock。")
         return 2
 
+    reports_dir = get_reports_dir()
     date = datetime.now(timezone.utc).strftime("%Y%m%d")
     if args.llm == "real":
         shared_llm = build_real_llm()
@@ -1466,13 +1468,13 @@ def main(argv: list[str] | None = None) -> int:
         # real 报告内嵌 mock 基线：同子集跑一遍 mock（确定性、零成本）供对比
         mock_report = Benchmark(llm_mode="mock", tag=args.tag).run()
         report = Benchmark(llm_mode="real", llm=shared_llm, tag=args.tag, cost_limit_usd=cost_limit).run()
-        out = args.out or Path(f"reports/benchmark_real_{date}.csv")
-        report_path = args.report or Path(f"reports/benchmark_real_{date}.md")
+        out = args.out or (reports_dir / f"benchmark_real_{date}.csv")
+        report_path = args.report or (reports_dir / f"benchmark_real_{date}.md")
     else:
         mock_report = None
         report = Benchmark(llm_mode="mock", tag=args.tag).run()
-        out = args.out or Path(f"reports/benchmark_{date}.csv")
-        report_path = args.report or Path(f"reports/benchmark_{date}.md")
+        out = args.out or (reports_dir / f"benchmark_{date}.csv")
+        report_path = args.report or (reports_dir / f"benchmark_{date}.md")
 
     out.parent.mkdir(parents=True, exist_ok=True)
     report_path.parent.mkdir(parents=True, exist_ok=True)

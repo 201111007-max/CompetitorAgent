@@ -184,5 +184,15 @@ def get_data_dir() -> Path:
     return path
 
 
+def get_reports_dir() -> Path:
+    """解析报告输出根目录（默认 ``<data_dir>/reports``，仓库外）。
+
+    用于统一放置：竞品/对比/消融/基准/告警/模板等生成物，避免写入仓库工作树。
+    """
+    path = get_data_dir() / "reports"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 vault = SecretVault()
 

@@ -247,7 +247,7 @@ async def _event_generator(
             },
         ).to_sse()
 
-        # 自动落盘 reports/competitor/<竞品>.md（导出/下载用）
+        # 自动落盘 <data_dir>/reports/competitor/<竞品>.md（导出/下载用）
         save_report_markdown(report)
 
         # 归档会话（统一 raw schema + freshness 元数据）
@@ -479,7 +479,7 @@ async def report_file(
     competitor: str,
     _: None = Depends(require_auth),
 ) -> FileResponse:
-    """返回落盘的报告文件 reports/competitor/<competitor>.md；不存在返回 404。"""
+    """返回落盘的报告文件 <data_dir>/reports/competitor/<competitor>.md；不存在返回 404。"""
     path = report_file_path(competitor)
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"报告不存在: {competitor}")

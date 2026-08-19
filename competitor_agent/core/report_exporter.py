@@ -1,8 +1,8 @@
 """结构化导出（设计文档 28 §3.1）
 
-每次分析产出 ``reports/competitor/<竞品>.json``（与 .md 同目录同名不同扩展名）：
+每次分析产出 ``<data_dir>/reports/competitor/<竞品>.json``（与 .md 同目录同名不同扩展名）：
 机器可读的 competitor / dimensions / evidence / freshness / pricing.profile /
-benchmark_scores；比较报告另出 ``reports/comparison/<names>.json``（品类矩阵数据）。
+benchmark_scores；比较报告另出 ``<data_dir>/reports/comparison/<names>.json``（品类矩阵数据）。
 
 复用 checkpoint 的原子写模式（临时文件 + fsync + os.replace）与 report_archiver
 的路径解析/文件名净化，与 ``report_archiver``（.md）并存不冲突。
@@ -94,7 +94,7 @@ def export_competitor_json(
     report: CompetitorReport,
     output_dir: str | Path | None = None,
 ) -> Path:
-    """原子写 reports/competitor/<竞品>.json，返回落盘路径。
+    """原子写 <data_dir>/reports/competitor/<竞品>.json，返回落盘路径。
 
     ``output_dir`` 缺省取 config.report.output_dir（与 .md 同名同目录）。
     """
@@ -175,9 +175,9 @@ def export_comparison_json(
     report: ComparisonReport,
     output_dir: str | Path | None = None,
 ) -> Path:
-    """原子写 reports/comparison/<names>.json：matrix + best_per_dimension + summary。
+    """原子写 <data_dir>/reports/comparison/<names>.json：matrix + best_per_dimension + summary。
 
-    ``output_dir`` 缺省取 config.report.comparison_dir（reports/comparison）。
+    ``output_dir`` 缺省取 config.report.comparison_dir（<data_dir>/reports/comparison）。
     """
     out_dir = resolve_output_dir(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

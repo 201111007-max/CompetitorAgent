@@ -120,3 +120,8 @@ competitor_agent/web.err
 # ==================== dota_helper (no longer synced) ====================
 # dota_helper 子项目不再同步到远程仓库，整目录本地保留
 dota_helper/
+
+# ==================== External Data (out of repo) ====================
+# 工具缓存（pytest/ruff/mypy）已固定到 ~/.cache/competitor_agent（见 competitor_agent/pyproject.toml）
+# 报告生成物已固定到 ~/.competitor_agent/reports（见 config/review_config.yaml / secret_vault.get_reports_dir）
+# 以下条目仅作安全兜底：当以仓库根为 CWD 运行、或显式用相对路径覆盖时仍可忽略

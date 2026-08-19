@@ -1,7 +1,8 @@
-"""报告落盘归档 — 原子写 reports/competitor/<竞品>.md（设计文档 22 §3.2）
+"""报告落盘归档 — 原子写 <data_dir>/reports/competitor/<竞品>.md（设计文档 22 §3.2）
 
 复用 checkpoint 的原子写模式（临时文件 + fsync + os.replace），避免写一半损坏。
 Web / CLI 共用，消除重复；与 archive_session（L1 记忆）并存，落盘为额外导出。
+报告根目录默认 <data_dir>/reports（仓库外，见 secret_vault.get_reports_dir()）。
 """
 from __future__ import annotations
 
@@ -32,7 +33,11 @@ def _safe_filename(name: str) -> str:
 
 
 def resolve_output_dir(output_dir: str | Path | None = None) -> Path:
-    """解析报告输出目录：未显式给出时取 AppConfig.report.output_dir，相对路径按 CWD 解析。"""
+    """解析报告输出目录：未显式给出时取 AppConfig.report.output_dir。
+
+    支持 ``~`` 展开；相对路径按 CWD 解析。默认值为 ``~/.competitor_agent/reports/...``
+    （仓库外），由调用方配置（config/loader.ReportConfig）决定具体子目录。
+    """
     raw: str | Path
     if output_dir is not None:
         raw = output_dir

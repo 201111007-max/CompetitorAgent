@@ -255,7 +255,7 @@ def write_ablation_json(results: list[AblationResult], out: Path) -> None:
 
 
 def write_ablation_report(results: list[AblationResult], out_dir: Path) -> list[Path]:
-    """对比表 + JSON 一并落盘 reports/ablation/ablation_<date>.md/.json。"""
+    """对比表 + JSON 一并落盘 <data_dir>/reports/ablation/ablation_<date>.md/.json。"""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     date = datetime.now(timezone.utc).strftime("%Y%m%d")

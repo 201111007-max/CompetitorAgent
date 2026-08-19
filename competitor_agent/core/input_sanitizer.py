@@ -17,7 +17,13 @@ from pathlib import Path
 from competitor_agent.agent.prompts.trust_boundary import wrap_untrusted
 
 # @file: 引用允许的数据目录（仅数据文件，禁止源码/配置/凭据，见风险 R25）
-_ALLOWED_REF_DIRS: tuple[str, ...] = ("evaluation/cases", "reports/templates")
+# 相对条目按 base_dir/CWD 解析（evaluation/cases 为评测用例库）；
+# 模板目录默认在仓库外 <data_dir>/reports/templates（绝对路径，自动创建）。
+_ALLOWED_REF_DIRS: tuple[str, ...] = (
+    "evaluation/cases",
+    "reports/templates",
+    str(Path.home() / ".competitor_agent" / "reports" / "templates"),
+)
 # 仅允许数据类扩展名，禁止 .py/.toml/.env 等源码或配置
 _ALLOWED_REF_EXTENSIONS: frozenset[str] = frozenset({".md", ".txt", ".json", ".yaml"})
 _MAX_REFERENCE_BYTES = 64 * 1024  # 64KB
@@ -61,7 +67,7 @@ def strip_terminal_leaks(text: str) -> str:
 def expand_references(text: str, base_dir: str | None = None) -> str:
     """展开 @file:path 引用：将本地数据文件内容作为分析上下文嵌入。
 
-    仅允许读取白名单数据目录（evaluation/cases、reports/templates）内的
+    仅允许读取白名单数据目录（evaluation/cases、<data_dir>/reports/templates）内的
     数据类文件（.md/.txt/.json/.yaml），且大小不超过 64KB；源码/配置/凭据
     一律拒绝。路径以 base_dir 为根，防止路径穿越（R25）。读取内容包裹为
     不可信数据块（提示注入防护，见设计文档 06）。

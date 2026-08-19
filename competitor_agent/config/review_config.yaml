@@ -65,9 +65,9 @@ memory:
 report:
   include_confidence: true
   include_evidence_urls: true
-  output_dir: "reports/competitor"
+  output_dir: "~/.competitor_agent/reports/competitor"   # 仓库外，避免写入工作树
   export_json: true          # 结构化 JSON 导出（设计文档 28），与 .md 同目录同名
-  comparison_dir: "reports/comparison"   # 比较报告品类矩阵 JSON 目录
+  comparison_dir: "~/.competitor_agent/reports/comparison"   # 比较报告品类矩阵 JSON 目录
 
 # ===== 新鲜度 / 陈旧度（设计文档 26）=====
 freshness:
