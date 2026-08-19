@@ -82,7 +82,7 @@ def parse_task(
         return _parse_task_llm(task, llm)
     except LLMUnavailableError:
         raise
-    except Exception as exc:  # noqa: BLE001 — 解析失败统一抛 LLMUnavailableError
+    except Exception as exc:
         raise LLMUnavailableError(f"LLM 任务解析失败: {exc}") from exc
 
 

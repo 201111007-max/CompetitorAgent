@@ -99,7 +99,7 @@ class WebExtractor:
             ) from exc
         try:
             soup = BeautifulSoup(html, "lxml")
-        except Exception:  # lxml 解析器缺失时回退标准库 html.parser
+        except Exception:  # noqa: BLE001 - lxml 解析器失败时回退标准库 html.parser
             soup = BeautifulSoup(html, "html.parser")
         for tag in soup(_SKIP_TAGS):
             tag.decompose()

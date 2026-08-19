@@ -72,7 +72,7 @@ def _semantic_embedder_cached(model_name: str) -> bool:
             if isinstance(path, (str, Path)) and Path(path).exists():
                 return True
         return False
-    except Exception:
+    except Exception:  # noqa: BLE001 - 缓存探测失败视为不可用，避免触发网络重试
         return False
 
 
@@ -127,7 +127,7 @@ class VectorStore:
 
             model = SentenceTransformer(self._model_name)
             return model.encode  # type: ignore[return-value]
-        except Exception as exc:  # pragma: no cover - 模型损坏等偶发
+        except Exception as exc:  # noqa: BLE001 - 模型损坏等偶发 # pragma: no cover
             logger.warning("加载向量模型失败: %s", exc)
             return None
 

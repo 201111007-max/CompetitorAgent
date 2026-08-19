@@ -28,7 +28,6 @@ pytestmark = pytest.mark.integration
 @pytest.fixture(autouse=True)
 def _isolated_logging(tmp_path) -> None:
     import logging
-    from pathlib import Path
 
     L.setup_logging(level="INFO", log_dir=tmp_path / "logs", json_format=True)
     L._session_adapters.clear()

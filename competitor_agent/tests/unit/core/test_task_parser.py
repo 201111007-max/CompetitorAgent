@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from competitor_agent.core.task_parser import ResolutionDecision, TaskParseResult, parse_task
+from competitor_agent.core.task_parser import ResolutionDecision, parse_task
 from competitor_agent.interfaces.exceptions import LLMUnavailableError
 from competitor_agent.llm.client import LLMClient
 

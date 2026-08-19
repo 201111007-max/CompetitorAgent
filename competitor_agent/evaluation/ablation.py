@@ -35,6 +35,7 @@ from competitor_agent.knowledge_base.competitor_store import CompetitorStore
 from competitor_agent.llm.client import LLMClient
 from competitor_agent.memory.four_layer_memory import FourLayerMemory
 
+
 @dataclass(frozen=True)
 class AblationVariant:
     """一个消融配置：开关组合 + 名称"""
@@ -266,10 +267,10 @@ def write_ablation_report(results: list[AblationResult], out_dir: Path) -> list[
 
 
 __all__ = [
+    "DEFAULT_VARIANTS",
     "AblationResult",
     "AblationRunner",
     "AblationVariant",
-    "DEFAULT_VARIANTS",
     "render_ablation_table",
     "write_ablation_json",
     "write_ablation_report",

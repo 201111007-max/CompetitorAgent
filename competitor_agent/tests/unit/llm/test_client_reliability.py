@@ -6,7 +6,6 @@ LLMUnavailableError、超时计入重试、LLMConfig 解析与默认值叠加。
 from __future__ import annotations
 
 import pytest
-
 from competitor_agent.config.loader import LLMConfig, load_config
 from competitor_agent.interfaces.exceptions import LLMUnavailableError
 from competitor_agent.llm.client import LLMClient

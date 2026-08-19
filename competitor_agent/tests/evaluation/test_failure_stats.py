@@ -5,6 +5,8 @@
 - 集成：自定义 fixtures（真实执行链路，mock LLM + 固定页面）→ failure_stats 符合预期；
   默认 fixtures → 报告含「失败类型分布」表、CSV 含 failure 行、to_dict 携带新字段。
 """
+from __future__ import annotations
+
 import json
 
 from competitor_agent.domain_types.competitor import Competitor
@@ -12,10 +14,10 @@ from competitor_agent.domain_types.observation import SourceEvidence
 from competitor_agent.domain_types.report import CompetitorReport, DimensionResult
 from competitor_agent.evaluation.accuracy_eval import EvalCase
 from competitor_agent.evaluation.benchmark import (
+    Benchmark,
     _classify_failures,
     _write_csv,
     _write_markdown,
-    Benchmark,
 )
 from competitor_agent.evaluation.failure import FailureRecord, FailureType, classify_case
 from competitor_agent.evaluation.strategy_eval import StrategyCase

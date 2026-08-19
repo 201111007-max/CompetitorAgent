@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 from competitor_agent.agent.prompts.react_system import enrich_prompt
-from competitor_agent.interfaces.context import AnalysisSession, Skill
+from competitor_agent.interfaces.context import AnalysisSession
 from competitor_agent.llm.client import LLMClient
 from competitor_agent.memory import (
     EvolutionMemory,

@@ -21,6 +21,14 @@ include = ["competitor_agent*"]
 where = [".."]
 namespaces = false
 
+[tool.setuptools.package-data]
+"competitor_agent" = [
+    "static/*.html",
+    "static/*.js",
+    "static/*.css",
+    "static/vendor/*.js",
+]
+
 [project.optional-dependencies]
 mcp = [
     "mcp>=1.0",

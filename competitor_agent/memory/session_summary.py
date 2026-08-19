@@ -41,7 +41,7 @@ class SessionSummary:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "SessionSummary":
+    def from_dict(cls, data: dict[str, Any]) -> SessionSummary:
         return cls(
             competitor=str(data.get("competitor", "")),
             dimensions=[str(d) for d in data.get("dimensions", []) if d],

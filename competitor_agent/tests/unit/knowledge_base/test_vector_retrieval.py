@@ -12,7 +12,6 @@ import re
 
 import numpy as np
 import pytest
-
 from competitor_agent.facade.api import CompetitorAnalysisAPI
 from competitor_agent.knowledge_base.competitor_store import CompetitorStore, TextChunk
 from competitor_agent.knowledge_base.ingester import Ingester, chunk_text_semantic
@@ -24,7 +23,7 @@ try:  # pragma: no cover
     import chromadb  # noqa: F401
 
     _HAS_CHROMADB = True
-except Exception:  # pragma: no cover
+except Exception:  # noqa: BLE001 - chromadb 缺失则整体跳过 # pragma: no cover
     _HAS_CHROMADB = False
 
 pytestmark = pytest.mark.skipif(not _HAS_CHROMADB, reason="chromadb 未安装，向量层不可用")

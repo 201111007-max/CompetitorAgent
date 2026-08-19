@@ -8,16 +8,15 @@
 - mock vs real 对比：real 报告内嵌 mock 基线「mock vs real」段，直答"评测是不是自证"。
 - real 冒烟（skipif 无 Key）：有 Key 时 --llm real 跑 normal 子集产真实质量报告。
 """
-import json
 
 import pytest
 
 from competitor_agent.evaluation.benchmark import (
     ACCURACY_FIXTURE,
+    STRATEGY_FIXTURE,
     Benchmark,
     BenchmarkMockLLM,
     BenchmarkReport,
-    STRATEGY_FIXTURE,
     _write_csv,
     _write_markdown,
     build_benchmark_api,
@@ -76,7 +75,6 @@ class TestTagFilter:
     """设计文档 37 §3.1：--tag 子集过滤（先跑 normal 控制成本）"""
 
     def test_tag_normal_reduces_cases(self):
-        b = Benchmark()
         full = Benchmark().run()
         normal = Benchmark(tag="normal").run()
         assert normal.n_cases < full.n_cases

@@ -8,9 +8,9 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from competitor_agent.config.loader import AppConfig, load_config
+from competitor_agent.config.loader import load_config
 from competitor_agent.core.checkpoint import _write_bytes_atomic
-from competitor_agent.domain_types.report import CompetitorReport, ComparisonReport
+from competitor_agent.domain_types.report import ComparisonReport, CompetitorReport
 
 _SAFE_CHARS = re.compile(r"[^A-Za-z0-9_.\-一-鿿]+")
 

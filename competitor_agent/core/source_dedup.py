@@ -10,7 +10,7 @@
 """
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Callable
 
 from competitor_agent.domain_types.observation import Observation
 

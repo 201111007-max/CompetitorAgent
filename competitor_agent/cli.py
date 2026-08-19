@@ -336,7 +336,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "analyze":
         if args.mode != "team":
-            print("[提示] --mode 已废弃，统一走 Lead ReAct 编排（设计文档 49），忽略 --mode=%s" % args.mode)
+            print(f"[提示] --mode 已废弃，统一走 Lead ReAct 编排（设计文档 49），忽略 --mode={args.mode}")
         task = " ".join(args.task)
         return _run_analyze(api, task, out_dir=args.out_dir, mode=args.mode, llm=llm, use_llm=use_llm)
     if args.command == "history":

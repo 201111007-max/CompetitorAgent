@@ -1,8 +1,8 @@
 """core/report_builder.py + markdown_renderer.py 单测"""
 from competitor_agent.core.report_builder import ReportBuilder
 from competitor_agent.domain_types import (
-    Competitor,
     ComparisonReport,
+    Competitor,
     DimensionResult,
     GapStatus,
     InfoGap,

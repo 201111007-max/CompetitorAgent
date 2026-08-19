@@ -82,7 +82,7 @@ class TestMockGateUnchanged:
             dimension = "pricing"
             page = "Pro $20/month"
             best_url = "https://www.cursor.com"
-            fail_urls = []
+            fail_urls: tuple = ()
 
         api = build_benchmark_api(Case())
         report = api.analyze("只分析 cursor 的定价")

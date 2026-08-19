@@ -11,7 +11,7 @@ from typing import Callable
 
 from competitor_agent.agent.tool_dispatcher import ToolDispatcher
 from competitor_agent.config.loader import AppConfig
-from competitor_agent.mcp_server.tools import TOOLS, TOOL_SPECS
+from competitor_agent.mcp_server.tools import TOOL_SPECS, TOOLS
 
 
 def build_react_dispatcher(

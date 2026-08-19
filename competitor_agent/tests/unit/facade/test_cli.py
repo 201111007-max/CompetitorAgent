@@ -3,7 +3,6 @@
 设计文档 47：仅 LLM 解析/规划/分析；无 Key → 打印提示 + 退出码 2。
 analyze 路由用 mock LLM（BenchmarkMockLLM 从任务文本确定性推断竞品/分辨率）。
 """
-import pytest
 
 from competitor_agent.cli import (
     _repl,

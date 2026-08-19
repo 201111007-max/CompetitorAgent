@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>竞品分析 Agent</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <h1>竞品分析 Agent</h1>
+    <div class="controls">
+      <input id="task" type="text"
+             placeholder="输入竞品名称，如 Cursor（多竞品用逗号分隔，普查任务如“所有 AI coding agent”将自动发现）"
+             value="Cursor" />
+      <button id="start-btn">开始分析</button>
+      <button id="cancel-btn" disabled>取消</button>
+    </div>
+    <div class="progress-wrap" id="progress-wrap" hidden>
+      <div class="progress-track"><div class="progress-bar" id="progress-bar"></div></div>
+      <div class="progress-label" id="progress-label">0%</div>
+    </div>
+    <div class="badges" id="phase-badges"></div>
+  </header>
+
+  <div id="candidates" hidden><strong>发现候选:</strong> <span id="candidate-list"></span></div>
+
+  <main class="main">
+    <section class="col-left">
+      <div id="log">等待输入...</div>
+      <details class="session-details">
+        <summary>会话日志</summary>
+        <div id="session-log">（分析开始后实时显示）</div>
+      </details>
+    </section>
+    <section class="col-right">
+      <div id="report-meta" class="report-meta" hidden></div>
+      <div id="report-toolbar" class="report-toolbar" hidden>
+        <button onclick="copyReport()">复制 Markdown</button>
+        <button id="download-btn" onclick="downloadReport()" disabled>下载 .md</button>
+      </div>
+      <div id="report" class="report" hidden></div>
+    </section>
+  </main>
+</div>
+<script src="/static/vendor/marked.min.js"></script>
+<script src="/static/vendor/dompurify.min.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

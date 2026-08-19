@@ -122,7 +122,7 @@ class ReactAgent:
                 if on_step is not None:
                     try:
                         on_step(self._step_record(parsed.tool_name, parsed.tool_args, str(result)))
-                    except Exception:  # noqa: BLE001 — transcript 捕获失败不影响主循环
+                    except Exception:
                         logger.warning("ReAct transcript 捕获失败", exc_info=True)
                 messages.append({
                     "role": "user",

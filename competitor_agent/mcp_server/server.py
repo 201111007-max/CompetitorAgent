@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 
-from competitor_agent.mcp_server.tools import TOOLS, TOOL_SPECS
+from competitor_agent.mcp_server.tools import TOOL_SPECS, TOOLS
 
 logger = logging.getLogger("competitor_agent.mcp_server")
 

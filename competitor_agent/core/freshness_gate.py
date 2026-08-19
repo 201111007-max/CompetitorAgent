@@ -15,7 +15,6 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
 
 from competitor_agent.domain_types.freshness import DEFAULT_TTL_DAYS
 from competitor_agent.memory.timeline_memory import _EVENT_TYPE_BY_DIM, TimelineEvent

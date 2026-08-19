@@ -78,7 +78,7 @@ class CompetitorDiscoverer:
             return []
         try:
             raw = self._web_tool(task)
-        except Exception:  # noqa: BLE001 - 搜索失败返回空候选，不编造兜底清单
+        except Exception:
             logger.warning("web_tool 搜索失败: task=%r", task, exc_info=True)
             return []
         if not raw:
@@ -113,7 +113,7 @@ class CompetitorDiscoverer:
                 ]
             )
             return json_loads_array(text)
-        except Exception as exc:  # noqa: BLE001 - LLM 去重失败统一抛 LLMUnavailableError
+        except Exception as exc:
             raise LLMUnavailableError(f"竞品去重失败: {exc}") from exc
 
     @staticmethod
@@ -192,7 +192,7 @@ def json_loads_array(text: str) -> list[dict[str, Any]]:
     if isinstance(data, dict) and "competitors" in data:
         data = data["competitors"]
     if not isinstance(data, list):
-        raise ValueError(f"非数组: {text[:200]}")
+        raise TypeError(f"非数组: {text[:200]}")
     return [d for d in data if isinstance(d, dict)]
 
 

@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+
 from competitor_agent.core.alerting import ConsoleAlertSink, FileAlertSink, report_diff
 from competitor_agent.domain_types.competitor import Competitor
 from competitor_agent.domain_types.observation import SourceEvidence

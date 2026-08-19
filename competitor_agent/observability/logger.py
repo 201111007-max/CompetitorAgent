@@ -348,10 +348,10 @@ def emit_session_event(
 
 
 __all__ = [
-    "TextFormatter",
-    "SessionJSONFormatter",
     "SessionFileHandler",
+    "SessionJSONFormatter",
     "SessionRouterHandler",
+    "TextFormatter",
     "close_session_log",
     "current_session",
     "emit_session_event",

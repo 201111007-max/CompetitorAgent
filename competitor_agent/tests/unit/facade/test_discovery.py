@@ -1,6 +1,5 @@
 """facade/api.py 设计文档 20：N 向 compare + discover（市场普查/发现）"""
 import pytest
-
 from competitor_agent.core.competitor_registry import COMPETITOR_REGISTRY
 from competitor_agent.domain_types.competitor import Competitor
 from competitor_agent.domain_types.report import ComparisonReport

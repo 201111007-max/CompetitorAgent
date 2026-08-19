@@ -41,7 +41,7 @@ try:  # pragma: no cover
     import chromadb  # noqa: F401
 
     _HAS_CHROMADB = True
-except Exception:  # pragma: no cover
+except Exception:  # noqa: BLE001 - chromadb 缺失跳过差分用例 # pragma: no cover
     _HAS_CHROMADB = False
 
 

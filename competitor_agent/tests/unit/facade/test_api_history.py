@@ -1,5 +1,4 @@
 """facade/api.py M5 增强单测：会话历史 / compare / continue_analysis"""
-import pytest
 
 from competitor_agent.config.loader import AppConfig, CollectorConfig
 from competitor_agent.domain_types.report import ComparisonReport
