@@ -46,31 +46,17 @@ class TestAnalyzeInstrumentation:
         )
         api.analyze("只分析 cursor 的定价和功能", mode="single", session_id=sid)
 
+        # doc 49：ReAct 编排埋点（session_started / llm.call / report.built）；
+        # 规划器/采集器事件（competitor.resolved 等）随流水线删除
         events = [e["event"] for e in _events(sid)]
-        for expected in (
-            "session_started",
-            "competitor.resolved",
-            "gaps.planned",
-            "source.selected",
-            "collect.done",
-            "analyze.done",
-            "llm.call",
-            "analysis.terminated",
-            "report.built",
-        ):
+        for expected in ("session_started", "llm.call", "report.built"):
             assert expected in events, f"会话日志缺 {expected} 事件，实际: {events}"
-
-        analyze = [e for e in _events(sid) if e["event"] == "analyze.done"]
-        assert analyze and analyze[0].get("model"), "analyze.done 应含 model"
-        assert analyze[0].get("dimension"), "analyze.done 应含 dimension"
 
         llm = [e for e in _events(sid) if e["event"] == "llm.call"]
         assert llm, "LLM 调用日志缺失"
+        assert "model" in llm[0], "llm.call 应含 model"
         assert "total_tokens" in llm[0] and "cost_usd" in llm[0], "llm.call 应含 tokens/cost"
         assert "elapsed_ms" in llm[0]
-
-        terminated = [e for e in _events(sid) if e["event"] == "analysis.terminated"]
-        assert terminated and terminated[0].get("reason"), "analysis.terminated 应含终止原因"
 
         built = [e for e in _events(sid) if e["event"] == "report.built"]
         assert built and built[0].get("dimension_count") is not None
@@ -82,7 +68,6 @@ class TestAnalyzeInstrumentation:
 
         events = [e["event"] for e in _events(sid)]
         assert "session_started" in events
-        assert "analysis.terminated" in events
         assert "report.built" in events
         assert report.dimension_results
 

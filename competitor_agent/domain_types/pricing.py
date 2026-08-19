@@ -200,9 +200,13 @@ def parse_usage(data: Any) -> UsageBilling | None:
 
 
 def extract_profile(details: dict[str, Any], evidence: list[Any] | None = None) -> PricingProfile:
-    """details（LLM 产物）→ PricingProfile（结构抽取，设计文档 27 §2.1）。"""
-    plans = [parse_plan(d) for d in details.get("plans") or []]
-    plans = [p for p in plans if p is not None]
+    """details（LLM 产物）→ PricingProfile（结构抽取，设计文档 27 §2.1）。
+
+    plans 非 list（LLM 产物可能畸形）时按空档位处理，不抛错。
+    """
+    raw_plans = details.get("plans") or []
+    raw_plans = raw_plans if isinstance(raw_plans, list) else []
+    plans = [p for p in (parse_plan(d) for d in raw_plans) if p is not None]
     usage = parse_usage(details.get("usage"))
     urls = [str(getattr(e, "url", "")) for e in (evidence or []) if getattr(e, "url", "")]
     return PricingProfile(
@@ -240,6 +244,26 @@ def plan_cost(plan: PricingPlan, usage: UsageBilling | None, monthly_requests: i
     if cap is not None and monthly_requests > cap:
         return None  # 超限额但无按量单价：无法估算
     return base
+
+
+def profile_from_details(
+    details: dict[str, Any], evidence: list[Any] | None = None
+) -> PricingProfile:
+    """details（49 命名空间：plans 原始档位）→ 完整 PricingProfile（含成本估算）。
+
+    渲染 / 导出 / 时间线 diff 共用；plans 键名沿用现有命名空间
+    （``details["plans"]``），结构抽取交给 ``extract_profile``。
+    """
+    profile = extract_profile(details, evidence)
+    if not profile.has_pricing_data:
+        return profile
+    # 显式 cost_scenarios（LLM/工具产物）优先；缺失时才按档位估算（不覆盖外部给定值）
+    explicit = details.get("cost_scenarios")
+    if isinstance(explicit, dict) and explicit:
+        profile.cost_scenarios = {str(k): _to_maybe_float(v) for k, v in explicit.items()}
+    else:
+        profile.cost_scenarios = estimate_costs(profile, DAILY_SCENARIOS)
+    return profile
 
 
 def estimate_costs(profile: PricingProfile, scenarios: dict[str, int]) -> dict[str, float | None]:
@@ -284,6 +308,7 @@ __all__ = [
     "parse_plan",
     "parse_usage",
     "plan_cost",
+    "profile_from_details",
 ]
 
 # 旧下划线名别名（analyzers/pricing_analyzer.py 沿用；M3 删除 analyzers 后移除）

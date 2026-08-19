@@ -104,6 +104,20 @@ class FakeExtractor:
         return Observation(gap_field=gap.field, source="web_extractor", raw_text=text, evidence=ev)
 
 
+def _plan_first(final: str):
+    """plan-first 脚本：Lead 首步必须 make_plan（doc 49 §3.5），之后返回给定 Final Answer。"""
+
+    def call(messages, model):
+        if not any(m.get("role") == "assistant" for m in messages):
+            return (
+                "Thought: 规划分析策略\nAction: make_plan\n"
+                'Args: {"plan_json": {"competitor": "Cursor", "dimensions": ["pricing"]}}'
+            )
+        return final
+
+    return call
+
+
 def _api(llm):
     """包装 react llm：任务解析 prompt 单独处理（设计文档 47：仅 LLM），其余走 react 脚本。"""
     import json
@@ -123,14 +137,18 @@ def _api(llm):
 
 class TestAnalyzeReactReport:
     def test_structured_json_into_report(self):
-        llm = LLMClient(call_func=lambda messages, model: (
-            'Final Answer: {"summary": "Cursor 定价已收集", "details": {"plans": 3}, "confidence": 0.8}'
-        ))
+        # doc 49：Lead Final Answer 走 REPORT_SCHEMA（competitor + dimensions[...]）
+        final = (
+            'Final Answer: {"competitor": "cursor", "dimensions": [{"dimension": "pricing", '
+            '"summary": "Cursor 定价已收集", "details": {"plans": 3}, "confidence": 0.8, '
+            '"evidence_urls": ["https://www.cursor.com/pricing"]}]}'
+        )
+        llm = LLMClient(call_func=_plan_first(final))
         report = _api(llm).analyze_react_report("分析 Cursor")
         assert report.competitor.name == "cursor"
         assert len(report.dimension_results) == 1
         dr = report.dimension_results[0]
-        assert dr.dimension == "react"
+        assert dr.dimension == "pricing"
         assert dr.confidence == 0.8
         assert dr.status == ResultStatus.COMPLETE
         assert dr.details["plans"] == 3
@@ -138,14 +156,14 @@ class TestAnalyzeReactReport:
         assert report.markdown_report
 
     def test_text_answer_degrades_to_react_dimension(self):
-        llm = LLMClient(call_func=lambda messages, model: "Final Answer: Cursor 定价已收集完毕")
+        llm = LLMClient(call_func=_plan_first("Final Answer: Cursor 定价已收集完毕"))
         report = _api(llm).analyze_react_report("分析 Cursor")
         dr = report.dimension_results[0]
         assert dr.dimension == "react"
         assert "定价" in dr.summary
 
     def test_analyze_react_records_budget_steps(self):
-        llm = LLMClient(call_func=lambda messages, model: "Final Answer: 结论")
+        llm = LLMClient(call_func=_plan_first("Final Answer: 结论"))
         api = _api(llm)
         before = api._budget.iteration_count
         api.analyze_react("分析 Cursor")
@@ -153,5 +171,5 @@ class TestAnalyzeReactReport:
 
     def test_analyze_react_returns_text(self):
         # analyze_react（裸字符串入口）保持向后兼容
-        llm = LLMClient(call_func=lambda messages, model: "Final Answer: 定价已收集")
+        llm = LLMClient(call_func=_plan_first("Final Answer: 定价已收集"))
         assert "定价" in _api(llm).analyze_react("分析 Cursor")

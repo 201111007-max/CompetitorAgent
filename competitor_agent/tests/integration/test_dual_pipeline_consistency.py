@@ -1,11 +1,10 @@
-"""问题 20 双流水线一致性测试（设计文档 18 §5）
+"""问题 20 统一流水线行为测试（设计文档 18 §5 / 49 迁移）
 
-single / team 收敛后应共享统一语义：
-- 取消后都保留 checkpoint，且都能被 resume() 续跑；
-- 完成后都清理 checkpoint（成功路径不留残留）；
-- 预算耗尽都提前终止（同一 BudgetController）；
-- 记忆沉淀一致（skills / source_success_rates 两条路径都写入）；
-- 规划埋点一致（competitor.resolved / gaps.planned 两条路径都发）。
+设计文档 49 后 single/team 收敛为单一 ReAct 编排（mode 废弃），保留统一语义验证：
+- 取消后保留 checkpoint，resume() 可从断点续跑；
+- 完成后清理 checkpoint（成功路径不留残留）；
+- 预算耗尽提前终止（同一 BudgetController，终态 partial）；
+- 分析沉淀记忆（skills / source_success_rates 写入）。
 """
 from __future__ import annotations
 
@@ -14,11 +13,10 @@ import uuid
 
 import pytest
 
+from competitor_agent.config.loader import AppConfig, CollectorConfig
 from competitor_agent.core.checkpoint import (
     clear_cancel,
-    is_cancelled,
     load_checkpoint,
-    set_cancel,
 )
 from competitor_agent.facade.api import CompetitorAnalysisAPI
 from competitor_agent.memory import FourLayerMemory
@@ -46,9 +44,9 @@ def _new_sid() -> str:
     return f"sess_dual_{uuid.uuid4().hex[:8]}"
 
 
-class TestTeamCancelResume:
-    def test_team_cancel_keeps_checkpoint_and_resumes(self, fake_extractor, mock_llm) -> None:
-        """team 路径取消后保留 checkpoint，resume 能从断点续跑（与 single 对齐）。"""
+class TestCancelResume:
+    def test_cancel_keeps_checkpoint_and_resumes(self, fake_extractor, mock_llm) -> None:
+        """取消后保留 checkpoint，resume 能从断点续跑（设计文档 14 承诺）。"""
         started = threading.Event()
         release = threading.Event()
 
@@ -58,13 +56,14 @@ class TestTeamCancelResume:
                 release.wait(timeout=10)
                 return fake_extractor.fetch(gap, context)
 
-        api = CompetitorAnalysisAPI(extractor=BlockingExtractor(), llm=mock_llm, use_llm=True, max_iterations=10)
+        cfg = AppConfig(collector=CollectorConfig(block_private_urls=False))
+        api = CompetitorAnalysisAPI(extractor=BlockingExtractor(), llm=mock_llm, use_llm=True, max_iterations=10, config=cfg)
         sid = _new_sid()
         holder: dict = {}
 
         def _run() -> None:
             try:
-                holder["report"] = api.analyze("分析 Cursor", mode="team", session_id=sid)
+                holder["report"] = api.analyze("分析 Cursor", mode="single", session_id=sid)
             except Exception as exc:  # noqa: BLE001
                 holder["error"] = exc
 
@@ -78,60 +77,40 @@ class TestTeamCancelResume:
         assert "error" not in holder
         cancelled = holder["report"]
         assert cancelled.terminal_state == "cancelled"
-        assert getattr(cancelled, "cancelled", False), "team 取消应返回 CancelledResult"
-        assert load_checkpoint(sid) is not None, "team 取消后应保留 checkpoint 供 resume"
+        assert getattr(cancelled, "cancelled", False), "取消应返回 CancelledResult"
+        assert load_checkpoint(sid) is not None, "取消后应保留 checkpoint 供 resume"
 
-        # 取消已确认后清除标志（真实场景：用户再次发起 resume）
         clear_cancel(sid)
-        # 断点续跑：复用 single 的缺口级闭环重跑未关闭缺口
         resumed = api.resume(sid)
-        assert resumed.dimension_results, "team 会话 resume 应恢复维度结果"
+        assert resumed.dimension_results, "resume 应恢复维度结果"
         assert resumed.competitor.name == "cursor"
 
         with pytest.raises(ValueError):
             api.resume(sid)
 
-    def test_team_completion_deletes_checkpoint(self, fake_extractor, mock_llm) -> None:
-        """team 正常完成后清理 checkpoint（与 single 一致，不留残留）。"""
+    def test_completion_deletes_checkpoint(self, fake_extractor, mock_llm) -> None:
+        """正常完成后清理 checkpoint（不留残留）。"""
         sid = _new_sid()
         api = CompetitorAnalysisAPI(extractor=fake_extractor, llm=mock_llm, use_llm=True)
-        report = api.analyze("分析 Cursor", mode="team", session_id=sid)
+        report = api.analyze("分析 Cursor", mode="single", session_id=sid)
         assert report.terminal_state == "success"
-        assert load_checkpoint(sid) is None, "team 完成后应删除 checkpoint"
+        assert load_checkpoint(sid) is None, "完成后应删除 checkpoint"
 
 
-class TestTeamBudgetConsistency:
-    def test_team_budget_exhaustion_terminates_early(self, fake_extractor, mock_llm) -> None:
-        """预算耗尽时 team 提前终止（同一 BudgetController，终态 partial）。"""
+class TestBudgetConsistency:
+    def test_budget_exhaustion_terminates_early(self, fake_extractor, mock_llm) -> None:
+        """预算耗尽时提前终止（同一 BudgetController，终态 partial）。"""
         api = CompetitorAnalysisAPI(extractor=fake_extractor, llm=mock_llm, use_llm=True, max_iterations=0)
-        report = api.analyze("分析 Cursor", mode="team")
+        report = api.analyze("分析 Cursor", mode="single")
         assert report.terminal_state == "partial", "预算耗尽应标记 partial"
 
 
 class TestMemoryConsistency:
-    def test_single_and_team_both_sediment_memory(self, fake_extractor, tmp_path, mock_llm) -> None:
-        """两条路径都沉淀 skills 与 source_success_rates（记忆闭环一致）。"""
+    def test_analysis_sediments_memory(self, fake_extractor, tmp_path, mock_llm) -> None:
+        """分析沉淀 skills 与 source_success_rates（记忆闭环）。"""
         m1 = FourLayerMemory(tmp_path / "m1")
         api1 = CompetitorAnalysisAPI(extractor=fake_extractor, llm=mock_llm, use_llm=True, memory=m1)
         api1.analyze("分析 Cursor", mode="single")
 
-        m2 = FourLayerMemory(tmp_path / "m2")
-        api2 = CompetitorAnalysisAPI(extractor=fake_extractor, llm=mock_llm, use_llm=True, memory=m2)
-        api2.analyze("分析 Cursor", mode="team")
-
-        assert m1.retrieve_skills("cursor") and m2.retrieve_skills("cursor"), "两条路径都应沉淀技能"
-        assert m1.source_success_rates() and m2.source_success_rates(), "两条路径都应记录源成功率"
-
-
-class TestPlanningInstrumentation:
-    def test_single_and_team_emit_planning_events(self, fake_extractor, tmp_path, mock_llm) -> None:
-        """规划埋点一致：competitor.resolved / gaps.planned 两条路径都发。"""
-        for mode in ("single", "team"):
-            sid = _new_sid()
-            api = CompetitorAnalysisAPI(extractor=fake_extractor, llm=mock_llm, use_llm=True)
-            api.analyze("分析 Cursor", mode=mode, session_id=sid)
-            events = [ln["event"] for ln in L.read_session_log(sid) if "event" in ln]
-            assert "competitor.resolved" in events, f"{mode} 缺 competitor.resolved"
-            assert "gaps.planned" in events, f"{mode} 缺 gaps.planned"
-            assert events.count("session_started") == 1, f"{mode} session_started 应恰好一次"
-            L.close_session_log(sid)
+        assert m1.retrieve_skills("cursor"), "应沉淀技能"
+        assert m1.source_success_rates(), "应记录源成功率"

@@ -8,13 +8,8 @@
 """
 from __future__ import annotations
 
-import json
-
 from competitor_agent.agent.prompts.react_system import enrich_prompt
-from competitor_agent.analyzers import FeatureAnalyzer
-from competitor_agent.domain_types import InfoGap, Observation, SourceEvidence
-from competitor_agent.domain_types.enums import DimensionType
-from competitor_agent.interfaces.context import AnalysisContext, AnalysisSession, Skill
+from competitor_agent.interfaces.context import AnalysisSession, Skill
 from competitor_agent.llm.client import LLMClient
 from competitor_agent.memory import (
     EvolutionMemory,
@@ -68,11 +63,6 @@ def _session(session_id, competitor="cursor", dimensions=None, pending=None, mar
         created_at=created_at,
         raw=_raw(dimensions or [], pending or [], markdown, competitor),
     )
-
-
-def _obs(raw_text, gap_field="feature"):
-    ev = SourceEvidence(source_name="web_extractor", content_hash="h1")
-    return Observation(gap_field=gap_field, source="web_extractor", raw_text=raw_text, evidence=ev)
 
 
 # ── 1. summarize_session（设计文档 35 §3.1 单测） ──────────────────────
@@ -266,30 +256,37 @@ class TestFourLayerMemoryDelegation:
 
 
 class TestMemoryContextInjection:
-    def test_memory_context_reaches_analyzer_prompt(self):
+    """设计文档 49 迁移：记忆召回经 ReactLoop.memory_context_fn 注入 ReAct 系统提示。"""
+
+    @staticmethod
+    def _run_loop(memory_text: str) -> str:
+        from competitor_agent.agent.react_agent import ReactAgent
+        from competitor_agent.agent.react_loop import ReactLoop
+        from competitor_agent.agent.tool_dispatcher import ToolDispatcher
+
         captured: dict = {}
 
         def fake_llm(messages, model):
-            captured["messages"] = messages
-            return json.dumps({"summary": "ok", "details": {"features": ["x"]}, "confidence": 0.9})
+            captured["system"] = messages[0].get("content", "") if messages else ""
+            return "Final Answer: 分析完成"
 
-        analyzer = FeatureAnalyzer(llm=LLMClient(call_func=fake_llm))
-        obs = _obs("Cursor supports mcp integration", gap_field="feature")
-        ctx = AnalysisContext(competitor_name="cursor", memory_context="pricing: Pro is $20（过往结论）")
-        analyzer.analyze(obs, InfoGap(field="feature"), ctx)
-        last_user = captured["messages"][-1]["content"]
-        assert "[历史经验参考" in last_user
-        assert "Pro is $20" in last_user
+        agent = ReactAgent(
+            llm=LLMClient(call_func=fake_llm),
+            dispatcher=ToolDispatcher(tools={}),
+        )
+        loop = ReactLoop(
+            agent,
+            max_steps=3,
+            memory_context_fn=lambda task: memory_text,
+        )
+        loop.run("分析 cursor")
+        return captured["system"]
+
+    def test_memory_context_reaches_react_system_prompt(self):
+        system = self._run_loop("pricing: Pro is $20（过往结论）")
+        assert "历史教训/笔记" in system
+        assert "pricing: Pro is $20" in system
 
     def test_no_memory_context_no_injection(self):
-        captured: dict = {}
-
-        def fake_llm(messages, model):
-            captured["messages"] = messages
-            return json.dumps({"summary": "ok", "details": {"features": ["x"]}, "confidence": 0.9})
-
-        analyzer = FeatureAnalyzer(llm=LLMClient(call_func=fake_llm))
-        obs = _obs("Cursor supports mcp integration", gap_field="feature")
-        analyzer.analyze(obs, InfoGap(field="feature"), AnalysisContext(competitor_name="cursor"))
-        last_user = captured["messages"][-1]["content"]
-        assert "[历史经验参考" not in last_user
+        system = self._run_loop("")
+        assert "历史教训/笔记" not in system

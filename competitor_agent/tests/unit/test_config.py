@@ -32,30 +32,20 @@ def test_budget_defaults_present() -> None:
     assert budget["max_parallel_subagents"] == 4
 
 
-def test_termination_thresholds_valid() -> None:
+def test_dimensions_enabled_present() -> None:
     with open(_CONFIG_PATH, encoding="utf-8") as f:
         raw = yaml.safe_load(f)
-    term = raw["termination"]
-    assert 0 < term["core_priority_threshold"] <= 10
-    assert 0.0 <= term["core_confidence"] <= 1.0
+    enabled = raw["dimensions"]["enabled"]
+    assert "pricing" in enabled
+    assert "feature" in enabled
 
 
-def test_dimensions_enabled_and_budgeted() -> None:
+def test_subagents_config_section() -> None:
     with open(_CONFIG_PATH, encoding="utf-8") as f:
         raw = yaml.safe_load(f)
-    dims = raw["dimensions"]
-    enabled = dims["enabled"]
-    budgets = dims["default_budget"]
-    for d in enabled:
-        assert d in budgets, f"维度 {d} 缺少预算分配"
-
-
-def test_required_dimensions_in_stop_verifier() -> None:
-    with open(_CONFIG_PATH, encoding="utf-8") as f:
-        raw = yaml.safe_load(f)
-    required = raw["stop_verifier"]["required_dimensions"]
-    assert "pricing" in required
-    assert "feature" in required
+    sub = raw["subagents"]
+    assert sub["enabled"] is True
+    assert sub["max_concurrent"] >= 1
 
 
 # ── M6：load_config() 加载为类型安全 AppConfig ──────────────────────────────
@@ -67,15 +57,14 @@ def test_load_config_returns_appconfig() -> None:
     assert cfg.budget.max_iterations == 10
     assert cfg.budget.cost_limit_usd == 1.0
     assert cfg.budget.max_parallel_subagents == 4
-    assert cfg.termination.core_priority_threshold == 8
-    assert cfg.termination.core_confidence == 0.8
     assert "pricing" in cfg.dimensions.enabled
-    assert "feature" in cfg.stop_verifier.required_dimensions
     assert cfg.collector.rate_limit_per_second == 2
     assert cfg.memory.enabled is True
     assert cfg.observability.log_level == "INFO"
     assert cfg.execution.mode == "single"
     assert cfg.execution.max_parallel_subagents == 4
+    assert cfg.subagents.enabled is True
+    assert cfg.tools.validate_facts is True
 
 
 def test_load_config_missing_file_raises() -> None:

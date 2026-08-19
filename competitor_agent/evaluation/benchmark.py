@@ -256,7 +256,6 @@ class BenchmarkMockLLM:
         self._no_tools = no_tools
         self._parsed_competitors: list[str] = []
         self._parsed_dimensions: list[str] | None = None
-        self._convs: dict[str, dict] = {}  # 会话级状态（Lead 与各子 Agent 分 key，可并发）
 
     def complete(self, messages: list[dict[str, str]], model: str | None = None) -> str:
         if not messages:
@@ -271,7 +270,7 @@ class BenchmarkMockLLM:
             return self._lead_step(messages)
         if "维度子 Agent" in system:
             # 维度子 Agent 会话（独立完整 agent 自己的 ReAct 会话）
-            return self._subagent_step(messages, user)
+            return self._subagent_step(messages, user, system)
         if "战略规划器" in system:
             # 设计文档 47 规划 prompt：返回合法 PLAN_SCHEMA（competitor 优先取自用例）
             competitor = self._competitor or self._infer_competitor(user)
@@ -375,26 +374,35 @@ class BenchmarkMockLLM:
     def _lead_step(self, messages: list[dict[str, str]]) -> str:
         """Lead 会话状态机：make_plan → delegate → Final Answer（REPORT_SCHEMA）。
 
-        ``no_tools`` 消融变体：make_plan 后直接 Final Answer（无工具循环，测委派价值）。
+        阶段由会话消息内容推导（不依赖跨调用持久状态）：共享同一 mock 实例的
+        并行 compare / 复用分析中，多个 analyze 同任务时会话内容各自独立，
+        ``_convs`` 持久状态会在不同 analyze 运行间泄漏（首步跳过 make_plan →
+        plan-first 回灌 → 预算耗尽）。``no_tools`` 消融变体：make_plan 后直接
+        Final Answer（无工具循环，测委派价值）。
         """
-        state = self._conv("lead")
-        if not state.get("plan"):
-            state["plan"] = True
+        obs = self._last_observation(messages)
+        if not obs:
             return self._make_plan_action(messages)
-        if self._no_tools or state.get("delegate"):
+        if self._no_tools or "维度子 Agent 结果" in obs:
             return self._lead_final(messages)
-        state["delegate"] = True
-        return self._delegate_action()
+        return self._delegate_action(messages)
+
+    def _lead_task_competitor(self, messages: list[dict[str, str]]) -> str:
+        """本会话竞品：用例标注优先，否则从任务文本解析。
+
+        不读共享 ``_parsed_competitors``——并行 compare 共享同一 mock 实例时，
+        多会话并发 parse 会互相覆盖该字段（各 Lead 误用他人竞品）。
+        """
+        if self._competitor:
+            return self._competitor
+        task = self._task_text(messages)
+        names = self._registry_competitors(task)
+        return names[0] if names else self._infer_competitor(task)
 
     def _make_plan_action(self, messages: list[dict[str, str]]) -> str:
         from competitor_agent.agent.react_schemas import DIMENSIONS
 
-        user = self._user_text(messages)
-        competitor = (
-            self._competitor
-            or (self._parsed_competitors[0] if self._parsed_competitors else "")
-            or self._infer_competitor(user)
-        )
+        competitor = self._lead_task_competitor(messages)
         dimensions = self._dimensions or self._parsed_dimensions or list(DIMENSIONS)
         plan = {
             "competitor": competitor,
@@ -407,13 +415,15 @@ class BenchmarkMockLLM:
             f"Args: {json.dumps({'plan_json': plan}, ensure_ascii=False)}"
         )
 
-    def _delegate_action(self) -> str:
+    def _delegate_action(self, messages: list[dict[str, str]]) -> str:
         from competitor_agent.agent.react_schemas import DIMENSIONS
 
         dimensions = self._dimensions or self._parsed_dimensions or list(DIMENSIONS)
+        # task 透传会话任务：子 Agent 会话标识据此区分（并行 compare 隔离状态）
+        task = self._task_text(messages)
         return (
             "Thought: 委派维度子 Agent 并行采集\nAction: delegate\n"
-            f"Args: {json.dumps({'dimensions': dimensions, 'task': ''}, ensure_ascii=False)}"
+            f"Args: {json.dumps({'dimensions': dimensions, 'task': task}, ensure_ascii=False)}"
         )
 
     def _lead_final(self, messages: list[dict[str, str]]) -> str:
@@ -430,36 +440,31 @@ class BenchmarkMockLLM:
                     "confidence": 0.5,
                 }
             dimensions.append(item)
-        competitor = self._competitor or (
-            self._parsed_competitors[0] if self._parsed_competitors else "unknown"
-        )
+        competitor = self._lead_task_competitor(messages)
         return "Final Answer: " + json.dumps(
             {"competitor": competitor, "dimensions": dimensions}, ensure_ascii=False
         )
 
-    def _subagent_step(self, messages: list[dict[str, str]], user: str) -> str:
+    def _subagent_step(self, messages: list[dict[str, str]], user: str, system: str) -> str:
         """子 Agent 会话状态机：web_extract（首候选源失败则回退 best_url）→ Final Answer。
 
+        阶段由会话消息内容推导（``tried`` 从 assistant Action 的 Args URL 提取，
+        不依赖跨调用持久状态）——共享 mock 实例的并行 compare 中多会话内容各自独立。
         独立 LLM 子 Agent 走与 Lead 相同的 ReAct 代码路径；本 mock 只负责确定性地
         脚本化工具选择与收尾 JSON（SUBAGENT_RESULT_SCHEMA）。
         """
-        dim = self._subagent_dimension(user)
-        state = self._conv(f"sub:{dim}")
-        tried = list(state.get("tried", []))
+        # 维度取系统提示（跨轮稳定）：后续轮的 user 是 Observation，不含维度标记
+        dim = self._subagent_dimension_from_system(system) or self._subagent_dimension(user)
+        tried = self._tried_urls(messages)
         last_obs = self._last_observation(messages)
         if not tried:
             # 首步：模拟"首候选源"——标注 fail_urls 先试故障源（降级恢复路径）；
             # 否则首选最优源 best_url（rumor 低信任源拒绝，改用官方兜底 URL）
-            url = self._preferred_url(dim)
-            tried.append(url)
-            state["tried"] = tried
-            return self._web_extract_action(url)
+            return self._web_extract_action(self._preferred_url(dim))
         if "抓取失败" in last_obs:
             # 上一步失败 → 回退到标注最优源/兜底 URL
             url = self._best_url or self._target_url(dim)
             if url not in tried:
-                tried.append(url)
-                state["tried"] = tried
                 return self._web_extract_action(url)
         return self._subagent_final(dim, tried, last_obs)
 
@@ -529,14 +534,31 @@ class BenchmarkMockLLM:
         base = self._competitor or (self._parsed_competitors[0] if self._parsed_competitors else "unknown")
         return f"https://example.com/{base}/{dim}"
 
+    @staticmethod
+    def _subagent_dimension_from_system(system: str) -> str:
+        """从系统提示取维度名：「{dim}」维度子 Agent（跨轮稳定，user 会变成 Observation）。"""
+        import re as _re
+
+        match = _re.search(r"「([^」]+)」维度子 Agent", system)
+        return match.group(1) if match else ""
+
     def _subagent_dimension(self, user: str) -> str:
-        for dim in self._dimensions or []:
+        """解析子 Agent 任务文本的维度；与 _make_plan_action 同口径（用例维度 → 解析维度 → 全维度）。"""
+        from competitor_agent.agent.react_schemas import DIMENSIONS
+
+        dims = self._dimensions or self._parsed_dimensions or list(DIMENSIONS)
+        for dim in dims:
             if f"（请分析维度：{dim}）" in user:
                 return dim
-        return self._dimensions[0] if self._dimensions else "pricing"
+        return dims[0] if dims else "pricing"
 
-    def _conv(self, key: str) -> dict:
-        return self._convs.setdefault(key, {})
+    @staticmethod
+    def _task_text(messages: list[dict[str, str]]) -> str:
+        """首条 user 消息（会话任务文本），跨轮稳定。"""
+        for message in messages:
+            if message.get("role") == "user":
+                return str(message.get("content", ""))
+        return ""
 
     @staticmethod
     def _last_observation(messages: list[dict[str, str]]) -> str:
@@ -544,6 +566,18 @@ class BenchmarkMockLLM:
             if message.get("role") == "user" and "Observation" in str(message.get("content", "")):
                 return str(message.get("content", ""))
         return ""
+
+    @staticmethod
+    def _tried_urls(messages: list[dict[str, str]]) -> list[str]:
+        """本会话已尝试的抓取 URL：从 assistant Action 的 Args 提取（消息内容推导）。"""
+        urls: list[str] = []
+        for message in messages:
+            if message.get("role") != "assistant":
+                continue
+            match = re.search(r'"url"\s*:\s*"([^"]+)"', str(message.get("content", "")))
+            if match and match.group(1) not in urls:
+                urls.append(match.group(1))
+        return urls
 
     @classmethod
     def _subagent_blocks(cls, text: str) -> list[tuple[str, str]]:

@@ -12,6 +12,7 @@ import os
 
 import pytest
 
+from competitor_agent.config.loader import AppConfig, CollectorConfig
 from competitor_agent.evaluation.benchmark import (
     BenchmarkExtractor,
     BenchmarkMockLLM,
@@ -37,15 +38,21 @@ def _has_llm_key() -> bool:
     return any(os.getenv(key) for key in _LLM_KEY_ENVS)
 
 
+def _mock_api() -> CompetitorAnalysisAPI:
+    # 关闭 URL 守卫（DNS 解析离线必败）：让 BenchmarkExtractor 固定页面真实被 web_extract 采集
+    cfg = AppConfig(collector=CollectorConfig(block_private_urls=False))
+    return CompetitorAnalysisAPI(
+        extractor=BenchmarkExtractor(page=_PAGE),
+        llm=LLMClient(call_func=BenchmarkMockLLM().complete),
+        use_llm=True,
+        max_iterations=10,
+        config=cfg,
+    )
+
+
 class TestEndToEndMockLLM:
     def test_mock_llm_full_chain_single(self) -> None:
-        api = CompetitorAnalysisAPI(
-            extractor=BenchmarkExtractor(page=_PAGE),
-            llm=LLMClient(call_func=BenchmarkMockLLM().complete),
-            use_llm=True,
-            max_iterations=10,
-        )
-        report = api.analyze("分析 Cursor", mode="single")
+        report = _mock_api().analyze("分析 Cursor", mode="single")
 
         assert "# cursor 竞品分析报告" in report.markdown_report
         assert "## 维度结论" in report.markdown_report
@@ -54,11 +61,13 @@ class TestEndToEndMockLLM:
         assert "证据:" in report.markdown_report
 
     def test_mock_llm_full_chain_team(self, mock_llm) -> None:
+        cfg = AppConfig(collector=CollectorConfig(block_private_urls=False))
         api = CompetitorAnalysisAPI(
             extractor=BenchmarkExtractor(page=_PAGE),
             llm=mock_llm,
             use_llm=True,
             max_iterations=10,
+            config=cfg,
         )
         report = api.analyze("分析 Cursor", mode="team")
 
@@ -68,13 +77,7 @@ class TestEndToEndMockLLM:
         assert "# cursor 竞品分析报告" in report.markdown_report
 
     def test_mock_llm_report_is_evaluable(self) -> None:
-        api = CompetitorAnalysisAPI(
-            extractor=BenchmarkExtractor(page=_PAGE),
-            llm=LLMClient(call_func=BenchmarkMockLLM().complete),
-            use_llm=True,
-            max_iterations=10,
-        )
-        report = api.analyze("只分析 cursor 的定价", mode="single")
+        report = _mock_api().analyze("只分析 cursor 的定价", mode="single")
 
         prediction = extract_prediction(report, "pricing", {"pro": "$20/month", "team": "$40/month"})
         assert prediction.get("pro") == "$20/month"

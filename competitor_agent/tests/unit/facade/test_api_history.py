@@ -1,11 +1,15 @@
 """facade/api.py M5 增强单测：会话历史 / compare / continue_analysis"""
 import pytest
 
+from competitor_agent.config.loader import AppConfig, CollectorConfig
 from competitor_agent.domain_types.report import ComparisonReport
 from competitor_agent.facade.api import CompetitorAnalysisAPI
 from competitor_agent.interfaces.context import ChatMessage
 
 CURSOR_PRICING = "Pro $20/month\nTeams $40/month\nUltra $60/month"
+
+# 离线环境 URL 守卫（DNS 解析）会拦截 before 采集器运行：关闭守卫让 FakeExtractor 真被命中
+_OFFLINE_CFG = AppConfig(collector=CollectorConfig(block_private_urls=False))
 
 
 class FakeExtractor:
@@ -24,7 +28,13 @@ class FakeExtractor:
 
 
 def _api(mock_llm, **kwargs):
-    return CompetitorAnalysisAPI(extractor=FakeExtractor(), llm=mock_llm, use_llm=True, **kwargs)
+    return CompetitorAnalysisAPI(
+        extractor=FakeExtractor(),
+        llm=mock_llm,
+        use_llm=True,
+        config=_OFFLINE_CFG,
+        **kwargs,
+    )
 
 
 class TestHistoryContext:
@@ -41,23 +51,29 @@ class TestHistoryContext:
         assert second.competitor.name == "cursor"
 
     def test_no_history_keeps_unknown(self, mock_llm):
-        """无历史时相对指代解析为 unknown；规划无法定竞品 → 报错（LLM 时代无规则兜底）。"""
+        """无历史时相对指代解析为 unknown；analyze 产出 unknown 竞品报告（doc 49 不报错）。"""
         from competitor_agent.core.task_parser import parse_task
 
         parsed = parse_task("那定价呢", llm=mock_llm, use_llm=True)
         assert parsed.primary_competitor == "unknown"
         api = _api(mock_llm)
-        with pytest.raises(ValueError):
-            api.analyze("那定价呢")
+        report = api.analyze("那定价呢")
+        assert report.competitor.name == "unknown"
+        assert report.markdown_report
 
     def test_history_emits_context(self, mock_llm):
         events = []
         api = CompetitorAnalysisAPI(
-            extractor=FakeExtractor(), llm=mock_llm, use_llm=True, event_sink=events.append
+            extractor=FakeExtractor(),
+            llm=mock_llm,
+            use_llm=True,
+            event_sink=events.append,
+            config=_OFFLINE_CFG,
         )
         api.analyze("分析 Cursor")
         api.analyze("那性能呢", conversation_history=[ChatMessage(role="user", content="分析 Cursor")])
-        assert any(e.message.startswith("规划:") for e in events)
+        # doc 49：ReAct 编排以 phase 事件产出进度（不再有"规划:" 规划器事件）
+        assert any(e.event == "phase_start" and e.phase == "react" for e in events)
 
 
 class TestCompare:

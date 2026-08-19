@@ -44,7 +44,7 @@ def assemble(
     builder = builder or ReportBuilder()
     payload = _parse_report(lead_answer)
     if payload is None:
-        return _fallback_single_dimension(lead_answer, competitor, builder, terminal_state)
+        return _fallback_single_dimension(lead_answer, competitor, builder, terminal_state, loop_plan)
 
     dimensions: list[DimensionResult] = []
     for item in payload.get("dimensions") or []:
@@ -156,8 +156,13 @@ def _fallback_single_dimension(
     competitor: Competitor,
     builder: Any,
     terminal_state: str,
+    loop_plan: dict[str, Any] | None = None,
 ) -> CompetitorReport:
-    """非 JSON / 无 dimensions：单 react 维度 PARTIAL（LLM 不可用/超步数文案）。"""
+    """非 JSON / 无 dimensions：单 react 维度 PARTIAL（LLM 不可用/超步数文案）。
+
+    plan 已声明但未产出的维度 → gaps_pending（供 resume/预算判定），与
+    assemble() 正常路径一致。
+    """
     text = (answer or "").strip()
     is_unavailable = "LLM 服务不可用" in text or "已达最大" in text or "推理已停止" in text
     status = ResultStatus.PARTIAL
@@ -169,9 +174,11 @@ def _fallback_single_dimension(
         confidence=confidence,
         status=status,
     )
+    planned = _planned_dimensions(loop_plan)
+    gaps_pending = [InfoGap(field=dim, priority=5, status=ResultStatus.PARTIAL) for dim in planned]
     return builder.build(
         competitor=competitor,
         results=[dr],
-        gaps_pending=[],
+        gaps_pending=gaps_pending,
         terminal_state=terminal_state,
     )
