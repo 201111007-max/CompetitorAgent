@@ -1,8 +1,6 @@
-"""M2 集成：技能/进化记忆影响规划与选源，prompt 注入记忆片段"""
+"""M2 集成（设计文档 49 迁移）：技能/进化记忆经 enrich_prompt 注入 ReAct 系统提示，
+引导 LLM 选源；analyze 记忆写侧落盘、跨加载持久。"""
 from competitor_agent.agent.prompts.react_system import enrich_prompt
-from competitor_agent.collector.source_selector import SourceSelector
-from competitor_agent.core.strategic_loop import StrategicPlanner
-from competitor_agent.domain_types import Competitor, InfoGap
 from competitor_agent.interfaces.context import Skill
 from competitor_agent.memory import FourLayerMemory
 
@@ -30,41 +28,31 @@ class TestPromptEnrichment:
         assert "docs" in prompt
 
 
-class TestSourcePreference:
-    def test_high_success_rate_source_first(self):
-        sel = SourceSelector()
-        sel.set_success_rates({"official_pricing": 0.95, "official_home": 0.2})
-        gap = InfoGap(field="pricing")
-        competitor = Competitor(
-            name="cursor",
-            official_links={"pricing": "https://c.com/pricing", "home": "https://c.com"},
-        )
-        cands = sel.candidates(gap, competitor)
-        assert cands[0].source_name == "official_pricing"
+class TestSkillGuidedSourceSelection:
+    """选源引导（设计文档 49）：记忆技能作为「推荐优先使用的数据源」注入系统提示。"""
 
-    def test_success_rates_affect_trust(self):
-        sel = SourceSelector()
-        sel.set_success_rates({"official_home": 1.0})
-        gap = InfoGap(field="pricing")
-        competitor = Competitor(name="cursor", official_links={"home": "https://c.com"})
-        cands = sel.candidates(gap, competitor)
-        assert cands[0].trust_level > 0.9
+    def test_success_skill_recommends_source(self):
+        skills = [Skill(competitor_name="cursor", gap_field="pricing", source_name="official_pricing", success=True)]
+        prompt = enrich_prompt("base", skills=skills, competitor="cursor")
+        assert "official_pricing" in prompt
+        assert "pricing" in prompt
+
+    def test_failed_skill_not_recommended(self):
+        skills = [Skill(competitor_name="cursor", gap_field="pricing", source_name="official_pricing", success=False)]
+        prompt = enrich_prompt("base", skills=skills, competitor="cursor")
+        assert "official_pricing" not in prompt
 
 
-class TestMemoryDrivesPlanning:
-    def test_second_analysis_boosts_confidence(self, tmp_path, mock_llm):
+class TestMemoryDrivesPrompt:
+    def test_second_analysis_surfaces_skill_in_prompt(self, tmp_path):
         mem = FourLayerMemory(tmp_path / "mem")
         mem.record_skill(Skill(competitor_name="cursor", gap_field="pricing", source_name="docs", success=True))
-        p = StrategicPlanner(llm=mock_llm, use_llm=True)
-        strategy = p.plan("cursor", memory=mem)
-        by_field = {g.field: g for g in strategy.gaps}
-        assert by_field["pricing"].confidence == 0.2  # 记忆提升
+        prompt = enrich_prompt("base", skills=mem.retrieve_skills("cursor"), competitor="cursor")
+        assert "docs" in prompt  # 记忆沉淀的技能进入提示引导选源
 
-    def test_no_memory_no_boost(self, tmp_path, mock_llm):
-        p = StrategicPlanner(llm=mock_llm, use_llm=True)
-        strategy = p.plan("cursor")
-        by_field = {g.field: g for g in strategy.gaps}
-        assert by_field["pricing"].confidence == 0.0
+    def test_no_memory_no_recommendation(self):
+        prompt = enrich_prompt("base", skills=[], competitor="cursor")
+        assert "历史技能" not in prompt
 
     def test_memory_end_to_end_persistence(self, tmp_path):
         d = tmp_path / "m2"
@@ -82,7 +70,7 @@ class TestApiWithMemory:
         api = CompetitorAnalysisAPI(extractor=None, llm=mock_llm, use_llm=True, memory=mem, max_iterations=2)
         assert api.memory is mem
 
-    def test_api_memory_drives_confidence(self, tmp_path, mock_llm):
+    def test_api_memory_persists_after_analyze(self, tmp_path, mock_llm):
         from competitor_agent.domain_types import Observation, SourceEvidence
         from competitor_agent.facade.api import CompetitorAnalysisAPI
         from competitor_agent.interfaces.context import SourceContext
@@ -103,12 +91,6 @@ class TestApiWithMemory:
 
         api = CompetitorAnalysisAPI(extractor=FakeExtractor(), llm=mock_llm, use_llm=True, memory=mem, max_iterations=4)
         api.analyze("分析 Cursor")
-        # 分析后应沉淀技能，二次规划命中记忆（同存储目录重新加载）
+        # 分析后记忆写侧落盘：技能跨加载可见（设计文档 49 唯一写侧）
         mem2 = FourLayerMemory(tmp_path / "m")
-        assert mem2.retrieve_skills("cursor")  # 技能被落盘
-        # 直接规划即可观察到记忆命中带来的置信度提升
-        from competitor_agent.core.strategic_loop import StrategicPlanner
-
-        strategy = StrategicPlanner(llm=mock_llm, use_llm=True).plan("cursor", memory=mem2)
-        by_field = {g.field: g for g in strategy.gaps}
-        assert by_field["pricing"].confidence >= 0.2
+        assert mem2.retrieve_skills("cursor"), "分析后技能被落盘"

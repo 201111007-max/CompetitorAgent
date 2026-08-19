@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 
 import pytest
-from competitor_agent.config.loader import AppConfig
+from competitor_agent.config.loader import AppConfig, CollectorConfig
 from competitor_agent.core.alerting import Alert
 from competitor_agent.domain_types.observation import Observation, SourceEvidence
 from competitor_agent.facade.api import CompetitorAnalysisAPI
@@ -53,7 +53,8 @@ class _PricingExtractor:
 
 
 def _api(extractor, mock_llm, tmp_path: Path, export_json: bool = True) -> CompetitorAnalysisAPI:
-    cfg = AppConfig()
+    # 离线环境 URL 守卫（DNS 解析）会拦截 before 采集器运行：关闭守卫让采集器真被命中
+    cfg = AppConfig(collector=CollectorConfig(block_private_urls=False))
     cfg.report.output_dir = str(tmp_path / "reports" / "competitor")
     cfg.report.comparison_dir = str(tmp_path / "reports" / "comparison")
     cfg.report.export_json = export_json

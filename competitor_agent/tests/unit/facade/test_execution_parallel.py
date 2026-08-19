@@ -12,7 +12,7 @@ from __future__ import annotations
 import threading
 import uuid
 
-from competitor_agent.config.loader import AppConfig, ExecutionConfig
+from competitor_agent.config.loader import AppConfig, CollectorConfig, ExecutionConfig
 from competitor_agent.domain_types import (
     InfoGap,
     Observation,
@@ -22,6 +22,9 @@ from competitor_agent.facade.api import CompetitorAnalysisAPI
 from competitor_agent.interfaces.context import SourceContext
 
 CURSOR_PRICING = "Pro $20/month\nTeams $40/month\nUltra $60/month"
+
+# 离线环境 URL 守卫（DNS 解析）会拦截 before 采集器运行：关闭守卫让 FakeExtractor 真被命中
+_OFFLINE_CFG = CollectorConfig(block_private_urls=False)
 
 
 class FakeExtractor:
@@ -40,7 +43,10 @@ class FakeExtractor:
 
 
 def _parallel_api(llm=None, **kwargs) -> CompetitorAnalysisAPI:
-    cfg = AppConfig(execution=ExecutionConfig(mode="parallel", max_parallel_subagents=4))
+    cfg = AppConfig(
+        execution=ExecutionConfig(mode="parallel", max_parallel_subagents=4),
+        collector=_OFFLINE_CFG,
+    )
     kwargs.setdefault("extractor", FakeExtractor())
     kwargs.setdefault("llm", llm)
     kwargs.setdefault("use_llm", True)
@@ -49,32 +55,35 @@ def _parallel_api(llm=None, **kwargs) -> CompetitorAnalysisAPI:
 
 class TestParallelExecution:
     def test_parallel_merges_all_gaps_in_gap_order(self, mock_llm):
+        """doc 49：delegate 并发委派维度子 Agent，Lead 聚合结果按 plan 维度顺序。"""
         api = _parallel_api(llm=mock_llm)
         report = api.analyze("分析 Cursor", mode="single")
-        planner_gaps = api._planner.plan("分析 Cursor").gaps
         report_fields = [r.dimension for r in report.dimension_results]
-        # 结果必须按策略缺口原始顺序出现的子序列（串行路径同语义）
-        idx = 0
-        for gap_field in [g.field for g in planner_gaps]:
-            if idx < len(report_fields) and report_fields[idx] == gap_field:
-                idx += 1
-        assert idx == len(report_fields)
+        assert report_fields == [
+            "pricing",
+            "feature",
+            "performance",
+            "ecosystem",
+            "sentiment",
+            "roadmap",
+        ]
         assert report.overall_confidence > 0
         assert report.markdown_report
 
     def test_parallel_shared_budget_not_exceeded(self, mock_llm):
-        api = _parallel_api(llm=mock_llm)
+        """doc 49：analyze 末尾统一记账；预算扣减不超过上限。"""
+        api = _parallel_api(llm=mock_llm, max_iterations=10, cost_limit=1.0)
         report = api.analyze("分析 Cursor", mode="single")
-        total_gaps = len(api._planner.plan("分析 Cursor").gaps)
-        # 每个缺口只贡献 1 次 record_iteration，且不超过缺口总数与预算上限
-        assert total_gaps <= api._budget.max_iterations
-        assert len(report.dimension_results) <= total_gaps
-        assert api._budget.iteration_count >= len(report.dimension_results)
-        assert api._budget.iteration_count <= total_gaps
+        assert report.terminal_state == "success"
+        assert api._budget.iteration_count >= 1
         assert api._budget.iteration_count <= api._budget.max_iterations
+        assert api._budget.total_cost > 0
 
     def test_parallel_same_results_as_serial(self, mock_llm):
-        cfg_serial = AppConfig(execution=ExecutionConfig(mode="single", max_parallel_subagents=4))
+        cfg_serial = AppConfig(
+            execution=ExecutionConfig(mode="single", max_parallel_subagents=4),
+            collector=_OFFLINE_CFG,
+        )
         serial = CompetitorAnalysisAPI(extractor=FakeExtractor(), llm=mock_llm, use_llm=True, config=cfg_serial)
         parallel = _parallel_api(llm=mock_llm)
         r_serial = serial.analyze("分析 Cursor", mode="single")

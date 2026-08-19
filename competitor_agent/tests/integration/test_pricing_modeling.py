@@ -1,9 +1,14 @@
-"""设计文档 27 §5 集成：analyze 完整流水线 → 报告含定价档位表 / 按量计费表 / 成本场景表 / 需询价标注"""
+"""设计文档 27 §5 集成（49 命名空间）：analyze → 报告含定价档位表 / 成本场景表
+
+details 沿用 49 命名空间（``details["plans"]`` 原始档位），经
+``profile_from_details`` 结构抽取为 PricingProfile（含成本估算）→ 渲染定价表。
+"""
 from __future__ import annotations
 
 import pytest
 
-from competitor_agent.domain_types.pricing import PricingProfile
+from competitor_agent.config.loader import AppConfig, CollectorConfig
+from competitor_agent.domain_types.pricing import profile_from_details
 from competitor_agent.facade.api import CompetitorAnalysisAPI
 from competitor_agent.memory import FourLayerMemory
 from tests.conftest import FakeExtractor
@@ -16,31 +21,38 @@ _RICH_PRICING = (
     "Advanced model $2.00/request"
 )
 
+# 离线环境 URL 守卫（DNS 解析）会拦截 before 采集器运行：关闭守卫让采集器真被命中
+_OFFLINE_CFG = AppConfig(collector=CollectorConfig(block_private_urls=False))
+
 
 class RichPricingExtractor(FakeExtractor):
-    """定价页文本含免费/付费档位 + 按量计费 + 模型档位 + 企业询价。"""
+    """定价页文本含免费/付费档位 + 按量计费 + 模型档位 + 企业询价。
+
+    doc 49：web_extract 传 InfoGap(field="web")，按 URL 判定定价页而非 gap.field。
+    """
 
     def fetch(self, gap, context):
         obs = super().fetch(gap, context)
-        if str(getattr(gap, "field", "")) == "pricing":
+        if "pricing" in str(context.kwargs.get("url")):
             obs.raw_text = _RICH_PRICING
         return obs
 
 
 class TestPricingModelingIntegration:
-    def test_report_contains_pricing_tables(self, fake_extractor, tmp_path, mock_llm) -> None:
+    def test_report_contains_pricing_tables(self, tmp_path, mock_llm) -> None:
         api = CompetitorAnalysisAPI(
             extractor=RichPricingExtractor(),
             llm=mock_llm,
             use_llm=True,
             memory=FourLayerMemory(tmp_path / "memory"),
             max_iterations=10,
+            config=_OFFLINE_CFG,
         )
         report = api.analyze("分析 Cursor 的定价", mode="single", session_id="sess_pricing_1")
         pricing = [r for r in report.dimension_results if r.dimension == "pricing"]
         assert pricing, "报告应包含 pricing 维度"
 
-        profile = PricingProfile.from_dict(pricing[0].details["pricing"])
+        profile = profile_from_details(pricing[0].details, pricing[0].evidence)
         assert profile is not None and profile.has_pricing_data
         # 档位表：mock LLM 确定性抽取 free/pro/teams 等档位
         assert len(profile.plans) >= 4
@@ -64,6 +76,7 @@ class TestPricingModelingIntegration:
             use_llm=True,
             memory=mem,
             max_iterations=10,
+            config=_OFFLINE_CFG,
         )
         api.analyze("分析 Cursor 的定价", mode="single", session_id="sess_pricing_arch")
         sessions = mem.list_sessions("cursor")

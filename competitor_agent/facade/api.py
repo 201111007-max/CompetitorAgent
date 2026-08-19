@@ -49,6 +49,7 @@ from competitor_agent.core.budget import IterationBudget
 from competitor_agent.core.budget_controller import BudgetController
 from competitor_agent.core.checkpoint import (
     checkpoint_to_report,
+    clear_cancel,
     delete_checkpoint,
     is_cancelled,
     load_checkpoint,
@@ -70,6 +71,7 @@ from competitor_agent.domain_types.events import ProgressEvent
 from competitor_agent.domain_types.freshness import ReportFreshness, stale_under_ttl
 from competitor_agent.domain_types.info_gap import InfoGap
 from competitor_agent.domain_types.observation import SourceEvidence
+from competitor_agent.domain_types.pricing import profile_from_details
 from competitor_agent.domain_types.report import (
     CancelledResult,
     ComparisonReport,
@@ -299,9 +301,11 @@ class CompetitorAnalysisAPI:
         if self._memory is None:
             return
         pricing_profiles = [
-            r.details.get("pricing")
+            profile.to_dict()
             for r in report.dimension_results
-            if isinstance(r.details, dict) and isinstance(r.details.get("pricing"), dict)
+            if r.dimension == "pricing"
+            and isinstance(r.details, dict)
+            and (profile := profile_from_details(r.details, r.evidence or [])).has_pricing_data
         ]
         self._memory.archive_session(
             AnalysisSession(
@@ -472,15 +476,18 @@ class CompetitorAnalysisAPI:
         )
 
     def _run_react_loop(self, task: str, session_id: str | None) -> tuple[ReactLoop, ReactRunResult]:
-        """构建 Lead ReactLoop 并运行；会话收尾统一回收子 Agent 线程池。"""
+        """构建 Lead ReactLoop 并运行；会话收尾统一回收子 Agent 线程池。
+
+        DelegateRunner 挂在 loop 实例（而非 self），避免并行 analyze()（compare
+        并发）共享 self._delegate_runner 时互相 shutdown 彼此的线程池。
+        """
         loop = self._react_loop(task, session_id)
         try:
             result = loop.run_with_result(task)
         finally:
-            runner = getattr(self, "_delegate_runner", None)
+            runner = getattr(loop, "_delegate_runner", None)
             if runner is not None:
                 runner.shutdown()
-                self._delegate_runner = None
         if result.steps:
             self._budget.record_iteration(cost=0.01 * result.steps)
         return loop, result
@@ -530,7 +537,6 @@ class CompetitorAnalysisAPI:
             max_concurrent=max_concurrent,
             timeout_seconds=timeout_seconds,
         )
-        self._delegate_runner = runner  # analyze() 收尾统一 shutdown
         extra_tools: dict[str, Callable[..., str]] = {
             "make_plan": build_make_plan_tool(),
             "delegate": make_delegate_tool(runner, registry=get_subagent_registry()),
@@ -551,10 +557,12 @@ class CompetitorAnalysisAPI:
             extra_tools=extra_tools,
         )
         agent = ReactAgent(llm=self._llm or LLMClient(), dispatcher=dispatcher)
-        # Lead 步数上限 = max_steps（≈12）；diminishing_threshold=0 关闭"边际递减"
-        # 启发（ReAct 恒传 delta_tokens=0，否则第 3 步后必然误判预算耗尽）
+        # Lead 步数上限：默认 ≈12；用户显式传 max_iterations 时以其为准（含 0，预算耗尽→
+        # partial，设计文档 14 承诺）；diminishing_threshold=0 关闭"边际递减"启发
+        # （ReAct 恒传 delta_tokens=0，否则第 3 步后必然误判预算耗尽）
+        lead_max = self._budget.max_iterations if self._budget.max_iterations is not None else _LEAD_MAX_STEPS
         budget = IterationBudget(
-            max_iterations=_LEAD_MAX_STEPS,
+            max_iterations=lead_max,
             cost_limit=self._budget.cost_limit,
             diminishing_threshold=0,
         )
@@ -570,6 +578,8 @@ class CompetitorAnalysisAPI:
             system_prompt_override=build_lead_system_prompt(),
             plan_first=True,
         )
+        loop._delegate_runner = runner  # 收尾 shutdown 用（挂 loop 避免并行 analyze 互相误杀）
+        return loop
 
     def _react_competitor(self, task: str) -> Competitor:
         """从任务解析竞品（注册表命中带官方源；未知竞品退化为裸名）。"""
@@ -896,6 +906,8 @@ class CompetitorAnalysisAPI:
         cp = load_checkpoint(session_id)
         if cp is None:
             raise ValueError(f"会话 {session_id} 无 checkpoint，无法恢复")
+        # resume 是显式新调用：清除前次取消标志，否则 analyze() 立即判取消、续跑空转
+        clear_cancel(session_id)
         logger.info("从 checkpoint 恢复会话: %s (%d gaps)", session_id, len(cp.gaps))
 
         # 1. 重建竞品与缺口状态（用注册表恢复官方源）

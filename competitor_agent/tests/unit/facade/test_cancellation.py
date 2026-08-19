@@ -1,17 +1,18 @@
-"""问题 4 修复测试：Web 取消 session_id 断链 + 协作式取消真正中断
+"""问题 4 修复测试：Web 取消 session_id 断链 + 协作式取消真正中断（设计文档 04/49）
 
-覆盖设计文档 04 验证方式：
 - 单元：analyze(session_id="x") 内部取消标志与外传 id 一致
 - 集成：慢速分析中调用 cancel，循环提前终止并返回部分结果
-- 协作式：TacticalLoop 每轮迭代感知取消、多 Agent 采集阶段感知取消
+- 协作式（49 迁移）：ReactLoop._step_guard 每步感知取消；无 session_id 不感知
 """
 from __future__ import annotations
 
 import threading
 import time
 
-from competitor_agent.collector.source_selector import SourceSelector
-from competitor_agent.core.budget import IterationBudget
+from competitor_agent.agent.react_agent import ReactAgent
+from competitor_agent.agent.react_loop import ReactLoop
+from competitor_agent.agent.tool_dispatcher import ToolDispatcher
+from competitor_agent.config.loader import AppConfig, CollectorConfig
 from competitor_agent.core.checkpoint import (
     clear_cancel,
     delete_checkpoint,
@@ -19,15 +20,13 @@ from competitor_agent.core.checkpoint import (
     load_checkpoint,
     set_cancel,
 )
-from competitor_agent.core.competitor_registry import COMPETITOR_REGISTRY
-from competitor_agent.core.tactical_loop import TacticalLoop
 from competitor_agent.domain_types.info_gap import InfoGap
 from competitor_agent.domain_types.observation import Observation, SourceEvidence
 from competitor_agent.domain_types.report import CancelledResult, CompetitorReport
-from competitor_agent.domain_types.strategy import CompetitorStrategy
 from competitor_agent.facade.api import CompetitorAnalysisAPI
 from competitor_agent.interfaces.context import SourceContext
 from competitor_agent.interfaces.exceptions import DataSourceUnavailableError
+from competitor_agent.llm.client import LLMClient
 
 CURSOR_PRICING = "Pro $20/month\nTeams $40/month\nUltra $60/month"
 
@@ -46,7 +45,9 @@ class FakeExtractor:
 
 
 def _api(llm, **kwargs):
-    return CompetitorAnalysisAPI(extractor=FakeExtractor(), llm=llm, use_llm=True, **kwargs)
+    # 关闭 URL 守卫（DNS 解析离线必败）：让测试注入的 FakeExtractor 真实被 web_extract 调用
+    cfg = AppConfig(collector=CollectorConfig(block_private_urls=False))
+    return CompetitorAnalysisAPI(extractor=FakeExtractor(), llm=llm, use_llm=True, config=cfg, **kwargs)
 
 
 class TestSessionIdConsistency:
@@ -111,10 +112,12 @@ class TestCooperativeCancellation:
     def test_cancel_during_run_returns_partial_result_and_stops(self, mock_llm):
         sid = "sess_partial_1"
         blocking = threading.Event()
+        cfg = AppConfig(collector=CollectorConfig(block_private_urls=False))
         api = CompetitorAnalysisAPI(
             extractor=_SlowExtractor(sid, blocking),
             llm=mock_llm,
             use_llm=True,
+            config=cfg,
         )
 
         result_holder: list[CompetitorReport] = []
@@ -141,77 +144,41 @@ class TestCooperativeCancellation:
             clear_cancel(sid)
             delete_checkpoint(sid)
 
-    def test_tactical_loop_stops_within_iteration_on_cancel(self):
-        sid = "sess_loop_1"
 
-        class SetCancelThenFailExtractor:
-            def __init__(self) -> None:
-                self.calls = 0
+class TestReactLoopCooperativeCancellation:
+    """设计文档 49 迁移：取消感知内化到 ReactLoop._step_guard（原 TacticalLoop 语义）。"""
 
-            def fetch(self, gap: InfoGap, context: SourceContext) -> Observation:
-                self.calls += 1
-                set_cancel(sid)  # 首次采集时触发取消（模拟 Web 取消）
-                raise DataSourceUnavailableError("源不可用")
+    @staticmethod
+    def _loop(sid: str | None):
+        called = {"n": 0}
 
-        extractor = SetCancelThenFailExtractor()
-        strategy = CompetitorStrategy(
-            competitor=COMPETITOR_REGISTRY["cursor"],
-            gaps=[InfoGap(field="pricing")],
+        def fake_llm(messages, model):
+            called["n"] += 1
+            return "Final Answer: done"
+
+        agent = ReactAgent(
+            llm=LLMClient(call_func=fake_llm),
+            dispatcher=ToolDispatcher(tools={}),
         )
-        loop = TacticalLoop(
-            selector=SourceSelector(),
-            extractor=extractor,
-            analyzer=_StubAnalyzer(),
-            budget=IterationBudget(max_iterations=10, cost_limit=1.0),
-            session_id=sid,
-        )
+        loop = ReactLoop(agent, session_id=sid, plan_first=False)
+        loop._called = called  # type: ignore[attr-defined]
+        return loop, called
+
+    def test_react_loop_cancelled_before_start(self):
+        sid = "sess_loop_react_1"
+        loop, called = self._loop(sid)
+        set_cancel(sid)
         try:
-            result = loop.execute(strategy.gaps[0], strategy)
-            assert result is None  # 取消后立即终止，不继续降级链
-            assert extractor.calls == 1  # 第二个候选源未被尝试
+            result = loop.run_with_result("分析 cursor")
+            assert result.cancelled is True
+            assert result.steps == 0
+            assert called["n"] == 0, "取消后不发起任何 LLM 调用"
         finally:
             clear_cancel(sid)
 
-    def test_tactical_loop_without_session_id_never_checks_cancel(self):
-        # 未传 session_id 时保持原行为：多候选源全部尝试
-        sid = "sess_loop_noop"
-
-        class FlakyExtractor:
-            def __init__(self) -> None:
-                self.calls = 0
-
-            def fetch(self, gap: InfoGap, context: SourceContext) -> Observation:
-                self.calls += 1
-                if self.calls == 1:
-                    raise DataSourceUnavailableError("源不可用")
-                return FakeExtractor().fetch(gap, context)
-
-        extractor = FlakyExtractor()
-        strategy = CompetitorStrategy(
-            competitor=COMPETITOR_REGISTRY["cursor"],
-            gaps=[InfoGap(field="pricing")],
-        )
-        loop = TacticalLoop(
-            selector=SourceSelector(),
-            extractor=extractor,
-            analyzer=_StubAnalyzer(),
-            budget=IterationBudget(max_iterations=10, cost_limit=1.0),
-            session_id=None,
-        )
-        try:
-            result = loop.execute(strategy.gaps[0], strategy)
-            assert result is not None  # 降级到第二个源成功闭环
-            assert extractor.calls >= 2
-        finally:
-            clear_cancel(sid)
-
-
-class _StubAnalyzer:
-    """最小分析器桩：测试中不会被实际调用（采集已失败/取消）"""
-
-    dimension = "pricing"
-
-    def analyze(self, observation, gap, context):
-        from competitor_agent.domain_types.report import DimensionResult
-
-        return DimensionResult(dimension="pricing", summary="", confidence=0.0)
+    def test_react_loop_without_session_id_runs(self):
+        loop, called = self._loop(None)
+        result = loop.run_with_result("分析 cursor")
+        assert result.cancelled is False
+        assert called["n"] >= 1
+        assert "done" in result.answer

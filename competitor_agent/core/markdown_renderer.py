@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from competitor_agent.domain_types.enums import ResultStatus
-from competitor_agent.domain_types.pricing import PricingProfile
+from competitor_agent.domain_types.pricing import profile_from_details
 from competitor_agent.domain_types.report import ComparisonReport, CompetitorReport, DimensionResult
 from competitor_agent.observability.logger import get_logger
 
@@ -70,7 +70,7 @@ class MarkdownRenderer:
         lines.append("")
 
         if result.dimension == "pricing":
-            profile = PricingProfile.from_dict(result.details.get("pricing")) if isinstance(result.details, dict) else None
+            profile = profile_from_details(result.details, result.evidence) if isinstance(result.details, dict) else None
             if profile is not None and profile.has_pricing_data:
                 self._render_pricing(lines, profile)
             else:

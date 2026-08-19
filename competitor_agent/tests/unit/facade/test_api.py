@@ -1,4 +1,5 @@
 """facade/api.py 端到端测试：注入 fake 采集器，无 LLM/无网络跑通完整链路"""
+from competitor_agent.config.loader import AppConfig, CollectorConfig
 from competitor_agent.domain_types import (
     InfoGap,
     Observation,
@@ -8,6 +9,9 @@ from competitor_agent.facade.api import CompetitorAnalysisAPI
 from competitor_agent.interfaces.context import SourceContext
 
 CURSOR_PRICING = "Pro $20/month\nTeams $40/month\nUltra $60/month"
+
+# 离线环境 URL 守卫（DNS 解析）会拦截 before 采集器运行：关闭守卫让 FakeExtractor 真被命中
+_OFFLINE_CFG = AppConfig(collector=CollectorConfig(block_private_urls=False))
 
 
 class FakeExtractor:
@@ -24,7 +28,13 @@ class FakeExtractor:
 
 
 def _api(llm, **kwargs):
-    return CompetitorAnalysisAPI(extractor=FakeExtractor(), llm=llm, use_llm=True, **kwargs)
+    return CompetitorAnalysisAPI(
+        extractor=FakeExtractor(),
+        llm=llm,
+        use_llm=True,
+        config=_OFFLINE_CFG,
+        **kwargs,
+    )
 
 
 class TestAnalyze:
@@ -85,10 +95,20 @@ class TestAnalyzeReact:
     def test_analyze_react_success_with_fake_llm(self):
         from competitor_agent.llm.client import LLMClient
 
+        def fake_llm(messages, model):
+            # plan-first（设计文档 49）：首步必须先 make_plan，之后才可收尾
+            if not any(m.get("role") == "assistant" for m in messages):
+                return (
+                    "Thought: 规划分析策略\nAction: make_plan\n"
+                    'Args: {"plan_json": {"competitor": "Cursor", "dimensions": ["pricing"]}}'
+                )
+            return "Final Answer: Cursor 定价已收集"
+
         api = CompetitorAnalysisAPI(
             extractor=FakeExtractor(),
-            llm=LLMClient(call_func=lambda messages, model: "Final Answer: Cursor 定价已收集"),
+            llm=LLMClient(call_func=fake_llm),
             use_llm=True,
+            config=_OFFLINE_CFG,
         )
         result = api.analyze_react("分析 Cursor")
         assert "定价" in result

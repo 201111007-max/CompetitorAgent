@@ -13,9 +13,13 @@ import uuid
 
 import pytest
 
+from competitor_agent.config.loader import AppConfig, CollectorConfig
 from competitor_agent.facade.api import CompetitorAnalysisAPI
 
 pytestmark = pytest.mark.integration
+
+# 离线环境 URL 守卫（DNS 解析）会拦截 before 采集器运行：关闭守卫让采集器真被命中
+_OFFLINE_CFG = AppConfig(collector=CollectorConfig(block_private_urls=False))
 
 
 class TestCheckpointResume:
@@ -29,7 +33,9 @@ class TestCheckpointResume:
                 release.wait(timeout=10)
                 return fake_extractor.fetch(gap, context)
 
-        api = CompetitorAnalysisAPI(extractor=BlockingExtractor(), llm=mock_llm, use_llm=True, max_iterations=10)
+        api = CompetitorAnalysisAPI(
+            extractor=BlockingExtractor(), llm=mock_llm, use_llm=True, max_iterations=10, config=_OFFLINE_CFG
+        )
         sid = f"sess_res_{uuid.uuid4().hex[:8]}"
         holder: dict = {}
 
@@ -61,6 +67,8 @@ class TestCheckpointResume:
             api.resume(sid)
 
     def test_resume_missing_session_raises(self, fake_extractor, mock_llm) -> None:
-        api = CompetitorAnalysisAPI(extractor=fake_extractor, llm=mock_llm, use_llm=True)
+        api = CompetitorAnalysisAPI(
+            extractor=fake_extractor, llm=mock_llm, use_llm=True, config=_OFFLINE_CFG
+        )
         with pytest.raises(ValueError):
             api.resume(f"sess_missing_{uuid.uuid4().hex[:8]}")

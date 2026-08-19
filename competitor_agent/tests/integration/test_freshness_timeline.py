@@ -3,15 +3,22 @@ from __future__ import annotations
 
 import pytest
 
+from competitor_agent.config.loader import AppConfig, CollectorConfig
 from competitor_agent.facade.api import CompetitorAnalysisAPI
 from competitor_agent.memory import FourLayerMemory, TimelineMemory
 from tests.conftest import FakeExtractor
 
 pytestmark = pytest.mark.integration
 
+# 离线环境 URL 守卫（DNS 解析）会拦截 before 采集器运行：关闭守卫让采集器真被命中
+_OFFLINE_CFG = AppConfig(collector=CollectorConfig(block_private_urls=False))
+
 
 class ShiftPricingExtractor(FakeExtractor):
-    """价格文本随调用次数漂移，模拟"竞品改价"跨时间变化。"""
+    """价格文本随调用次数漂移，模拟"竞品改价"跨时间变化。
+
+    doc 49：web_extract 传 InfoGap(field="web")，按 URL 判定定价页而非 gap.field。
+    """
 
     def __init__(self, pricing_texts: list[str]) -> None:
         super().__init__()
@@ -20,7 +27,7 @@ class ShiftPricingExtractor(FakeExtractor):
 
     def fetch(self, gap, context):
         obs = super().fetch(gap, context)
-        if str(getattr(gap, "field", "")) == "pricing":
+        if "pricing" in str(context.kwargs.get("url")):
             obs.raw_text = self._texts[self._i % len(self._texts)]
             self._i += 1
         return obs
@@ -40,6 +47,7 @@ class TestFreshnessAndTimelineIntegration:
             memory=mem,
             timeline=tl,
             max_iterations=10,
+            config=_OFFLINE_CFG,
         )
 
         r1 = api.analyze("分析 Cursor", mode="single", session_id="sess_tl_1")
@@ -73,6 +81,7 @@ class TestFreshnessAndTimelineIntegration:
             extractor=FakeExtractor(),
             timeline=tl,
             max_iterations=10,
+            config=_OFFLINE_CFG,
         )
         report = api.analyze("分析 Cursor", mode="single", session_id="sess_tl_first")
         assert "## 竞品时间线" not in report.markdown_report
@@ -92,6 +101,7 @@ class TestFreshnessAndTimelineIntegration:
             memory=mem,
             timeline=tl,
             max_iterations=10,
+            config=_OFFLINE_CFG,
         )
         api.analyze("分析 Cursor", mode="team", session_id="sess_tl_t1")
         api.analyze("分析 Cursor", mode="team", session_id="sess_tl_t2")

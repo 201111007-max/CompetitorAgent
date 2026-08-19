@@ -65,21 +65,31 @@ def _snap_details(details: Any) -> dict[str, Any]:
 
 
 def _pricing_price_label(snapshot: dict[str, Any]) -> str:
-    """定价快照 → 档位价格摘要（供价格变化 diff 的可读摘要，设计文档 27 §4）。"""
-    pricing = (snapshot.get("details") or {}).get("pricing")
-    if not isinstance(pricing, dict):
-        return ""
+    """定价快照 → 档位价格摘要（供价格变化 diff 的可读摘要，设计文档 27 §4）。
+
+    49 命名空间：details["plans"]（原始档位，name/price/period 键）；兼容旧
+    details["pricing"]["plans"]。均经 parse_plan 归一化为月付价格。
+    """
+    details = snapshot.get("details") or {}
+    pricing = details.get("pricing") if isinstance(details, dict) else None
+    if isinstance(pricing, dict):
+        plans = pricing.get("plans") or []
+    else:
+        plans = details.get("plans") or []
+    from competitor_agent.domain_types.pricing import parse_plan
+
     parts: list[str] = []
-    for plan in pricing.get("plans") or []:
+    for plan in plans:
         if not isinstance(plan, dict):
             continue
-        tier = str(plan.get("tier") or plan.get("name") or "plan")
-        if plan.get("requires_quote"):
-            parts.append(f"{tier}: 需询价")
+        parsed = parse_plan(plan)
+        if parsed is None:
             continue
-        monthly = plan.get("monthly_price_usd")
-        if monthly is not None:
-            parts.append(f"{tier}: ${float(monthly):g}/mo")
+        if parsed.requires_quote:
+            parts.append(f"{parsed.tier}: 需询价")
+            continue
+        if parsed.monthly_price_usd is not None:
+            parts.append(f"{parsed.tier}: ${parsed.monthly_price_usd:g}/mo")
     return "；".join(parts[:4])
 
 

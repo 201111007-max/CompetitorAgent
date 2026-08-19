@@ -7,10 +7,9 @@ from __future__ import annotations
 
 import pytest
 
-from competitor_agent.domain_types.conflict import CrossDimensionConflict, ConflictRegistry
+from competitor_agent.domain_types.conflict import CrossDimensionConflict, ConflictRegistry, detect_conflicts_across
 from competitor_agent.domain_types.enums import ResultStatus
 from competitor_agent.domain_types.report import DimensionResult
-from competitor_agent.team.validator_agent import FactValidator
 
 _HASH = "abc123"
 
@@ -96,24 +95,50 @@ class TestConflictRegistry:
         assert "monthly_price_usd" in summary
 
 
-class TestFactValidatorBridge:
-    def test_detect_cross_dimension_conflicts_via_validator(self):
-        validator = FactValidator()
-        conflicts = validator.detect_cross_dimension_conflicts(
+class TestDetectConflictsAcross:
+    """设计文档 49 ReAct 路径：以 (claim_key × 证据 URL) 为同源键检测跨维度冲突。"""
+
+    @staticmethod
+    def _payload(dimension: str, details: dict, urls: list[str] | None = None) -> dict:
+        return {
+            "dimension": dimension,
+            "details": details,
+            "evidence_urls": urls if urls is not None else ["https://www.cursor.com"],
+        }
+
+    def test_same_url_same_key_diff_values_detected(self):
+        conflicts = detect_conflicts_across(
             [
-                _result("pricing", {"stars": 1000}),
-                _result("ecosystem", {"stars": 9999}),
+                self._payload("pricing", {"stars": 1000}),
+                self._payload("ecosystem", {"stars": 9999}),
             ]
         )
         assert len(conflicts) == 1
         assert conflicts[0].claim_key == "stars"
 
-    def test_no_evidence_hashes_no_conflict(self):
-        validator = FactValidator()
-        conflicts = validator.detect_cross_dimension_conflicts(
+    def test_different_urls_no_conflict(self):
+        conflicts = detect_conflicts_across(
             [
-                _result("pricing", {"stars": 1000}, hashes=[]),
-                _result("ecosystem", {"stars": 9999}, hashes=[]),
+                self._payload("pricing", {"stars": 1000}, urls=["https://a.com"]),
+                self._payload("ecosystem", {"stars": 9999}, urls=["https://b.com"]),
+            ]
+        )
+        assert conflicts == []
+
+    def test_no_evidence_urls_no_conflict(self):
+        conflicts = detect_conflicts_across(
+            [
+                self._payload("pricing", {"stars": 1000}, urls=[]),
+                self._payload("ecosystem", {"stars": 9999}, urls=[]),
+            ]
+        )
+        assert conflicts == []
+
+    def test_same_value_no_conflict(self):
+        conflicts = detect_conflicts_across(
+            [
+                self._payload("pricing", {"stars": 1000}),
+                self._payload("ecosystem", {"stars": 1000}),
             ]
         )
         assert conflicts == []

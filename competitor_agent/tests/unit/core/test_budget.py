@@ -126,48 +126,7 @@ class TestBudgetControllerCondition4:
         assert not d.should_stop
 
 
-class TestBudgetControllerVerifierHook:
-    def test_verifier_can_force_stop(self):
-        class ForceStopVerifier:
-            def verify(self, gaps, budget_state):
-                from competitor_agent.interfaces.context import StopDecision
-
-                return StopDecision(should_stop=True, reason="hook")
-
-        ctrl = BudgetController(verifier=ForceStopVerifier())
-        d = ctrl.should_stop([_gap(status=GapStatus.OPEN)])
-        assert d.should_stop
-        assert d.reason == "hook"
-
-    def test_verifier_can_force_continue(self):
-        class BlockStopVerifier:
-            def verify(self, gaps, budget_state):
-                from competitor_agent.interfaces.context import StopDecision
-
-                return StopDecision(should_stop=False)
-
-        ctrl = BudgetController(verifier=BlockStopVerifier())
-        gaps = [_gap(status=GapStatus.CONFIRMED)]
-        d = ctrl.should_stop(gaps)
-        assert not d.should_stop
-
-    def test_budget_state_passed_to_verifier(self):
-        captured = {}
-
-        class CaptureVerifier:
-            def verify(self, gaps, budget_state):
-                captured["state"] = budget_state
-                from competitor_agent.interfaces.context import StopDecision
-
-                return StopDecision(should_stop=False)
-
-        ctrl = BudgetController(verifier=CaptureVerifier())
-        ctrl.record_iteration(cost=0.3)
-        ctrl.should_stop([_gap(status=GapStatus.OPEN)])
-        assert captured["state"].iterations_used == 1
-        assert captured["state"].total_cost == 0.3
-        assert captured["state"].max_iterations == 10
-
+class TestBudgetControllerConcurrency:
     def test_record_iteration_thread_safe(self):
         """并行缺口共享 BudgetController：并发 record_iteration 计数/成本不丢失。"""
         ctrl = BudgetController(max_iterations=100, cost_limit=100.0)

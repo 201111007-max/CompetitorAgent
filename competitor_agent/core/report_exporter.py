@@ -41,13 +41,18 @@ def _dimension_to_dict(result: object) -> dict[str, Any]:
 
 
 def _pricing_profile(report: CompetitorReport) -> dict[str, Any] | None:
-    """从 pricing 维度结果的 details["pricing"] 提取结构化定价画像。"""
+    """从 pricing 维度结果的 details（49 命名空间 plans）提取结构化定价画像。"""
     for r in report.dimension_results:
         if r.dimension != "pricing":
             continue
         details = getattr(r, "details", None)
-        if isinstance(details, dict) and isinstance(details.get("pricing"), dict):
-            return details["pricing"]
+        if not isinstance(details, dict):
+            continue
+        from competitor_agent.domain_types.pricing import profile_from_details
+
+        profile = profile_from_details(details, getattr(r, "evidence", None) or [])
+        if profile.has_pricing_data:
+            return profile.to_dict()
     return None
 
 
