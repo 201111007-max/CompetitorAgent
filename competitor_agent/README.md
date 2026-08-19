@@ -47,7 +47,7 @@ python -m competitor_agent.mcp_server.server --transport sse --port 8001
 ```python
 from competitor_agent import CompetitorAnalysisAPI
 
-# 设计文档 47/49：主路径仅 LLM（需配置 LLM API Key），Lead ReAct 编排
+# 主路径仅 LLM（需配置 LLM API Key），Lead ReAct 编排
 api = CompetitorAnalysisAPI(llm=LLMClient(...), use_llm=True)
 report = api.analyze("Cursor")
 print(report.markdown_report)
@@ -63,7 +63,7 @@ history = api.get_history("cursor")
 api.cancel("sess_abc123")
 report = api.resume("sess_abc123")
 
-# 新鲜度与时间线（设计文档 26）
+# 新鲜度与时间线
 stale = api.refresh_stale()          # 按维度 TTL 重爬过期竞品（可 ttl_override / recompute_all）
 events = api.timeline.events("cursor")  # 跨分析 diff 产生的 price_change/version_release 等事件
 ```
@@ -90,21 +90,18 @@ competitor_agent/
 └── tests/                      # unit / integration / evaluation
 ```
 
-## 设计文档
+## 文档
 
-- 架构总纲：`../doc/ai_coding_agent_competitor_analysis_architecture.md`
-- 分步实现计划：`../doc/plan/implementation_plan.md`
-- 各模块契约/规范：`docs/`（interfaces/domain_models/prompts/data_sources/configuration/evaluation_guide/testing/usage/api）
-- 逐期设计文档：`../doc/plan/issue_designs/`（含 26_freshness_timeline_design.md：新鲜度 TTL / 过期提示 / refresh_stale / 时间线事件；27_pricing_modeling_design.md：结构化定价画像 / 成本估算；28_structured_export_design.md：结构化导出 / 定时调度轮 / 异动告警；47_llm_only_pipeline_design.md：主路径仅 LLM 解析，无规则降级；48_skill_guided_pipeline_design.md：写死代码知识型规则 → skill 化，主体流程 LLM 驱动 + 保证型逻辑代码兜底；49_domain_agent_orchestration_design.md：多 Agent **LLM 主导编排**——deer-flow 式 Lead Agent 动态委派 + 独立 LLM 子 Agent 后台并发 + 结果回填，独有流程/校验脚本 skill/工具化，废弃固定流水线）
+- 契约文档：`docs/`（interfaces / domain_models / prompts / data_sources / configuration / evaluation_guide / testing / usage / api）
 
-## skill 机制（设计文档 48）
+## skill 机制
 
 `skills/*.md`（YAML frontmatter：name/description + 正文规范）承载"知识型"写死内容：
 规划规范（planning）、6 个维度抽取规范、真值/事实边界（fact_verification）、置信度披露（confidence_disclosure），
 经 `SkillLoader` 以独立 `<skill name="...">` system 消息注入分析/规划 prompt；保证型逻辑（安全/路由/校验/阈值/聚合）仍由代码兜底。
 目录缺省 `skills/`，可用环境变量 `SKILLS_DIR` 覆盖（测试/评测注入确定性内容）；文件缺失静默跳过。
 
-## 多 Agent LLM 主导编排（设计文档 49，deer-flow 式）
+## 多 Agent LLM 主导编排
 
 主路径是一条 **Lead Agent 编排的 LLM 主导多 Agent 流程**（`analyze()` 即 Lead ReAct 循环，无代码阶段序列）：
 
@@ -134,10 +131,10 @@ analyze(task)
 - [x] M2 记忆与自进化
 - [x] M3 多 Agent 协作 + 评测体系
 - [x] M4 工程化（Web/MCP/CI/断点）
-- [x] M5 数据新鲜度 + 竞品时间线（设计文档 26：维度 TTL / 过期提示 / `refresh_stale` 过期重爬 / 跨分析 diff → 时间线事件 / `timeline` 记忆 + CLI/Web 查询）
-- [x] M6 结构化定价画像（设计文档 27：`PricingProfile` 档位 + 按量计费 + 模型档位 / light·medium·heavy 成本估算 / 企业询价标注 / 报告渲染与归档 `pricing_profiles` / 时间线价格变化 diff）
-- [x] M7 结构化导出 + 定时跑 + 异动告警（设计文档 28：`report_exporter` 竞品/对比矩阵 JSON（schema v1.0.0）/ `api.run_scheduled` 按 TTL 定时重爬 / `alerting` 异动告警（Console/FileAlertSink）/ CLI `schedule`）
-- [x] M8 评测盲区覆盖（设计文档 29：ecosystem/sentiment/roadmap 维度入 benchmark，harness 0.4.0）
-- [x] M9 消融/对比实验（设计文档 30：`enable_rag`/`enable_memory` 开关 + `AblationRunner` 变体对比）
-- [x] M10 失败类型统计（设计文档 31：`FailureType` 五类归因聚合入 benchmark 报告）
-- [x] M11 多 Agent LLM 主导编排（设计文档 49 重写：Lead ReAct `make_plan`/`delegate` 动态委派 + `SubagentRegistry` 预注册 6 维度独立 LLM 子 Agent 后台并发回填 + `react_report.assemble` 组 REPORT_SCHEMA；删除固定流水线/规则管线（team/analyzers/strategic_loop 等）；benchmark ReAct-scripted + HARNESS 0.7.0）
+- [x] M5 数据新鲜度 + 竞品时间线（维度 TTL / 过期提示 / `refresh_stale` 过期重爬 / 跨分析 diff → 时间线事件 / `timeline` 记忆 + CLI/Web 查询）
+- [x] M6 结构化定价画像（`PricingProfile` 档位 + 按量计费 + 模型档位 / light·medium·heavy 成本估算 / 企业询价标注 / 报告渲染与归档 `pricing_profiles` / 时间线价格变化 diff）
+- [x] M7 结构化导出 + 定时跑 + 异动告警（`report_exporter` 竞品/对比矩阵 JSON（schema v1.0.0）/ `api.run_scheduled` 按 TTL 定时重爬 / `alerting` 异动告警（Console/FileAlertSink）/ CLI `schedule`）
+- [x] M8 评测盲区覆盖（ecosystem/sentiment/roadmap 维度入 benchmark，harness 0.4.0）
+- [x] M9 消融/对比实验（`enable_rag`/`enable_memory` 开关 + `AblationRunner` 变体对比）
+- [x] M10 失败类型统计（`FailureType` 五类归因聚合入 benchmark 报告）
+- [x] M11 多 Agent LLM 主导编排（Lead ReAct `make_plan`/`delegate` 动态委派 + `SubagentRegistry` 预注册 6 维度独立 LLM 子 Agent 后台并发回填 + `react_report.assemble` 组 REPORT_SCHEMA；删除固定流水线/规则管线（team/analyzers/strategic_loop 等）；benchmark ReAct-scripted + HARNESS 0.7.0）
