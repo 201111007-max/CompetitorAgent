@@ -895,3 +895,15 @@ dev:
   `extract_profile` 对畸形 plans 不健壮。全量 **730 passed / 6 skipped / 0 failed**。
 - **M6 文档收口**：README 目录结构/编排叙事/里程碑 M8-M11、CHANGELOG M11（Added + Removed）、
   docs/*.md 去流水线叙事、§21 登记收口。
+
+## 22. 第八轮评审待办（Web 前端 SSE 与展示优化，设计文档 50）
+
+> 状态背景：2026-08-19 分析 Web 前端发现 **SSE 事件桥真实 bug**——`_event_generator` 的 `_on_event`
+> 回调在工作线程调 `asyncio.get_event_loop()`，Python 3.11 抛 `RuntimeError` 被静默吞掉，
+> **分析期间所有中途进度事件丢失**（已实证）；另有 50ms 忙轮询、报告 markdown 纯文本直出、
+> 内嵌 HTML 不可维护等问题。设计文档见
+> `doc/plan/issue_designs/50_web_frontend_sse_design.md`（2026-08-19，待实施）。
+
+| 项 | 内容 | 优先级 | 状态 |
+|---|---|---|---|
+| **50 Web 前端 SSE 修复与展示优化** | P0：sink 闭包捕获 `get_running_loop()` 修事件丢失 + 队列 await 化（去 50ms 忙轮询）+ 中途事件回归测试；P1：markdown 渲染（vendored marked+DOMPurify，无 CDN）+ 进度条/阶段徽章/维度 chips；P2：`static/` 静态资源抽离 + 双栏/暗色/响应式 + package-data | 中 | 📄 设计完成（2026-08-19，待实施） |
