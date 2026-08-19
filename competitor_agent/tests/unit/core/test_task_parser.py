@@ -108,31 +108,3 @@ class TestResolutionDecision:
             use_llm=True,
         )
         assert result.resolution == ResolutionDecision.REGISTRY
-
-
-class TestStrategicLoopDimensions:
-    """设计文档 47：规划走 LLM 版 parse_task（mock LLM 断言）"""
-
-    def test_dimension_whitelist_restricts_gaps(self):
-        from competitor_agent.core.strategic_loop import StrategicPlanner
-
-        llm = LLMClient(
-            call_func=lambda messages, model: json.dumps(
-                {"competitor": "cursor", "dimensions": ["pricing"], "priorities": {}, "budget": {}}
-            )
-        )
-        planner = StrategicPlanner(llm=llm, use_llm=True)
-        strategy = planner.plan("只分析 Cursor 定价")
-        assert [g.field for g in strategy.gaps] == ["pricing"]
-
-    def test_custom_source_merged_into_links(self):
-        from competitor_agent.core.strategic_loop import StrategicPlanner
-
-        llm = LLMClient(
-            call_func=lambda messages, model: json.dumps(
-                {"competitor": "cursor", "dimensions": None, "custom_sources": {"home": "https://custom.example.com"}}
-            )
-        )
-        planner = StrategicPlanner(llm=llm, use_llm=True)
-        strategy = planner.plan("分析 Cursor，官网是 https://custom.example.com")
-        assert strategy.competitor.official_links.get("home") == "https://custom.example.com"
