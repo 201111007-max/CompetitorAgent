@@ -10,7 +10,6 @@ import pytest
 from competitor_agent.config.loader import LLMConfig, load_config
 from competitor_agent.llm.client import LLMClient
 
-
 # ── ③ 默认值统一 ──────────────────────────────────────────────
 
 

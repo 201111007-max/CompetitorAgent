@@ -71,7 +71,7 @@ def assemble(
             if conflicts:
                 lines = [f"- {c.summary}" for c in conflicts]
                 conflict_note = "## 跨维度冲突备注\n\n" + "\n".join(lines) + "\n"
-        except Exception:  # noqa: BLE001 — 冲突检测失败不影响主报告
+        except Exception:
             logger.warning("跨维度冲突检测失败，跳过", exc_info=True)
 
     # plan 声明但未产出的维度 → gaps_pending（供 resume/预算/报告标注）

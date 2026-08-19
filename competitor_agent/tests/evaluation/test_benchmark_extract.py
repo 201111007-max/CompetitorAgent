@@ -6,9 +6,9 @@
 """
 import json
 
-from competitor_agent.domain_types.report import CompetitorReport, DimensionResult
 from competitor_agent.domain_types.competitor import Competitor
 from competitor_agent.domain_types.observation import SourceEvidence
+from competitor_agent.domain_types.report import CompetitorReport, DimensionResult
 from competitor_agent.evaluation.benchmark import (
     BenchmarkExtractor,
     BenchmarkMockLLM,
@@ -208,7 +208,7 @@ class TestExtractStrategy:
 
     def test_no_evidence_incomplete(self):
         report = CompetitorReport(competitor=Competitor(name="x"), dimension_results=[])
-        urls, cost, complete = extract_strategy(report, best_url="https://nope.com")
+        urls, _cost, complete = extract_strategy(report, best_url="https://nope.com")
         assert urls == []
         assert complete is False
 

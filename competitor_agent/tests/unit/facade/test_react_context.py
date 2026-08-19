@@ -4,15 +4,14 @@
 - 路径统一：analyze_react_report 产物可入 CompetitorReport（结构化 JSON → DimensionResult，
   非 JSON → 单 react 维度）
 """
-import pytest
 
 from competitor_agent.agent.react_agent import ReactAgent
 from competitor_agent.agent.react_loop import ReactLoop
 from competitor_agent.agent.tool_dispatcher import ToolDispatcher
 from competitor_agent.core.budget import IterationBudget
 from competitor_agent.core.checkpoint import clear_cancel, set_cancel
-from competitor_agent.domain_types.enums import ResultStatus
 from competitor_agent.domain_types import InfoGap, Observation, SourceEvidence
+from competitor_agent.domain_types.enums import ResultStatus
 from competitor_agent.facade.api import CompetitorAnalysisAPI
 from competitor_agent.interfaces.context import SourceContext
 from competitor_agent.llm.client import LLMClient

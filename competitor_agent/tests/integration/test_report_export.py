@@ -12,14 +12,13 @@ import json
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
+
 from competitor_agent import web_app
 from competitor_agent.config.loader import AppConfig
 from competitor_agent.core import report_archiver as ra
-from competitor_agent.evaluation.benchmark import BenchmarkMockLLM
 from competitor_agent.facade.api import CompetitorAnalysisAPI
-from competitor_agent.llm.client import LLMClient
 from competitor_agent.memory import FourLayerMemory
-from fastapi.testclient import TestClient
 
 
 class _ReportAPI:

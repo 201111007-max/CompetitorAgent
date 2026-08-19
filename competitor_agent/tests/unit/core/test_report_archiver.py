@@ -6,6 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+
 from competitor_agent.config.loader import AppConfig
 from competitor_agent.core import report_archiver as ra
 from competitor_agent.domain_types.competitor import Competitor

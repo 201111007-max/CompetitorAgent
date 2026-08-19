@@ -10,14 +10,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 from competitor_agent.config.loader import AppConfig, CollectorConfig
 from competitor_agent.core.alerting import Alert
 from competitor_agent.domain_types.observation import Observation, SourceEvidence
 from competitor_agent.facade.api import CompetitorAnalysisAPI
 from competitor_agent.interfaces.context import SourceContext
-from competitor_agent.memory.timeline_memory import TimelineMemory
 from competitor_agent.memory import FourLayerMemory
+from competitor_agent.memory.timeline_memory import TimelineMemory
 
 
 class _CollectSink:

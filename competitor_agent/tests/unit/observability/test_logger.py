@@ -9,7 +9,6 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from competitor_agent.observability import logger as L
 
 
@@ -75,6 +74,7 @@ class TestDetachedFlush:
             text=True,
             env=env,
             timeout=60,
+            check=True,
         )
         assert result.returncode == 0, result.stderr
         path = log_dir / "sess_detached.log"

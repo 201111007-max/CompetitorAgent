@@ -1,8 +1,8 @@
 """agent 层单测：response_parser / tool_dispatcher / react_agent / react_loop"""
 import time
+from typing import ClassVar
 
 import pytest
-
 from competitor_agent.agent import (
     ReactAgent,
     ReactLoop,
@@ -170,7 +170,7 @@ class TestReactLoop:
 class TestToolSchema:
     """设计文档 38：params_schema 校验 → ToolArgumentError 可读回灌"""
 
-    SCHEMA = {
+    SCHEMA: ClassVar[dict[str, object]] = {
         "type": "object",
         "required": ["url"],
         "properties": {

@@ -187,9 +187,9 @@ def detect_conflicts_across(
 
 
 __all__ = [
-    "CrossDimensionConflict",
-    "ConflictRegistry",
     "_SHARED_CLAIM_KEYS",
+    "ConflictRegistry",
+    "CrossDimensionConflict",
     "collect_claims",
     "detect_conflicts_across",
 ]

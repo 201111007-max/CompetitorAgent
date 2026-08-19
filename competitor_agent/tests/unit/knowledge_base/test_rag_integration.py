@@ -2,6 +2,7 @@
 from competitor_agent.domain_types import Observation, SourceEvidence
 from competitor_agent.facade.api import CompetitorAnalysisAPI
 from competitor_agent.interfaces.context import SourceContext
+from competitor_agent.knowledge_base.competitor_store import CompetitorStore
 
 
 class FakeExtractor:
@@ -18,21 +19,32 @@ class FakeExtractor:
 
 
 class TestApiRagWiring:
+    @staticmethod
+    def _fresh_store(tmp_path) -> CompetitorStore:
+        """隔离的知识库（临时目录）：避免测试依赖默认持久化存储的跨运行状态。"""
+        return CompetitorStore(data_dir=tmp_path)
+
     def test_api_instantiates_knowledge_base(self, mock_llm):
         api = CompetitorAnalysisAPI(extractor=None, llm=mock_llm, use_llm=True, max_iterations=2)
         assert api._store is not None
         assert api._ingester is not None
         assert api._retriever is not None
 
-    def test_analysis_ingests_observations(self, mock_llm):
-        api = CompetitorAnalysisAPI(extractor=FakeExtractor(), llm=mock_llm, use_llm=True, max_iterations=4)
+    def test_analysis_ingests_observations(self, mock_llm, tmp_path):
+        api = CompetitorAnalysisAPI(
+            extractor=FakeExtractor(), llm=mock_llm, use_llm=True, max_iterations=4,
+            rag_store=self._fresh_store(tmp_path),
+        )
         api.analyze("分析 Cursor")
         chunks = api._store.all_chunks()
         assert chunks, "分析后知识库应摄入观测片段"
         assert any(c.competitor == "cursor" for c in chunks)
 
-    def test_retriever_hits_ingested_chunks(self, mock_llm):
-        api = CompetitorAnalysisAPI(extractor=FakeExtractor(), llm=mock_llm, use_llm=True, max_iterations=4)
+    def test_retriever_hits_ingested_chunks(self, mock_llm, tmp_path):
+        api = CompetitorAnalysisAPI(
+            extractor=FakeExtractor(), llm=mock_llm, use_llm=True, max_iterations=4,
+            rag_store=self._fresh_store(tmp_path),
+        )
         api.analyze("分析 Cursor")
         hits = api._retriever.retrieve(query="pricing", competitor="cursor", dimension="pricing", top_k=3)
         assert hits, "检索应命中已摄入片段"

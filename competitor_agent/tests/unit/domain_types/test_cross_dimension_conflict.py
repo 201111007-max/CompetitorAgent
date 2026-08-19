@@ -5,9 +5,10 @@
 """
 from __future__ import annotations
 
-import pytest
-
-from competitor_agent.domain_types.conflict import CrossDimensionConflict, ConflictRegistry, detect_conflicts_across
+from competitor_agent.domain_types.conflict import (
+    ConflictRegistry,
+    detect_conflicts_across,
+)
 from competitor_agent.domain_types.enums import ResultStatus
 from competitor_agent.domain_types.report import DimensionResult
 

@@ -17,16 +17,19 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from importlib import resources
 from typing import Any
 
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 from competitor_agent import CompetitorAnalysisAPI
 from competitor_agent.config.loader import AppConfig, load_config
@@ -56,6 +59,14 @@ _sessions: dict[str, dict[str, Any]] = {}  # session_id → {task, cancel_flag, 
 _memory: FourLayerMemory | None = None
 _config: AppConfig = load_config()
 
+# 设计文档 50 P0/P1：事件队列挂起等待的超时（秒）——取消检查挂在该超时分支上，
+# 取消响应延迟 ≤ 2×此值（原 50ms 忙轮询的折衷，避免队列空转 CPU）。
+_EVENT_WAIT_TIMEOUT = 0.2
+
+# 设计文档 50 P2：前端静态资源（index.html/app.js/style.css/vendor）抽离自包内
+# `static/`，经 package-data 纳入 wheel；`importlib.resources` 定位保证打包/源码一致。
+_STATIC_DIR = resources.files("competitor_agent").joinpath("static")
+
 
 def _get_memory() -> FourLayerMemory:
     global _memory
@@ -84,15 +95,18 @@ async def _event_generator(
 ) -> AsyncIterator[str]:
     """SSE 事件生成器：逐条 yield ProgressEvent"""
     events_queue: asyncio.Queue[ProgressEvent] = asyncio.Queue()
+    # 设计文档 50 P0：在主线程（loop 运行中）捕获 loop 供工作线程 sink 跨线程投递。
+    # 修复前在此调 asyncio.get_event_loop()——Python 3.11 起非主线程无 current loop 抛
+    # RuntimeError 被 except 吞掉，Lead 分析期间所有中途进度事件被静默丢弃（已实证）。
+    loop = asyncio.get_running_loop()
 
     def _on_event(event: ProgressEvent) -> None:
-        """将事件推入 asyncio 队列"""
+        """将事件推入 asyncio 队列（线程安全，供 run_in_executor 工作线程回调）"""
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                loop.call_soon_threadsafe(lambda: events_queue.put_nowait(event))
+            loop.call_soon_threadsafe(events_queue.put_nowait, event)
         except RuntimeError:
-            pass
+            # generator 已关闭后的迟到事件（会话结束边界）：记录 debug 而非静默丢弃
+            logger.debug("会话 %s 已关闭，迟到事件丢弃: %s", session_id, event.event)
 
     llm_client = LLMClient(
         model=_config.llm.model,
@@ -116,7 +130,7 @@ async def _event_generator(
         loop = asyncio.get_running_loop()
         try:
             parsed = parse_task(task, llm=llm_client, use_llm=True)
-        except Exception as exc:  # noqa: BLE001 - LLM 不可用 → 可读错误，Web 普查不崩溃
+        except Exception as exc:  # LLM 不可用 → 可读错误，Web 普查不崩溃
             raise RuntimeError(f"需要配置 LLM API Key 才能分析（LLM 不可用: {exc}）") from exc
         if parsed.resolution == ResolutionDecision.DISCOVERY:
             return await loop.run_in_executor(None, api_with_sink.discover, task)
@@ -135,18 +149,9 @@ async def _event_generator(
             payload={"session_id": session_id},
         ).to_sse()
 
-        # 持续消费事件队列直到分析完成
-        while True:
-            done = analysis_task.done()
-            # 消费队列中所有已有事件
-            while not events_queue.empty():
-                event = events_queue.get_nowait()
-                yield event.to_sse()
-
-            if done:
-                break
-
-            # 检查取消标志
+        # 挂起等待事件而非 50ms 忙轮询（设计文档 50 §2.2）：队列空时 await 挂起，
+        # 取消检查挂在 wait_for 超时分支，保持取消响应 ≤200ms（原 50ms 的折衷）。
+        while not analysis_task.done():
             if _sessions.get(session_id, {}).get("cancelled", False):
                 logger.info("会话 %s 被取消", session_id)
                 # 关键修复：内部取消标志与 web sid 打通，协作式取消真正中断运行中的分析
@@ -160,7 +165,17 @@ async def _event_generator(
                 analysis_task.cancel()
                 return
 
-            await asyncio.sleep(0.05)
+            try:
+                event = await asyncio.wait_for(
+                    events_queue.get(), timeout=_EVENT_WAIT_TIMEOUT
+                )
+            except asyncio.TimeoutError:
+                continue
+            yield event.to_sse()
+
+        # 分析完成：排空残余事件，防"完成瞬间队列中事件丢失"（设计文档 50 §3.3 ②）
+        while not events_queue.empty():
+            yield events_queue.get_nowait().to_sse()
 
         # 分析完成，获取报告
         report = analysis_task.result()
@@ -308,217 +323,12 @@ def require_auth(
 
 @app.get("/", response_class=HTMLResponse)
 async def index() -> str:
-    """简易前端页面"""
-    return """<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<title>竞品分析 Agent</title>
-<style>
-body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
-#log { background: #f5f5f5; padding: 12px; border-radius: 6px; min-height: 200px; font-size: 14px; line-height: 1.6; }
-.event { margin: 4px 0; padding: 4px 8px; border-left: 3px solid #ccc; }
-.event.phase_start { border-color: #2196F3; }
-.event.phase_complete { border-color: #4CAF50; }
-.event.report { border-color: #FF9800; font-weight: bold; }
-.event.error { border-color: #f44336; color: #f44336; }
-.event.cancelled { border-color: #9E9E9E; color: #9E9E9E; }
-input, button { padding: 8px 16px; font-size: 16px; }
-input { width: 400px; }
-button { cursor: pointer; background: #2196F3; color: white; border: none; border-radius: 4px; }
-button:hover { background: #1976D2; }
-button:disabled { background: #ccc; }
-#cancel-btn { background: #f44336; }
-#cancel-btn:hover { background: #d32f2f; }
-#report { border: 1px solid #ddd; border-radius: 6px; padding: 12px; margin-top: 12px; white-space: pre-wrap; font-size: 13px; display: none; }
-#report.visible { display: block; }
-#candidates { margin-top: 12px; font-size: 13px; color: #1565C0; display: none; }
-#candidates.visible { display: block; }
-.matrix-box { margin-top: 12px; }
-.matrix-box table { border-collapse: collapse; width: 100%; font-size: 13px; }
-.matrix-box th, .matrix-box td { border: 1px solid #ddd; padding: 6px 8px; text-align: left; }
-.matrix-box th { background: #f0f4f8; }
-.report-toolbar { margin-top: 12px; }
-.report-toolbar button { margin-right: 8px; }
-#session-log { background: #111; color: #0f0; padding: 12px; border-radius: 6px; font-size: 12px; line-height: 1.5; height: 160px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; }
-details { margin-top: 12px; }
-</style>
-</head>
-<body>
-<h1>竞品分析 Agent</h1>
-<div>
-    <input id="task" type="text" placeholder="输入竞品名称，如 Cursor（多竞品用逗号分隔，普查任务如“所有 AI coding agent”将自动发现）" value="Cursor" />
-    <button id="start-btn" onclick="startAnalysis()">开始分析</button>
-    <button id="cancel-btn" onclick="cancelAnalysis()" disabled>取消</button>
-</div>
-<hr/>
-<div id="log">等待输入...</div>
-<div id="candidates"><strong>发现候选:</strong> <span id="candidate-list"></span></div>
-<div id="report-toolbar" class="report-toolbar" style="display:none;">
-    <button onclick="copyReport()">复制 Markdown</button>
-    <button id="download-btn" onclick="downloadReport()">下载 .md</button>
-</div>
-<div id="matrix" class="matrix-box" style="display:none;"></div>
-<div id="report"></div>
-<details>
-    <summary>会话日志</summary>
-    <div id="session-log">（分析开始后实时显示）</div>
-</details>
-<script>
-let eventSource = null;
-let logSource = null;
-let sessionId = null;
-let discoveredCandidates = [];
-let lastReport = null;
+    """前端页面：从包内 static/index.html 读取（设计文档 50 §2.4/§3.2）。"""
+    return _STATIC_DIR.joinpath("index.html").read_text(encoding="utf-8")
 
-function addLog(event, message) {
-    const log = document.getElementById('log');
-    const div = document.createElement('div');
-    div.className = 'event ' + (event || '');
-    div.textContent = '[' + new Date().toLocaleTimeString() + '] ' + message;
-    log.appendChild(div);
-    log.scrollTop = log.scrollHeight;
-}
 
-function openLogStream() {
-    if (!sessionId) return;
-    document.getElementById('session-log').textContent = '';
-    logSource = new EventSource('/api/logs/stream/' + sessionId);
-    logSource.onmessage = function(e) {
-        const data = JSON.parse(e.data);
-        if (data.event === 'log_end') { logSource.close(); return; }
-        const line = '[' + (data.ts || '') + '] ' + (data.event || '') + ' ' + (data.message || JSON.stringify(data));
-        const box = document.getElementById('session-log');
-        box.textContent += line + '\n';
-        box.scrollTop = box.scrollHeight;
-    };
-    logSource.onerror = function() { if (logSource) logSource.close(); };
-}
-
-function closeLogStream() { if (logSource) { logSource.close(); logSource = null; } }
-
-function startAnalysis() {
-    const task = document.getElementById('task').value.trim();
-    if (!task) return;
-    sessionId = 'sess_' + Date.now();
-    document.getElementById('log').innerHTML = '';
-    clearCandidates();
-    clearReport();
-    document.getElementById('start-btn').disabled = true;
-    document.getElementById('cancel-btn').disabled = false;
-    openLogStream();
-
-    eventSource = new EventSource('/api/analyze?task=' + encodeURIComponent(task) + '&session_id=' + sessionId);
-    eventSource.onmessage = function(e) {
-        const data = JSON.parse(e.data);
-        addLog(data.event, data.message || (data.phase || '') + ' [' + (data.progress * 100).toFixed(0) + '%]');
-        if (data.event === 'discovery.candidate' && data.payload && data.payload.candidate) {
-            addCandidate(data.payload.candidate);
-        }
-        if (data.event === 'report') {
-            renderReport(data.payload);
-        }
-        if (data.event === 'report' || data.event === 'error' || data.event === 'cancelled') {
-            eventSource.close();
-            closeLogStream();
-            document.getElementById('start-btn').disabled = false;
-            document.getElementById('cancel-btn').disabled = true;
-            if (data.event !== 'report') clearReport();
-        }
-    };
-    eventSource.onerror = function() {
-        addLog('error', '连接断开');
-        eventSource.close();
-        closeLogStream();
-        document.getElementById('start-btn').disabled = false;
-        document.getElementById('cancel-btn').disabled = true;
-        clearReport();
-    };
-}
-
-function addCandidate(name) {
-    if (discoveredCandidates.indexOf(name) === -1) {
-        discoveredCandidates.push(name);
-        document.getElementById('candidates').classList.add('visible');
-        document.getElementById('candidate-list').textContent = discoveredCandidates.join(', ');
-    }
-}
-
-function clearCandidates() {
-    discoveredCandidates = [];
-    document.getElementById('candidates').classList.remove('visible');
-    document.getElementById('candidate-list').textContent = '';
-}
-
-function escapeHtml(s) {
-    const div = document.createElement('div');
-    div.textContent = s;
-    return div.innerHTML;
-}
-
-function renderMatrix(md) {
-    const matrix = document.getElementById('matrix');
-    if (!md || !md.includes('品类格局矩阵')) {
-        matrix.innerHTML = '';
-        matrix.style.display = 'none';
-        return;
-    }
-    const rows = md.split('\n')
-        .filter(l => l.trim().startsWith('|'))
-        .map(l => l.trim().replace(/^[|]/, '').replace(/[|]$/, '').split('|').map(c => c.trim()))
-        .filter(row => !row.every(c => /^:?-+:?$/.test(c)));  // 跳过 --- 分隔行
-    const html = rows.map((row, i) => '<tr>' + row.map(c =>
-        '<' + (i === 0 ? 'th' : 'td') + '>' + escapeHtml(c) + '</' + (i === 0 ? 'th' : 'td') + '>'
-    ).join('') + '</tr>').join('');
-    matrix.innerHTML = '<table>' + html + '</table>';
-    matrix.style.display = 'block';
-}
-
-function renderReport(payload) {
-    const report = document.getElementById('report');
-    if (!payload || !payload.markdown_report) return;
-    lastReport = payload;
-    report.textContent = payload.markdown_report;  // 服务端已转义，直接文本注入（防 XSS）
-    report.classList.add('visible');
-    document.getElementById('report-toolbar').style.display = 'block';
-    const dl = document.getElementById('download-btn');
-    dl.disabled = !payload.competitor;
-    renderMatrix(payload.markdown_report);  // 对比报告额外渲染品类格局矩阵表格
-}
-
-function copyReport() {
-    if (!lastReport || !lastReport.markdown_report) return;
-    navigator.clipboard.writeText(lastReport.markdown_report)
-        .then(() => addLog('report', '已复制 Markdown'))
-        .catch(() => addLog('error', '复制失败'));
-}
-
-function downloadReport() {
-    if (!lastReport || !lastReport.competitor) return;
-    window.location.href = '/api/reports/' + encodeURIComponent(lastReport.competitor) + '/download';
-}
-
-function clearReport() {
-    lastReport = null;
-    const report = document.getElementById('report');
-    report.textContent = '';
-    report.classList.remove('visible');
-    document.getElementById('report-toolbar').style.display = 'none';
-    const matrix = document.getElementById('matrix');
-    matrix.innerHTML = '';
-    matrix.style.display = 'none';
-    clearCandidates();
-}
-
-function cancelAnalysis() {
-    if (sessionId) {
-        fetch('/api/cancel/' + sessionId, { method: 'POST' });
-        addLog('cancelled', '正在取消...');
-    }
-}
-</script>
-</body>
-</html>"""
+# 静态资源（css/js/vendor）：设计文档 50 P2 抽离内嵌 HTML，避免改动前端需动 .py
+app.mount("/static", StaticFiles(directory=os.fspath(_STATIC_DIR)), name="static")
 
 
 @app.get("/api/analyze")

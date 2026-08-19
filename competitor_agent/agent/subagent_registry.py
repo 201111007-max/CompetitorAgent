@@ -7,7 +7,7 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable
 
 from competitor_agent.agent.react_schemas import DIMENSIONS
@@ -53,7 +53,7 @@ class SubagentConfig:
     system_prompt: str = ""
 
     @classmethod
-    def for_dimension(cls, name: str) -> "SubagentConfig":
+    def for_dimension(cls, name: str) -> SubagentConfig:
         return cls(
             name=name,
             tools=tuple(_SUBAGENT_TOOLS.get(name, [])),

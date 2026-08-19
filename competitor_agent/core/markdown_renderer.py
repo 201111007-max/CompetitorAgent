@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from competitor_agent.domain_types.enums import ResultStatus
-from competitor_agent.domain_types.pricing import profile_from_details
+from competitor_agent.domain_types.pricing import PricingProfile, profile_from_details
 from competitor_agent.domain_types.report import ComparisonReport, CompetitorReport, DimensionResult
 from competitor_agent.observability.logger import get_logger
 

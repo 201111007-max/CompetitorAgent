@@ -11,10 +11,10 @@ import re
 import pytest
 
 from competitor_agent.evaluation.ablation import (
+    DEFAULT_VARIANTS,
     AblationResult,
     AblationRunner,
     AblationVariant,
-    DEFAULT_VARIANTS,
     render_ablation_table,
     write_ablation_json,
 )

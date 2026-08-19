@@ -176,7 +176,7 @@ class RecoveryEvaluator:
     def _build_dispatcher(recorder: list[dict[str, Any]]) -> ToolDispatcher:
         """多工具 dispatcher（复用设计文档 40 唯一工具源 TOOL_SPECS）：
         web_extract 用无网络假实现；成功分发即记录（证明修正后合法调用真执行，而非仅 Final Answer）。"""
-        from competitor_agent.mcp_server.tools import TOOLS, TOOL_SPECS
+        from competitor_agent.mcp_server.tools import TOOL_SPECS, TOOLS
 
         def fake_web_extract(url: str, selector: str = "") -> str:
             return f"REACT_EXTRACT:{url}"
@@ -250,10 +250,11 @@ class RetrievalEvaluator:
         vector_store = None
         try:
             import chromadb  # noqa: F401
+
             from competitor_agent.knowledge_base.vector_store import VectorStore
 
             vector_store = VectorStore(embed_fn="hash")
-        except Exception:  # pragma: no cover - 无 chromadb 环境降级词袋
+        except Exception:  # noqa: BLE001 - chromadb 缺失降级词袋 # pragma: no cover
             vector_store = None
         store = CompetitorStore(
             data_dir=Path(tempfile.mkdtemp(prefix="behavior_retrieval_")),

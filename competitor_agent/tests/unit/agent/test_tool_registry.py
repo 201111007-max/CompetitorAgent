@@ -8,12 +8,11 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-
 from competitor_agent.agent import ReactAgent, ToolArgumentError
 from competitor_agent.agent.tool_registry import build_react_dispatcher
 from competitor_agent.config.loader import AppConfig
 from competitor_agent.llm.client import LLMClient
-from competitor_agent.mcp_server.tools import TOOLS, TOOL_SPECS
+from competitor_agent.mcp_server.tools import TOOL_SPECS, TOOLS
 
 
 def _config() -> AppConfig:

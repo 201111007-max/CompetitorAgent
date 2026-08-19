@@ -89,8 +89,7 @@ class TestLogsStream:
     def test_stream_ends_with_log_end_after_session_removed(self) -> None:
         """会话日志流：尾部追加推送，会话结束后发 log_end 收尾。"""
         _write_sample_log("sess_web_stream")
-        with TestClient(web_app.app) as client:
-            with client.stream("GET", "/api/logs/stream/sess_web_stream") as resp:
+        with TestClient(web_app.app) as client, client.stream("GET", "/api/logs/stream/sess_web_stream") as resp:
                 assert resp.status_code == 200
                 body = "".join(resp.iter_text())
         lines = [json.loads(b[len("data: "):]) for b in body.splitlines() if b.startswith("data: ")]

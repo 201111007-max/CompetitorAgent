@@ -10,11 +10,10 @@
 """
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any
-
-import re
 
 # 典型用量场景（每日请求数）→ 月请求数按 30 天折算
 DAILY_SCENARIOS: dict[str, int] = {"light": 30, "medium": 100, "heavy": 1000}
@@ -310,16 +309,3 @@ __all__ = [
     "plan_cost",
     "profile_from_details",
 ]
-
-# 旧下划线名别名（analyzers/pricing_analyzer.py 沿用；M3 删除 analyzers 后移除）
-_compose_summary = compose_summary
-_estimate_costs = estimate_costs
-_extract_profile = extract_profile
-_limit_requests = _limit_requests
-_parse_plan = parse_plan
-_parse_usage = parse_usage
-_plan_cost = plan_cost
-_detect_tier = _detect_tier
-_to_maybe_float = _to_maybe_float
-_to_maybe_int = _to_maybe_int
-_TIER_KEYWORDS = _TIER_KEYWORDS

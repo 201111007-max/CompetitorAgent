@@ -12,7 +12,6 @@ M4 新增：analyze_stream()（流式 SSE）/ cancel() / resume() / get_history(
 
 from __future__ import annotations
 
-import json
 import logging
 import uuid
 from collections.abc import AsyncIterator
@@ -32,7 +31,6 @@ from competitor_agent.agent.react_loop import ReactLoop, ReactRunResult
 from competitor_agent.agent.review_tools import (
     build_check_freshness_tool,
     build_detect_conflict_tool,
-    build_estimate_costs_tool,
     build_select_source_tool,
     build_validate_facts_tool,
 )
@@ -519,7 +517,7 @@ class CompetitorAnalysisAPI:
                 name,
                 self._llm or LLMClient(),
                 config=self._config,
-                web_extract=self._react_web_extract,
+                web_extract=self._web_extract_for(lead_competitor.name, name),
                 session_id=session_id,
                 budget=budget,
                 memory_context_fn=lambda t: self._memory_ctx_for(lead_competitor.name, t),
@@ -566,7 +564,7 @@ class CompetitorAnalysisAPI:
             cost_limit=self._budget.cost_limit,
             diminishing_threshold=0,
         )
-        return ReactLoop(
+        loop = ReactLoop(
             agent,
             max_steps=_LEAD_MAX_STEPS,
             event_sink=self._event_sink,
@@ -578,7 +576,8 @@ class CompetitorAnalysisAPI:
             system_prompt_override=build_lead_system_prompt(),
             plan_first=True,
         )
-        loop._delegate_runner = runner  # 收尾 shutdown 用（挂 loop 避免并行 analyze 互相误杀）
+        # 收尾 shutdown 用（挂 loop 实例而非 self，避免并行 analyze 互相误杀线程池）
+        loop._delegate_runner = runner
         return loop
 
     def _react_competitor(self, task: str) -> Competitor:
@@ -609,7 +608,7 @@ class CompetitorAnalysisAPI:
                 if competitor is not None:
                     return competitor
             except Exception:  # noqa: BLE001 — 注册表解析失败退化为裸名
-                pass
+                logger.debug("注册表解析竞品 %s 失败，退化为裸名", name)
             return Competitor(name=name)
         return self._react_competitor(task)
 
@@ -674,6 +673,31 @@ class CompetitorAnalysisAPI:
         max_chars = self._config.collector.max_content_chars
         return (obs.raw_text or "").strip()[:max_chars] or "（页面无文本内容）"
 
+    def _web_extract_for(self, competitor: str, dimension: str) -> Callable[[str], str]:
+        """子 Agent 专用 web_extract：抓取后按（竞品×维度）摄入知识库（RAG 写侧）。
+
+        设计文档 30：分析中采集到的原文即知识库增量，后续分析与追问可检索复用。
+        抓取失败的占位文本（守卫拦截/抓取失败）不摄入，避免污染知识库。
+        """
+
+        def _extract(url: str) -> str:
+            text = self._react_web_extract(url)
+            self._ingest_fetched(competitor, dimension, url, text)
+            return text
+
+        return _extract
+
+    def _ingest_fetched(self, competitor: str, dimension: str, url: str, text: str) -> None:
+        """采集原文 → 知识库摄入（幂等：chunk_id 由内容哈希决定）。"""
+        if self._ingester is None:
+            return
+        if not text or text.startswith(("URL 被安全守卫拦截", "抓取失败", "（页面无文本内容）")):
+            return
+        try:
+            self._ingester.ingest(competitor, dimension, text, source_url=url)
+        except Exception:  # noqa: BLE001 — 摄入失败不影响采集/分析
+            logger.debug("RAG 摄入跳过: %s/%s %s", competitor, dimension, url)
+
     # ── 复核工具提供方（设计文档 49：代码确定性兜底，不进 LLM 决策）────────
 
     def _check_freshness(self, competitor: str, dimensions: list[str]) -> dict[str, str]:
@@ -689,7 +713,7 @@ class CompetitorAnalysisAPI:
                 freshness = ReportFreshness.from_dict(raw.get("freshness"))
                 if freshness is not None:
                     ages = dict(freshness.dimension_ages)
-        except Exception:  # noqa: BLE001 — 新鲜度查询失败不阻塞
+        except Exception:
             logger.warning("check_freshness 归档读取失败: %s", competitor, exc_info=True)
             return decisions
         ttl = dict(self._config.freshness.dimension_ttl_days)
@@ -713,7 +737,7 @@ class CompetitorAnalysisAPI:
         try:
             comp = resolve_competitor(competitor)
             links = dict(comp.official_links or {}) if comp is not None else {}
-        except Exception:  # noqa: BLE001 — 选源失败不阻塞
+        except Exception:
             logger.warning("select_source 注册表解析失败: %s", competitor, exc_info=True)
         candidates: list[str] = []
         key = {"pricing": "pricing", "roadmap": "changelog", "feature": "docs"}.get(dimension)
@@ -739,7 +763,7 @@ class CompetitorAnalysisAPI:
                     if candidate not in candidates:
                         candidates.append(candidate)
             except Exception:  # noqa: BLE001 — 路径探测失败不影响已得候选
-                pass
+                logger.debug("探测 %s 的 %s 路径失败，跳过", base, dimension)
         return candidates
 
     # ── 记忆写侧（设计文档 49：唯一沉淀点）───────────────────────────────
@@ -1072,7 +1096,7 @@ class CompetitorAnalysisAPI:
             return task
         try:
             parsed = parse_task(task, llm=self._llm, use_llm=self._use_llm)
-        except Exception:  # noqa: BLE001 — 消歧失败不阻塞主流程
+        except Exception:
             logger.warning("历史消歧任务解析失败，返回原 task", exc_info=True)
             return task
         if parsed.primary_competitor != "unknown":
