@@ -116,3 +116,7 @@ competitor_agent/reports/
 reports/
 # web_app 运行时错误日志（临时产物）
 competitor_agent/web.err
+
+# ==================== dota_helper (no longer synced) ====================
+# dota_helper 子项目不再同步到远程仓库，整目录本地保留
+dota_helper/
