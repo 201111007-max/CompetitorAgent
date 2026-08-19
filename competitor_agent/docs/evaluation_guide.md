@@ -31,7 +31,7 @@
 工具选择准确率 = 对正cycle选用正确工具的步数 / 总决策步数
 ```
 
-- ground truth 标明该信息缺口应优先用哪个数据源，与实际 SourceSelector→ReAct 选择比对。
+- ground truth 标明该信息缺口应优先用哪个数据源，与实际 Lead/子 Agent 的 ReAct 工具选择比对。
 
 ### 1.4 成本效率（Cost Efficiency）
 
@@ -195,10 +195,11 @@ python -m competitor_agent.evaluation.benchmark --llm real --out reports/benchma
 > 工具选择 ≥0.85 / trace 100%）与既有断言保持（`tests/evaluation/test_skill_injection.py` 验证）。
 > 技能目录可用 `SKILLS_DIR` 环境变量覆盖（评测注入确定性内容），注入点对缺失静默降级。
 
-> **编排开关与 mock 不变量（设计文档 49）**：`orchestration.reviewer.enabled` / `freshness_delegation.enabled`
-> 默认关（零行为变化）；mock 零缺陷评审零回灌 → 开启评审不增加 LLM 调用次数、不改变 mock 门禁
-> （`tests/integration/test_domain_orchestration.py::TestReviewerZeroDefectInvariant` 验证）；`source_dedup` 按
-> "单次分析"为界清空，不缓存跨用例采集 → benchmark 逐 case 独立抓取不受污染。
+> **ReAct-scripted mock 编排（设计文档 49 重写）**：`BenchmarkMockLLM` 按 ReAct 脚本驱动 Lead 会话
+> （make_plan → delegate → 子 Agent 按维度确定性抽取，复用既有 details 命名空间 → Final Answer
+> REPORT_SCHEMA JSON），conversation-safe（按消息推导阶段，无共享状态）；HARNESS_VERSION 0.7.0
+> 重定门禁（字段 ≥0.90 / 幻觉 ≤0.05 / 工具选择 ≥0.85 / trace 100%）。消融的 `no-llm-rule` 变体
+> 已改为 `no-tools`（单发 plan + Final Answer 无工具循环），保 5 列对比。
 
 ---
 
@@ -224,13 +225,14 @@ python -m competitor_agent.evaluation.benchmark --llm real --out reports/benchma
 
 ## 8. 消融 / 对比实验（设计文档 30）
 
-回答「加 RAG / 加记忆到底有没有用」（设计文档 47：主路径仅 LLM，已删除 no-llm-rule 变体）——
+回答「加 RAG / 加记忆 / 加工具循环到底有没有用」（设计文档 47：主路径仅 LLM，无规则降级变体；
+设计文档 49：`no-llm-rule` 变体改为 `no-tools`）——
 对同一批确定性用例逐变体跑真实执行链路，产出「变体 × 指标」对比表。
 
 ### 8.1 运行
 
 ```bash
-# 4 变体全跑 + 落盘 reports/ablation/ablation_<date>.md/.json
+# 5 变体全跑 + 落盘 reports/ablation/ablation_<date>.md/.json
 python -m competitor_agent.cli benchmark --ablate
 
 # 仅跑默认评测（不加消融）
@@ -239,15 +241,17 @@ python -m competitor_agent.cli benchmark
 
 ### 8.2 变体矩阵
 
-| 变体 | enable_rag | enable_memory | use_llm | 说明 |
+| 变体 | enable_rag | enable_memory | 工具循环 | 说明 |
 |------|:---:|:---:|:---:|------|
 | full | ✅ | ✅ | ✅ | 完整链路（默认行为） |
 | no-rag | ❌ | ✅ | ✅ | 关知识库检索 |
 | no-memory | ✅ | ❌ | ✅ | 关四层记忆副作用 |
 | no-rag+no-memory | ❌ | ❌ | ✅ | 双关 |
+| no-tools | ✅ | ✅ | ❌ | 单发 make_plan + Final Answer，无工具循环（设计文档 49） |
 
-> 设计文档 47：主路径仅 LLM，`no-llm-rule` 变体已删除（确定性由 `BenchmarkMockLLM`
-> 在 LLM 版接口上固定返回承担，不依赖规则版）。
+> 设计文档 47/49：主路径仅 LLM 且无规则降级，`no-llm-rule` 变体已删除——确定性由
+> `BenchmarkMockLLM` 在 LLM 版接口上 ReAct-scripted 固定返回承担；`no-tools` 衡量
+> ReAct 工具循环本身的增益。
 
 每变体用独立目录的共享 `FourLayerMemory` 与 `CompetitorStore`（跨用例累积），
 使 RAG / 记忆差分可测（no-rag 检索不到先前摄入片段、no-memory 无成功率/技能累积）。

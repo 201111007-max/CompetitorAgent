@@ -18,9 +18,10 @@
 
 ---
 
-## 2. 降级链（SourceSelector 规则）
+## 2. 降级链（源选择语义）
 
-对每个缺口 `field`，定义候选源有序列表；前一个失败则换下一个。
+设计文档 49 后，源选择由 Lead/子 Agent 的 LLM 自主决策（可调 `select_source` 工具获取确定性候选清单）；
+以下候选序作为**降级语义规范**保留：同一缺口的候选源有序，前一个失败则换下一个。
 
 ### 示例：PRICING
 
@@ -70,7 +71,7 @@
 
 | 注意点 | 处理 |
 |--------|------|
-| SPA 动态渲染 | `web_extractor.py` 检测：初始 HTML 无内容 → 自动升 Playwright（M2+） |
+| SPA 动态渲染 | `web_extractor.py` 静态抓取；SPA 页面内容为空时返回 degraded Observation，由 LLM 换源重试（`collector.use_playwright` 预留开关） |
 | 频率限制 | ToolGuard 每源令牌桶限速；避免瞬时打爆 |
 | 缓存 | 命中缓存优先（config 调 TTL）；缓存带时间戳防过期结论 |
 | User-Agent / 代理 | 统一 UA；异常网络走错误分类器 |
