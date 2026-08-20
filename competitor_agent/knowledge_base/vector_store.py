@@ -167,17 +167,38 @@ class VectorStore:
         res = self._collection.get(ids=chunk_ids, include=[])
         return set(res.get("ids") or [])
 
-    def search(self, query_vec: list[float], top_k: int) -> list[tuple[str, float]]:
-        """返回 [(chunk_id, distance)]，distance 越小越相似（L2，对归一化向量等价余弦）。"""
+    def search(
+        self,
+        query_vec: list[float],
+        top_k: int,
+        where: dict[str, Any] | None = None,
+    ) -> list[tuple[str, float]]:
+        """返回 [(chunk_id, distance)]，distance 越小越相似（L2，对归一化向量等价余弦）。
+
+        where：chromadb metadata 过滤（设计文档 52：记忆召回按竞品隔离）。
+        """
         self._ensure_client()
         if self.count() == 0:
             return []
         res = self._collection.query(
-            query_embeddings=[query_vec], n_results=min(top_k, self.count())
+            query_embeddings=[query_vec], n_results=min(top_k, self.count()), where=where
         )
         ids = (res.get("ids") or [[]])[0]
         distances = (res.get("distances") or [[]])[0]
         return list(zip(ids, distances))
+
+    def list_ids(self, where: dict[str, Any] | None = None) -> set[str]:
+        """按 metadata 过滤列出集合内 chunk_id（记忆侧过期剔除用，设计文档 52）。"""
+        if self._collection is None:
+            return set()
+        res = self._collection.get(where=where, include=[])
+        return set(res.get("ids") or [])
+
+    def delete(self, chunk_ids: list[str]) -> None:
+        """按 id 删除（记忆老化/压缩同步剔除，设计文档 52）。"""
+        if not chunk_ids or self._collection is None:
+            return
+        self._collection.delete(ids=list(chunk_ids))
 
     def clear(self) -> None:
         if self._collection is None:

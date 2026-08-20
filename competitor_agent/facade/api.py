@@ -182,6 +182,16 @@ class CompetitorAnalysisAPI:
             self._store = rag_store or CompetitorStore(vector_store=self._vector_store)
             self._ingester = Ingester(store=self._store)
             self._retriever = Retriever(store=self._store)
+
+            # 记忆召回向量层（设计文档 52 §2.1）：独立 collection 与知识库隔离，
+            # 注入 L1 会话归档；嵌入模型不可用/未装 rag extra 时 is_available()=False，
+            # 记忆召回保持词袋路径，行为与现状逐位一致
+            from competitor_agent.memory.four_layer_memory import FourLayerMemory
+
+            if isinstance(self._memory, FourLayerMemory):
+                self._memory.attach_vector_store(
+                    VectorStore(collection_name="session_summaries", data_dir=self._memory.data_dir)
+                )
         else:
             self._store = None
             self._ingester = None
