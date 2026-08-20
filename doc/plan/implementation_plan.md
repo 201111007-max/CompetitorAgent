@@ -919,3 +919,15 @@ dev:
 | 项 | 内容 | 优先级 | 状态 |
 |---|---|---|---|
 | **51 LangGraph 引擎对照** | M1：`agent/langgraph_engine/`（StateGraph：plan→Send fan-out 子 Agent→aggregate→report，复用 LLMClient/dispatcher/ReactAgent/react_report）；M2：api/cli `--engine` 路由 + 事件/记忆注入 + optional extra；M3：benchmark `--engine both` 对比表 + 实测报告 | 中 | 📄 设计完成（2026-08-20，待实施） |
+
+## 24. 第九轮待办（RAG 深化：记忆召回向量化 + 可用性治理 + 检索对照，设计文档 52）
+
+> 状态背景：2026-08-20 岗位差距分析标出「词袋 TF 余弦，无真 Embedding/向量库」；经代码核实
+> 知识库 RAG（doc 32：chromadb + bge-small-zh + hybrid 融合）已是真 RAG，真正缺口是 L1 记忆召回
+> `SessionArchive._rank_entries` 仍为纯词袋，且 embedding 静默降级无感知。用户拍板不引入 FAISS
+> （chromadb 自带 HNSW，规模无瓶颈），记忆召回复用现有 VectorStore 接入点、词袋保留降级。
+> 设计文档见 `doc/plan/issue_designs/52_rag_depth_design.md`（2026-08-20，待实施）。
+
+| 项 | 内容 | 优先级 | 状态 |
+|---|---|---|---|
+| **52 RAG 深化** | M1：`SessionArchive`/`FourLayerMemory`/`api` 注入可选 VectorStore（独立 collection `session_summaries`），`recent_context` 向量优先、异常/不可用回退词袋逐位不变；M2：`rag-warmup` CLI 预缓存 + 启动向量层状态日志；M3：`evaluation/retrieval_compare.py` 词袋/向量/hybrid recall@5 对照表 | 中 | 📄 设计完成（2026-08-20，待实施） |
