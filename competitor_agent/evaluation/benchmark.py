@@ -16,6 +16,7 @@ import json
 import re
 import sys
 import tempfile
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -904,6 +905,8 @@ def build_benchmark_api(
     memory: object | None = None,
     rag_store: object | None = None,
     timeline: object | None = None,
+    engine: str = "react",
+    llm_call_counter: list[int] | None = None,
 ) -> CompetitorAnalysisAPI:
     """按用例配置构建 API：mock 用确定性 MockLLM（无 Key、无网络），real 用真实 LLMClient。
 
@@ -928,7 +931,20 @@ def build_benchmark_api(
                 fail_urls=list(getattr(case, "fail_urls", None) or ()),
                 no_tools=bool(getattr(case, "no_tools", False)),
             )
-            llm = LLMClient(call_func=mock.complete)
+            call_func: Callable[..., str] = mock.complete
+            if llm_call_counter is not None:
+                # 引擎对照（设计文档 51）：mock 模式成本恒 0，LLM 调用次数是编排开销指标
+                def _counting_complete(
+                    messages: list[dict[str, str]],
+                    model: str | None = None,
+                    _counter: list[int] = llm_call_counter,
+                    _fn: Callable[..., str] = mock.complete,
+                ) -> str:
+                    _counter.append(1)
+                    return _fn(messages, model=model)
+
+                call_func = _counting_complete
+            llm = LLMClient(call_func=call_func)
         elif llm_mode == "real":
             llm = build_real_llm()
     extractor = BenchmarkExtractor(
@@ -952,6 +968,7 @@ def build_benchmark_api(
         rag_store=rag_store,
         timeline=timeline,  # type: ignore[arg-type]
         config=cfg,
+        engine=engine,
     )
 
 
@@ -971,6 +988,8 @@ class Benchmark:
         llm: LLMClient | None = None,
         tag: str | None = None,
         cost_limit_usd: float | None = None,
+        engine: str = "react",
+        llm_call_counter: list[int] | None = None,
     ) -> None:
         self._dir = fixtures_dir or FIXTURES_DIR
         self._llm_mode = llm_mode
@@ -979,9 +998,15 @@ class Benchmark:
         self._cost_limit_usd = cost_limit_usd
         if build_api is None:
             if llm is not None:
-                self._build_api = lambda case: build_benchmark_api(case, llm_mode=self._llm_mode, llm=llm)
+                self._build_api = lambda case: build_benchmark_api(
+                    case, llm_mode=self._llm_mode, llm=llm, engine=engine,
+                    llm_call_counter=llm_call_counter,
+                )
             else:
-                self._build_api = lambda case: build_benchmark_api(case, llm_mode=self._llm_mode)
+                self._build_api = lambda case: build_benchmark_api(
+                    case, llm_mode=self._llm_mode, engine=engine,
+                    llm_call_counter=llm_call_counter,
+                )
         else:
             self._build_api = build_api
         self._accuracy = accuracy_eval or AccuracyEvaluator()
@@ -1431,6 +1456,56 @@ def _write_markdown(
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _orchestration_loc() -> tuple[int, int]:
+    """编排层代码行数（静态统计，设计文档 51 §2.3）：自研 react_loop+delegate_tool vs langgraph_engine 包。"""
+    agent_dir = Path(__file__).resolve().parent.parent / "agent"
+    react = sum(
+        (agent_dir / name).read_text(encoding="utf-8").count("\n") + 1
+        for name in ("react_loop.py", "delegate_tool.py")
+    )
+    lg_dir = agent_dir / "langgraph_engine"
+    langgraph = sum(
+        p.read_text(encoding="utf-8").count("\n") + 1 for p in sorted(lg_dir.glob("*.py"))
+    )
+    return react, langgraph
+
+
+def _write_engine_compare(
+    react_report: BenchmarkReport,
+    lg_report: BenchmarkReport,
+    *,
+    wall_seconds: dict[str, float],
+    llm_calls: dict[str, int],
+    path: Path,
+) -> None:
+    """双引擎对照表落盘（设计文档 51 §2.3）：同 fixture/同 LLM/同工具/同出口，唯一变量是编排层。"""
+    react_loc, lg_loc = _orchestration_loc()
+    rows = [
+        ("field_accuracy", f"{react_report.accuracy.field_accuracy:.4f}", f"{lg_report.accuracy.field_accuracy:.4f}"),
+        ("hallucination_rate", f"{react_report.accuracy.hallucination_rate:.4f}", f"{lg_report.accuracy.hallucination_rate:.4f}"),
+        ("tool_selection_accuracy", f"{react_report.strategy.tool_selection_accuracy:.4f}", f"{lg_report.strategy.tool_selection_accuracy:.4f}"),
+        ("llm_calls", str(llm_calls.get("react", 0) or "—"), str(llm_calls.get("langgraph", 0) or "—")),
+        ("total_cost_usd", f"{react_report.cost_usd:.6f}", f"{lg_report.cost_usd:.6f}"),
+        ("wall_seconds", f"{wall_seconds.get('react', 0.0):.2f}", f"{wall_seconds.get('langgraph', 0.0):.2f}"),
+        ("orchestration_loc（静态）", str(react_loc), str(lg_loc)),
+        ("third_party_deps（静态）", "零（自研）", "langgraph + langchain-core（≈15MB）"),
+    ]
+    lines = [
+        "# 双引擎对照（设计文档 51）：react（自研 Lead ReAct） vs langgraph（StateGraph）",
+        "",
+        "> 控变量：同 fixture、同 LLM（含 mock 脚本）、同工具面、同报告出口（react_report.assemble），",
+        "> 唯一变量是编排层。mock 模式下成本恒 0，编排开销看 llm_calls / wall_seconds；",
+        "> 产出质量对比需 `--llm real` 手动跑。取消/预算/checkpoint 为自研引擎差异化能力，",
+        "> langgraph 引擎未对齐（框架省了编排代码，横切控制要自己补）。",
+        "",
+        "| 指标 | react | langgraph |",
+        "|------|-------|-----------|",
+    ]
+    lines += [f"| {name} | {r} | {l} |" for name, r, l in rows]
+    lines.append("")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="benchmark", description="competitor_agent 评测基准（真实执行）")
     parser.add_argument(
@@ -1453,7 +1528,22 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--out", type=Path, default=None, help="CSV 输出路径（缺省 <data_dir>/reports/benchmark[_real]_<date>.csv，仓库外）")
     parser.add_argument("--report", type=Path, default=None, help="Markdown 报告路径（缺省 <data_dir>/reports/benchmark[_real]_<date>.md）")
+    parser.add_argument(
+        "--engine",
+        choices=["react", "langgraph", "both"],
+        default="react",
+        help="编排引擎（设计文档 51）：react=自研（默认，门禁口径不变），langgraph=StateGraph，both=双引擎顺序跑 + 对比表落盘",
+    )
     args = parser.parse_args(argv)
+
+    if args.engine in ("langgraph", "both"):
+        from competitor_agent.agent.langgraph_engine import ensure_langgraph_available
+
+        try:
+            ensure_langgraph_available()
+        except ImportError as exc:
+            print(str(exc))
+            return 2
 
     # 设计文档 37 §4：real 无 Key 明确报错，不静默回退 mock（防误读 mock 数字）
     if args.llm == "real" and not LLMClient.has_api_key():
@@ -1462,19 +1552,39 @@ def main(argv: list[str] | None = None) -> int:
 
     reports_dir = get_reports_dir()
     date = datetime.now(timezone.utc).strftime("%Y%m%d")
+    # --engine both：主跑默认 react（门禁/产物口径不变），langgraph 作对照侧加跑
+    suffix = "_langgraph" if args.engine == "langgraph" else ""
+    engine_main = "langgraph" if args.engine == "langgraph" else "react"
+    shared_llm: LLMClient | None = None
+    cost_limit: float | None = None
+    main_calls: list[int] = []
+    main_wall = 0.0
+
+    # 设计文档 37 §4：real 无 Key 明确报错，不静默回退 mock（防误读 mock 数字）
     if args.llm == "real":
         shared_llm = build_real_llm()
         cost_limit = args.cost_limit if args.cost_limit is not None else 1.0
         # real 报告内嵌 mock 基线：同子集跑一遍 mock（确定性、零成本）供对比
         mock_report = Benchmark(llm_mode="mock", tag=args.tag).run()
-        report = Benchmark(llm_mode="real", llm=shared_llm, tag=args.tag, cost_limit_usd=cost_limit).run()
-        out = args.out or (reports_dir / f"benchmark_real_{date}.csv")
-        report_path = args.report or (reports_dir / f"benchmark_real_{date}.md")
+        t0 = time.monotonic()
+        report = Benchmark(
+            llm_mode="real", llm=shared_llm, tag=args.tag, cost_limit_usd=cost_limit,
+            engine=engine_main,
+            llm_call_counter=main_calls if args.engine == "both" else None,
+        ).run()
+        main_wall = time.monotonic() - t0
+        out = args.out or (reports_dir / f"benchmark_real{suffix}_{date}.csv")
+        report_path = args.report or (reports_dir / f"benchmark_real{suffix}_{date}.md")
     else:
         mock_report = None
-        report = Benchmark(llm_mode="mock", tag=args.tag).run()
-        out = args.out or (reports_dir / f"benchmark_{date}.csv")
-        report_path = args.report or (reports_dir / f"benchmark_{date}.md")
+        t0 = time.monotonic()
+        report = Benchmark(
+            llm_mode="mock", tag=args.tag, engine=engine_main,
+            llm_call_counter=main_calls if args.engine == "both" else None,
+        ).run()
+        main_wall = time.monotonic() - t0
+        out = args.out or (reports_dir / f"benchmark{suffix}_{date}.csv")
+        report_path = args.report or (reports_dir / f"benchmark{suffix}_{date}.md")
 
     out.parent.mkdir(parents=True, exist_ok=True)
     report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1486,6 +1596,28 @@ def main(argv: list[str] | None = None) -> int:
           f"cost_eff={report.strategy.cost_efficiency:.4f} harness_v{report.harness_version}")
     print(f"csv: {out}")
     print(f"report: {report_path}")
+
+    if args.engine == "both":
+        lg_calls: list[int] = []
+        t0 = time.monotonic()
+        lg_report = Benchmark(
+            llm_mode=args.llm,
+            llm=shared_llm,
+            tag=args.tag,
+            cost_limit_usd=cost_limit,
+            engine="langgraph",
+            llm_call_counter=lg_calls,
+        ).run()
+        lg_wall = time.monotonic() - t0
+        compare_path = reports_dir / f"engine_compare_{date}.md"
+        _write_engine_compare(
+            report,
+            lg_report,
+            wall_seconds={"react": main_wall, "langgraph": lg_wall},
+            llm_calls={"react": len(main_calls), "langgraph": len(lg_calls)},
+            path=compare_path,
+        )
+        print(f"engine_compare: {compare_path}")
     return 0
 
 

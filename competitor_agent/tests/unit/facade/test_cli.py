@@ -200,7 +200,7 @@ class TestRunResume:
 
 class TestMain:
     def _patch_api(self, monkeypatch, api=None):
-        monkeypatch.setattr("competitor_agent.cli._make_api", lambda: api or StubAPI())
+        monkeypatch.setattr("competitor_agent.cli._make_api", lambda engine="react": api or StubAPI())
         # main() 以 kwargs 构造 LLMClient；mock 需接受任意参数并返回确定性 LLM
         monkeypatch.setattr(
             "competitor_agent.cli.LLMClient", lambda *a, **kw: _mock_llm()

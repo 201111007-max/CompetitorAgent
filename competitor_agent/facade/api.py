@@ -135,9 +135,18 @@ class CompetitorAnalysisAPI:
         rag_store: object | None = None,  # 设计文档 30：消融可注入共享知识库实例
         vector_store: object | None = None,  # 设计文档 32：可注入向量层（测试/评测确定性 mock）
         tool_dispatcher: object | None = None,  # 历史兼容：已由 Lead 工具面取代，保留签名
+        engine: str = "react",  # 设计文档 51：编排引擎 "react"（默认）| "langgraph"
     ) -> None:
         # 配置注入：显式参数优先，其次 config，最后默认值
         cfg = config or load_config()
+        if engine not in ("react", "langgraph"):
+            raise ValueError(f"未知编排引擎: {engine!r}（可用: react | langgraph）")
+        if engine == "langgraph":
+            # 构造期检查（设计文档 51 §2.2）：未装 langgraph → 可读 ImportError
+            from competitor_agent.agent.langgraph_engine import ensure_langgraph_available
+
+            ensure_langgraph_available()
+        self._engine = engine
         max_iterations = max_iterations if max_iterations is not None else cfg.budget.max_iterations
         cost_limit = cost_limit if cost_limit is not None else cfg.budget.cost_limit_usd
         self._config = cfg
@@ -208,20 +217,30 @@ class CompetitorAnalysisAPI:
         slog = get_session_logger(sid)
         log_event(slog, "session_started", "init", f"会话 {sid} 启动", task=task)
         self._emit(
-            ProgressEvent(event="phase_start", phase="react", message=f"Lead 编排: {task}")
+            ProgressEvent(
+                event="phase_start",
+                phase="langgraph" if self._engine == "langgraph" else "react",
+                message=f"{'LangGraph' if self._engine == 'langgraph' else 'Lead'} 编排: {task}",
+            )
         )
 
-        loop, result = self._run_react_loop(task, sid)
-        terminal = (
-            "cancelled"
-            if result.cancelled
-            else ("partial" if result.budget_exhausted else "success")
-        )
+        if self._engine == "langgraph":
+            # 设计文档 51：LangGraph 引擎——取消/预算/checkpoint 不对齐（差异化结论）
+            plan, answer, transcript = self._run_langgraph_engine(task, sid)
+            terminal = "success"
+        else:
+            loop, result = self._run_react_loop(task, sid)
+            plan, answer, transcript = loop.plan, result.answer, result.transcript
+            terminal = (
+                "cancelled"
+                if result.cancelled
+                else ("partial" if result.budget_exhausted else "success")
+            )
         report = react_report.assemble(
-            lead_answer=result.answer,
-            competitor=self._lead_competitor(task, loop.plan),
-            loop_plan=loop.plan,
-            transcript=result.transcript,
+            lead_answer=answer,
+            competitor=self._lead_competitor(task, plan),
+            loop_plan=plan,
+            transcript=transcript,
             builder=self._builder,
             terminal_state=terminal,
         )
@@ -232,7 +251,7 @@ class CompetitorAnalysisAPI:
             overall_confidence=round(report.overall_confidence, 3),
         )
         # 记忆沉淀（唯一写侧）：成功与取消部分结果都沉淀（对齐 single 路径）
-        self._record_memory_success(report, result.transcript)
+        self._record_memory_success(report, transcript)
         if is_cancelled(sid):
             # 取消完成：保留 checkpoint 供 /resume 续跑，返回带部分结果的取消报告
             logger.info("会话 %s 取消后返回部分结果（%d 个维度）", sid, len(report.dimension_results))
@@ -489,6 +508,69 @@ class CompetitorAnalysisAPI:
         if result.steps:
             self._budget.record_iteration(cost=0.01 * result.steps)
         return loop, result
+
+    def _run_langgraph_engine(
+        self, task: str, session_id: str | None
+    ) -> tuple[dict | None, str, list[dict]]:
+        """LangGraph 引擎路径（设计文档 51 §2.2）：StateGraph 编排，其余全复用。
+
+        与 ``_run_react_loop`` 同形返回 ``(plan, answer, transcript)``：
+        LLM/工具/记忆/RAG/事件/报告出口与自研引擎逐位一致（对照实验控变量），
+        唯一变量是编排层（StateGraph plan→Send fan-out→aggregate→report）。
+        取消/预算/checkpoint 不做图级对齐（§1.2 差异化结论）；
+        预算记账以 transcript 记录数近似步数（同 0.01/步 口径）。
+        """
+        from competitor_agent.agent.langgraph_engine import run_langgraph
+
+        llm = self._llm or LLMClient()
+        lead_competitor = self._react_competitor(task)
+
+        def _subagent_run(name: str, sub_task: str) -> ReactRunResult:
+            # 子 Agent 运行时与自研路径同工厂（独立预算/共享取消/记忆/RAG/事件）
+            budget = IterationBudget(
+                max_iterations=6,
+                cost_limit=self._budget.cost_limit,
+                diminishing_threshold=0,
+            )
+            return build_subagent(
+                name,
+                llm,
+                config=self._config,
+                web_extract=self._web_extract_for(lead_competitor.name, name),
+                session_id=session_id,
+                budget=budget,
+                memory_context_fn=lambda t: self._memory_ctx_for(lead_competitor.name, t),
+                rag_fn=lambda t: self._rag_ctx_for(lead_competitor.name, t),
+                event_sink=self._event_sink,
+                obs_max_chars=self._config.collector.max_content_chars,
+                max_steps=6,
+            ).run_subagent(sub_task)
+
+        # Lead 系统提示与自研路径同文本（工具描述 + Thought/Action 格式 + skills）
+        prompt_dispatcher = build_react_dispatcher(
+            config=self._config,
+            web_extract=self._react_web_extract,
+            exclude=("analyze_competitor",),
+            extra_tools={"make_plan": build_make_plan_tool()},
+        )
+        base_prompt = ReactAgent(llm=llm, dispatcher=prompt_dispatcher).build_system_prompt(
+            instructions=build_lead_system_prompt()
+        )
+        plan, answer, transcript = run_langgraph(
+            task,
+            llm=llm,
+            make_plan_fn=build_make_plan_tool(),
+            subagent_run=_subagent_run,
+            registry=get_subagent_registry(),
+            event_sink=self._event_sink,
+            session_id=session_id,
+            memory_ctx_fn=self._react_memory_context,
+            rag_fn=self._react_rag_context,
+            system_prompt=base_prompt,
+        )
+        if transcript:
+            self._budget.record_iteration(cost=0.01 * len(transcript))
+        return plan, answer, transcript
 
     def _react_loop(self, task: str, session_id: str | None) -> ReactLoop:
         """组装 Lead ReactLoop（设计文档 49 §3.5/3.6）：plan-first + delegate + 复核工具。
