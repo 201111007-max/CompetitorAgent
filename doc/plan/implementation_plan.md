@@ -927,11 +927,11 @@ dev:
 > `SessionArchive._rank_entries` 仍为纯词袋，且 embedding 静默降级无感知。用户拍板不引入 FAISS
 > （chromadb 自带 HNSW，规模无瓶颈），记忆召回复用现有 VectorStore 接入点、词袋保留降级。
 > 设计文档见 `doc/plan/issue_designs/52_rag_depth_design.md`（2026-08-20）。
-> **M1 已实现（2026-08-20，见 §24.1）；M2 已实现（2026-08-20，见 §24.2）**；M3 待实施。
+> **M1 已实现（2026-08-20，见 §24.1）；M2 已实现（2026-08-20，见 §24.2）；M3 已实现（2026-08-20，见 §24.3）**。
 
 | 项 | 内容 | 优先级 | 状态 |
 |---|---|---|---|
-| **52 RAG 深化** | M1：`SessionArchive`/`FourLayerMemory`/`api` 注入可选 VectorStore（独立 collection `session_summaries`），`recent_context` 向量优先、异常/不可用回退词袋逐位不变；M2：`rag-warmup` CLI 预缓存 + 启动向量层状态日志；M3：`evaluation/retrieval_compare.py` 词袋/向量/hybrid recall@5 对照表 | 中 | 🔧 M1+M2 已实现（2026-08-20），M3 待实施 |
+| **52 RAG 深化** | M1：`SessionArchive`/`FourLayerMemory`/`api` 注入可选 VectorStore（独立 collection `session_summaries`），`recent_context` 向量优先、异常/不可用回退词袋逐位不变；M2：`rag-warmup` CLI 预缓存 + 启动向量层状态日志；M3：`evaluation/retrieval_compare.py` 词袋/向量/hybrid recall@5 对照表 | 中 | ✅ M1-M3 已实现（2026-08-20） |
 
 ### 24.1 52 M1 完成说明（2026-08-20）
 
@@ -973,6 +973,30 @@ dev:
   不构造 API 短路断言、api 启动日志 available/degraded 各一条（注入 callable / 未缓存模型名）。
 - **手动验证**：`python -m competitor_agent.cli rag-warmup` 在本机（模型未缓存）真实触网下载
   bge-small-zh-v1.5（沙箱网络超时属环境限制，触网行为本身符合设计预期）。
+
+### 24.3 52 M3 完成说明（2026-08-20）
+
+- **`evaluation/retrieval_compare.py`**（新增，~230 行）：固定查询集从 benchmark
+  `accuracy_cases.json` 提炼——27 个 fixture page 作为语料 chunk（chunk_id=case_id），
+  查询按 (task, competitor, dimension) 去重得 18 条，标注相关条目=同 (competitor, dimension)
+  的全部 chunk_id（topical 相关性）。三模式复用生产检索路径 `CompetitorStore.search_hybrid`
+  的 alpha 扫描（0=纯词袋 / 1=纯向量 / 0.5=生产默认融合），口径与线上一致；逐查询 recall@5 +
+  均值对比表落盘 `<data_dir>/reports/retrieval_compare_<date>.md`（`get_reports_dir`，仓库外）。
+  语料库建在 `TemporaryDirectory`，不污染用户知识库。CLI：`--embed hash`（默认，确定性特征哈希，
+  零网络、CI 可复现）/ `--embed auto`（真实 bge，须先 rag-warmup）；`--top-k` / `--out` /
+  `--fixtures-dir`。chromadb 未安装或模型未缓存时向量/混合模式记 n/a（不静默退成词袋数据），
+  对比表标注所用 embed（设计文档 §7 风险 4：hash 数据只验证链路，真实结论以 bge 手动跑为准）。
+- **测试**：新增 `tests/unit/evaluation/test_retrieval_compare.py` 12 条——查询集提炼
+  （27 chunks / 18 查询去重 / 相关标注同竞品×维度 / cursor×pricing 3 条相关）、三模式
+  recall 边界与确定性（hash 跑两次逐位一致）、词面命中 lexical recall=1、chromadb 缺失与
+  模型未缓存两路 n/a 降级、表渲染（列/均值加粗/n/a）、落盘与 main() 出口码，全部零网络。
+- **手动验证**：`python -m competitor_agent.evaluation.retrieval_compare`（hash）实跑出表——
+  lexical 0.1111 / vector 0.1852 / hybrid 0.1852（hash 伪语义为噪声级，符合预期，仅验证链路）。
+- **实测记录的一个既有语义**：`search_hybrid` 的 min-max 归一化会把词袋最低分归零，仅 2 条
+  词袋命中时 alpha=0 下低分条被 `fused>0` 过滤——非本次引入，单测以「3 命中最低分落选」
+  构造固定该行为（`test_lexical_hits_exact_terms`）。
+- **回归**：evaluation+knowledge_base+memory 126 条通过（`test_rag_integration.py` 2 条失败为
+  远程既有问题，M1 已 stash 复核）；ruff/mypy 全绿。
 
 ## 25. 第九轮待办（原生 Function Calling：双协议并存 + 默认 tool_calls，设计文档 53）
 
