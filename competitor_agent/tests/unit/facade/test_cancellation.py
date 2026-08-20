@@ -159,6 +159,7 @@ class TestReactLoopCooperativeCancellation:
         agent = ReactAgent(
             llm=LLMClient(call_func=fake_llm),
             dispatcher=ToolDispatcher(tools={}),
+            protocol="react",
         )
         loop = ReactLoop(agent, session_id=sid, plan_first=False)
         loop._called = called  # type: ignore[attr-defined]

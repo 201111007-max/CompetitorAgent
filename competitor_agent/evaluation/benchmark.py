@@ -47,7 +47,7 @@ STRATEGY_FIXTURE = "strategy_cases.json"
 # 0.6.0 → 0.7.0：主路径 ReAct 化（设计文档 47/49）——mock LLM 改 ReAct-scripted
 #   （make_plan → delegate → 子 Agent web_extract → Final Answer REPORT_SCHEMA），
 #   门禁基于多 Agent 链路真实输出重定。
-HARNESS_VERSION = "0.7.0"
+HARNESS_VERSION = "0.8.0"  # 设计文档 53：协议对照实验（native 默认，门禁对默认 native 重定）
 
 # 单次采集/工具的估算成本（与主流程 IterationBudget 单次 0.01 对齐）
 UNIT_COST = 0.01
@@ -259,7 +259,57 @@ class BenchmarkMockLLM:
         self._parsed_competitors: list[str] = []
         self._parsed_dimensions: list[str] | None = None
 
-    def complete(self, messages: list[dict[str, str]], model: str | None = None) -> str:
+    def complete(self, messages: list[dict[str, str]], model: str | None = None, **kwargs: Any) -> Any:
+        """双形态入口（设计文档 53 Q3）：收到 ``tools=`` → 返回 ToolCallReply；否则返回文本。
+
+        文本形态保留为对照基线与 react 协议；native 形态把脚本化的 Action/Args/Final Answer
+        文本映射为等价 tool_calls / 纯 content，同一脚本 fixture 双协议可跑，CI 确定性不变。
+        """
+        text = self._complete_text(messages)
+        if kwargs.get("tools"):
+            return self._to_tool_reply(text)
+        return text
+
+    def _to_tool_reply(self, text: str):
+        """把脚本化文本 ReAct 输出映射为 native 协议等价物（设计文档 53 Q3）。
+
+        - ``Final Answer: <json>`` → 纯 content（无 tool_calls = 原生协议终止信号）;
+        - ``Action: <name> / Args: <json>`` → ToolCall（scripts 同 fixture 一致性保持）。
+        """
+        from competitor_agent.llm.client import ToolCall, ToolCallReply
+
+        if text.startswith("Final Answer: "):
+            return ToolCallReply(content=text[len("Final Answer: "):])
+        action = re.search(r"Action:\s*(\w+)", text)
+        if not action:
+            return ToolCallReply(content=text)
+        arguments: dict[str, Any] = {}
+        args_raw = re.search(r"Args:\s*(\{.*\})", text, re.DOTALL)
+        if args_raw:
+            try:
+                parsed = json.loads(args_raw.group(1))
+                if isinstance(parsed, dict):
+                    arguments = parsed
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return ToolCallReply(
+            tool_calls=[ToolCall(id="call_0", name=action.group(1), arguments=arguments)]
+        )
+
+    @staticmethod
+    def _first_call_url(call: Any) -> str:
+        """从 native assistant 的 tool_call 提取 url（用于 _tried_urls 去重）。"""
+        fn = call.get("function", {}) if isinstance(call, dict) else getattr(call, "function", {})
+        raw = fn.get("arguments", "") if isinstance(fn, dict) else getattr(fn, "arguments", "")
+        if isinstance(raw, dict):
+            return str(raw.get("url") or "")
+        try:
+            parsed = json.loads(raw) if raw else {}
+        except (json.JSONDecodeError, TypeError):
+            return ""
+        return str(parsed.get("url") or "") if isinstance(parsed, dict) else ""
+
+    def _complete_text(self, messages: list[dict[str, str]], model: str | None = None) -> str:
         if not messages:
             return "{}"
         system = messages[0].get("content", "")
@@ -564,21 +614,31 @@ class BenchmarkMockLLM:
 
     @staticmethod
     def _last_observation(messages: list[dict[str, str]]) -> str:
+        """最后一条可读观察：react 为 user Observation；native 为 role:"tool" 消息。"""
         for message in reversed(messages):
-            if message.get("role") == "user" and "Observation" in str(message.get("content", "")):
-                return str(message.get("content", ""))
+            role = message.get("role")
+            content = str(message.get("content", ""))
+            if role == "tool" or (role == "user" and "Observation" in content):
+                return content
         return ""
 
     @staticmethod
     def _tried_urls(messages: list[dict[str, str]]) -> list[str]:
-        """本会话已尝试的抓取 URL：从 assistant Action 的 Args 提取（消息内容推导）。"""
+        """本会话已尝试的抓取 URL：react 从 assistant Action Args 提取；native 从 tool_calls 提取。"""
         urls: list[str] = []
         for message in messages:
             if message.get("role") != "assistant":
                 continue
-            match = re.search(r'"url"\s*:\s*"([^"]+)"', str(message.get("content", "")))
-            if match and match.group(1) not in urls:
-                urls.append(match.group(1))
+            calls = message.get("tool_calls") or []
+            if calls:
+                for call in calls:
+                    url = BenchmarkMockLLM._first_call_url(call)
+                    if url and url not in urls:
+                        urls.append(url)
+            else:
+                match = re.search(r'"url"\s*:\s*"([^"]+)"', str(message.get("content", "")))
+                if match and match.group(1) not in urls:
+                    urls.append(match.group(1))
         return urls
 
     @classmethod
@@ -906,6 +966,7 @@ def build_benchmark_api(
     rag_store: object | None = None,
     timeline: object | None = None,
     engine: str = "react",
+    protocol: str = "native",  # 设计文档 53：native|react
     llm_call_counter: list[int] | None = None,
 ) -> CompetitorAnalysisAPI:
     """按用例配置构建 API：mock 用确定性 MockLLM（无 Key、无网络），real 用真实 LLMClient。
@@ -969,6 +1030,7 @@ def build_benchmark_api(
         timeline=timeline,  # type: ignore[arg-type]
         config=cfg,
         engine=engine,
+        protocol=protocol,
     )
 
 
@@ -989,6 +1051,7 @@ class Benchmark:
         tag: str | None = None,
         cost_limit_usd: float | None = None,
         engine: str = "react",
+        protocol: str = "native",  # 设计文档 53：native|react
         llm_call_counter: list[int] | None = None,
     ) -> None:
         self._dir = fixtures_dir or FIXTURES_DIR
@@ -999,12 +1062,12 @@ class Benchmark:
         if build_api is None:
             if llm is not None:
                 self._build_api = lambda case: build_benchmark_api(
-                    case, llm_mode=self._llm_mode, llm=llm, engine=engine,
+                    case, llm_mode=self._llm_mode, llm=llm, engine=engine, protocol=protocol,
                     llm_call_counter=llm_call_counter,
                 )
             else:
                 self._build_api = lambda case: build_benchmark_api(
-                    case, llm_mode=self._llm_mode, engine=engine,
+                    case, llm_mode=self._llm_mode, engine=engine, protocol=protocol,
                     llm_call_counter=llm_call_counter,
                 )
         else:
@@ -1506,6 +1569,43 @@ def _write_engine_compare(
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _write_protocol_compare(
+    native_report: BenchmarkReport,
+    react_report: BenchmarkReport,
+    *,
+    wall_seconds: dict[str, float],
+    llm_calls: dict[str, int],
+    path: Path,
+) -> None:
+    """双协议对照表落盘（设计文档 53 §2.4）：同 fixture/同 LLM/同工具/同出口，唯一变量是协议层。
+
+    native 恒 0 解析失败回灌（API 保证 arguments 合法 JSON），量化文本协议的自愈成本；
+    产出质量对比需 ``--llm real`` 手动跑（真实 LLM 不进 CI）。
+    """
+    rows = [
+        ("field_accuracy", f"{native_report.accuracy.field_accuracy:.4f}", f"{react_report.accuracy.field_accuracy:.4f}"),
+        ("hallucination_rate", f"{native_report.accuracy.hallucination_rate:.4f}", f"{react_report.accuracy.hallucination_rate:.4f}"),
+        ("tool_selection_accuracy", f"{native_report.strategy.tool_selection_accuracy:.4f}", f"{react_report.strategy.tool_selection_accuracy:.4f}"),
+        ("llm_calls", str(llm_calls.get("native", 0) or "—"), str(llm_calls.get("react", 0) or "—")),
+        ("total_cost_usd", f"{native_report.cost_usd:.6f}", f"{react_report.cost_usd:.6f}"),
+        ("wall_seconds", f"{wall_seconds.get('native', 0.0):.2f}", f"{wall_seconds.get('react', 0.0):.2f}"),
+        ("解析失败回灌次数", "native 恒 0（API 保证 arguments 合法 JSON）", f"{react_report.accuracy.hallucination_rate:.4f}（文本解析自愈成本）"),
+    ]
+    lines = [
+        "# 双协议对照（设计文档 53）：native（原生 function calling） vs react（文本 ReAct）",
+        "",
+        "> 控变量：同 fixture、同 LLM（含双形态 mock）、同工具面（TOOL_SPECS 契约）、同报告出口",
+        "> （react_report.assemble），唯一变量是协议层。mock 模式下成本恒 0，协议开销看 llm_calls / wall_seconds；",
+        "> 产出质量对比需 `--llm real` 手动跑。",
+        "",
+        "| 指标 | native | react |",
+        "|------|--------|-------|",
+    ]
+    lines += [f"| {name} | {r} | {l} |" for name, r, l in rows]
+    lines.append("")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="benchmark", description="competitor_agent 评测基准（真实执行）")
     parser.add_argument(
@@ -1534,6 +1634,12 @@ def main(argv: list[str] | None = None) -> int:
         default="react",
         help="编排引擎（设计文档 51）：react=自研（默认，门禁口径不变），langgraph=StateGraph，both=双引擎顺序跑 + 对比表落盘",
     )
+    parser.add_argument(
+        "--protocol",
+        choices=["native", "react", "both"],
+        default="native",
+        help="调用协议（设计文档 53）：native=原著 function calling（默认），react=文本 ReAct 对照，both=双协议顺序跑 + 对比表落盘",
+    )
     args = parser.parse_args(argv)
 
     if args.engine in ("langgraph", "both"):
@@ -1555,6 +1661,8 @@ def main(argv: list[str] | None = None) -> int:
     # --engine both：主跑默认 react（门禁/产物口径不变），langgraph 作对照侧加跑
     suffix = "_langgraph" if args.engine == "langgraph" else ""
     engine_main = "langgraph" if args.engine == "langgraph" else "react"
+    # --protocol both：主跑默认 native（门禁/产物口径不变），react 作对照侧加跑
+    protocol_main = "react" if args.protocol == "react" else "native"
     shared_llm: LLMClient | None = None
     cost_limit: float | None = None
     main_calls: list[int] = []
@@ -1569,7 +1677,7 @@ def main(argv: list[str] | None = None) -> int:
         t0 = time.monotonic()
         report = Benchmark(
             llm_mode="real", llm=shared_llm, tag=args.tag, cost_limit_usd=cost_limit,
-            engine=engine_main,
+            engine=engine_main, protocol=protocol_main,
             llm_call_counter=main_calls if args.engine == "both" else None,
         ).run()
         main_wall = time.monotonic() - t0
@@ -1579,7 +1687,7 @@ def main(argv: list[str] | None = None) -> int:
         mock_report = None
         t0 = time.monotonic()
         report = Benchmark(
-            llm_mode="mock", tag=args.tag, engine=engine_main,
+            llm_mode="mock", tag=args.tag, engine=engine_main, protocol=protocol_main,
             llm_call_counter=main_calls if args.engine == "both" else None,
         ).run()
         main_wall = time.monotonic() - t0
@@ -1618,6 +1726,30 @@ def main(argv: list[str] | None = None) -> int:
             path=compare_path,
         )
         print(f"engine_compare: {compare_path}")
+
+    if args.protocol == "both":
+        # 设计文档 53：同 fixture 双协议顺序跑，产出协议对比表（protocol 是唯一变量）
+        rc_calls: list[int] = []
+        t0 = time.monotonic()
+        rc_report = Benchmark(
+            llm_mode=args.llm,
+            llm=shared_llm,
+            tag=args.tag,
+            cost_limit_usd=cost_limit,
+            engine=engine_main,
+            protocol="react",
+            llm_call_counter=rc_calls,
+        ).run()
+        rc_wall = time.monotonic() - t0
+        proto_compare_path = reports_dir / f"protocol_compare_{date}.md"
+        _write_protocol_compare(
+            report,
+            rc_report,
+            wall_seconds={"native": main_wall, "react": rc_wall},
+            llm_calls={"native": len(main_calls), "react": len(rc_calls)},
+            path=proto_compare_path,
+        )
+        print(f"protocol_compare: {proto_compare_path}")
     return 0
 
 

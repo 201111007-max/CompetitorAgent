@@ -136,17 +136,21 @@ class CompetitorAnalysisAPI:
         vector_store: object | None = None,  # 设计文档 32：可注入向量层（测试/评测确定性 mock）
         tool_dispatcher: object | None = None,  # 历史兼容：已由 Lead 工具面取代，保留签名
         engine: str = "react",  # 设计文档 51：编排引擎 "react"（默认）| "langgraph"
+        protocol: str = "native",  # 设计文档 53 Q1：默认 native；"react" 为显式 fallback/对照基准
     ) -> None:
         # 配置注入：显式参数优先，其次 config，最后默认值
         cfg = config or load_config()
         if engine not in ("react", "langgraph"):
             raise ValueError(f"未知编排引擎: {engine!r}（可用: react | langgraph）")
+        if protocol not in ("native", "react"):
+            raise ValueError(f"未知协议: {protocol!r}（可用: native | react）")
         if engine == "langgraph":
             # 构造期检查（设计文档 51 §2.2）：未装 langgraph → 可读 ImportError
             from competitor_agent.agent.langgraph_engine import ensure_langgraph_available
 
             ensure_langgraph_available()
         self._engine = engine
+        self._protocol = protocol  # 设计文档 53：native|react 双协议并存
         max_iterations = max_iterations if max_iterations is not None else cfg.budget.max_iterations
         cost_limit = cost_limit if cost_limit is not None else cfg.budget.cost_limit_usd
         self._config = cfg
@@ -561,6 +565,7 @@ class CompetitorAnalysisAPI:
                 event_sink=self._event_sink,
                 obs_max_chars=self._config.collector.max_content_chars,
                 max_steps=6,
+                protocol="react",  # langgraph 引擎走文本节点（design 51/53）：保持 react 协议
             ).run_subagent(sub_task)
 
         # Lead 系统提示与自研路径同文本（工具描述 + Thought/Action 格式 + skills）
@@ -570,7 +575,9 @@ class CompetitorAnalysisAPI:
             exclude=("analyze_competitor",),
             extra_tools={"make_plan": build_make_plan_tool()},
         )
-        base_prompt = ReactAgent(llm=llm, dispatcher=prompt_dispatcher).build_system_prompt(
+        base_prompt = ReactAgent(
+            llm=llm, dispatcher=prompt_dispatcher, protocol="react"  # langgraph 节点按文本 ReAct 解析
+        ).build_system_prompt(
             instructions=build_lead_system_prompt()
         )
         plan, answer, transcript = run_langgraph(
@@ -624,6 +631,7 @@ class CompetitorAnalysisAPI:
                 event_sink=self._event_sink,
                 obs_max_chars=self._config.collector.max_content_chars,
                 max_steps=6,
+                protocol=self._protocol,
             )
 
         runner = DelegateRunner(
@@ -653,7 +661,7 @@ class CompetitorAnalysisAPI:
             exclude=("analyze_competitor",),
             extra_tools=extra_tools,
         )
-        agent = ReactAgent(llm=self._llm or LLMClient(), dispatcher=dispatcher)
+        agent = ReactAgent(llm=self._llm or LLMClient(), dispatcher=dispatcher, protocol=self._protocol)
         # Lead 步数上限：默认 ≈12；用户显式传 max_iterations 时以其为准（含 0，预算耗尽→
         # partial，设计文档 14 承诺）；diminishing_threshold=0 关闭"边际递减"启发
         # （ReAct 恒传 delta_tokens=0，否则第 3 步后必然误判预算耗尽）

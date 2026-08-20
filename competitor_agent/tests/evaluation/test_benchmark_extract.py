@@ -15,6 +15,7 @@ from competitor_agent.evaluation.benchmark import (
     extract_prediction,
     extract_strategy,
     real_trace,
+    _write_protocol_compare,
 )
 
 
@@ -235,3 +236,34 @@ class TestBenchmarkExtractor:
         obs = ext.fetch(InfoGap(field="pricing"), SourceContext(competitor_name="c", kwargs={"url": "https://b.com"}))
         assert obs.raw_text == "Pro $20/month"
         assert obs.evidence.url == "https://b.com"
+
+
+class TestWriteProtocolCompare:
+    """设计文档 53 §2.4：双协议对照表落盘（轻量单测，不跑真实 benchmark）。"""
+
+    @staticmethod
+    def _report(field_acc: float, hall: float) -> object:
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            accuracy=SimpleNamespace(field_accuracy=field_acc, hallucination_rate=hall),
+            strategy=SimpleNamespace(tool_selection_accuracy=0.9),
+            cost_usd=0.0,
+        )
+
+    def test_writes_comparison_table(self, tmp_path):
+        native = self._report(1.0, 0.0)
+        react = self._report(0.95, 0.01)
+        out = tmp_path / "protocol_compare.md"
+        _write_protocol_compare(
+            native, react,
+            wall_seconds={"native": 1.0, "react": 2.0},
+            llm_calls={"native": 3, "react": 4},
+            path=out,
+        )
+        text = out.read_text(encoding="utf-8")
+        assert "# 双协议对照（设计文档 53）" in text
+        assert "| 指标 | native | react |" in text
+        assert "1.0000" in text and "0.9500" in text
+        assert "native 恒 0" in text  # 解析失败回灌行的说明
+        assert "3" in text and "4" in text  # llm_calls 列

@@ -273,6 +273,7 @@ class TestMemoryContextInjection:
         agent = ReactAgent(
             llm=LLMClient(call_func=fake_llm),
             dispatcher=ToolDispatcher(tools={}),
+            protocol="react",  # 系统提示文本形状断言（设计文档 35）
         )
         loop = ReactLoop(
             agent,

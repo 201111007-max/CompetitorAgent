@@ -102,7 +102,7 @@ def _run_react(responses, dispatcher):
         seen.append(user_msgs)
         return responses[min(len(seen) - 1, len(responses) - 1)]
 
-    agent = ReactAgent(llm=LLMClient(call_func=fake_llm), dispatcher=dispatcher)
+    agent = ReactAgent(llm=LLMClient(call_func=fake_llm), dispatcher=dispatcher, protocol="react")
     answer = agent.run(agent.build_system_prompt(), "任务")
     observations = [m for msgs in seen for m in msgs]
     return answer, observations
@@ -149,7 +149,7 @@ class TestMultiToolReact:
 
     def test_system_prompt_lists_multi_tools(self):
         d = build_react_dispatcher(config=_config(), web_extract=lambda url: "")
-        agent = ReactAgent(llm=LLMClient(call_func=lambda m, mo: "Final Answer: x"), dispatcher=d)
+        agent = ReactAgent(llm=LLMClient(call_func=lambda m, mo: "Final Answer: x"), dispatcher=d, protocol="react")
         prompt = agent.build_system_prompt()
         assert "web_search" in prompt
         assert "github_stars" in prompt

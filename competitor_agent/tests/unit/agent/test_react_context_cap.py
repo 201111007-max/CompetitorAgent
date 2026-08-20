@@ -42,6 +42,7 @@ def _agent(scripted: ScriptedLLM, tool_output: str = "ok") -> ReactAgent:
     return ReactAgent(
         llm=LLMClient(call_func=scripted),
         dispatcher=ToolDispatcher({"echo": lambda v: tool_output}),
+        protocol="react",  # 上下文上限按文本形状断言（设计文档 46）
     )
 
 

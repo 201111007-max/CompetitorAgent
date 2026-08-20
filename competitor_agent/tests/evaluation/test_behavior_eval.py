@@ -76,7 +76,7 @@ class TestRecoveryEvaluator:
         assert len(default_recovery_scenarios()) >= 2
 
     def test_never_recovers_injected_llm(self):
-        def never(messages, model=None):
+        def never(messages, model=None, **kwargs):
             return 'Thought: 重试\n<action>ghost_tool({})</action>'
 
         rate, n = RecoveryEvaluator(llm=LLMClient(call_func=never)).run(
