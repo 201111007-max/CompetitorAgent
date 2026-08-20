@@ -43,9 +43,9 @@ def _build_llm(cfg: AppConfig) -> LLMClient:
     )
 
 
-def _make_api() -> CompetitorAnalysisAPI:
+def _make_api(engine: str = "react") -> CompetitorAnalysisAPI:
     cfg = load_config()
-    return CompetitorAnalysisAPI(llm=_build_llm(cfg), use_llm=True, config=cfg)
+    return CompetitorAnalysisAPI(llm=_build_llm(cfg), use_llm=True, config=cfg, engine=engine)
 
 
 def _print_report(report: CompetitorReport) -> None:
@@ -296,6 +296,7 @@ def build_parser() -> argparse.ArgumentParser:
     analyze_p.add_argument("task", nargs="+", help="竞品名或分析任务")
     analyze_p.add_argument("--out", dest="out_dir", default=None, help="报告输出目录")
     analyze_p.add_argument("--mode", default="team", choices=["single", "team"], help="[已废弃] 历史参数，统一走 Lead ReAct 编排（设计文档 49）")
+    analyze_p.add_argument("--engine", default="react", choices=["react", "langgraph"], help="编排引擎：react=自研 Lead ReAct（默认），langgraph=LangGraph StateGraph（设计文档 51，需 .[langgraph]）")
 
     history_p = sub.add_parser("history", help="查询历史分析记录")
     history_p.add_argument("--competitor", default=None, help="按竞品过滤")
@@ -315,6 +316,7 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark_p.add_argument("--llm", choices=["mock", "real"], default="mock", help="LLM 模式：mock=确定性评测（默认），real=真实 LLM（需配置 API Key）")
     benchmark_p.add_argument("--tag", default=None, help="按 tag 过滤用例子集（如 normal）控制成本")
     benchmark_p.add_argument("--cost-limit", type=float, default=None, dest="cost_limit", help="真实评测成本护栏上限（美元），缺省 real 模式 $1.0")
+    benchmark_p.add_argument("--engine", choices=["react", "langgraph", "both"], default=None, help="编排引擎对照（设计文档 51）：both=双引擎顺序跑并落盘对比表")
     return parser
 
 
@@ -322,7 +324,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     setup_logging(level=load_config().observability.log_level, log_dir=get_data_dir() / "logs")
-    api = _make_api()
+    engine = getattr(args, "engine", None) or "react"
+    if args.command == "benchmark":
+        # benchmark 的引擎选择（含 both 对照）透传 evaluation.benchmark，不进 facade 构造
+        engine = "react"
+    api = _make_api(engine=engine)
     llm = _build_llm(load_config())
     use_llm = True
 
@@ -362,6 +368,8 @@ def main(argv: list[str] | None = None) -> int:
             parts += ["--tag", args.tag]
         if args.cost_limit is not None:
             parts += ["--cost-limit", str(args.cost_limit)]
+        if args.engine:
+            parts += ["--engine", args.engine]
         _run_benchmark(" ".join(parts))
         return 0
 

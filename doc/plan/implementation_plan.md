@@ -918,7 +918,7 @@ dev:
 
 | 项 | 内容 | 优先级 | 状态 |
 |---|---|---|---|
-| **51 LangGraph 引擎对照** | M1：`agent/langgraph_engine/`（StateGraph：plan→Send fan-out 子 Agent→aggregate→report，复用 LLMClient/dispatcher/ReactAgent/react_report）；M2：api/cli `--engine` 路由 + 事件/记忆注入 + optional extra；M3：benchmark `--engine both` 对比表 + 实测报告 | 中 | 📄 设计完成（2026-08-20，待实施） |
+| **51 LangGraph 引擎对照** | M1：`agent/langgraph_engine/`（StateGraph：plan→Send fan-out 子 Agent→aggregate→report，复用 LLMClient/dispatcher/ReactAgent/react_report）；M2：api/cli `--engine` 路由 + 事件/记忆注入 + optional extra；M3：benchmark `--engine both` 对比表 + 实测报告 | 中 | ✅ 已实现（2026-08-20，M1-M3：引擎包 + engine 路由 + `--engine both` 对照表；mock 对照 field_accuracy/hallucination/tool_selection 双引擎一致，llm_calls 269→231） |
 
 ## 24. 第九轮待办（RAG 深化：记忆召回向量化 + 可用性治理 + 检索对照，设计文档 52）
 
