@@ -931,3 +931,42 @@ dev:
 | 项 | 内容 | 优先级 | 状态 |
 |---|---|---|---|
 | **52 RAG 深化** | M1：`SessionArchive`/`FourLayerMemory`/`api` 注入可选 VectorStore（独立 collection `session_summaries`），`recent_context` 向量优先、异常/不可用回退词袋逐位不变；M2：`rag-warmup` CLI 预缓存 + 启动向量层状态日志；M3：`evaluation/retrieval_compare.py` 词袋/向量/hybrid recall@5 对照表 | 中 | 📄 设计完成（2026-08-20，待实施） |
+
+## 25. 第九轮待办（原生 Function Calling：双协议并存 + 默认 tool_calls，设计文档 53）
+
+> 状态背景：2026-08-20 岗位差距分析标出「文本 ReAct 解析，非原生 tool-calling API」，经代码核实
+> 属实（`LLMClient.complete` 只回纯文本，从不传 `tools=`）。用户拍板四决策：双协议并存 +
+> `protocol="native"` 默认（文本 ReAct 保留 fallback/对照）；Lead 主循环 + 子 Agent 一并覆盖；
+> mock 双形态（按 `tools=` kwarg 出形状）；模型不支持 tools 直接报错不自动降级。
+> 设计文档见 `doc/plan/issue_designs/53_native_tool_calling_design.md`（2026-08-20，待实施）。
+
+| 项 | 内容 | 优先级 | 状态 |
+|---|---|---|---|
+| **53 原生 tool-calling** | M1：`LLMClient.complete_with_tools` + ToolCallReply + TOOL_SPECS→OpenAI tools 转换器；M2：ReactAgent/ReactLoop native 循环 + tool_choice plan-first + 压缩适配；M3：api/cli/subagent 透传 + mock 双形态 + 测试迁移（最大阶段）；M4：benchmark `--protocol both` 对比表 + HARNESS_VERSION 0.8.0 | 中 | 📄 设计完成（2026-08-20，待实施） |
+
+## 26. 第九轮待办（Langfuse 式链路追踪：自研 trace 总线 + 可选 exporter，设计文档 54）
+
+> 状态背景：2026-08-20 岗位差距分析标出「无 OpenTelemetry/Langfuse 式链路追踪」，经代码核实属实
+> （结构化日志/成本埋点已有，但无 trace→span 树、工具无结构化埋点、无 trace 聚合视图）。
+> 用户拍板三决策：自研轻量 trace 为底座 + Langfuse 作可选 exporter（三环境变量齐全才启用）；
+> span 三档全要（llm.call/tool.call/子 Agent 嵌套）；查看方式 = CLI 文本瀑布图 + JSONL 落盘。
+> 历史包袱：问题 19 曾删 langfuse_* 假配置——本次配置字段全有真消费方。
+> 设计文档见 `doc/plan/issue_designs/54_langfuse_tracing_design.md`（2026-08-20，待实施）。
+
+| 项 | 内容 | 优先级 | 状态 |
+|---|---|---|---|
+| **54 Langfuse 链路追踪** | M1：`observability/tracer.py` 总线 + JsonlSink + llm/tool 两档埋点；M2：delegate 跨线程 parent 传递 + 子 Agent span + `trace show/list` CLI 瀑布图；M3：Langfuse exporter（可选 extra + 环境变量启用 + mock 单测） | 中 | 📄 设计完成（2026-08-20，待实施） |
+
+## 27. 第九轮待办（部署/LLMOps：Dockerfile 双 target + compose + benchmark 门禁化，设计文档 55）
+
+> 状态背景：2026-08-20 岗位差距分析标出「无 Dockerfile、无 CI 产物」，经代码核实说错一半——
+> CI 已有（ruff/mypy/pytest 矩阵 + benchmark 报告 artifact），真正缺口是 ① 无 Docker 化与
+> 部署文档、② benchmark 门禁不执法（`main()` 恒 return 0，质量退化 CI 不变红）。
+> 用户拍板四决策：范围 = Dockerfile + compose + 部署文档 + CI 补强（主体不动）；multi-stage
+> 双 target（full 含 rag / slim 仅 web）；compose 含可选 observability profile（Langfuse +
+> Postgres 联动 doc 54）；benchmark `--gate` 门禁化 + docker build 验证 job，不推镜像。
+> 设计文档见 `doc/plan/issue_designs/55_deployment_llmops_design.md`（2026-08-20，待实施）。
+
+| 项 | 内容 | 优先级 | 状态 |
+|---|---|---|---|
+| **55 部署/LLMOps** | M1：benchmark `--gate` + 单测 + CI 门禁接线；M2：Dockerfile multi-stage 双 target + .dockerignore + CI docker job；M3：docker-compose（observability profile 带 Langfuse+Postgres）+ .env.example + deployment.md | 中 | 📄 设计完成（2026-08-20，待实施） |
