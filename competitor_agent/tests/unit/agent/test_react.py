@@ -113,6 +113,7 @@ class TestReactAgent:
         return ReactAgent(
             llm=LLMClient(call_func=fake_llm),
             dispatcher=tools or ToolDispatcher({"web_extract": lambda url: "fetched"}),
+            protocol="react",  # 文本 ReAct 形状断言（设计文档 53 react 回归基线）
         )
 
     def test_run_reaches_final_answer(self):
@@ -159,6 +160,7 @@ class TestReactLoop:
         agent = ReactAgent(
             llm=LLMClient(call_func=lambda messages, model: "Final Answer: 结论"),
             dispatcher=ToolDispatcher(),
+            protocol="react",
         )
         loop = ReactLoop(agent, event_sink=sink)
         answer = loop.run("分析 cursor")
@@ -241,7 +243,7 @@ class TestReActFeedback:
             seen.append(user_msgs)
             return responses[min(len(seen) - 1, len(responses) - 1)]
 
-        agent = ReactAgent(llm=LLMClient(call_func=fake_llm), dispatcher=tools)
+        agent = ReactAgent(llm=LLMClient(call_func=fake_llm), dispatcher=tools, protocol="react")
         return agent.run(agent.build_system_prompt(), "任务"), seen
 
     @staticmethod
@@ -325,7 +327,7 @@ class TestReActRecovery:
                 return 'Thought: 修正参数\n<action>web_extract({"url": "https://x.com"})</action>'
             return "Final Answer: 完成"
 
-        agent = ReactAgent(llm=LLMClient(call_func=fake_llm), dispatcher=d)
+        agent = ReactAgent(llm=LLMClient(call_func=fake_llm), dispatcher=d, protocol="react")
         answer = agent.run(agent.build_system_prompt(), "任务")
         assert answer == "完成"
         assert calls == ["https://x.com"]

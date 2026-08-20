@@ -11,6 +11,8 @@
 """
 from __future__ import annotations
 
+import json
+import re
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -124,23 +126,61 @@ class ScriptedLLM:
         self._scenario = scenario
         self._round = 0
 
-    def complete(self, messages: list[dict[str, str]], model: str | None = None) -> str:
+    def complete(self, messages: list[dict[str, str]], model: str | None = None, **kwargs: Any) -> Any:
         self._round += 1
         if self._round == 1:
-            return self._scenario.first_plan
-        if self._round == 2:
-            return self._scenario.first_error
+            text = self._scenario.first_plan
+        elif self._round == 2:
+            text = self._scenario.first_error
         # 第 3 轮起：读最近一条 Observation（react_agent 把 task 追加在 Observation 之后，
         # 故按内容前缀定位），含设计文档 38 错误反馈关键词即输出合法调用（自恢复）
-        if self._round == 3 and any(m in self._last_observation(messages) for m in _ERROR_MARKERS):
-            return self._scenario.correction
-        return self._scenario.final_answer
+        elif self._round == 3 and any(m in self._last_observation(messages) for m in _ERROR_MARKERS):
+            text = self._scenario.correction
+        else:
+            text = self._scenario.final_answer
+        if kwargs.get("tools"):
+            return self._to_tool_reply(text)
+        return text
+
+    @staticmethod
+    def _to_tool_reply(text: str):
+        """把脚本化文本映射为 native 等价物：兼容 plan-first（Action:/Args:）与 <action> 两种格式。"""
+        from competitor_agent.llm.client import ToolCall, ToolCallReply
+
+        if text.startswith("Final Answer: "):
+            return ToolCallReply(content=text[len("Final Answer: "):])
+        name: str | None = None
+        args_str: str | None = None
+        tag = re.search(r"<action>(\w+)\((.*?)\)</action>", text, re.DOTALL)
+        if tag:
+            name, args_str = tag.group(1), tag.group(2)
+        else:
+            action = re.search(r"Action:\s*(\w+)", text)
+            if action:
+                name = action.group(1)
+                args_m = re.search(r"Args:\s*(\{.*\})", text, re.DOTALL)
+                args_str = args_m.group(1) if args_m else None
+        if not name:
+            return ToolCallReply(content=text)
+        arguments: dict[str, Any] = {}
+        if args_str is not None and args_str.strip():
+            try:
+                parsed = json.loads(args_str)
+                if isinstance(parsed, dict):
+                    arguments = parsed
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return ToolCallReply(
+            tool_calls=[ToolCall(id="call_0", name=name, arguments=arguments)]
+        )
 
     @staticmethod
     def _last_observation(messages: list[dict[str, str]]) -> str:
         for message in reversed(messages):
-            if message.get("role") == "user" and "Observation" in message.get("content", ""):
-                return message.get("content", "")
+            role = message.get("role")
+            content = str(message.get("content", ""))
+            if role == "tool" or (role == "user" and "Observation" in content):
+                return content
         return ""
 
 

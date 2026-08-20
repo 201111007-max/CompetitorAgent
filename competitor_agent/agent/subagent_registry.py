@@ -112,6 +112,7 @@ def build_subagent(
     event_sink: Callable[..., None] | None = None,
     obs_max_chars: int | None = None,
     max_steps: int = 6,
+    protocol: str = "native",  # 设计文档 53 Q2：子 Agent 一并覆盖（默认 native 与 Lead 对齐）
 ):
     """构造一个维度子 Agent（独立 ReactAgent + ReactLoop）。
 
@@ -136,7 +137,7 @@ def build_subagent(
         web_extract=web_extract,
         extra_tools=extra_tools,
     )
-    agent = ReactAgent(llm=llm, dispatcher=dispatcher)
+    agent = ReactAgent(llm=llm, dispatcher=dispatcher, protocol=protocol)
     system_prompt = build_subagent_system_prompt(name)
     return ReactLoop(
         agent,

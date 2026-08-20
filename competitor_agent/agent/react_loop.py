@@ -63,8 +63,11 @@ class ReactLoop:
         system_prompt_override: str | None = None,
         plan_first: bool = False,
         plan_sink: Callable[[str], None] | None = None,
+        protocol: str | None = None,  # 设计文档 53：native|react；None 用 agent 自身配置
     ) -> None:
         self._agent = agent
+        if protocol is not None:
+            agent.protocol = protocol
         self._max_steps = max_steps
         self._event_sink = event_sink
         self._session_id = session_id

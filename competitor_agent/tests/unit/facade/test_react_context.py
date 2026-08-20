@@ -33,14 +33,14 @@ class Recorder:
 
 
 def _react_loop(**kwargs) -> ReactLoop:
-    agent = ReactAgent(llm=LLMClient(call_func=Recorder(["Final Answer: 结论"])), dispatcher=ToolDispatcher())
+    agent = ReactAgent(llm=LLMClient(call_func=Recorder(["Final Answer: 结论"])), dispatcher=ToolDispatcher(), protocol="react")
     return ReactLoop(agent, **kwargs)
 
 
 class TestSharedContext:
     def test_injects_memory_and_rag(self):
         rec = Recorder(["Final Answer: 结论"])
-        agent = ReactAgent(llm=LLMClient(call_func=rec), dispatcher=ToolDispatcher())
+        agent = ReactAgent(llm=LLMClient(call_func=rec), dispatcher=ToolDispatcher(), protocol="react")
         loop = ReactLoop(
             agent,
             memory_context_fn=lambda task: "历史经验：cursor pricing 用官网源有效",
@@ -53,7 +53,7 @@ class TestSharedContext:
 
     def test_no_injection_when_fns_none(self):
         rec = Recorder(["Final Answer: 结论"])
-        agent = ReactAgent(llm=LLMClient(call_func=rec), dispatcher=ToolDispatcher())
+        agent = ReactAgent(llm=LLMClient(call_func=rec), dispatcher=ToolDispatcher(), protocol="react")
         loop = ReactLoop(agent)
         loop.run("分析 cursor")
         assert "历史经验" not in rec.systems[0]
@@ -70,7 +70,7 @@ class TestSharedContext:
     def test_budget_exhausted_interrupts(self):
         budget = IterationBudget(max_iterations=1, cost_limit=1.0)
         rec = Recorder(["Thought: 需要继续", "Final Answer: 不应到达"])
-        agent = ReactAgent(llm=LLMClient(call_func=rec), dispatcher=ToolDispatcher())
+        agent = ReactAgent(llm=LLMClient(call_func=rec), dispatcher=ToolDispatcher(), protocol="react")
         loop = ReactLoop(agent, budget=budget)
         result = loop.run_with_result("分析 cursor")
         assert result.budget_exhausted is True
@@ -79,7 +79,7 @@ class TestSharedContext:
 
     def test_cancel_interrupts(self):
         rec = Recorder(["Thought: 需要继续", "Final Answer: 不应到达"])
-        agent = ReactAgent(llm=LLMClient(call_func=rec), dispatcher=ToolDispatcher())
+        agent = ReactAgent(llm=LLMClient(call_func=rec), dispatcher=ToolDispatcher(), protocol="react")
         loop = ReactLoop(agent, session_id="react_cancel_sid")
         set_cancel("react_cancel_sid")
         try:
@@ -131,7 +131,12 @@ def _api(llm):
             return llm.complete(messages)
         return llm(messages, model)
 
-    return CompetitorAnalysisAPI(extractor=FakeExtractor(), llm=LLMClient(call_func=call), use_llm=True)
+    return CompetitorAnalysisAPI(
+        extractor=FakeExtractor(),
+        llm=LLMClient(call_func=call),
+        use_llm=True,
+        protocol="react",  # React 文本形状断言（设计文档 53 react 回归基线）
+    )
 
 
 class TestAnalyzeReactReport:

@@ -200,7 +200,10 @@ class TestRunResume:
 
 class TestMain:
     def _patch_api(self, monkeypatch, api=None):
-        monkeypatch.setattr("competitor_agent.cli._make_api", lambda engine="react": api or StubAPI())
+        monkeypatch.setattr(
+            "competitor_agent.cli._make_api",
+            lambda engine="react", protocol="native": api or StubAPI(),
+        )
         # main() 以 kwargs 构造 LLMClient；mock 需接受任意参数并返回确定性 LLM
         monkeypatch.setattr(
             "competitor_agent.cli.LLMClient", lambda *a, **kw: _mock_llm()
@@ -263,6 +266,15 @@ class TestMain:
 
         assert main(["benchmark", "--llm", "real", "--tag", "normal", "--cost-limit", "0.5"]) == 0
         assert calls == ["--llm real --tag normal --cost-limit 0.5"]
+
+    def test_main_benchmark_protocol_passthrough(self, monkeypatch):
+        """--protocol 应透传给 _run_benchmark（设计文档 53 协议对照）。"""
+        calls = []
+        monkeypatch.setattr("competitor_agent.cli._run_benchmark", lambda a: calls.append(a))
+        from competitor_agent.cli import main
+
+        assert main(["benchmark", "--protocol", "both"]) == 0
+        assert calls == ["--protocol both"]
 
 
 class TestCompareRepl:

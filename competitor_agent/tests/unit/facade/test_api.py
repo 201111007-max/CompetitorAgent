@@ -109,6 +109,7 @@ class TestAnalyzeReact:
             llm=LLMClient(call_func=fake_llm),
             use_llm=True,
             config=_OFFLINE_CFG,
+            protocol="react",  # 文本假 LLM（make_plan Action/Args）按 react 协议回放
         )
         result = api.analyze_react("分析 Cursor")
         assert "定价" in result
