@@ -58,22 +58,63 @@ def hash_embed(texts: list[str], dim: int = 256) -> list[list[float]]:
     return out
 
 
-def _semantic_embedder_cached(model_name: str) -> bool:
-    """模型权重是否已缓存（探测本地缓存，不触发网络下载）。
-
-    仅探测权重文件（safetensors/bin）——config/tokenizer 已缓存而权重缺失
-    （如下载中断）时仍视为不可用，避免 SentenceTransformer 构造时触发网络重试。
-    """
+def _cached_weight_path(model_name: str) -> str | None:
+    """本地缓存的模型权重文件路径（探测本地缓存，不触发网络下载）；无则 None。"""
     try:
         from huggingface_hub import try_to_load_from_cache
 
         for filename in ("model.safetensors", "pytorch_model.bin", "model.bin"):
             path = try_to_load_from_cache(model_name, filename)
             if isinstance(path, (str, Path)) and Path(path).exists():
-                return True
-        return False
-    except Exception:  # noqa: BLE001 - 缓存探测失败视为不可用，避免触发网络重试
-        return False
+                return str(path)
+        return None
+    except Exception:  # noqa: BLE001 - 缓存探测失败视为无缓存，避免触发网络重试
+        return None
+
+
+def _semantic_embedder_cached(model_name: str) -> bool:
+    """模型权重是否已缓存（探测本地缓存，不触发网络下载）。
+
+    仅探测权重文件（safetensors/bin）——config/tokenizer 已缓存而权重缺失
+    （如下载中断）时仍视为不可用，避免 SentenceTransformer 构造时触发网络重试。
+    """
+    return _cached_weight_path(model_name) is not None
+
+
+def warmup_status(model_name: str = "BAAI/bge-small-zh-v1.5") -> dict[str, Any]:
+    """显式下载/校验嵌入模型缓存，返回向量层状态（rag-warmup CLI 用，设计文档 52 §2.2）。
+
+    模型未缓存时构造 SentenceTransformer 触网下载——这是全库唯一触网路径，
+    须用户显式执行 rag-warmup。返回 dict：
+    model_name / available / downloaded / model_path / chromadb_version / error。
+    """
+    status: dict[str, Any] = {
+        "model_name": model_name,
+        "available": False,
+        "downloaded": False,
+        "model_path": None,
+        "chromadb_version": None,
+        "error": None,
+    }
+    try:
+        import chromadb
+
+        status["chromadb_version"] = getattr(chromadb, "__version__", "unknown")
+    except Exception:  # noqa: BLE001 - chromadb 未安装：状态如实反映为 None
+        logger.debug("chromadb 未安装，rag-warmup 状态不含版本号")
+    if not _semantic_embedder_cached(model_name):
+        try:
+            from sentence_transformers import SentenceTransformer
+
+            SentenceTransformer(model_name)  # 触网下载 + 加载校验
+            status["downloaded"] = True
+        except Exception as exc:  # noqa: BLE001 - 下载失败如实上报，不抛断 CLI
+            status["error"] = str(exc)
+            return status
+    if _semantic_embedder_cached(model_name):
+        status["available"] = True
+        status["model_path"] = _cached_weight_path(model_name)
+    return status
 
 
 class VectorStore:
@@ -103,6 +144,11 @@ class VectorStore:
         self._resolved = False
 
     # ---- 可用性 ----
+    @property
+    def model_name(self) -> str:
+        """嵌入模型名（启动状态日志用，设计文档 52 §2.2）。"""
+        return self._model_name
+
     def is_available(self) -> bool:
         if not self._resolved:
             self._resolved = True

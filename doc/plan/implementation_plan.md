@@ -927,11 +927,11 @@ dev:
 > `SessionArchive._rank_entries` 仍为纯词袋，且 embedding 静默降级无感知。用户拍板不引入 FAISS
 > （chromadb 自带 HNSW，规模无瓶颈），记忆召回复用现有 VectorStore 接入点、词袋保留降级。
 > 设计文档见 `doc/plan/issue_designs/52_rag_depth_design.md`（2026-08-20）。
-> **M1 已实现（2026-08-20，见 §24.1）**；M2/M3 待实施。
+> **M1 已实现（2026-08-20，见 §24.1）；M2 已实现（2026-08-20，见 §24.2）**；M3 待实施。
 
 | 项 | 内容 | 优先级 | 状态 |
 |---|---|---|---|
-| **52 RAG 深化** | M1：`SessionArchive`/`FourLayerMemory`/`api` 注入可选 VectorStore（独立 collection `session_summaries`），`recent_context` 向量优先、异常/不可用回退词袋逐位不变；M2：`rag-warmup` CLI 预缓存 + 启动向量层状态日志；M3：`evaluation/retrieval_compare.py` 词袋/向量/hybrid recall@5 对照表 | 中 | 🔧 M1 已实现（2026-08-20），M2/M3 待实施 |
+| **52 RAG 深化** | M1：`SessionArchive`/`FourLayerMemory`/`api` 注入可选 VectorStore（独立 collection `session_summaries`），`recent_context` 向量优先、异常/不可用回退词袋逐位不变；M2：`rag-warmup` CLI 预缓存 + 启动向量层状态日志；M3：`evaluation/retrieval_compare.py` 词袋/向量/hybrid recall@5 对照表 | 中 | 🔧 M1+M2 已实现（2026-08-20），M3 待实施 |
 
 ### 24.1 52 M1 完成说明（2026-08-20）
 
@@ -954,6 +954,25 @@ dev:
 - **回归**：memory+knowledge_base+facade+接口/集成/行为评测相关 161 条全绿（`test_rag_integration.py`
   2 条失败经 git stash 复核为远程既有问题，与本改动无关）；ruff 通过；mypy 无新增错误
   （`vector_store.py:129` unused-ignore 为 HEAD 既有）。
+
+### 24.2 52 M2 完成说明（2026-08-20）
+
+- **`knowledge_base/vector_store.py`**：新增 `warmup_status(model_name)`——显式下载/校验嵌入模型
+  缓存并返回状态 dict（model_name/available/downloaded/model_path/chromadb_version/error），
+  未缓存时构造 `SentenceTransformer` 触网下载（**全库唯一触网路径**，须用户显式执行 rag-warmup）；
+  缓存探测逻辑抽出 `_cached_weight_path`（`_semantic_embedder_cached` 复用，语义不变）；
+  `VectorStore` 新增 `model_name` 只读属性（状态日志用）。
+- **`cli.py`**：新增 `rag-warmup` 子命令（`_run_rag_warmup`，~25 行）——打印嵌入模型/chromadb
+  版本/模型缓存路径/available|degraded 状态，available 退出码 0、degraded 或下载失败 1；
+  在 `main()` 中于 `_make_api` 之前短路（无需 LLM Key / API 构造）。
+- **`facade/api.py`**：enable_rag 块末尾打一行启动状态日志
+  `向量层状态: available(<model>) / degraded(模型 <model> 未缓存，降级词袋)`，消除静默降级。
+- **测试**：新增 `tests/unit/facade/test_rag_warmup.py` 9 条（设计文档原写 `tests/unit/cli/`，
+  按本仓惯例 CLI 测试在 `tests/unit/facade/`）——warmup_status 三态（下载路径用假
+  `sentence_transformers` 模块注入 `sys.modules`，零网络）、CLI 输出与退出码、
+  不构造 API 短路断言、api 启动日志 available/degraded 各一条（注入 callable / 未缓存模型名）。
+- **手动验证**：`python -m competitor_agent.cli rag-warmup` 在本机（模型未缓存）真实触网下载
+  bge-small-zh-v1.5（沙箱网络超时属环境限制，触网行为本身符合设计预期）。
 
 ## 25. 第九轮待办（原生 Function Calling：双协议并存 + 默认 tool_calls，设计文档 53）
 

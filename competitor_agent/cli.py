@@ -213,6 +213,29 @@ def _run_benchmark(args: str) -> None:
         raise SystemExit(exit_code)
 
 
+def _run_rag_warmup() -> int:
+    """rag-warmup：显式下载/校验嵌入模型缓存并打印向量层状态（设计文档 52 §2.2）。
+
+    唯一触网路径，须用户显式执行；available → 0，degraded/下载失败 → 1。
+    """
+    from competitor_agent.knowledge_base.vector_store import warmup_status
+
+    status = warmup_status()
+    print(f"嵌入模型: {status['model_name']}")
+    print(f"chromadb 版本: {status['chromadb_version'] or '未安装'}")
+    if status["model_path"]:
+        print(f"模型缓存: {status['model_path']}")
+    if status["downloaded"]:
+        print("模型已下载完成并校验可用。")
+    if status["available"]:
+        print("向量层状态: available（语义嵌入就绪）")
+        return 0
+    print("向量层状态: degraded（模型未缓存，记忆召回/检索降级词袋）")
+    if status["error"]:
+        print(f"模型下载失败: {status['error']}")
+    return 1
+
+
 def _run_help(args: str) -> None:
     from competitor_agent.core.command_registry import COMMAND_REGISTRY
 
@@ -317,6 +340,8 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark_p.add_argument("--tag", default=None, help="按 tag 过滤用例子集（如 normal）控制成本")
     benchmark_p.add_argument("--cost-limit", type=float, default=None, dest="cost_limit", help="真实评测成本护栏上限（美元），缺省 real 模式 $1.0")
     benchmark_p.add_argument("--engine", choices=["react", "langgraph", "both"], default=None, help="编排引擎对照（设计文档 51）：both=双引擎顺序跑并落盘对比表")
+
+    sub.add_parser("rag-warmup", help="预缓存向量嵌入模型并打印向量层状态（设计文档 52 M2；唯一触网路径，需显式执行）")
     return parser
 
 
@@ -328,6 +353,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "benchmark":
         # benchmark 的引擎选择（含 both 对照）透传 evaluation.benchmark，不进 facade 构造
         engine = "react"
+    if args.command == "rag-warmup":
+        # 无需 LLM/API 构造，在 _make_api 之前短路（设计文档 52 §2.2）
+        return _run_rag_warmup()
     api = _make_api(engine=engine)
     llm = _build_llm(load_config())
     use_llm = True
