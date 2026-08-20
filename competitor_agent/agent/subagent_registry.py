@@ -113,6 +113,7 @@ def build_subagent(
     obs_max_chars: int | None = None,
     max_steps: int = 6,
     protocol: str = "native",  # 设计文档 53 Q2：子 Agent 一并覆盖（默认 native 与 Lead 对齐）
+    tracer: Any = None,  # 设计文档 54：子 Agent tool.call span（透传 ToolDispatcher）
 ):
     """构造一个维度子 Agent（独立 ReactAgent + ReactLoop）。
 
@@ -136,7 +137,9 @@ def build_subagent(
         config=config,
         web_extract=web_extract,
         extra_tools=extra_tools,
+        tracer=tracer,  # 设计文档 54：子 Agent tool.call span
     )
+    # 设计文档 54：子 Agent LLM 复用 Lead 同实例（若其带 tracer 则有 generation span）
     agent = ReactAgent(llm=llm, dispatcher=dispatcher, protocol=protocol)
     system_prompt = build_subagent_system_prompt(name)
     return ReactLoop(

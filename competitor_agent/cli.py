@@ -33,6 +33,8 @@ PROMPT = "competitor> "
 
 def _build_llm(cfg: AppConfig) -> LLMClient:
     """按 LLMConfig 构造带重试/fallback/超时的 LLMClient（设计文档 36/46）"""
+    from competitor_agent.observability.tracer import get_tracer
+
     return LLMClient(
         model=cfg.llm.model,
         base_url=cfg.llm.api_base_url,
@@ -40,6 +42,7 @@ def _build_llm(cfg: AppConfig) -> LLMClient:
         timeout=cfg.llm.timeout,
         max_retries=cfg.llm.max_retries,
         pricing_per_1k=cfg.llm.pricing_per_1k,
+        tracer=get_tracer(),  # 设计文档 54：generation span（LLM 调用挂到当前 trace）
     )
 
 
@@ -238,6 +241,41 @@ def _run_rag_warmup() -> int:
     return 1
 
 
+def _run_trace(action: str, sid: str | None) -> int:
+    """trace list / trace show <sid>：链路追踪查看器（设计文档 54 Q3）。"""
+    from competitor_agent.observability import tracer as T
+
+    if action == "list":
+        sums = T.list_summaries()
+        if not sums:
+            print("（暂无 trace 记录；先 analyze 一次生成 <data_dir>/traces）")
+            return 0
+        header = f"{'TRACE_ID':<26}{'NAME':<12}{'STATUS':<9}{'SPANS':>6}{'TOKENS':>8}{'$COST':>10}  TASK"
+        print(header)
+        for s in sums:
+            cost = float(s.get("total_cost_usd") or 0.0)
+            tok = int(s.get("total_tokens") or 0)
+            spans = int(s.get("span_count") or 0)
+            tid = str(s.get("trace_id") or "")
+            task = str(s.get("input_brief") or "")[:40]
+            print(f"{tid[:26]:<26}{str(s.get('name') or ''):<12}{str(s.get('status') or ''):<9}"
+                  f"{spans:>6}{tok:>8}{cost:>10.4f}  {task}")
+        return 0
+
+    if not sid:
+        print("用法: trace show <session_id>")
+        return 0
+    spans = T.load_trace(sid)
+    if not spans:
+        print(f"（trace {sid} 无记录——先 analyze 一次再查看；或检查 trace_id 是否即 session_id）")
+        return 0
+    print(T.render_waterfall(spans))
+    total_cost = sum(float(r.get("cost_usd") or 0.0) for r in spans if r.get("kind") == "llm")
+    total_tokens = sum(int(r.get("total_tokens") or 0) for r in spans if r.get("kind") == "llm")
+    print(f"聚合：{len(spans)} 条 span | {total_tokens} tokens | ${total_cost:.4f}")
+    return 0
+
+
 def _run_help(args: str) -> None:
     from competitor_agent.core.command_registry import COMMAND_REGISTRY
 
@@ -346,6 +384,10 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark_p.add_argument("--protocol", choices=["native", "react", "both"], default=None, help="调用协议（设计文档 53）：native=默认；both=双协议同 fixture 顺序跑并落盘对比表")
 
     sub.add_parser("rag-warmup", help="预缓存向量嵌入模型并打印向量层状态（设计文档 52 M2；唯一触网路径，需显式执行）")
+
+    trace_p = sub.add_parser("trace", help="查看链路追踪（设计文档 54）：list=最近 trace 列表；show <sid>=文本瀑布图")
+    trace_p.add_argument("action", nargs="?", choices=["list", "show"], default="list")
+    trace_p.add_argument("sid", nargs="?", default=None, help="trace_id（通常即 session_id）")
     return parser
 
 
@@ -364,6 +406,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "rag-warmup":
         # 无需 LLM/API 构造，在 _make_api 之前短路（设计文档 52 §2.2）
         return _run_rag_warmup()
+    if args.command == "trace":
+        # 链路追踪查看纯本地读 JSONL，无需构造 API/LLM（截图展示用）
+        return _run_trace(args.action or "list", args.sid)
     api = _make_api(engine=engine, protocol=protocol)
     llm = _build_llm(load_config())
     use_llm = True
@@ -417,4 +462,8 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    from competitor_agent.observability.langfuse_exporter import flush_langfuse
+
+    _exit_code = main()
+    flush_langfuse()  # 进程退出前尽力排空 Langfuse 异步上报队列（可选 exporter）
+    raise SystemExit(_exit_code)

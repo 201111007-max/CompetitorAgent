@@ -133,9 +133,11 @@ class LLMClient:
         max_retries: int = 3,
         backoff: float = 1.0,
         pricing_per_1k: dict[str, float] | None = None,
+        tracer: Any = None,  # 设计文档 54：链路追踪 generation hook（None 跳过）
     ) -> None:
         # call_func: (messages, **kwargs) -> str；默认走 openai SDK（惰性导入）
         self._call = call_func
+        self._tracer = tracer
         self._model = model
         self._fallback_models = list(fallback_models) if fallback_models else []
         self._timeout = timeout
@@ -445,6 +447,22 @@ class LLMClient:
             retried=retried,
             timed_out=timed_out,
         )
+        # 设计文档 54：generation span 挂到当前线程最近 span（数据同源 _log_call，
+        # 不落 prompt 全文/密钥）；无 tracer 或无活动 trace 时零埋点降级。
+        if self._tracer is not None:
+            try:
+                self._tracer.record_generation(
+                    model=final_model or self._model,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    elapsed_ms=elapsed_ms,
+                    cost_usd=cost_usd,
+                    attempts=attempts,
+                    retried=retried,
+                    timed_out=timed_out,
+                )
+            except Exception:  # noqa: BLE001 - trace 埋点失败不影响主流程
+                logger.debug("generation trace 埋点失败，跳过", exc_info=True)
 
     def complete_json(
         self,

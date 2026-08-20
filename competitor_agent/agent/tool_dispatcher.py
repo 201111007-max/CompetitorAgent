@@ -42,10 +42,12 @@ class ToolDispatcher:
         tools: dict[str, Callable[..., str]] | None = None,
         *,
         default_timeout: float | None = None,
+        tracer: Any = None,  # 设计文档 54：tool.call span（None 跳过）
     ) -> None:
         self._tools: dict[str, Callable[..., str]] = {}
         self._specs: dict[str, ToolSpec] = {}
         self._default_timeout = default_timeout
+        self._tracer = tracer
         for name, func in (tools or {}).items():
             self.register(name, func)
 
@@ -68,7 +70,22 @@ class ToolDispatcher:
 
         工具不存在抛 ValueError；参数不合 schema 抛 ToolArgumentError（可读原因）；
         超时返回可读文本（不悬挂循环）；执行异常原样冒泡由上层回灌。
+
+        设计文档 54：有 tracer 时整次分发包一层 ``tool.call`` span（挂当前线程最近
+        span 下）；并把 (trace_id, tool span id) 压入跨线程待领取上下文，供 delegate
+        这类后台执行工具在 worker 线程挂接子节点。
         """
+        tracer = self._tracer
+        if tracer is None:
+            return self._dispatch_impl(tool_name, args)
+        with tracer.span(
+            f"tool.{tool_name}", kind="tool", input_brief=str(args)[:120], args_brief=str(args)[:200]
+        ) as tool_span:
+            if tool_span is not None:
+                tracer.push_tool_context(tracer.current_trace_id(), tool_span["span_id"])
+            return self._dispatch_impl(tool_name, args)
+
+    def _dispatch_impl(self, tool_name: str, args: dict[str, Any] | None) -> str:
         args = args or {}
         spec = self._specs.get(tool_name)
         if spec is None:

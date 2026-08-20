@@ -99,6 +99,24 @@ class FreshnessConfig:
 class ObservabilityConfig:
     log_level: str = "INFO"
 
+    @property
+    def langfuse_enabled(self) -> bool:
+        """Langfuse 上报是否启用（设计文档 54 §2.3）。
+
+        派生属性：需 `LANGFUSE_HOST` + `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY`
+        三环境变量**齐全** 且 ``langfuse`` 包可导入 —— 任一不满足即为 False（NoOp
+        底座不受影响，启动不炸）。yaml 不落明文密钥，避免问题 19「假亮点」死字段。
+        """
+        if not (os.environ.get("LANGFUSE_HOST") and os.environ.get("LANGFUSE_PUBLIC_KEY")
+                and os.environ.get("LANGFUSE_SECRET_KEY")):
+            return False
+        try:
+            import importlib.util  # noqa: PLC0415 - 原地惰性探测
+
+            return importlib.util.find_spec("langfuse") is not None
+        except Exception:  # noqa: BLE001 - 探测失败保守视为未启用
+            return False
+
 
 @dataclass
 class LLMConfig:
