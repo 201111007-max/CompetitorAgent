@@ -926,11 +926,34 @@ dev:
 > 知识库 RAG（doc 32：chromadb + bge-small-zh + hybrid 融合）已是真 RAG，真正缺口是 L1 记忆召回
 > `SessionArchive._rank_entries` 仍为纯词袋，且 embedding 静默降级无感知。用户拍板不引入 FAISS
 > （chromadb 自带 HNSW，规模无瓶颈），记忆召回复用现有 VectorStore 接入点、词袋保留降级。
-> 设计文档见 `doc/plan/issue_designs/52_rag_depth_design.md`（2026-08-20，待实施）。
+> 设计文档见 `doc/plan/issue_designs/52_rag_depth_design.md`（2026-08-20）。
+> **M1 已实现（2026-08-20，见 §24.1）**；M2/M3 待实施。
 
 | 项 | 内容 | 优先级 | 状态 |
 |---|---|---|---|
-| **52 RAG 深化** | M1：`SessionArchive`/`FourLayerMemory`/`api` 注入可选 VectorStore（独立 collection `session_summaries`），`recent_context` 向量优先、异常/不可用回退词袋逐位不变；M2：`rag-warmup` CLI 预缓存 + 启动向量层状态日志；M3：`evaluation/retrieval_compare.py` 词袋/向量/hybrid recall@5 对照表 | 中 | 📄 设计完成（2026-08-20，待实施） |
+| **52 RAG 深化** | M1：`SessionArchive`/`FourLayerMemory`/`api` 注入可选 VectorStore（独立 collection `session_summaries`），`recent_context` 向量优先、异常/不可用回退词袋逐位不变；M2：`rag-warmup` CLI 预缓存 + 启动向量层状态日志；M3：`evaluation/retrieval_compare.py` 词袋/向量/hybrid recall@5 对照表 | 中 | 🔧 M1 已实现（2026-08-20），M2/M3 待实施 |
+
+### 24.1 52 M1 完成说明（2026-08-20）
+
+- **`memory/session_archive.py`**：`__init__` 加 `vector_store` 可选注入 + `attach_vector_store` 构造后接入；
+  `_sync_vectors(competitor)` 挂在 `_rebuild_context` 末尾（增量 `get_existing` upsert + `list_ids(where)` 剔除
+  老化/压缩条目，同事务）；`recent_context` 向量优先分支 `_vector_rank`（embed(query) → search(where=竞品过滤)
+  → 按距离排序，集合未覆盖条目按原序追加兜底），不可用/空集/任何异常回退 `_rank_entries` 词袋逐位不变。
+  条目 id = `{competitor}:{session_id 或 idx 索引}`，同 session_id 重复归档 upsert 覆盖（幂等）。
+- **`memory/four_layer_memory.py`**：`__init__` 加同名可选参数透传；新增 `data_dir` 属性与
+  `attach_vector_store`（facade 注入点）。
+- **`facade/api.py`**：enable_rag 块内 `isinstance(self._memory, FourLayerMemory)` 时构造
+  `VectorStore(collection_name="session_summaries", data_dir=memory.data_dir)` 注入；不注入/非 FourLayerMemory
+  = 完全现状（CLI/benchmark 默认路径不变）。
+- **`knowledge_base/vector_store.py`**（增量，设计文档原估零改动，实测需三个小方法）：`search` 加
+  `where` metadata 过滤参数；新增 `list_ids(where)` 与 `delete(ids)`（老化/压缩剔除用）。
+- **测试**：新增 `tests/unit/memory/test_session_archive_vectors.py` 12 条——向量语义召回（词面不重叠
+  同义条目顶到首位）、竞品 metadata 隔离、未同步条目原序兜底、不可用/异常回退与无注入逐位一致、
+  重复归档幂等（向量条数不增）、TTL 老化与压缩截断同步剔除、FourLayerMemory 透传/attach/data_dir、
+  无注入回归。mock 全部用注入 callable / 未缓存模型名，零触网。
+- **回归**：memory+knowledge_base+facade+接口/集成/行为评测相关 161 条全绿（`test_rag_integration.py`
+  2 条失败经 git stash 复核为远程既有问题，与本改动无关）；ruff 通过；mypy 无新增错误
+  （`vector_store.py:129` unused-ignore 为 HEAD 既有）。
 
 ## 25. 第九轮待办（原生 Function Calling：双协议并存 + 默认 tool_calls，设计文档 53）
 

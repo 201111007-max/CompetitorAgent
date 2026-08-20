@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from competitor_agent.interfaces.context import AnalysisSession, Skill
 from competitor_agent.interfaces.memory import IFourLayerMemory
@@ -19,6 +20,10 @@ from competitor_agent.memory.evolution_memory import EvolutionMemory
 from competitor_agent.memory.persistent_notes import PersistentNotes
 from competitor_agent.memory.session_archive import SessionArchive
 from competitor_agent.memory.skill_store import SkillStore
+from competitor_agent.secret_vault import get_data_dir
+
+if TYPE_CHECKING:
+    from competitor_agent.knowledge_base.vector_store import VectorStore
 
 logger = logging.getLogger("competitor_agent.memory.four_layer_memory")
 
@@ -31,11 +36,23 @@ class FourLayerMemory(IFourLayerMemory):
         data_dir: Path | str | None = None,
         session_ttl_days: int = 30,
         skills_max_per_competitor: int = 50,
+        vector_store: VectorStore | None = None,
     ) -> None:
-        self._sessions = SessionArchive(data_dir, ttl_days=session_ttl_days)
+        # 记忆数据根目录（供 facade 注入同根向量层，设计文档 52 §3.1）
+        self._data_dir = Path(data_dir) if data_dir else get_data_dir()
+        self._sessions = SessionArchive(data_dir, ttl_days=session_ttl_days, vector_store=vector_store)
         self._notes = PersistentNotes(data_dir)
         self._skills = SkillStore(data_dir, max_per_competitor=skills_max_per_competitor)
         self._evolution = EvolutionMemory(data_dir)
+
+    @property
+    def data_dir(self) -> Path:
+        """记忆数据根目录"""
+        return self._data_dir
+
+    def attach_vector_store(self, vector_store: VectorStore) -> None:
+        """构造后为 L1 会话归档接入向量召回（设计文档 52：facade enable_rag 时注入）。"""
+        self._sessions.attach_vector_store(vector_store)
 
     # ---- L1 会话归档 ----
     def archive_session(self, session: AnalysisSession) -> None:

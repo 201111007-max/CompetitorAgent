@@ -6,6 +6,8 @@
 - 老化：超过 ttl_days 的会话自动剔除（惰性清理）
 - 摘要压缩：compress() 超限滚动压缩 + recent_context() 相关度召回（设计文档 35 §3.2）。
   压缩只影响内部注入路径（session_summaries），不改动 list_sessions/get_history 的全文契约。
+- 向量召回（设计文档 52 §2.1）：可选注入 VectorStore（独立 collection），
+  recent_context 向量优先，不可用/异常回退词袋（行为与现状逐位一致）。
 """
 from __future__ import annotations
 
@@ -15,12 +17,15 @@ import time
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from competitor_agent.interfaces.context import AnalysisSession
 from competitor_agent.knowledge_base.competitor_store import tokenize
 from competitor_agent.memory.json_store import JsonStore, now_iso
 from competitor_agent.memory.session_summary import compress_archive
+
+if TYPE_CHECKING:
+    from competitor_agent.knowledge_base.vector_store import VectorStore
 
 logger = logging.getLogger("competitor_agent.memory.session_archive")
 
@@ -32,6 +37,7 @@ class SessionArchive:
         self,
         data_dir: Path | str | None = None,
         ttl_days: int = 30,
+        vector_store: VectorStore | None = None,
     ) -> None:
         self._store = JsonStore("session_archive", data_dir)
         # 压缩后的上下文视图（设计文档 35）：summary/session 条目，供 recent_context 召回
@@ -39,6 +45,12 @@ class SessionArchive:
         self._max_entries = 20
         self._keep_full = 5
         self._ttl_days = ttl_days
+        # 向量层（设计文档 52）：可选注入；None/不可用 → 纯词袋召回（现状）
+        self._vector_store = vector_store
+
+    def attach_vector_store(self, vector_store: VectorStore) -> None:
+        """构造后注入向量层（facade 在 enable_rag 时接入，设计文档 52 §3.1）。"""
+        self._vector_store = vector_store
 
     def archive(self, session: AnalysisSession) -> None:
         """归档一次会话；session_id 相同则覆盖（去重）"""
@@ -73,15 +85,16 @@ class SessionArchive:
     def recent_context(self, competitor: str, top_k: int = 5, query: str = "") -> list[str]:
         """按任务相关度召回可注入的记忆上下文（"摘要 + 最近相关会话"）。
 
-        query 非空时经词袋相关度召回（复用 knowledge_base 的分词/余弦层，
-        设计文档 32 向量层接入后由调用侧自动升级），否则取最近 top_k 条。
-        返回可直接拼入 prompt 的文本行列表。
+        query 非空时相关度召回：注入的向量层可用 → 语义召回（设计文档 52），
+        不可用/集合为空/任何异常 → 回退词袋 TF 余弦（行为与现状逐位一致）；
+        query 为空取最近 top_k 条。返回可直接拼入 prompt 的文本行列表。
         """
         entries = self._summary_store.get(competitor, [])
         if not isinstance(entries, list) or not entries:
             return []
         if query:
-            entries = _rank_entries(entries, query)
+            ranked = self._vector_rank(entries, competitor, query)
+            entries = ranked if ranked is not None else _rank_entries(entries, query)
         return [_format_entry(e) for e in entries[:top_k]]
 
     def retrieve(self, competitor: str, limit: int = 20) -> list[AnalysisSession]:
@@ -127,6 +140,82 @@ class SessionArchive:
         context = compress_archive(sessions, keep_full=self._keep_full, summarize_rest=True)
         self._summary_store.put(competitor, context[: self._max_entries])
         self._summary_store.save()
+        self._sync_vectors(competitor)
+
+    def _sync_vectors(self, competitor: str) -> None:
+        """向量同步（设计文档 52 §2.1）：增量 upsert 新条目 + 删除已老化/压缩剔除的条目。
+
+        与 _rebuild_context 同事务调用；任何异常静默降级（记忆召回保持词袋路径）。
+        老摘要经 get_existing 惰性 upsert，不做一次性强制回填。
+        """
+        vs = self._vector_store
+        if vs is None:
+            return
+        try:
+            if not vs.is_available():
+                return
+            entries = self._summary_store.get(competitor, [])
+            entries = entries if isinstance(entries, list) else []
+            ids = [_entry_id(competitor, e, i) for i, e in enumerate(entries)]
+            existing = vs.get_existing(ids)
+            new_ids = [eid for eid in ids if eid not in existing]
+            if new_ids:
+                texts = [_entry_text(entries[ids.index(eid)]) for eid in new_ids]
+                vs.upsert(
+                    new_ids,
+                    vs.embed(texts),
+                    [{"competitor": competitor}] * len(new_ids),
+                )
+            stale = vs.list_ids(where={"competitor": competitor}) - set(ids)
+            if stale:
+                vs.delete(sorted(stale))
+        except Exception:
+            logger.debug("记忆向量同步失败（%s），保持词袋召回", competitor, exc_info=True)
+
+    def _vector_rank(
+        self, entries: list[dict[str, Any]], competitor: str, query: str
+    ) -> list[dict[str, Any]] | None:
+        """向量语义召回：按 L2 距离升序返回条目；不可用/空集/异常 → None（回退词袋）。
+
+        向量集合未覆盖的条目（如刚注入尚未同步的老摘要）按原序追加兜底，
+        保证召回条数不缩水。
+        """
+        vs = self._vector_store
+        if vs is None:
+            return None
+        try:
+            if not vs.is_available():
+                return None
+            query_vec = vs.embed([query])[0]
+            hits = vs.search(query_vec, top_k=len(entries), where={"competitor": competitor})
+            if not hits:
+                return None
+            by_id = {_entry_id(competitor, e, i): e for i, e in enumerate(entries)}
+            ranked: list[dict[str, Any]] = []
+            seen: set[str] = set()
+            for eid, _dist in hits:
+                entry = by_id.get(eid)
+                if entry is not None and eid not in seen:
+                    seen.add(eid)
+                    ranked.append(entry)
+            for i, entry in enumerate(entries):
+                eid = _entry_id(competitor, entry, i)
+                if eid not in seen:
+                    ranked.append(entry)
+            return ranked
+        except Exception:
+            logger.debug("记忆向量召回失败，回退词袋", exc_info=True)
+            return None
+
+
+def _entry_id(competitor: str, entry: dict[str, Any], index: int) -> str:
+    """向量条目 id（设计文档 52 §2.1）：{competitor}:{session_id 或摘要索引}。
+
+    同 session_id 重复归档 → 同 id upsert 覆盖（幂等）；无 session_id 的条目
+    用索引兜底（视图按 created_at 降序，索引稳定）。
+    """
+    sid = str(entry.get("session_id", "") or f"idx{index}")
+    return f"{competitor}:{sid}"
 
 
 def _rank_entries(entries: list[dict[str, Any]], query: str) -> list[dict[str, Any]]:
