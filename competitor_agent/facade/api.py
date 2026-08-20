@@ -17,7 +17,7 @@ import uuid
 from collections.abc import AsyncIterator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Callable
+from typing import Callable, cast
 
 from competitor_agent.agent.delegate_tool import (
     DelegateRunner,
@@ -192,6 +192,13 @@ class CompetitorAnalysisAPI:
                 self._memory.attach_vector_store(
                     VectorStore(collection_name="session_summaries", data_dir=self._memory.data_dir)
                 )
+
+            # 启动状态日志（设计文档 52 §2.2）：消除静默降级
+            vs = cast(VectorStore, self._vector_store)
+            if vs.is_available():
+                logger.info("向量层状态: available(%s)", vs.model_name)
+            else:
+                logger.info("向量层状态: degraded(模型 %s 未缓存，降级词袋)", vs.model_name)
         else:
             self._store = None
             self._ingester = None
