@@ -22,6 +22,7 @@ import os
 import random
 import threading
 import time
+from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from competitor_agent.interfaces.exceptions import LLMUnavailableError
@@ -51,9 +52,62 @@ _JSON_REPAIR_HINT = (
     "不要包裹在 Markdown 代码块里。务必修正以下问题："
 )
 
+# 「端点/模型不支持 tools」特征片段（设计文档 53 Q4）：400 报错文本中出现即判定
+_TOOLS_UNSUPPORTED_FRAGMENTS = ("tool_calls", "tool_choice", "tools", "function call")
+
+
+@dataclass
+class ToolCall:
+    """原生 tool-calling 的单次工具调用（设计文档 53）。
+
+    ``arguments`` 为解析后的 dict；arguments JSON 解析失败时不静默置空——
+    ``args_error`` 携带可读原因供回灌（设计文档 38 语义），``arguments`` 为 {}。
+    """
+
+    id: str
+    name: str
+    arguments: dict[str, Any] = field(default_factory=dict)
+    args_error: str | None = None
+
+
+@dataclass
+class ToolCallReply:
+    """``complete_with_tools`` 的返回：content + 结构化 tool_calls + usage。
+
+    ``tool_calls`` 为空时 ``content`` 即最终回答（原生协议的终止信号）。
+    """
+
+    content: str = ""
+    tool_calls: list[ToolCall] = field(default_factory=list)
+    usage: Any = None
+
 
 def _estimate_tokens(texts: list[str]) -> int:
     return sum(len(t) // 4 for t in texts)
+
+
+def _parse_arguments(raw_args: Any) -> dict[str, Any]:
+    """解析 tool_call 的 arguments：合法 JSON 对象 → dict；非法 → args_error 可读原因。
+
+    不静默置空（设计文档 38/53 语义）：解析失败时 ``args_error`` 供回灌自恢复。
+    """
+    if raw_args is None:
+        return {"arguments": {}}
+    if isinstance(raw_args, dict):
+        return {"arguments": raw_args}
+    try:
+        parsed = json.loads(str(raw_args))
+    except (json.JSONDecodeError, ValueError) as exc:
+        return {
+            "arguments": {},
+            "args_error": f"arguments 不是合法 JSON: {exc}；原始内容: {str(raw_args)[:200]}",
+        }
+    if not isinstance(parsed, dict):
+        return {
+            "arguments": {},
+            "args_error": f"arguments 期望 JSON 对象，实际 {type(parsed).__name__}",
+        }
+    return {"arguments": parsed}
 
 
 # 兼容别名链：OPENAI_API_KEY > DEEPSEEK_API_KEY > LLM_API_KEY
@@ -124,10 +178,11 @@ class LLMClient:
         """
         started = time.monotonic()
         if self._call is not None:
+            call = self._call
             return self._attempt_models(
                 messages,
                 started,
-                lambda model: self._call(messages=messages, model=model),
+                lambda model: call(messages=messages, model=model),
             )
 
         try:
@@ -151,17 +206,83 @@ class LLMClient:
                 create_kwargs["response_format"] = {"type": "json_object"}
             if self._timeout is not None:
                 create_kwargs["timeout"] = self._timeout
-            return client.chat.completions.create(**create_kwargs)  # type: ignore[arg-type]
+            return client.chat.completions.create(**create_kwargs)
 
         return self._attempt_models(messages, started, attempt)
 
+    def complete_with_tools(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        tool_choice: Any = None,
+    ) -> ToolCallReply:
+        """原生 function calling 通道（设计文档 53 M1）。
+
+        - SDK 路径传 ``tools``/``tool_choice``，复用 ``_attempt_models``
+          重试/多模型 fallback/计价/埋点；
+        - 注入 ``call_func`` 路径透传 kwargs（mock 双形态入口，设计文档 53 Q3）：
+          mock 返回 ``ToolCallReply`` 原样采用，返回 str 包装为纯 content 回复；
+        - 端点/模型不支持 tools（400 特征报错）→ 抛 ``LLMUnavailableError``（Q4：
+          不自动降级文本协议，报错给出 ``protocol='react'`` 可操作指引）。
+        """
+        started = time.monotonic()
+        if self._call is not None:
+            call = self._call
+            return self._attempt_models(
+                messages,
+                started,
+                lambda model: call(
+                    messages=messages, model=model, tools=tools, tool_choice=tool_choice
+                ),
+                extract=self._extract_tool_reply,
+            )
+
+        try:
+            from openai import OpenAI  # 惰性导入，避免无 key 环境失败
+        except ImportError as exc:
+            raise LLMUnavailableError("openai SDK 未安装") from exc
+
+        if not self._api_key:
+            raise LLMUnavailableError(
+                "缺少 LLM API Key，请设置环境变量 OPENAI_API_KEY（或 DEEPSEEK_API_KEY / LLM_API_KEY）"
+            )
+
+        kwargs: dict[str, Any] = {"api_key": self._api_key}
+        if self._base_url:
+            kwargs["base_url"] = self._base_url
+        client = OpenAI(**kwargs)
+
+        def attempt(model: str) -> Any:
+            create_kwargs: dict[str, Any] = {"model": model, "messages": messages, "tools": tools}
+            if tool_choice is not None:
+                create_kwargs["tool_choice"] = tool_choice
+            if self._timeout is not None:
+                create_kwargs["timeout"] = self._timeout
+            try:
+                return client.chat.completions.create(**create_kwargs)
+            except Exception as exc:
+                if self._is_tools_unsupported(exc):
+                    raise LLMUnavailableError(
+                        f"模型 {model} 不支持 tool_calls（原生 function calling），"
+                        "请改用 protocol='react' 或更换支持工具调用的模型"
+                    ) from exc
+                raise
+
+        return self._attempt_models(messages, started, attempt, extract=self._extract_tool_reply)
+
     def _attempt_models(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         started: float,
         attempt_fn: Callable[[str], Any],
-    ) -> str:
-        """逐模型 × 逐次重试：可重试错误退避重试 → 下一个 fallback 模型 → 全灭抛错。"""
+        extract: Callable[[Any], tuple[Any, Any]] | None = None,
+    ) -> Any:
+        """逐模型 × 逐次重试：可重试错误退避重试 → 下一个 fallback 模型 → 全灭抛错。
+
+        ``extract``：从原始响应抽取 (payload, usage)，缺省 ``_extract_text_and_usage``
+        （payload=文本）；原生 tool-calling 传 ``_extract_tool_reply``（payload=ToolCallReply）。
+        """
+        extract_fn = extract or self._extract_text_and_usage
         models = [self._model, *self._fallback_models]
         last_exc: Exception | None = None
         saw_timeout = False
@@ -171,18 +292,19 @@ class LLMClient:
                 total_attempts += 1
                 try:
                     raw = attempt_fn(model)
-                    text, usage = self._extract_text_and_usage(raw)
+                    payload, usage = extract_fn(raw)
+                    log_text = payload.content if isinstance(payload, ToolCallReply) else str(payload)
                     self._log_call(
                         messages,
                         started,
-                        text,
+                        log_text,
                         usage=usage,
                         attempts=total_attempts,
                         final_model=model,
                         retried=total_attempts > 1,
                         timed_out=saw_timeout,
                     )
-                    return text
+                    return payload
                 except Exception as exc:
                     last_exc = exc
                     if self._is_timeout(exc):
@@ -209,6 +331,57 @@ class LLMClient:
             content = getattr(content, "content", None) or ""
             return content, getattr(raw, "usage", None)
         raise LLMUnavailableError(f"LLM 返回无法解析的类型: {type(raw).__name__}")
+
+    @staticmethod
+    def _extract_tool_reply(raw: Any) -> tuple[ToolCallReply, Any]:
+        """从 mock 双形态 / dict / openai SDK 响应抽取 ToolCallReply 与 usage（设计文档 53）。"""
+        if isinstance(raw, ToolCallReply):
+            return raw, raw.usage
+        if isinstance(raw, str):
+            return ToolCallReply(content=raw), None
+        if isinstance(raw, dict):
+            choices = raw.get("choices") or []
+            message = choices[0].get("message", {}) if choices else {}
+            reply = ToolCallReply(
+                content=message.get("content") or "",
+                tool_calls=LLMClient._parse_tool_calls(message.get("tool_calls") or []),
+            )
+            return reply, raw.get("usage")
+        if getattr(raw, "choices", None) is not None:
+            message = getattr(raw.choices[0], "message", None)
+            reply = ToolCallReply(
+                content=getattr(message, "content", None) or "",
+                tool_calls=LLMClient._parse_tool_calls(getattr(message, "tool_calls", None) or []),
+            )
+            return reply, getattr(raw, "usage", None)
+        raise LLMUnavailableError(f"LLM 返回无法解析的类型: {type(raw).__name__}")
+
+    @staticmethod
+    def _parse_tool_calls(items: list[Any]) -> list[ToolCall]:
+        """把 SDK/dict 形态的 tool_calls 规整为 ToolCall；arguments 非法 JSON → args_error。"""
+        calls: list[ToolCall] = []
+        for idx, item in enumerate(items):
+            if isinstance(item, dict):
+                call_id = str(item.get("id") or f"call_{idx}")
+                func = item.get("function") or {}
+                name = str(func.get("name") or "")
+                raw_args = func.get("arguments")
+            else:
+                call_id = str(getattr(item, "id", None) or f"call_{idx}")
+                func = getattr(item, "function", None)
+                name = str(getattr(func, "name", "") or "")
+                raw_args = getattr(func, "arguments", None)
+            calls.append(ToolCall(id=call_id, name=name, **_parse_arguments(raw_args)))
+        return calls
+
+    @staticmethod
+    def _is_tools_unsupported(exc: Exception) -> bool:
+        """「端点/模型不支持 tools」判定（设计文档 53 Q4）：400 + 报错文本含工具特征片段。"""
+        status = getattr(exc, "status_code", None)
+        if status != 400:
+            return False
+        text = str(exc).lower()
+        return any(frag in text for frag in _TOOLS_UNSUPPORTED_FRAGMENTS)
 
     @staticmethod
     def _should_retry(exc: Exception) -> bool:
