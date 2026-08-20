@@ -1005,10 +1005,48 @@ dev:
 > `protocol="native"` 默认（文本 ReAct 保留 fallback/对照）；Lead 主循环 + 子 Agent 一并覆盖；
 > mock 双形态（按 `tools=` kwarg 出形状）；模型不支持 tools 直接报错不自动降级。
 > 设计文档见 `doc/plan/issue_designs/53_native_tool_calling_design.md`（2026-08-20，待实施）。
+> **M1 已实现（2026-08-20，见 §25.1）；M2-M4 待实施**。
 
 | 项 | 内容 | 优先级 | 状态 |
 |---|---|---|---|
-| **53 原生 tool-calling** | M1：`LLMClient.complete_with_tools` + ToolCallReply + TOOL_SPECS→OpenAI tools 转换器；M2：ReactAgent/ReactLoop native 循环 + tool_choice plan-first + 压缩适配；M3：api/cli/subagent 透传 + mock 双形态 + 测试迁移（最大阶段）；M4：benchmark `--protocol both` 对比表 + HARNESS_VERSION 0.8.0 | 中 | 📄 设计完成（2026-08-20，待实施） |
+| **53 原生 tool-calling** | M1：`LLMClient.complete_with_tools` + ToolCallReply + TOOL_SPECS→OpenAI tools 转换器；M2：ReactAgent/ReactLoop native 循环 + tool_choice plan-first + 压缩适配；M3：api/cli/subagent 透传 + mock 双形态 + 测试迁移（最大阶段）；M4：benchmark `--protocol both` 对比表 + HARNESS_VERSION 0.8.0 | 中 | 🔨 M1 已实现（2026-08-20），M2-M4 待实施 |
+
+### 25.1 53 M1 完成说明（2026-08-20）
+
+- **`llm/client.py`**：新增 `ToolCall`（id/name/arguments dict + `args_error`——arguments
+  非法 JSON 不静默置空，携带可读原因供回灌，设计文档 38 语义）与 `ToolCallReply`
+  （content/tool_calls/usage）dataclass；`complete_with_tools(messages, tools, tool_choice=None)`
+  ——SDK 路径传 `tools`/`tool_choice`（`tool_choice=None` 不下发该键），复用
+  `_attempt_models` 重试/多模型 fallback/计价/埋点（`_attempt_models` 泛化出 `extract`
+  参数，缺省 `_extract_text_and_usage` 行为逐位不变，native 通道传 `_extract_tool_reply`）；
+  注入 `call_func` 路径透传 `tools=`/`tool_choice=` kwargs（mock 双形态入口，Q3）：
+  返回 `ToolCallReply` 原样采用、返回 str 包装为纯 content 回复。
+- **Q4 报错语义**：`_is_tools_unsupported`（400 + 报错文本含 tool_calls/tool_choice/tools/
+  function call 特征片段）→ `LLMUnavailableError("模型 <model> 不支持 tool_calls（原生
+  function calling），请改用 protocol='react' 或更换支持工具调用的模型")`——不自动降级
+  文本协议、不进 fallback 链空转；与 tools 无关的 400（如上下文超长）原样抛出。
+- **`agent/tool_registry.py`**：`build_openai_tools(dispatcher)`——已注册工具从 ToolSpec
+  （description/params_schema）直映 OpenAI tools 格式（与文本协议
+  `get_tool_descriptions` 同源一份契约）；无 schema 的 extra_tools 从函数签名派生最小
+  parameters（无默认值参数进 required，注解映射 string/integer/number/boolean/array/object，
+  缺省 string）。`ToolDispatcher` 增公开 `specs` 只读访问器。
+- **测试** `tests/unit/llm/test_complete_with_tools.py` 18 条：mock 双形态（kwargs 透传/
+  ToolCallReply 原样/str 包装）、dict 与 SDK 对象两形态抽取、缺 id 按序补 `call_<idx>`、
+  非法/非对象 arguments 的 args_error、usage 计价累计（2000+1000 tokens → $0.0012）、
+  429 重试后成功、SDK 路径 tools/tool_choice 透传与 None 省略（monkeypatch openai.OpenAI
+  伪客户端，零网络）、Q4 两类特征报错与「普通 400 不误判」、build_openai_tools 直映/
+  exclude 生效/签名派生/无描述不输出 description 键。全程零真实 LLM。
+- **顺带修复**：`llm/client.py` 两处 mypy 远程既有错误（`self._call` 闭包窄化、
+  失效 `type: ignore`），该文件现 mypy 全绿。
+- 回归：`tests/unit` 639 passed / 3 failed（**均为 HEAD 既有**，已 stash 复核：
+  test_rag_integration ×2 为 doc 52 M1 遗留，test_refresh_stale ×1）；
+  `tests/integration` 45 passed 全绿；ruff/mypy 改动文件全绿。
+- **已知问题登记（2026-08-20，HEAD 既有，非本改动引入）**：`tests/evaluation`
+  全量跑出现 runaway——某用例线程数持续上涨至 7000+ 不收敛（疑似
+  `ToolDispatcher._call_with_timeout` 超时路径 `wait=False` 的 ThreadPoolExecutor
+  在高频超时循环中堆积），本机 evaluation/e2e 全量一次跑不完。
+  待后续单独定位（`pytest tests/evaluation -v` 观察卡点用例）。
+
 
 ## 26. 第九轮待办（Langfuse 式链路追踪：自研 trace 总线 + 可选 exporter，设计文档 54）
 

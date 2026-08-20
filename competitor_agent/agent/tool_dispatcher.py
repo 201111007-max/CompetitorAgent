@@ -132,3 +132,8 @@ class ToolDispatcher:
     @property
     def tool_count(self) -> int:
         return len(self._tools)
+
+    @property
+    def specs(self) -> dict[str, ToolSpec]:
+        """已注册工具的契约表（设计文档 53：build_openai_tools 转换器读取）。"""
+        return dict(self._specs)
