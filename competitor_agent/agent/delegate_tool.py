@@ -50,6 +50,8 @@ class _BackgroundRecord:
     execution_id: str
     name: str
     task: str
+    trace_id: str | None = None  # 设计文档 54：跨线程 subagent span 归属的 trace
+    parent_span_id: str | None = None  # 设计文档 54：subagent span 挂在 delegate 下的父 span
     future: Future | None = None
     status: str = "running"
     result: str = ""
@@ -64,6 +66,7 @@ class DelegateRunner:
         runtime_factory: Callable[[str], SubagentRuntime],
         max_concurrent: int = 3,
         timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS,
+        tracer: Any = None,  # 设计文档 54：subagent span（None 用模块单例）
     ) -> None:
         self._runtime_factory = runtime_factory
         self._max_concurrent = max(1, int(max_concurrent))
@@ -73,14 +76,22 @@ class DelegateRunner:
         )
         self._tasks: dict[str, _BackgroundRecord] = {}
         self._lock = threading.Lock()
+        from competitor_agent.observability.tracer import get_tracer
+
+        self._tracer = tracer if tracer is not None else get_tracer()
 
     def spawn(self, name: str, task: str) -> str:
         """提交一个子 Agent 到后台线程池，返回 execution_id（仿 execute_async）。"""
         execution_id = uuid.uuid4().hex[:12]
+        # 跨线程 subagent span 归属：显式传参（delegate 工具提供）或从当前线程待领取
+        # 上下文取（dispatch 在 Lead 线程压入，由本后台线程领取）。
+        trace_id, parent_span_id = self._spawn_parent()
         rec = _BackgroundRecord(
             execution_id=execution_id,
             name=name,
             task=task,
+            trace_id=trace_id,
+            parent_span_id=parent_span_id,
         )
         with self._lock:
             self._tasks[execution_id] = rec
@@ -88,10 +99,47 @@ class DelegateRunner:
         logger.info("子 Agent 已后台提交: %s (%s)", name, execution_id)
         return execution_id
 
+    def spawn_with_parent(self, name: str, task: str, *, trace_id: str | None, parent_span_id: str | None) -> str:
+        """带显式 trace 父节的提交（delegate 工具内：同一 delegate span 下的多个子 Agent 平行）。
+
+        避免同一批子 Agent 各自 pop 不同父节，保证它们互为兄弟、挂在同一 delegate 下。
+        """
+        execution_id = uuid.uuid4().hex[:12]
+        rec = _BackgroundRecord(
+            execution_id=execution_id,
+            name=name,
+            task=task,
+            trace_id=trace_id,
+            parent_span_id=parent_span_id,
+        )
+        with self._lock:
+            self._tasks[execution_id] = rec
+        rec.future = self._pool.submit(self._run, name, task, rec)
+        logger.info("子 Agent 已后台提交: %s (%s)", name, execution_id)
+        return execution_id
+
+    def _spawn_parent(self) -> tuple[str | None, str | None]:
+        """读取当前线程待领取的 (trace_id, parent_span_id)（无则 None,None）。"""
+        if self._tracer is None:
+            return None, None
+        return self._tracer.pop_tool_context()
+
     def _run(self, name: str, task: str, rec: _BackgroundRecord) -> None:
         try:
             runtime = self._runtime_factory(name)
-            result = runtime.run(task)
+            if self._tracer is None:
+                result = runtime.run(task)
+            else:
+                # 子 Agent 运行包在 kind=subagent span 里，并压入 worker 线程栈——
+                # 使子 Agent 内的 llm.call / tool.call 自动挂到本 subagent span 下。
+                with self._tracer.span(
+                    name,
+                    kind="subagent",
+                    trace_id=rec.trace_id,
+                    parent_span_id=rec.parent_span_id,
+                    input_brief=task,
+                ) as sub_span:
+                    result = runtime.run(task)
             rec.result = getattr(result, "answer", "") or str(result)
             rec.status = "done"
             logger.info("子 Agent 完成: %s (%s)", name, rec.execution_id)
@@ -139,11 +187,35 @@ def make_delegate_tool(
 
     - ``registry``：SubagentRegistry（校验维度是否可委派；None 时不过滤）；
     - 工具签名 ``delegate(task, dimensions)``：批量 spawn 全部指定维度子 Agent
-      （后台并发），轮询全部 terminal 后合并各结果（状态 + 截断正文）回填。
+      （后台并发），轮询全部 terminal 后合并各结果（状态 + 截断正文）回填；
+    - 设计文档 54：后台线程里先领取 dispatch 压入的 (trace_id, tool span) 上下文，
+      包一层 ``delegate`` phase span，并让同一批子 Agent 共享该 span 作父节点。
     """
     from competitor_agent.agent.subagent_registry import get_subagent_registry
 
     registry = registry or get_subagent_registry()
+
+    def _delegate_spawn_and_merge(
+        dims: list[str],
+        task: str,
+        trace_id: str | None,
+        parent_span_id: str | None,
+    ) -> str:
+        execution_ids: list[str] = []
+        for dim in dims:
+            execution_ids.append(
+                runner.spawn_with_parent(
+                    dim, f"{task}（请分析维度：{dim}）",
+                    trace_id=trace_id, parent_span_id=parent_span_id,
+                )
+            )
+        merged: list[str] = []
+        for eid in execution_ids:
+            rec = runner.await_terminal(eid)
+            if rec is not None:
+                merged.append(_render_record(rec))
+                runner.cleanup(eid)
+        return "\n\n".join(merged) if merged else "delegate 失败：全部子 Agent 无结果。"
 
     def delegate(dimensions: list[str], task: str = "") -> str:
         dims = [d for d in (dimensions or []) if registry.get(d)]
@@ -153,16 +225,19 @@ def make_delegate_tool(
                 f"delegate 失败：未指定可委派维度（可用：{available}）。"
                 "请给 dimensions 传数组，如 {\"dimensions\": [\"pricing\",\"feature\"]}。"
             )
-        execution_ids: list[str] = []
-        for dim in dims:
-            execution_ids.append(runner.spawn(dim, f"{task}（请分析维度：{dim}）"))
-        merged: list[str] = []
-        for eid in execution_ids:
-            rec = runner.await_terminal(eid)
-            if rec is not None:
-                merged.append(_render_record(rec))
-                runner.cleanup(eid)
-        return "\n\n".join(merged) if merged else "delegate 失败：全部子 Agent 无结果。"
+        tracer = getattr(runner, "_tracer", None)
+        if tracer is None:
+            return _delegate_spawn_and_merge(dims, task, None, None)
+        trace_id, parent = tracer.pop_tool_context()
+        if trace_id is None:
+            # 无活动 trace：仍正常委派，只是不产生 subagent span（零埋点降级）
+            return _delegate_spawn_and_merge(dims, task, None, None)
+        with tracer.span(
+            "delegate", kind="phase", trace_id=trace_id, parent_span_id=parent,
+            input_brief=f"dimensions={','.join(dims)}",
+        ) as dspan:
+            parent_span = dspan["span_id"] if dspan is not None else parent
+            return _delegate_spawn_and_merge(dims, task, trace_id, parent_span)
 
     return delegate
 

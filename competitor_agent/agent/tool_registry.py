@@ -76,6 +76,7 @@ def build_react_dispatcher(
     web_extract: Callable[..., str] | None = None,
     exclude: tuple[str, ...] = (),
     extra_tools: dict[str, Callable[..., str]] | None = None,
+    tracer: Any = None,  # 设计文档 54：tool.call span
 ) -> ToolDispatcher:
     """把 MCP 工具集（TOOLS + TOOL_SPECS）注册进 ToolDispatcher。
 
@@ -89,7 +90,7 @@ def build_react_dispatcher(
         from competitor_agent.config.loader import load_config
 
         config = load_config()
-    dispatcher = ToolDispatcher(default_timeout=config.collector.timeout_seconds)
+    dispatcher = ToolDispatcher(default_timeout=config.collector.timeout_seconds, tracer=tracer)
     for name, spec in TOOL_SPECS.items():
         if name in exclude:
             continue
@@ -106,6 +107,7 @@ def build_subagent_dispatcher(
     config: AppConfig | None = None,
     web_extract: Callable[..., str] | None = None,
     extra_tools: dict[str, Callable[..., str]] | None = None,
+    tracer: Any = None,  # 设计文档 54：子 Agent 的 tool.call span
 ) -> ToolDispatcher:
     """按子 Agent 配置的工具子集白名单构造工具面（设计文档 49 §3.6）。
 
@@ -121,7 +123,7 @@ def build_subagent_dispatcher(
         config = load_config()
     cfg = get_subagent_registry().get(name)
     whitelist = set(cfg.tools) if cfg is not None else set()
-    dispatcher = ToolDispatcher(default_timeout=config.collector.timeout_seconds)
+    dispatcher = ToolDispatcher(default_timeout=config.collector.timeout_seconds, tracer=tracer)
     for tool_name, spec in TOOL_SPECS.items():
         if tool_name not in whitelist:
             continue

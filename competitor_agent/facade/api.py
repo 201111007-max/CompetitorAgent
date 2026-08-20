@@ -17,7 +17,7 @@ import uuid
 from collections.abc import AsyncIterator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Callable, cast
+from typing import Any, Callable, cast
 
 from competitor_agent.agent.delegate_tool import (
     DelegateRunner,
@@ -137,6 +137,7 @@ class CompetitorAnalysisAPI:
         tool_dispatcher: object | None = None,  # 历史兼容：已由 Lead 工具面取代，保留签名
         engine: str = "react",  # 设计文档 51：编排引擎 "react"（默认）| "langgraph"
         protocol: str = "native",  # 设计文档 53 Q1：默认 native；"react" 为显式 fallback/对照基准
+        tracer: Any = None,  # 设计文档 54：链路追踪底座（None 用模块单例，默认 JsonlSink）
     ) -> None:
         # 配置注入：显式参数优先，其次 config，最后默认值
         cfg = config or load_config()
@@ -212,6 +213,19 @@ class CompetitorAnalysisAPI:
         # 竞品发现器（设计文档 20）：仅 DISCOVERY 意图时被调用，web_tool 可注入
         self._discoverer = CompetitorDiscoverer(llm=llm, use_llm=use_llm, web_tool=web_tool)
 
+        # 设计文档 54：链路追踪底座。显式注入优先（测试隔离）；否则模块单例。
+        # 可选 Langfuse exporter：ObservabilityConfig.langfuse_enabled 派生属性为真时才
+        # 追加（宿主/公钥/密钥三环境变量齐全 + SDK 可导入），否则纯本地 JsonlSink。
+        from competitor_agent.observability.langfuse_exporter import LangfuseExporter
+        from competitor_agent.observability.tracer import JsonlSink, Tracer, get_tracer
+
+        if tracer is not None:
+            self._tracer = tracer
+        elif self._config.observability.langfuse_enabled:
+            self._tracer = Tracer(sinks=[JsonlSink(), LangfuseExporter()])
+        else:
+            self._tracer = get_tracer()
+
     def analyze(
         self,
         task: str,
@@ -235,82 +249,94 @@ class CompetitorAnalysisAPI:
         task = self._disambiguate_with_history(task, conversation_history)
         sid = session_id or f"sess_{uuid.uuid4().hex[:8]}"
         set_current_session(sid)
-        slog = get_session_logger(sid)
-        log_event(slog, "session_started", "init", f"会话 {sid} 启动", task=task)
-        self._emit(
-            ProgressEvent(
-                event="phase_start",
-                phase="langgraph" if self._engine == "langgraph" else "react",
-                message=f"{'LangGraph' if self._engine == 'langgraph' else 'Lead'} 编排: {task}",
+        # 设计文档 54：trace 生命周期——trace_id 即 session_id，覆盖本次分析
+        # （含并行子 Agent 的跨线程 span，经 Tracer._traces 聚合 cost/token）。
+        self._tracer.start_trace("analyze", trace_id=sid, input_brief=task)
+        try:
+            slog = get_session_logger(sid)
+            log_event(slog, "session_started", "init", f"会话 {sid} 启动", task=task)
+            self._emit(
+                ProgressEvent(
+                    event="phase_start",
+                    phase="langgraph" if self._engine == "langgraph" else "react",
+                    message=f"{'LangGraph' if self._engine == 'langgraph' else 'Lead'} 编排: {task}",
+                )
             )
-        )
 
-        if self._engine == "langgraph":
-            # 设计文档 51：LangGraph 引擎——取消/预算/checkpoint 不对齐（差异化结论）
-            plan, answer, transcript = self._run_langgraph_engine(task, sid)
-            terminal = "success"
-        else:
-            loop, result = self._run_react_loop(task, sid)
-            plan, answer, transcript = loop.plan, result.answer, result.transcript
-            terminal = (
-                "cancelled"
-                if result.cancelled
-                else ("partial" if result.budget_exhausted else "success")
+            if self._engine == "langgraph":
+                # 设计文档 51：LangGraph 引擎——取消/预算/checkpoint 不对齐（差异化结论）
+                plan, answer, transcript = self._run_langgraph_engine(task, sid)
+                terminal = "success"
+            else:
+                loop, result = self._run_react_loop(task, sid)
+                plan, answer, transcript = loop.plan, result.answer, result.transcript
+                terminal = (
+                    "cancelled"
+                    if result.cancelled
+                    else ("partial" if result.budget_exhausted else "success")
+                )
+            report = react_report.assemble(
+                lead_answer=answer,
+                competitor=self._lead_competitor(task, plan),
+                loop_plan=plan,
+                transcript=transcript,
+                builder=self._builder,
+                terminal_state=terminal,
             )
-        report = react_report.assemble(
-            lead_answer=answer,
-            competitor=self._lead_competitor(task, plan),
-            loop_plan=plan,
-            transcript=transcript,
-            builder=self._builder,
-            terminal_state=terminal,
-        )
-        log_event(
-            slog, "report.built", "report",
-            f"报告生成，{len(report.dimension_results)} 个维度",
-            dimension_count=len(report.dimension_results),
-            overall_confidence=round(report.overall_confidence, 3),
-        )
-        # 记忆沉淀（唯一写侧）：成功与取消部分结果都沉淀（对齐 single 路径）
-        self._record_memory_success(report, transcript)
-        if is_cancelled(sid):
-            # 取消完成：保留 checkpoint 供 /resume 续跑，返回带部分结果的取消报告
-            logger.info("会话 %s 取消后返回部分结果（%d 个维度）", sid, len(report.dimension_results))
-            self._save_checkpoint_for_resume(sid, task, report)
+            log_event(
+                slog, "report.built", "report",
+                f"报告生成，{len(report.dimension_results)} 个维度",
+                dimension_count=len(report.dimension_results),
+                overall_confidence=round(report.overall_confidence, 3),
+            )
+            # 记忆沉淀（唯一写侧）：成功与取消部分结果都沉淀（对齐 single 路径）
+            self._record_memory_success(report, transcript)
+            if is_cancelled(sid):
+                # 取消完成：保留 checkpoint 供 /resume 续跑，返回带部分结果的取消报告
+                logger.info("会话 %s 取消后返回部分结果（%d 个维度）", sid, len(report.dimension_results))
+                self._save_checkpoint_for_resume(sid, task, report)
+                close_session_log(sid)
+                self._emit(
+                    ProgressEvent(
+                        event="cancelled",
+                        phase="report",
+                        message=f"分析已取消，返回 {len(report.dimension_results)} 个已完成维度",
+                    )
+                )
+                self._tracer.end_trace(
+                    sid, status="cancelled", output_brief=report.markdown_report
+                )
+                return CancelledResult(
+                    competitor=report.competitor,
+                    dimension_results=report.dimension_results,
+                    overall_score=report.overall_score,
+                    overall_confidence=report.overall_confidence,
+                    gaps_pending=report.gaps_pending,
+                    markdown_report=report.markdown_report,
+                    terminal_state="cancelled",
+                    created_at=report.created_at,
+                    cancelled=True,
+                )
+            # 分析正常完成：记录时间线 diff + 归档带新鲜度的会话（设计文档 26）
+            self._record_timeline(report)
+            self._archive_report(report, task, sid)
+            self._export_competitor_json(report, sid)
+            delete_checkpoint(sid)
             close_session_log(sid)
             self._emit(
                 ProgressEvent(
-                    event="cancelled",
+                    event="report",
                     phase="report",
-                    message=f"分析已取消，返回 {len(report.dimension_results)} 个已完成维度",
+                    progress=1.0,
+                    message=f"报告生成完成，终态={terminal}",
                 )
             )
-            return CancelledResult(
-                competitor=report.competitor,
-                dimension_results=report.dimension_results,
-                overall_score=report.overall_score,
-                overall_confidence=report.overall_confidence,
-                gaps_pending=report.gaps_pending,
-                markdown_report=report.markdown_report,
-                terminal_state="cancelled",
-                created_at=report.created_at,
-                cancelled=True,
-            )
-        # 分析正常完成：记录时间线 diff + 归档带新鲜度的会话（设计文档 26）
-        self._record_timeline(report)
-        self._archive_report(report, task, sid)
-        self._export_competitor_json(report, sid)
-        delete_checkpoint(sid)
-        close_session_log(sid)
-        self._emit(
-            ProgressEvent(
-                event="report",
-                phase="report",
-                progress=1.0,
-                message=f"报告生成完成，终态={terminal}",
-            )
-        )
-        return report
+            self._tracer.end_trace(sid, status=terminal, output_brief=report.markdown_report)
+            return report
+        except Exception:
+            # 异常路径：闭合 trace 为 error，避免残留悬半根节点（设计文档 54 §2.2）
+            self._tracer.end_trace(sid, status="error", output_brief="")
+            raise
 
     @property
     def memory(self) -> IFourLayerMemory | None:
@@ -543,7 +569,7 @@ class CompetitorAnalysisAPI:
         """
         from competitor_agent.agent.langgraph_engine import run_langgraph
 
-        llm = self._llm or LLMClient()
+        llm = self._llm or LLMClient(tracer=self._tracer)
         lead_competitor = self._react_competitor(task)
 
         def _subagent_run(name: str, sub_task: str) -> ReactRunResult:
@@ -566,6 +592,7 @@ class CompetitorAnalysisAPI:
                 obs_max_chars=self._config.collector.max_content_chars,
                 max_steps=6,
                 protocol="react",  # langgraph 引擎走文本节点（design 51/53）：保持 react 协议
+                tracer=self._tracer,  # 设计文档 54：子 Agent span
             ).run_subagent(sub_task)
 
         # Lead 系统提示与自研路径同文本（工具描述 + Thought/Action 格式 + skills）
@@ -574,6 +601,7 @@ class CompetitorAnalysisAPI:
             web_extract=self._react_web_extract,
             exclude=("analyze_competitor",),
             extra_tools={"make_plan": build_make_plan_tool()},
+            tracer=self._tracer,
         )
         base_prompt = ReactAgent(
             llm=llm, dispatcher=prompt_dispatcher, protocol="react"  # langgraph 节点按文本 ReAct 解析
@@ -621,7 +649,7 @@ class CompetitorAnalysisAPI:
             )
             return build_subagent(
                 name,
-                self._llm or LLMClient(),
+                self._llm or LLMClient(tracer=self._tracer),
                 config=self._config,
                 web_extract=self._web_extract_for(lead_competitor.name, name),
                 session_id=session_id,
@@ -632,6 +660,7 @@ class CompetitorAnalysisAPI:
                 obs_max_chars=self._config.collector.max_content_chars,
                 max_steps=6,
                 protocol=self._protocol,
+                tracer=self._tracer,  # 设计文档 54：子 Agent tool.call span
             )
 
         runner = DelegateRunner(
@@ -641,6 +670,7 @@ class CompetitorAnalysisAPI:
             ),
             max_concurrent=max_concurrent,
             timeout_seconds=timeout_seconds,
+            tracer=self._tracer,  # 设计文档 54：跨线程 subagent span
         )
         extra_tools: dict[str, Callable[..., str]] = {
             "make_plan": build_make_plan_tool(),
@@ -660,8 +690,12 @@ class CompetitorAnalysisAPI:
             web_extract=self._react_web_extract,
             exclude=("analyze_competitor",),
             extra_tools=extra_tools,
+            tracer=self._tracer,  # 设计文档 54：Lead tool.call span
         )
-        agent = ReactAgent(llm=self._llm or LLMClient(), dispatcher=dispatcher, protocol=self._protocol)
+        agent = ReactAgent(
+            llm=self._llm or LLMClient(tracer=self._tracer),
+            dispatcher=dispatcher, protocol=self._protocol,
+        )
         # Lead 步数上限：默认 ≈12；用户显式传 max_iterations 时以其为准（含 0，预算耗尽→
         # partial，设计文档 14 承诺）；diminishing_threshold=0 关闭"边际递减"启发
         # （ReAct 恒传 delta_tokens=0，否则第 3 步后必然误判预算耗尽）
