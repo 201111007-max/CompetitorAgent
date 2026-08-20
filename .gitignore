@@ -104,8 +104,7 @@ out_project/
 # ==================== Local Docs (not for GitHub) ====================
 # 个人/过程性文档 - 仅本地保留，不上传到 GitHub
 dota_helper/docs/
-# 根目录设计文档（架构/计划/issue_designs） - 仅本地保留，不上传到 GitHub
-doc/
+# 根目录设计文档（架构/计划/issue_designs）：2026-08-20 起恢复 git 跟踪
 
 # ==================== Post Match Review Reports ====================
 # 复盘报告输出目录 - 包含生成的 Markdown 报告，不上传到 git
