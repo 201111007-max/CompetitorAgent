@@ -1,0 +1,50 @@
+# 设计文档 55 M3：基础 web 服务 + 可选 observability profile（Langfuse + Postgres，doc 54 exporter 一键全栈）
+# 用法：
+#   docker compose up -d                          # 仅 web（build target=full）
+#   docker compose --profile observability up -d  # web + Langfuse + Postgres
+# 密钥纪律：本文件不含真实密钥；全部经 .env 注入（模板见 .env.example，.env 已被 gitignore）。
+services:
+  web:
+    build:
+      context: .
+      target: full
+    ports:
+      - "8000:8000"
+    volumes:
+      - competitor-data:/data # 记忆/知识库/报告（<data_dir>/reports）统一持久化
+    env_file: .env
+    environment:
+      # .env 显式设置 LANGFUSE_HOST 时优先（如外部 Langfuse Cloud）；
+      # 缺省指向 compose 内服务——不加 observability profile 时该地址无服务，
+      # exporter 仍需三变量齐全才启用（doc 54），单起 web 无副作用。
+      LANGFUSE_HOST: ${LANGFUSE_HOST:-http://langfuse:3000}
+    restart: unless-stopped
+
+  langfuse:
+    image: langfuse/langfuse:2
+    profiles: ["observability"]
+    depends_on:
+      - postgres
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-localdev-postgres}@postgres:5432/langfuse
+      NEXTAUTH_URL: http://localhost:3000
+      # 本地开发占位值，非真实密钥；暴露公网前必须在 .env 覆盖（见 deployment.md 安全节）
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-localdev-only-change-me}
+      SALT: ${SALT:-localdev-only-change-me}
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16
+    profiles: ["observability"]
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-localdev-postgres}
+      POSTGRES_DB: langfuse
+    volumes:
+      - langfuse-db:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  competitor-data:
+  langfuse-db:

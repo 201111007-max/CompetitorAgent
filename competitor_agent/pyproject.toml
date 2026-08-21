@@ -27,6 +27,9 @@ namespaces = false
     "static/*.js",
     "static/*.css",
     "static/vendor/*.js",
+    # 经 __file__ 相对路径加载（config/loader.py、skills/loader.py），非 editable 安装必须随包
+    "config/*.yaml",
+    "skills/*.md",
 ]
 
 [project.optional-dependencies]

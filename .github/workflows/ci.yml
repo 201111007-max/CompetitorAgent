@@ -6,10 +6,16 @@ on:
     paths:
       - "competitor_agent/**"
       - ".github/workflows/ci.yml"
+      - "Dockerfile"
+      - ".dockerignore"
+      - "docker-compose.yml"
   pull_request:
     branches: [main]
     paths:
       - "competitor_agent/**"
+      - "Dockerfile"
+      - ".dockerignore"
+      - "docker-compose.yml"
 
 defaults:
   run:
@@ -61,3 +67,30 @@ jobs:
         with:
           name: benchmark-report
           path: reports
+
+  docker:
+    # 设计文档 55 M2：构建双 target + 容器内 smoke；不推镜像（仓库是叙事载体）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build slim image
+        working-directory: ${{ github.workspace }}
+        run: docker build --target slim -t competitor-agent:slim .
+
+      - name: Build full image
+        working-directory: ${{ github.workspace }}
+        run: docker build --target full -t competitor-agent:full .
+
+      - name: Smoke test (slim)
+        working-directory: ${{ github.workspace }}
+        run: |
+          docker run --rm competitor-agent:slim python -c "import competitor_agent"
+          docker run --rm competitor-agent:slim python -m competitor_agent.web_app --help
+
+      - name: Smoke test (full)
+        working-directory: ${{ github.workspace }}
+        run: |
+          docker run --rm competitor-agent:full python -c "import competitor_agent"
+          docker run --rm competitor-agent:full python -c "import chromadb, sentence_transformers, numpy, pandas"
+          docker run --rm competitor-agent:full python -m competitor_agent.web_app --help
