@@ -114,6 +114,7 @@ def build_subagent(
     max_steps: int = 6,
     protocol: str = "native",  # 设计文档 53 Q2：子 Agent 一并覆盖（默认 native 与 Lead 对齐）
     tracer: Any = None,  # 设计文档 54：子 Agent tool.call span（透传 ToolDispatcher）
+    max_history_steps: int | None = None,  # 设计文档 56 Q4：配置化注入；None 用 ReactAgent 默认
 ):
     """构造一个维度子 Agent（独立 ReactAgent + ReactLoop）。
 
@@ -152,4 +153,5 @@ def build_subagent(
         rag_fn=rag_fn,
         obs_max_chars=obs_max_chars,
         system_prompt_override=system_prompt,
+        max_history_steps=max_history_steps,
     )

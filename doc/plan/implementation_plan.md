@@ -1155,5 +1155,29 @@ dev:
 
 | 项 | 内容 | 优先级 | 状态 |
 |---|---|---|---|
-| **56 压缩可逆化** | M1：kb_recall（Lead 懒绑定 + 子 Agent 按维度绑定）+ Lead 摄入补齐 + 摘要指引可操作化 + `AgentConfig.max_history_steps` 配置化 + 单测；M2：核验事实 pinned 段（复用 fact_verification 键空间，永不折叠、双封顶）；M3：behavior_eval 折叠取回场景 + `refetch_after_fold=0` 门禁 | 中 | 📋 设计完成（2026-08-21，待实施） |
+| **56 压缩可逆化** | M1：kb_recall（Lead 懒绑定 + 子 Agent 按维度绑定）+ Lead 摄入补齐 + 摘要指引可操作化 + `AgentConfig.max_history_steps` 配置化 + 单测；M2：核验事实 pinned 段（复用 fact_verification 键空间，永不折叠、双封顶）；M3：behavior_eval 折叠取回场景 + `refetch_after_fold=0` 门禁 | 中 | ✅ 2026-08-21（M1/M2/M3 一次落地） |
+
+> 实施明细（2026-08-21）：① `facade/api.py` 新增 `_build_kb_recall(competitor_fn, dimension)`
+> 闭包工厂（复用既有 Retriever 混合检索，空库/未装配返回可读信息保工具面稳定；ToolSpec
+> 携带"仅当需要回溯被折叠步骤的完整内容时使用"使用纪律描述）与 `_lead_web_extract`
+> （抓取成功摄入 `dimension="web"` 通用域，competitor 经 plan_box 懒绑定；闭包按 loop
+> 构造不挂 self，避免并行 analyze 串 competitor）；`_react_loop` 接线 extra_tools +
+> config 注入 `max_history_steps` + pinned 收集。② `react_agent.py` 摘要指引增补
+> "折叠步的完整内容已摄入知识库，可用 kb_recall(query) 取回"（双协议共用
+> `_SUMMARY_MSG_GUIDANCE`）；`_compress_history`/`_compress_history_native` 增
+> `pinned_facts` 参数，pinned 段（`_PINNED_MSG_PREFIX`）固定摘要块后、永不折叠/滚出、
+> 行数（8）+ 单行（120 字符）双封顶只保最近核验。③ `review_tools.py`
+> `extract_verified_facts` 只收 validate_facts/detect_conflict 核验**通过**结论，按
+> `_VERIFY_NUMERIC_KEYS` 键空间抽一行一条（失败/无关工具不 pin）。④ `react_loop.py`
+> 透传 `max_history_steps`/`pinned_facts`/`on_step` 附加回调；`tool_registry.py`
+> extra_tools 支持 ToolSpec 值（带描述/schema 注册）；`subagent_registry.py` 透传
+> `max_history_steps`；`config/loader.py` 新增 `AgentConfig`（默认 8）+ yaml `agent`
+> section。⑤ M3：`behavior_eval.py` `FoldRecallScriptedLLM`/`FoldRecallEvaluator`——
+> >8 步脚本决策完全由上下文驱动（摘要有 kb_recall 指引则取回、否则重抓），
+> `BehaviorMetrics.refetch_after_fold` 进门禁（`GATE_REFETCH_AFTER_FOLD_MAX=0`，
+> HARNESS_VERSION 不变）；monkeypatch 摘除指引即复现对照组 refetch=1。
+> 新增 4 个测试文件 + 更新 behavior/gate 测试（门禁 6→7 项、behavior 字段集），
+> ruff/mypy 改动文件通过；全量回归 899 passed / 5 failed——5 个失败均为存量问题
+> （refresh_stale 日期时间炸弹、rag_integration 与 ablation RAG 差分的 mock 流程，
+> 干净树上同样失败），与本次改动无关。
 

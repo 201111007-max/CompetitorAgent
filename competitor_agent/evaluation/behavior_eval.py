@@ -37,6 +37,7 @@ class BehaviorMetrics:
     retrieval_hit_hybrid: float = 0.0  # hybrid 命中率@k
     retrieval_hit_lexical: float = 0.0 # lexical 命中率@k（消融对照）
     retrieval_n: int = 0               # 检索样本数
+    refetch_after_fold: int = 0        # 折叠后重复抓取次数（设计文档 56 M3，门禁 = 0）
 
 
 @dataclass
@@ -305,8 +306,121 @@ class RetrievalEvaluator:
         return Retriever(store=store)
 
 
+class FoldRecallScriptedLLM:
+    """折叠取回对照脚本（设计文档 56 M3）：>max_history_steps 步后上下文已压缩。
+
+    前 ``n_fetches`` 轮逐个抓取不同 URL，第 n_fetches+1 轮调 validate_facts
+    （产生一条 pinned 已核验事实）；之后的决策轮"需要"最早抓取的 p0 内容：
+    摘要块含 kb_recall 指引 → 调 kb_recall 取回（可逆闭环）；指引缺失（修复前
+    形状）→ 只能重发 web_extract 重抓（重复抓取 +1）。决策完全由上下文驱动，
+    因此同一脚本可直接量化修复前后差异（refetch_after_fold: >0 → 0）。
+    """
+
+    P0_URL = "https://example.com/pricing-p0"
+
+    def __init__(self, n_fetches: int = 9) -> None:
+        self.calls: list[list[dict[str, Any]]] = []
+        self._round = 0
+        self._n_fetches = n_fetches
+        self._decision_done = False
+
+    def complete(self, messages: list[dict[str, str]], model: str | None = None, **kwargs: Any) -> Any:
+        self.calls.append([dict(m) for m in messages])
+        self._round += 1
+        if self._round <= self._n_fetches:
+            url = f"https://example.com/pricing-p{self._round - 1}"
+            return f'Thought: 抓取定价来源\n<action>web_extract({{"url": "{url}"}})</action>'
+        if self._round == self._n_fetches + 1:
+            return (
+                "Thought: 核验已采集数值\n"
+                '<action>validate_facts({"details_json": {"monthly_price_usd": 20}, '
+                '"raw_text": "cursor pro plan costs $20 per month"})</action>'
+            )
+        if not self._decision_done:
+            self._decision_done = True
+            summary = self._summary_block(messages)
+            if "kb_recall" in summary:
+                return (
+                    "Thought: 摘要指引说折叠内容可用 kb_recall 取回，不重抓\n"
+                    '<action>kb_recall({"query": "cursor pro plan pricing p0"})</action>'
+                )
+            return (
+                "Thought: 需要 p0 全文但摘要未告知取回途径，重新抓取\n"
+                f'<action>web_extract({{"url": "{self.P0_URL}"}})</action>'
+            )
+        return "Final Answer: cursor pro 定价 $20/月"
+
+    @staticmethod
+    def _summary_block(messages: list[dict[str, str]]) -> str:
+        from competitor_agent.agent.react_agent import _SUMMARY_MSG_PREFIX
+
+        for message in reversed(messages):
+            content = str(message.get("content", ""))
+            if message.get("role") == "user" and content.startswith(_SUMMARY_MSG_PREFIX):
+                return content
+        return ""
+
+    @property
+    def last_messages(self) -> list[dict[str, Any]]:
+        return self.calls[-1] if self.calls else []
+
+
+class FoldRecallEvaluator:
+    """折叠取回对照评测（设计文档 56 M3）：压缩发生后模型应 kb_recall 取回而非重抓。
+
+    返回 ``(refetch_after_fold, pinned_survived)``：重复抓取次数（同一 URL 抓取
+    第二次起计一次，门禁 = 0）+ pinned 段在压缩后是否仍在消息列表（M2 断言）。
+    全链路确定性（ScriptedLLM + 假 web_extract/kb_recall），无 Key/网络依赖。
+    """
+
+    def run(self, max_history_steps: int = 8) -> tuple[int, bool]:
+        from competitor_agent.agent.react_agent import _PINNED_MSG_PREFIX
+        from competitor_agent.agent.review_tools import (
+            build_validate_facts_tool,
+            extract_verified_facts,
+        )
+
+        fetched: list[str] = []
+
+        def fake_web_extract(url: str) -> str:
+            fetched.append(url)
+            return f"cursor pro plan costs $20 per month (page {url})"
+
+        def fake_kb_recall(query: str) -> str:
+            return "RECALLED: cursor pro plan costs $20 per month"
+
+        dispatcher = ToolDispatcher()
+        dispatcher.register("web_extract", fake_web_extract)
+        dispatcher.register("kb_recall", fake_kb_recall)
+        dispatcher.register("validate_facts", build_validate_facts_tool())
+        scripted = FoldRecallScriptedLLM()
+        agent = ReactAgent(
+            llm=LLMClient(call_func=scripted.complete),
+            dispatcher=dispatcher,
+            protocol="react",  # 文本协议：摘要块形状可直接断言
+        )
+        pinned_facts: list[str] = []
+        loop = ReactLoop(
+            agent,
+            max_steps=20,
+            max_history_steps=max_history_steps,
+            pinned_facts=pinned_facts,
+            on_step=lambda rec: pinned_facts.extend(extract_verified_facts(rec)),
+        )
+        loop.run("分析 cursor 定价（折叠取回对照实验）")
+        refetch = len(fetched) - len(set(fetched))
+        pinned_survived = any(
+            str(m.get("content", "")).startswith(_PINNED_MSG_PREFIX)
+            for m in scripted.last_messages
+            if m.get("role") == "user"
+        )
+        return refetch, pinned_survived
+
+
 __all__ = [
     "BehaviorMetrics",
+    "FoldRecallEvaluator",
+    "FoldRecallScriptedLLM",
     "RecoveryEvaluator",
     "RecoveryScenario",
     "RetrievalCase",

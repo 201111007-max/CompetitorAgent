@@ -161,9 +161,9 @@
 | # | 里程碑 | 产出 | 工作量 |
 |---|--------|------|--------|
 | 0 | 设计文档 + 索引登记 | 本文档 + README/implementation_plan 登记 | 0.2d ✅ 2026-08-21 |
-| 1 | 可逆化核心 | kb_recall（Lead+子Agent）+ Lead 摄入补齐 + 摘要指引 + 阈值配置化 + 单测 | 1d |
-| 2 | 事实 pinning | pinned 段收集/插入/封顶 + 单测 | 0.5d |
-| 3 | 对照实验 | behavior 场景 + `refetch_after_fold` 门禁 | 0.5d |
+| 1 | 可逆化核心 | kb_recall（Lead+子Agent）+ Lead 摄入补齐 + 摘要指引 + 阈值配置化 + 单测 | 1d ✅ 2026-08-21 |
+| 2 | 事实 pinning | pinned 段收集/插入/封顶 + 单测 | 0.5d ✅ 2026-08-21 |
+| 3 | 对照实验 | behavior 场景 + `refetch_after_fold` 门禁 | 0.5d ✅ 2026-08-21 |
 
 ## 7. 风险与缓解
 
