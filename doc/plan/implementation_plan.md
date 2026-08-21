@@ -1135,3 +1135,25 @@ dev:
   本机嵌套容器环境 overlay-on-overlay 不支持，本地构建未执行（Dockerfile/compose/yaml
   已通过静态语法校验）；`--gate` 门禁侧 13 条单测昨日已绿不受影响。
 
+## 28. 第十轮待办（上下文压缩可逆化：kb_recall 取回闭环 + Lead 摄入补齐 + 事实 pinning，设计文档 56）
+
+> 状态背景：2026-08-21 面试叙事深挖（"压缩有损是硬伤"追问）引出对 doc 46 压缩机制的复核，
+> 核实后修正口头分析的错误——doc 46 折叠**已有规则摘要雏形**（`_fold_pair`/
+> `_fold_native_turn`：一行一旧步「调用 工具[URL] → 结果前 80 字」），真缺口是
+> ① 摘要不可操作 + 循环内无知识库取回工具（假可逆：指针够不到内容，模型只能幻觉填空
+> 或 web_extract 重抓）② Lead `_react_web_extract` 抓完不摄入知识库（仅子 Agent
+> `_web_extract_for` 摄入）③ 已核验数值无 pinning，随折叠丢核验依据。
+> 用户拍板四决策：分三里程碑（M1 可逆化核心 / M2 事实 pinning / M3 对照实验门禁化）；
+> kb_recall Lead + 子 Agent 都加（含 Lead 摄入补齐）；摘要纯规则（不引入 LLM 摘要调用，
+> 保 mock 确定性）；`_MAX_HISTORY_STEPS=8` 配置化进 config（默认 8 不变）。
+> 关键架构决策：kb_recall 走 `extra_tools` 注入（同 make_plan/delegate），**不进
+> TOOLS/TOOL_SPECS**——有状态工具（依赖 Retriever + 竞品上下文）不进无状态函数面，
+> MCP 同源零涟漪。业界依据（Manus restorable compression / MemGPT archival search /
+> Anthropic tool result clearing / OpenHands keep_first / LangChain 四策略）见设计文档 §8。
+> 设计文档见 `doc/plan/issue_designs/56_context_compression_reversible_design.md`
+> （2026-08-21，待实施）。
+
+| 项 | 内容 | 优先级 | 状态 |
+|---|---|---|---|
+| **56 压缩可逆化** | M1：kb_recall（Lead 懒绑定 + 子 Agent 按维度绑定）+ Lead 摄入补齐 + 摘要指引可操作化 + `AgentConfig.max_history_steps` 配置化 + 单测；M2：核验事实 pinned 段（复用 fact_verification 键空间，永不折叠、双封顶）；M3：behavior_eval 折叠取回场景 + `refetch_after_fold=0` 门禁 | 中 | 📋 设计完成（2026-08-21，待实施） |
+
