@@ -1005,11 +1005,13 @@ dev:
 > `protocol="native"` 默认（文本 ReAct 保留 fallback/对照）；Lead 主循环 + 子 Agent 一并覆盖；
 > mock 双形态（按 `tools=` kwarg 出形状）；模型不支持 tools 直接报错不自动降级。
 > 设计文档见 `doc/plan/issue_designs/53_native_tool_calling_design.md`（2026-08-20，待实施）。
-> **M1 已实现（2026-08-20，见 §25.1）；M2-M4 待实施**。
+> **M1 已实现（2026-08-20，见 §25.1）；M2-M4 已实现（2026-08-20，13d6082：ReactAgent/ReactLoop
+> native 循环 + tool_choice plan-first + api/cli/subagent 透传 + mock 双形态 + benchmark
+> `--protocol both` 对照表 + HARNESS_VERSION 0.8.0，详见 README 索引）**。
 
 | 项 | 内容 | 优先级 | 状态 |
 |---|---|---|---|
-| **53 原生 tool-calling** | M1：`LLMClient.complete_with_tools` + ToolCallReply + TOOL_SPECS→OpenAI tools 转换器；M2：ReactAgent/ReactLoop native 循环 + tool_choice plan-first + 压缩适配；M3：api/cli/subagent 透传 + mock 双形态 + 测试迁移（最大阶段）；M4：benchmark `--protocol both` 对比表 + HARNESS_VERSION 0.8.0 | 中 | 🔨 M1 已实现（2026-08-20），M2-M4 待实施 |
+| **53 原生 tool-calling** | M1：`LLMClient.complete_with_tools` + ToolCallReply + TOOL_SPECS→OpenAI tools 转换器；M2：ReactAgent/ReactLoop native 循环 + tool_choice plan-first + 压缩适配；M3：api/cli/subagent 透传 + mock 双形态 + 测试迁移（最大阶段）；M4：benchmark `--protocol both` 对比表 + HARNESS_VERSION 0.8.0 | 中 | ✅ M1-M4 已实现（2026-08-20，M1 见 §25.1，M2-M4 见 13d6082） |
 
 ### 25.1 53 M1 完成说明（2026-08-20）
 
@@ -1056,10 +1058,12 @@ dev:
 > span 三档全要（llm.call/tool.call/子 Agent 嵌套）；查看方式 = CLI 文本瀑布图 + JSONL 落盘。
 > 历史包袱：问题 19 曾删 langfuse_* 假配置——本次配置字段全有真消费方。
 > 设计文档见 `doc/plan/issue_designs/54_langfuse_tracing_design.md`（2026-08-20，待实施）。
+> **M1-M3 已实现（2026-08-20，6f2cc2c：tracer 总线 + JsonlSink + 三档埋点 + 跨线程子 Agent span +
+> `trace show/list` CLI 瀑布图 + Langfuse exporter，详见 README 索引）**。
 
 | 项 | 内容 | 优先级 | 状态 |
 |---|---|---|---|
-| **54 Langfuse 链路追踪** | M1：`observability/tracer.py` 总线 + JsonlSink + llm/tool 两档埋点；M2：delegate 跨线程 parent 传递 + 子 Agent span + `trace show/list` CLI 瀑布图；M3：Langfuse exporter（可选 extra + 环境变量启用 + mock 单测） | 中 | 📄 设计完成（2026-08-20，待实施） |
+| **54 Langfuse 链路追踪** | M1：`observability/tracer.py` 总线 + JsonlSink + llm/tool 两档埋点；M2：delegate 跨线程 parent 传递 + 子 Agent span + `trace show/list` CLI 瀑布图；M3：Langfuse exporter（可选 extra + 环境变量启用 + mock 单测） | 中 | ✅ M1-M3 已实现（2026-08-20，6f2cc2c） |
 
 ## 27. 第九轮待办（部署/LLMOps：Dockerfile 双 target + compose + benchmark 门禁化，设计文档 55）
 
@@ -1070,7 +1074,33 @@ dev:
 > 双 target（full 含 rag / slim 仅 web）；compose 含可选 observability profile（Langfuse +
 > Postgres 联动 doc 54）；benchmark `--gate` 门禁化 + docker build 验证 job，不推镜像。
 > 设计文档见 `doc/plan/issue_designs/55_deployment_llmops_design.md`（2026-08-20，待实施）。
+> **M1 已实现（2026-08-21，见 §27.1）；M2-M3 待实施**。
 
 | 项 | 内容 | 优先级 | 状态 |
 |---|---|---|---|
-| **55 部署/LLMOps** | M1：benchmark `--gate` + 单测 + CI 门禁接线；M2：Dockerfile multi-stage 双 target + .dockerignore + CI docker job；M3：docker-compose（observability profile 带 Langfuse+Postgres）+ .env.example + deployment.md | 中 | 📄 设计完成（2026-08-20，待实施） |
+| **55 部署/LLMOps** | M1：benchmark `--gate` + 单测 + CI 门禁接线；M2：Dockerfile multi-stage 双 target + .dockerignore + CI docker job；M3：docker-compose（observability profile 带 Langfuse+Postgres）+ .env.example + deployment.md | 中 | 🔨 M1 已实现（2026-08-21），M2-M3 待实施 |
+
+### 27.1 55 M1 完成说明（2026-08-21）
+
+- **`evaluation/benchmark.py`**：门禁阈值抽为模块级常量单一来源——`GATE_FIELD_ACCURACY_MIN=0.90` /
+  `GATE_HALLUCINATION_MAX=0.05` / `GATE_TOOL_SELECTION_MIN=0.85` / `GATE_TRACE_COMPLETENESS=1.0`
+  （benchmark_design §5/§8）+ `GATE_RECOVERY_RATE_MIN=0.9`（设计文档 42）；新增 `GateCheck`
+  （指标名/阈值描述/实测值/是否达标）与 `evaluate_gates(report)` 六项判定（4 项结果级 +
+  行为门禁 2 项：自恢复率下限、hybrid 不劣于 lexical）；`main()` 新增 `--gate` 开关——
+  任一项不达标 `return 1` 并逐项打印「PASS/FAIL 指标： 实测 X，阈值 Y」+ 汇总
+  「N/6 项不达标」，全达标打印「门禁全部达标（6/6）」；**不加 `--gate` 行为逐位不变（恒 0）**，
+  real 无 Key 仍 return 2 前置校验不变，HARNESS_VERSION 不变不重定。
+- **阈值单一来源收口**：`test_benchmark_integration.py` 四项门禁断言与
+  `test_behavior_eval.py` 自恢复率断言改引 GATE_* 常量（原字面量 0.90/0.05/0.85/1.0/0.9 消除，
+  CLI 门禁与测试门禁同源）。
+- **测试** `tests/evaluation/test_benchmark_gate.py` 13 条：evaluate_gates 全绿/六项名称与顺序/
+  阈值文案来自常量/贴阈值边界达标（>= / <= / == 语义）/五项单指标失败各自唯一标 FAIL/
+  hybrid<lexical 标 FAIL 且阈值串含 lexical 实测；main `--gate` 真实 mock 全量跑 return 0 +
+  门禁表输出、monkeypatch 不达标报告 return 1 含差距与「1/6 项不达标」、不加 `--gate`
+  不达标也恒 0（回归既有行为）、real 无 Key return 2 不变。全程零真实 LLM。
+- **CI 接线**：`.github/workflows/ci.yml` benchmark 步骤加 `--gate`（mock 确定性门禁，零成本零触网），
+  报告 artifact 保留。
+- **回归**：`test_benchmark_gate.py` 13 条全绿（含一次真实 mock 全量 69s）；
+  `test_benchmark_integration.py` + `test_behavior_eval.py` 回归全绿；ruff 改动文件通过；
+  mypy `evaluation/benchmark.py` 10 项错误与 HEAD 逐条相同（均为远程既有，本改动零新增）。
+
