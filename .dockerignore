@@ -1,0 +1,26 @@
+# 设计文档 55 M2：构建上下文精简 + 镜像零密钥纪律
+# 版本控制与环境
+.git
+.github
+.env
+.env.*
+!.env.example
+.venv
+venv
+env/
+
+# 测试 / 文档 / 报告产物（不进镜像；package-data 不依赖这些目录）
+competitor_agent/tests/
+competitor_agent/docs/
+competitor_agent/reports/
+doc/
+reports/
+
+# 缓存与构建残留
+.cache
+**/__pycache__/
+**/*.pyc
+**/*.egg-info/
+.pytest_cache
+.mypy_cache
+.ruff_cache

@@ -1074,11 +1074,11 @@ dev:
 > 双 target（full 含 rag / slim 仅 web）；compose 含可选 observability profile（Langfuse +
 > Postgres 联动 doc 54）；benchmark `--gate` 门禁化 + docker build 验证 job，不推镜像。
 > 设计文档见 `doc/plan/issue_designs/55_deployment_llmops_design.md`（2026-08-20，待实施）。
-> **M1 已实现（2026-08-21，见 §27.1）；M2-M3 待实施**。
+> **M1-M3 已实现（2026-08-21，见 §27.1/§27.2）。**
 
 | 项 | 内容 | 优先级 | 状态 |
 |---|---|---|---|
-| **55 部署/LLMOps** | M1：benchmark `--gate` + 单测 + CI 门禁接线；M2：Dockerfile multi-stage 双 target + .dockerignore + CI docker job；M3：docker-compose（observability profile 带 Langfuse+Postgres）+ .env.example + deployment.md | 中 | 🔨 M1 已实现（2026-08-21），M2-M3 待实施 |
+| **55 部署/LLMOps** | M1：benchmark `--gate` + 单测 + CI 门禁接线；M2：Dockerfile multi-stage 双 target + .dockerignore + CI docker job；M3：docker-compose（observability profile 带 Langfuse+Postgres）+ .env.example + deployment.md | 中 | ✅ M1-M3 已实现（2026-08-21） |
 
 ### 27.1 55 M1 完成说明（2026-08-21）
 
@@ -1103,4 +1103,35 @@ dev:
 - **回归**：`test_benchmark_gate.py` 13 条全绿（含一次真实 mock 全量 69s）；
   `test_benchmark_integration.py` + `test_behavior_eval.py` 回归全绿；ruff 改动文件通过；
   mypy `evaluation/benchmark.py` 10 项错误与 HEAD 逐条相同（均为远程既有，本改动零新增）。
+
+### 27.2 55 M2+M3 完成说明（2026-08-21）
+
+- **M2 Dockerfile（仓库根，multi-stage 双 target）**：`base` 共享层（python:3.12-slim、
+  非 root uid 10001、`COMPETITOR_AGENT_DATA_DIR=/data`、`EXPOSE 8000`、`VOLUME /data`、
+  CMD `web_app --host 0.0.0.0 --port 8000`——容器端口映射语义，本地默认 127.0.0.1 不变）；
+  `slim`=`.[web]`（~300MB）、`full`=`.[web,rag,mcp,eval]`（~2GB+，torch 来自
+  sentence-transformers），pip 构建缓存挂载分层。镜像零密钥（全运行时注入）、
+  spa/playwright 不进镜像、bge 模型不构建期预下载（运行时缓存到 /data 卷，对齐 doc 52 纪律）。
+- **M2 `.dockerignore`**：排除 tests/docs/reports/.git/.cache/.env*/__pycache__/egg-info，
+  上下文精简且密钥零可能进镜像。
+- **M2 pyproject 必要修复（设计外）**：package-data 补 `config/*.yaml` + `skills/*.md`——
+  两者经 `__file__` 相对路径加载（config/loader.py:16、skills/loader.py:17），非 editable
+  安装（Docker 镜像场景）缺这两个资源 web_app 起不来；editable 安装此前掩盖了该缺口。
+- **M2 CI docker job**：build 两 target + 容器内 smoke（`import competitor_agent` +
+  `web_app --help`，full 加验 rag/eval 依赖 import）；**不推镜像**；push/PR paths 过滤纳入
+  Dockerfile/.dockerignore/docker-compose.yml。
+- **M3 `docker-compose.yml`**：基础 `web` 服务（target=full、8000:8000、`competitor-data`
+  卷挂 /data、`env_file: .env`）+ 可选 `observability` profile（`langfuse/langfuse:2` +
+  `postgres:16` 锁 tag + `langfuse-db` 卷）；web 的 `LANGFUSE_HOST` 缺省指向
+  `http://langfuse:3000`（`.env` 显式设置可改指 Langfuse Cloud），三变量齐全才启用
+  doc 54 exporter——单起 web 零副作用；Langfuse/Postgres 密钥为本地占位值经 `.env` 可覆盖。
+- **M3 `.env.example`**：全量可用变量模板（LLM Key 别名链 / OPENAI_BASE_URL /
+  COMPETITOR_AUTH_TOKEN / LANGFUSE_* / observability 占位密钥），逐条注释；不含真实密钥。
+- **M3 `competitor_agent/docs/deployment.md`**：本地开发 / Docker 单容器（slim↔full 体积与
+  能力取舍表、rag-warmup 容器内预热、spa 外挂说明）/ compose 全栈（含 observability
+  操作流程）/ 环境变量清单表 / 卷与持久化（含删卷告警）/ 安全节（鉴权、CORS yaml、
+  密钥纪律、不推镜像）。
+- **验证口径**：Docker/compose 不进 pytest（设计 §3.2）——CI docker job 即验证面；
+  本机嵌套容器环境 overlay-on-overlay 不支持，本地构建未执行（Dockerfile/compose/yaml
+  已通过静态语法校验）；`--gate` 门禁侧 13 条单测昨日已绿不受影响。
 

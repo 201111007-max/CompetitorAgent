@@ -144,9 +144,9 @@ FROM base AS full          # .[web,rag,mcp,eval]（~2GB+，torch 来自 sentence
 | # | 里程碑 | 产出 | 工作量 |
 |---|--------|------|--------|
 | 0 | 设计文档 + 索引登记 | 本文档 + README/implementation_plan 登记 | 0.2d ✅ 2026-08-20 |
-| 1 | 门禁执法 | benchmark `--gate` + 单测 + CI 接线 | 0.3d |
-| 2 | Docker 化 | Dockerfile 双 target + .dockerignore + CI docker job | 0.5d |
-| 3 | compose + 文档 | docker-compose + observability profile + .env.example + deployment.md | 0.5d |
+| 1 | 门禁执法 | benchmark `--gate` + 单测 + CI 接线 | 0.3d ✅ 2026-08-21 |
+| 2 | Docker 化 | Dockerfile 双 target + .dockerignore + CI docker job | 0.5d ✅ 2026-08-21 |
+| 3 | compose + 文档 | docker-compose + observability profile + .env.example + deployment.md | 0.5d ✅ 2026-08-21 |
 
 ## 7. 风险与缓解
 
