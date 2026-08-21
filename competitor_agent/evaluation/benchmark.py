@@ -49,6 +49,16 @@ STRATEGY_FIXTURE = "strategy_cases.json"
 #   门禁基于多 Agent 链路真实输出重定。
 HARNESS_VERSION = "0.8.0"  # 设计文档 53：协议对照实验（native 默认，门禁对默认 native 重定）
 
+# 门禁阈值单一来源（设计文档 55 M1）：--gate CLI、test_benchmark_integration、
+# test_behavior_eval 全部引用本组常量，不新造第二份数值。
+# 口径：field_accuracy / hallucination / tool_selection / trace（benchmark_design §5/§8）
+# + 行为门禁（设计文档 42：自恢复率下限 + hybrid 不劣于 lexical）。
+GATE_FIELD_ACCURACY_MIN = 0.90
+GATE_HALLUCINATION_MAX = 0.05
+GATE_TOOL_SELECTION_MIN = 0.85
+GATE_TRACE_COMPLETENESS = 1.0
+GATE_RECOVERY_RATE_MIN = 0.9
+
 # 单次采集/工具的估算成本（与主流程 IterationBudget 单次 0.01 对齐）
 UNIT_COST = 0.01
 
@@ -1569,6 +1579,63 @@ def _write_engine_compare(
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+@dataclass(frozen=True)
+class GateCheck:
+    """单条门禁判定结果（设计文档 55 M1）：指标名 / 阈值描述 / 实测值 / 是否达标。"""
+
+    name: str
+    threshold: str
+    actual: str
+    passed: bool
+
+
+def evaluate_gates(report: BenchmarkReport) -> list[GateCheck]:
+    """按门禁常量逐项判定（设计文档 55 M1：阈值单一来源，不新造数值）。
+
+    六项：field_accuracy / hallucination / tool_selection / trace 完整率
+    （benchmark_design §5/§8）+ 行为门禁（设计文档 42：自恢复率下限、hybrid 不劣于 lexical）。
+    """
+    b = report.behavior
+    return [
+        GateCheck(
+            "field_accuracy",
+            f">= {GATE_FIELD_ACCURACY_MIN:.2f}",
+            f"{report.accuracy.field_accuracy:.4f}",
+            report.accuracy.field_accuracy >= GATE_FIELD_ACCURACY_MIN,
+        ),
+        GateCheck(
+            "hallucination_rate",
+            f"<= {GATE_HALLUCINATION_MAX:.2f}",
+            f"{report.accuracy.hallucination_rate:.4f}",
+            report.accuracy.hallucination_rate <= GATE_HALLUCINATION_MAX,
+        ),
+        GateCheck(
+            "tool_selection_accuracy",
+            f">= {GATE_TOOL_SELECTION_MIN:.2f}",
+            f"{report.strategy.tool_selection_accuracy:.4f}",
+            report.strategy.tool_selection_accuracy >= GATE_TOOL_SELECTION_MIN,
+        ),
+        GateCheck(
+            "trace_completeness",
+            f"== {GATE_TRACE_COMPLETENESS:.2f}",
+            f"{report.trace_completeness:.4f}",
+            report.trace_completeness == GATE_TRACE_COMPLETENESS,
+        ),
+        GateCheck(
+            "behavior.react_recovery_rate",
+            f">= {GATE_RECOVERY_RATE_MIN:.2f}",
+            f"{b.react_recovery_rate:.4f}",
+            b.react_recovery_rate >= GATE_RECOVERY_RATE_MIN,
+        ),
+        GateCheck(
+            "behavior.retrieval_hit_hybrid",
+            f">= lexical({b.retrieval_hit_lexical:.4f})",
+            f"{b.retrieval_hit_hybrid:.4f}",
+            b.retrieval_hit_hybrid >= b.retrieval_hit_lexical,
+        ),
+    ]
+
+
 def _write_protocol_compare(
     native_report: BenchmarkReport,
     react_report: BenchmarkReport,
@@ -1639,6 +1706,11 @@ def main(argv: list[str] | None = None) -> int:
         choices=["native", "react", "both"],
         default="native",
         help="调用协议（设计文档 53）：native=原著 function calling（默认），react=文本 ReAct 对照，both=双协议顺序跑 + 对比表落盘",
+    )
+    parser.add_argument(
+        "--gate",
+        action="store_true",
+        help="门禁执法（设计文档 55 M1）：跑完按 GATE_* 阈值逐项判定，任一项不达标退出码 1 并打印差距；不加本开关行为不变（恒 0）",
     )
     args = parser.parse_args(argv)
 
@@ -1750,6 +1822,19 @@ def main(argv: list[str] | None = None) -> int:
             path=proto_compare_path,
         )
         print(f"protocol_compare: {proto_compare_path}")
+
+    if args.gate:
+        # 设计文档 55 M1：门禁执法——任一项不达标 return 1，逐项打印「指标/阈值/实测」
+        checks = evaluate_gates(report)
+        print("门禁判定（--gate）：")
+        for c in checks:
+            verdict = "PASS" if c.passed else "FAIL"
+            print(f"  {verdict} {c.name}: 实测 {c.actual}，阈值 {c.threshold}")
+        failed = [c for c in checks if not c.passed]
+        if failed:
+            print(f"benchmark 门禁未通过：{len(failed)}/{len(checks)} 项不达标")
+            return 1
+        print(f"benchmark 门禁全部达标（{len(checks)}/{len(checks)}）")
     return 0
 
 
@@ -1759,6 +1844,11 @@ if __name__ == "__main__":
 
 __all__ = [
     "ACCURACY_FIXTURE",
+    "GATE_FIELD_ACCURACY_MIN",
+    "GATE_HALLUCINATION_MAX",
+    "GATE_RECOVERY_RATE_MIN",
+    "GATE_TOOL_SELECTION_MIN",
+    "GATE_TRACE_COMPLETENESS",
     "HARNESS_VERSION",
     "STRATEGY_FIXTURE",
     "AccuracyCase",
@@ -1770,9 +1860,11 @@ __all__ = [
     "BenchmarkReport",
     "FailureRecord",
     "FailureType",
+    "GateCheck",
     "build_benchmark_api",
     "build_real_llm",
     "classify_case",
+    "evaluate_gates",
     "extract_prediction",
     "extract_strategy",
     "real_trace",

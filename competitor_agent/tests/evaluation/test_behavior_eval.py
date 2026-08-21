@@ -24,6 +24,7 @@ from competitor_agent.evaluation.behavior_eval import (
     default_recovery_scenarios,
 )
 from competitor_agent.evaluation.benchmark import (
+    GATE_RECOVERY_RATE_MIN,
     Benchmark,
     BenchmarkReport,
     _write_csv,
@@ -171,7 +172,7 @@ class TestBenchmarkReportBehavior:
 
     def test_report_behavior_gates(self):
         report = Benchmark(llm_mode="mock").run()
-        assert report.behavior.react_recovery_rate >= 0.9
+        assert report.behavior.react_recovery_rate >= GATE_RECOVERY_RATE_MIN
         assert report.behavior.retrieval_hit_hybrid >= report.behavior.retrieval_hit_lexical
         assert report.behavior.recovery_n >= 2
         assert report.behavior.retrieval_n >= 2

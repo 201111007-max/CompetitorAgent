@@ -10,6 +10,10 @@ import pytest
 
 from competitor_agent.evaluation.benchmark import (
     ACCURACY_FIXTURE,
+    GATE_FIELD_ACCURACY_MIN,
+    GATE_HALLUCINATION_MAX,
+    GATE_TOOL_SELECTION_MIN,
+    GATE_TRACE_COMPLETENESS,
     HARNESS_VERSION,
     STRATEGY_FIXTURE,
     Benchmark,
@@ -43,19 +47,19 @@ class TestRealExecutionGates:
 
     def test_field_accuracy_gate(self):
         report = Benchmark().run()
-        assert report.accuracy.field_accuracy >= 0.90
+        assert report.accuracy.field_accuracy >= GATE_FIELD_ACCURACY_MIN
 
     def test_hallucination_rate_gate(self):
         report = Benchmark().run()
-        assert report.accuracy.hallucination_rate <= 0.05
+        assert report.accuracy.hallucination_rate <= GATE_HALLUCINATION_MAX
 
     def test_tool_selection_gate(self):
         report = Benchmark().run()
-        assert report.strategy.tool_selection_accuracy >= 0.85
+        assert report.strategy.tool_selection_accuracy >= GATE_TOOL_SELECTION_MIN
 
     def test_trace_completeness_full(self):
         report = Benchmark().run()
-        assert report.trace_completeness == 1.0
+        assert report.trace_completeness == GATE_TRACE_COMPLETENESS
 
 
 class TestDesign29NewDimensionGates:

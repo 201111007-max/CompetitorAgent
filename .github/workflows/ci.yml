@@ -45,7 +45,8 @@ jobs:
         run: pytest -v --tb=short --cov=competitor_agent --cov-report=term-missing
 
       - name: Generate benchmark report
-        run: python -m competitor_agent.evaluation.benchmark --out reports/benchmark.csv --report reports/benchmark.md
+        # 设计文档 55 M1：--gate 门禁执法——质量退化（field_accuracy/幻觉率/工具选择/trace/行为门禁）CI 变红
+        run: python -m competitor_agent.evaluation.benchmark --gate --out reports/benchmark.csv --report reports/benchmark.md
 
       - name: Upload coverage report
         if: ${{ matrix.python-version == '3.12' }}
