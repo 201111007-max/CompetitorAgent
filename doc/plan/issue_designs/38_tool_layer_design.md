@@ -13,7 +13,7 @@
 - `ResponseParser._parse_json_args`（`agent/response_parser.py:102-108`）：JSON 解析失败或非 dict 时**静默返回 `{}`**——模型拿到空参数，得不到"格式错误"反馈，只能靠自然语言猜，**无法自恢复**。
 - `ReactAgent.run`（`agent/react_agent.py:64-74`）：action 分支只捕获 `ValueError`（工具不存在）一种反馈，其余异常直接冒泡；**无工具调用超时**（一个悬挂工具可卡死整个 ReAct 循环）。
 - 真实 `analyze_react` 只注册 1 个工具（`facade/api.py:474-476`），与 MCP Server 的 8 个工具（设计文档 40 打通）形成能力落差。
-- 影响：作为 agent 项目的"推理 ↔ 工具"交互不可靠——参数错误不可恢复、无超时、无契约；面试被问"工具调用怎么保稳"无证据。
+- 影响：作为 agent 项目的"推理 ↔ 工具"交互不可靠——参数错误不可恢复、无超时、无契约；"工具调用怎么保稳"无证据。
 
 ## 2. 目标设计
 

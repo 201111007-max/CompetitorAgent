@@ -1,8 +1,7 @@
 # 设计文档 55 — 部署/LLMOps：Dockerfile（multi-stage 双 target）+ docker-compose + benchmark 门禁化 + CI 补强
 
-> 触发：2026-08-20 岗位差距分析（BOSS/猎聘 Agent 应用开发岗 JD 提炼）标出「无 Dockerfile、
-> 无 CI 产物、单机运行——补 Dockerfile + docker-compose + GitHub Actions，是原型→生产叙事的分水岭」。
-> 经代码核实该判断**说错一半**：CI 已存在（`.github/workflows/ci.yml`：ruff + mypy + pytest
+> 触发：2026-08-20 复核部署/LLMOps：无 Dockerfile/部署文档、单机运行、benchmark 门禁不执法。
+> 经代码核实 CI 已存在（`.github/workflows/ci.yml`：ruff + mypy + pytest
 > py3.10/3.11/3.12 矩阵 + benchmark 报告 artifact），真正缺口是 ① 无任何 Docker 化与部署文档、
 > ② **benchmark 门禁不执法**——`benchmark.main()` 恒 `return 0`（benchmark.py:1489），
 > 门禁指标只打印，质量退化 CI 不会变红。
@@ -18,7 +17,7 @@
 
 ### 1.1 核实后的真实状态
 
-| 维度 | JD 判断 | 核实结论 |
+| 维度 | 初判 | 核实结论 |
 |---|---|---|
 | CI | 无 CI 产物 | ❌ 不准确——ci.yml 已有 lint/类型/三版本测试矩阵 + benchmark 报告 artifact |
 | CI 质量门禁 | （未提及） | ❌ 真缺口——benchmark 步骤恒 exit 0，门禁指标不执法 |

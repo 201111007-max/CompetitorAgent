@@ -1,7 +1,7 @@
 # 设计文档 31 — 失败类型统计（聚合口径 + 分布报告）
 
 > 对应 `implementation_plan.md` §12.3 #11（P2）「无失败类型统计」。
-> 触发：2026-08-13 简历达标审计——8 条标准中"有失败类型统计"仅半满足：有幻觉率 + 逐实例清单，但**无显式失败类型分类与聚合**。
+> 触发：2026-08-13 评测体系复核——8 条评测能力标准中"有失败类型统计"仅半满足：有幻觉率 + 逐实例清单，但**无显式失败类型分类与聚合**。
 > 依赖：`evaluation/accuracy_eval.py`、`evaluation/strategy_eval.py`、`evaluation/benchmark.py`。
 
 ## 1. 问题现状
@@ -9,7 +9,7 @@
 - `AccuracyMetrics`（`evaluation/accuracy_eval.py:31`）有 `hallucination_rate` + `hallucination_instances`（逐条幻觉清单），但没有**失败根因归类**——"这个 case 为什么没命中？"无法一眼回答。
 - `StrategyMetrics`（`evaluation/strategy_eval.py`）有 `per_case`（hit/rank/cost/efficiency），`confusion_matrix`（`benchmark.py:490-497`）只统计"最优源 vs 首选源"，均非失败类型聚合。
 - 底层信号已存在但未聚合：gap 状态机 `OPEN→PARTIAL→CONFIRMED→CLOSED/BLOCKED`（`domain_types/info_gap.py:18`）、`collect.fail` 埋点（`gap_executor.py:126`）、`[PARTIAL]`/`[N/A]` 状态（`markdown_renderer.py:12`）、`real_trace`（`benchmark.py:324`）。
-- 缺一份「失败类型 → 计数 → 占比 → 样本」的汇总，无法支撑简历/面试的"失败类型统计"，也无法指导归因优化（哪些失败是源挂了、哪些是幻觉、哪些是数据缺失）。
+- 缺一份「失败类型 → 计数 → 占比 → 样本」的汇总，无法指导归因优化（哪些失败是源挂了、哪些是幻觉、哪些是数据缺失）。
 
 ## 2. 目标设计
 
@@ -92,7 +92,7 @@ Benchmark.run() → 收集每个 case 的 report / prediction / ground_truth / t
 
 ## 6. 实现优先级与工作量
 
-- 优先级：**中低**（P2；不改变功能交付，补齐简历/面试"失败类型统计"证据与归因能力）。
+- 优先级：**中低**（P2；不改变功能交付，补齐"失败类型统计"归因能力）。
 - 工作量：约 0.5-1 天。
   - `FailureType` + `classify_case`：0.25 天；
   - `_classify_failures` 聚合 + `BenchmarkReport` 字段：0.25 天；

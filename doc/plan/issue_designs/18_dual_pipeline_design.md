@@ -8,7 +8,7 @@
   - **single**：`analyze()` → `_run_gaps` → `_run_gap` → `TacticalLoop` → `GapExecutor`（采集→分析→记忆→checkpoint，已有完整闭环与并行/取消/预算支持）。
   - **team**：`analyze_team()` → `TeamOrchestrator`（Collector→Analyzer→Validator→Reporter）各自实现"采集→分析→记忆"，**不写 checkpoint、无预算强约束、无并行、取消检查方式不同**。
 - `facade/api.py` 因此膨胀到 600+ 行，orchestration / RAG / streaming / history 混装，可读性差、易回归。
-- 行为分歧点（用户/面试评审可见）：
+- 行为分歧点（用户评审可见）：
   1. **取消语义**：single 在取消后保留 checkpoint 供 `/resume`；team 路径无此保证。
   2. **记忆沉淀**：两条路径 `record_skill` / `record_outcome` 调用时机与内容不一致。
   3. **checkpoint**：仅 single 路径有，team 中断即丢进度。

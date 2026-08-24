@@ -1,6 +1,6 @@
 # 设计文档 53 — 原生 Function Calling 协议：双协议并存 + 默认 tool_calls
 
-> 触发：2026-08-20 岗位差距分析（BOSS/猎聘 Agent 应用开发岗 JD 提炼）标出「Function Calling 协议：
+> 触发：2026-08-20 复核工具调用协议：当前为「Function Calling 协议：
 > 文本 ReAct 解析（Thought/Action），非原生 tool-calling API」。经代码核实属实：`ReactAgent.run`
 > → `LLMClient.complete` 只回纯文本 → `ResponseParser` 5 条正则抠 `Thought/Action/Args/Final Answer`
 > → 结果以 user 角色 "Observation..." 文本回灌；`LLMClient` 从不传 `tools=`，模型即使返回

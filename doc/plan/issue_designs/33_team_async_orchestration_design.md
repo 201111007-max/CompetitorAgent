@@ -2,7 +2,7 @@
 
 > 对应 `implementation_plan.md` §16.1 多 Agent 行（"顺序流水线非真协作"）。
 > 触发：2026-08-14 深度复查——`TeamOrchestrator.run()` 是逐步同步调用（orchestrator.py:100-132），
-> MessageBus 仅作事后记录（analyzer_agent.py:72），"事件驱动/多 Agent"名不副实；简历/面试深挖易崩。
+> MessageBus 仅作事后记录（analyzer_agent.py:72），"事件驱动/多 Agent"名不副实；宣称能力与实际接线不符。
 > 依赖：`team/message_bus.py`、`team/orchestrator.py`、`core/parallel_runner.py`、`facade/api.py`。
 >
 > **实现状态（2026-08-14）**：按路线 1 真异步协作落地 ✅。`MessageBus` 增 `subscribe_async`/`publish_async`（await_result/超时 DEGRADED）；`TeamOrchestrator.run_async` 并行编排（Collector 总线驱动 → Analyzer 按缺口并行 → Validator 仲裁 → Reporter）；`FactValidator.arbitrate` 冲突仲裁（`DimensionResult.conflict_evidence`）；`api.analyze_team_async` 可选 async 入口。详见 `doc/plan/issue_designs/README.md` 设计文档 33 修复说明。
@@ -11,11 +11,11 @@
 
 - `TeamOrchestrator.run`（`team/orchestrator.py:82-132`）顺序执行 Collector→Analyzer→Validator→Reporter，每步 `agent.run(ctx)` 直连，阶段间无并行、无协商。
 - `MessageBus`（`team/message_bus.py:75` 行）是 dict 键值对 pub/sub，仅内存 `_log`（:43-44）；`publish`（analyzer_agent.py:72）是**事后审计记录**，编排并不靠订阅驱动——总线形同日志器（设计文档 12.3 曾简化过它，但未改变"非驱动编排"的事实）。
-- 影响：宣称"多 Agent 协作"实为"流水线 + 重试状态机"，面试被问"Agent 之间如何协商/仲裁/并行"时无支撑。
+- 影响：宣称"多 Agent 协作"实为"流水线 + 重试状态机"，无"Agent 之间如何协商/仲裁/并行"的支撑。
 
 ## 2. 目标设计
 
-两条路择一（设计文档给出倾向，实现时可与面试叙事对齐）：
+两条路择一（设计文档给出倾向）：
 
 1. **真异步协作（推荐）**：各 Agent 独立决策循环 + 异步消息传递，Analyzer 与 Collector 可并行；Validator 对冲突结论做仲裁（多数/证据/置信度投票）；跨 Agent 超时与降级。
 2. **明确叙事降级（保底）**：若不投入真协作，则在文档/README 把"多 Agent"改述为"**多角色流水线 + 状态机编排**"，消除名不副实——成本最低，但失去"多 Agent 协作"卖点。
@@ -69,7 +69,7 @@ analyze(mode="team") → TeamOrchestrator.run_async (async)
 
 ## 6. 实现优先级与工作量
 
-- 优先级：**中高**（卖点真实性 + 面试深挖风险；纯功能交付影响小，但叙事影响大）。
+- 优先级：**中高**（卖点真实性风险；纯功能交付影响小，但叙事影响大）。
 - 工作量：约 1.5-2 天。
   - MessageBus async + 结果回调/超时：0.5 天；
   - `run_async` 并行编排 + 取消/预算贯穿：0.75 天；

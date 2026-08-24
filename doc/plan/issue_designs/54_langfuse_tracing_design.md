@@ -1,7 +1,7 @@
 # 设计文档 54 — Langfuse 式链路追踪：自研 trace 总线 + 可选 Langfuse exporter
 
-> 触发：2026-08-20 岗位差距分析（BOSS/猎聘 Agent 应用开发岗 JD 提炼）标出「自研结构化日志 +
-> 成本核算很好，但无 OpenTelemetry/Langfuse 式链路追踪」。经代码核实属实：`observability/logger.py`
+> 触发：2026-08-20 复核可观测性：自研结构化日志 +
+> 成本核算已有，但无 OpenTelemetry/Langfuse 式链路追踪。经代码核实属实：`observability/logger.py`
 > 有会话级 JSON 结构化日志 + `_log_call` LLM 埋点（tokens/成本/耗时，脱敏），但事件是扁平的
 > 按 session 日志——无 trace→span 树、工具调用无结构化埋点、无 trace 级聚合视图。
 > 用户拍板（2026-08-20）「使用 langfuse 跟踪」+ 三决策：**Q1 自研轻量 trace 为底座 +
@@ -34,7 +34,7 @@
 2. **trace 级聚合缺失**：单会话总成本/总耗时/调用次数没有现成视图（`_log_call` 数据散在
    日志行里），评测报告的成本数字与运行日志对不上口径。
 3. **无平台化上报**：Langfuse 式 UI（trace 瀑布/generation 详情/成本看板）完全缺失，
-   简历/面试缺「LLMOps 链路追踪」实证。
+   缺「LLMOps 链路追踪」实证，无法支撑跨会话的成本/耗时/调用聚合视图。
 
 ### 1.3 现有可复用资产
 

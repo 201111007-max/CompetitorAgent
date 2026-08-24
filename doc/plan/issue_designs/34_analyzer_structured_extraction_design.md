@@ -64,7 +64,7 @@ AnalyzerRegistry 构造不变 → BaseCompetitorAnalyzer._analyze_with_llm
 
 ## 6. 实现优先级与工作量
 
-- 优先级：**中**（抽取鲁棒性 + 面试"怎么让 LLM 输出稳定"的答案）。
+- 优先级：**中**（抽取鲁棒性 + "怎么让 LLM 输出稳定"的答案）。
 - 工作量：约 1 天。
   - `complete_json` + schema 校验/重试：0.4 天；
   - 基类 schema/校验惩罚 + 各维度 schema 对齐：0.4 天；

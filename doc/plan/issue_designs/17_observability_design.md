@@ -20,7 +20,7 @@
 - 全仓**没有任何消费方**：
   - grep `tracing` / `metrics` / `langfuse` 仅出现在 `loader.py` 定义与 `AppConfig` 装配处；
   - 唯一存在的 `observability/logger.py` 仅做普通日志封装，未读取 `ObservabilityConfig`、未导出 trace、未暴露 metrics、未接入 langfuse。
-- 后果：配置项与文档（及 README 卖点）宣称的"链路追踪 / 指标 / Langfuse 评测可视化"**全部未落地**，属于**假亮点**。运维/面试评审者按配置开启 `tracing: true` 后无任何可观测产出。
+- 后果：配置项与文档（及 README 卖点）宣称的"链路追踪 / 指标 / Langfuse 评测可视化"**全部未落地**，属于**假亮点**。运维评审者按配置开启 `tracing: true` 后无任何可观测产出。
 
 ## 2. 目标设计
 
@@ -94,4 +94,4 @@ self._emit(event) → observability.emit_event(event, sid)
 - 工作量：
   - 方案 A：约 2-3 天（tracing + metrics + langfuse 接入 + 端点 + 测试）。
   - 方案 B：约 0.5 天（删字段 + 文档同步）。
-- 建议：若本期重点是面试交付的"核心能力"，直接走**方案 B 削除**最稳，避免新增易挂起的外部依赖；可观测性作为后续独立任务。
+- 建议：若本期重点是核心能力交付，直接走**方案 B 削除**最稳，避免新增易挂起的外部依赖；可观测性作为后续独立任务。

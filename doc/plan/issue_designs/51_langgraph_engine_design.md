@@ -1,6 +1,7 @@
 # 设计文档 51 — 可切换 LangGraph 引擎（mini 复刻）+ benchmark 对照实验
 
-> 触发：2026-08-20 岗位差距分析（BOSS/猎聘等 Agent 应用开发岗 JD 提炼）发现项目主流框架关键词缺失；
+> 触发：2026-08-20 编排层全自研（ReactLoop + DelegateRunner + SubagentRegistry），零 LangChain/LangGraph
+> 依赖，但「为什么自研」仅有定性论证、无实证对照——需要一个同任务/同 LLM/同工具/同出口的第二引擎。
 > 用户拍板采用「可切换真实引擎 + benchmark 对照」方案：mini 版不是 examples 玩具，
 > 而是接入 `CompetitorAnalysisAPI` 的第二编排引擎，真实可跑、可用同一评测 harness 做双引擎对照。
 > 已确认范围：主链路（plan → delegate 并发子 Agent → report）+ SSE 事件 + 记忆/RAG 召回；
@@ -10,8 +11,8 @@
 ## 1. 问题现状
 
 - 编排层全自研（`agent/react_loop.py` + `agent/delegate_tool.py` + `SubagentRegistry`），
-  零 LangChain/LangGraph 依赖——架构能力实际达标，但简历/面试缺框架关键词，
-  且「为什么自研」目前只有定性论证，无实证数据。
+  零 LangChain/LangGraph 依赖——架构能力实际达标，但「为什么自研」目前只有定性论证，
+  无实证数据。
 - 需要一个**同任务、同 LLM、同工具、同出口**的第二引擎，把编排层变成唯一变量，
   用 benchmark 数据回答「自研 vs 框架」。
 
