@@ -93,6 +93,10 @@ tools:
   check_freshness: true    # 新鲜度查询工具注册
   select_source: true      # 选源工具注册（确定性候选由代码生成）
 
+# ===== ReAct 循环（设计文档 56）=====
+agent:
+  max_history_steps: 8     # 工具步超过后折叠旧步为摘要（默认 8，不设 = 现状不变）
+
 # ===== 可观测性 =====
 observability:
   log_level: "INFO"
