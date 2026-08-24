@@ -114,6 +114,7 @@ def build_subagent(
     max_steps: int = 6,
     tracer: Any = None,  # 设计文档 54：子 Agent tool.call span（透传 ToolDispatcher）
     max_history_steps: int | None = None,  # 设计文档 56 Q4：配置化注入；None 用 ReactAgent 默认
+    max_parallel_tool_calls: int = 4,  # 设计文档 59：单回合多 tool_calls 并发上限；1 = 串行
 ):
     """构造一个维度子 Agent（独立 ReactAgent + ReactLoop）。
 
@@ -140,7 +141,9 @@ def build_subagent(
         tracer=tracer,  # 设计文档 54：子 Agent tool.call span
     )
     # 设计文档 54：子 Agent LLM 复用 Lead 同实例（若其带 tracer 则有 generation span）
-    agent = ReactAgent(llm=llm, dispatcher=dispatcher)
+    agent = ReactAgent(
+        llm=llm, dispatcher=dispatcher, max_parallel_tool_calls=max_parallel_tool_calls
+    )
     system_prompt = build_subagent_system_prompt(name)
     return ReactLoop(
         agent,
