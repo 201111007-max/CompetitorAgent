@@ -1,8 +1,13 @@
 """RAG 接入主流程：采集后摄入 + 分析前检索注入"""
+from competitor_agent.config.loader import AppConfig, CollectorConfig
 from competitor_agent.domain_types import Observation, SourceEvidence
 from competitor_agent.facade.api import CompetitorAnalysisAPI
 from competitor_agent.interfaces.context import SourceContext
 from competitor_agent.knowledge_base.competitor_store import CompetitorStore
+
+# 离线环境 URL 守卫（DNS 解析）会拦截 example.com 采集前返回占位文本，关掉守卫让
+# FakeExtractor 真产出内容，才能验证"采集后摄入"（同 test_api.py 的 _OFFLINE_CFG）
+_OFFLINE_CFG = AppConfig(collector=CollectorConfig(block_private_urls=False))
 
 
 class FakeExtractor:
@@ -33,7 +38,7 @@ class TestApiRagWiring:
     def test_analysis_ingests_observations(self, mock_llm, tmp_path):
         api = CompetitorAnalysisAPI(
             extractor=FakeExtractor(), llm=mock_llm, use_llm=True, max_iterations=4,
-            rag_store=self._fresh_store(tmp_path),
+            config=_OFFLINE_CFG, rag_store=self._fresh_store(tmp_path),
         )
         api.analyze("分析 Cursor")
         chunks = api._store.all_chunks()
@@ -43,7 +48,7 @@ class TestApiRagWiring:
     def test_retriever_hits_ingested_chunks(self, mock_llm, tmp_path):
         api = CompetitorAnalysisAPI(
             extractor=FakeExtractor(), llm=mock_llm, use_llm=True, max_iterations=4,
-            rag_store=self._fresh_store(tmp_path),
+            config=_OFFLINE_CFG, rag_store=self._fresh_store(tmp_path),
         )
         api.analyze("分析 Cursor")
         hits = api._retriever.retrieve(query="pricing", competitor="cursor", dimension="pricing", top_k=3)
