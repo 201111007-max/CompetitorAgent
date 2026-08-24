@@ -45,7 +45,7 @@ def _passing_report() -> BenchmarkReport:
 class TestEvaluateGates:
     def test_passing_report_all_green(self):
         checks = evaluate_gates(_passing_report())
-        assert len(checks) == 6
+        assert len(checks) == 7
         assert all(c.passed for c in checks)
         assert [c.name for c in checks] == [
             "field_accuracy",
@@ -54,6 +54,7 @@ class TestEvaluateGates:
             "trace_completeness",
             "behavior.react_recovery_rate",
             "behavior.retrieval_hit_hybrid",
+            "behavior.refetch_after_fold",
         ]
 
     def test_thresholds_come_from_gate_constants(self):
@@ -136,7 +137,7 @@ class TestMainGate:
         out = capsys.readouterr().out
         assert rc == 0
         assert "门禁判定（--gate）" in out
-        assert "门禁全部达标（6/6）" in out
+        assert "门禁全部达标（7/7）" in out
         assert "PASS field_accuracy" in out
 
     def test_gate_failure_returns_1_with_gap(self, tmp_path, capsys, monkeypatch):
@@ -154,7 +155,7 @@ class TestMainGate:
         assert "FAIL field_accuracy" in out
         assert "实测 0.5000" in out
         assert f">= {GATE_FIELD_ACCURACY_MIN:.2f}" in out
-        assert "1/6 项不达标" in out
+        assert "1/7 项不达标" in out
 
     def test_no_gate_keeps_return_0_even_when_failing(self, tmp_path, monkeypatch):
         """默认不加 --gate 行为逐位不变：即使门禁不达标也恒 0。"""

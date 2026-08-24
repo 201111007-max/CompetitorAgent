@@ -159,6 +159,13 @@ class ToolsConfig:
 
 
 @dataclass
+class AgentConfig:
+    """ReAct 循环配置（设计文档 56 M1 Q4）"""
+
+    max_history_steps: int = 8  # 工具步超过后折叠旧步为摘要（默认 8，行为不变）
+
+
+@dataclass
 class AppConfig:
     """应用级配置聚合（对应 review_config.yaml 各 section）"""
 
@@ -178,6 +185,7 @@ class AppConfig:
     security: SecurityConfig = field(default_factory=SecurityConfig)
     subagents: SubagentsConfig = field(default_factory=SubagentsConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
+    agent: AgentConfig = field(default_factory=AgentConfig)
 
 
 def _build_section(cls: type[Any], data: dict[str, Any] | None) -> Any:
@@ -219,6 +227,7 @@ def load_config(path: str | os.PathLike | None = None) -> AppConfig:
         security=_build_security(raw.get("security")),
         subagents=_build_section(SubagentsConfig, raw.get("subagents")),
         tools=_build_section(ToolsConfig, raw.get("tools")),
+        agent=_build_section(AgentConfig, raw.get("agent")),
     )
 
 

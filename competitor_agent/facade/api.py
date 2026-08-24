@@ -33,11 +33,13 @@ from competitor_agent.agent.review_tools import (
     build_detect_conflict_tool,
     build_select_source_tool,
     build_validate_facts_tool,
+    extract_verified_facts,
 )
 from competitor_agent.agent.subagent_registry import (
     build_subagent,
     get_subagent_registry,
 )
+from competitor_agent.agent.tool_dispatcher import ToolSpec
 from competitor_agent.agent.tool_registry import build_react_dispatcher
 from competitor_agent.collector.web_extractor import WebExtractor
 from competitor_agent.config.loader import AppConfig, load_config
@@ -638,6 +640,20 @@ class CompetitorAnalysisAPI:
         max_concurrent = self._config.subagents.max_concurrent
         timeout_seconds = self._config.subagents.timeout_seconds
         lead_competitor = self._react_competitor(task)
+        max_history_steps = self._config.agent.max_history_steps
+        # 设计文档 56 M1/M2：Lead 级共享状态——plan 懒绑定 cell + 已核验事实 pinned 清单
+        plan_box: dict[str, ReactLoop | None] = {"loop": None}
+        pinned_facts: list[str] = []
+
+        def _lead_competitor_now() -> str:
+            """competitor 懒绑定：make_plan 落地后经 loop.plan 回填，落地前空串（全局检索）。"""
+            loop = plan_box["loop"]
+            if loop is not None and loop.plan:
+                return str(loop.plan.get("competitor") or "")
+            return ""
+
+        def _collect_pinned(rec: dict) -> None:
+            pinned_facts.extend(extract_verified_facts(rec))
 
         def _subagent_loop(name: str, sub_task: str) -> ReactLoop:
             # 子 Agent 步数由其 max_steps 兜底；diminishing_threshold=0 关闭"边际递减"
@@ -652,6 +668,10 @@ class CompetitorAnalysisAPI:
                 self._llm or LLMClient(tracer=self._tracer),
                 config=self._config,
                 web_extract=self._web_extract_for(lead_competitor.name, name),
+                extra_tools={
+                    # 设计文档 56 M1①：子 Agent kb_recall 按（竞品×维度）绑定
+                    "kb_recall": self._build_kb_recall(lambda: lead_competitor.name, name),
+                },
                 session_id=session_id,
                 budget=budget,
                 memory_context_fn=lambda t: self._memory_ctx_for(lead_competitor.name, t),
@@ -661,6 +681,7 @@ class CompetitorAnalysisAPI:
                 max_steps=6,
                 protocol=self._protocol,
                 tracer=self._tracer,  # 设计文档 54：子 Agent tool.call span
+                max_history_steps=max_history_steps,
             )
 
         runner = DelegateRunner(
@@ -672,9 +693,11 @@ class CompetitorAnalysisAPI:
             timeout_seconds=timeout_seconds,
             tracer=self._tracer,  # 设计文档 54：跨线程 subagent span
         )
-        extra_tools: dict[str, Callable[..., str]] = {
+        extra_tools: dict[str, Callable[..., str] | ToolSpec] = {
             "make_plan": build_make_plan_tool(),
             "delegate": make_delegate_tool(runner, registry=get_subagent_registry()),
+            # 设计文档 56 M1①：Lead kb_recall（competitor 懒绑定，plan 落地前全局检索）
+            "kb_recall": self._build_kb_recall(_lead_competitor_now),
         }
         if self._config.tools.validate_facts:
             extra_tools["validate_facts"] = build_validate_facts_tool()
@@ -687,7 +710,7 @@ class CompetitorAnalysisAPI:
 
         dispatcher = build_react_dispatcher(
             config=self._config,
-            web_extract=self._react_web_extract,
+            web_extract=self._lead_web_extract(_lead_competitor_now),
             exclude=("analyze_competitor",),
             extra_tools=extra_tools,
             tracer=self._tracer,  # 设计文档 54：Lead tool.call span
@@ -716,9 +739,13 @@ class CompetitorAnalysisAPI:
             obs_max_chars=self._config.collector.max_content_chars,
             system_prompt_override=build_lead_system_prompt(),
             plan_first=True,
+            max_history_steps=max_history_steps,
+            pinned_facts=pinned_facts,
+            on_step=_collect_pinned,
         )
         # 收尾 shutdown 用（挂 loop 实例而非 self，避免并行 analyze 互相误杀线程池）
         loop._delegate_runner = runner
+        plan_box["loop"] = loop  # kb_recall/Lead 摄入的 competitor 懒绑定数据源
         return loop
 
     def _react_competitor(self, task: str) -> Competitor:
@@ -827,6 +854,65 @@ class CompetitorAnalysisAPI:
             return text
 
         return _extract
+
+    def _lead_web_extract(self, competitor_fn: Callable[[], str]) -> Callable[[str], str]:
+        """Lead 专用 web_extract（设计文档 56 M1②）：抓取成功后摄入知识库通用域。
+
+        补齐 Lead 摄入缺口（此前只有子 Agent 摄入，Lead 抓的内容取回工具够不到）。
+        competitor 懒绑定（make_plan 落地后经 loop.plan 回填），落地前摄入
+        ``dimension="web"`` 通用域；守卫拦截/抓取失败/空文本占位不摄入（沿用
+        ``_ingest_fetched`` 既有纪律）。闭包按 loop 构造（不挂 self），避免并行
+        analyze 互相串 competitor。
+        """
+
+        def _extract(url: str) -> str:
+            text = self._react_web_extract(url)
+            self._ingest_fetched(competitor_fn(), "web", url, text)
+            return text
+
+        return _extract
+
+    def _build_kb_recall(
+        self,
+        competitor_fn: Callable[[], str],
+        dimension: str = "",
+    ) -> ToolSpec:
+        """kb_recall 闭包工厂（设计文档 56 M1①）：循环内知识库取回工具。
+
+        走 extra_tools（不进 TOOLS/TOOL_SPECS，MCP 工具面零变化）；复用既有
+        Retriever 混合检索，零新存储/新依赖。知识库为空/未装配时返回可读信息
+        （工具面稳定，不随状态缺 tool）。``competitor_fn`` 懒绑定：Lead 在
+        make_plan 落地前以空串全局检索（同竞品优先过滤对空串自然失效）。
+        """
+
+        def kb_recall(query: str) -> str:
+            if self._retriever is None:
+                return "知识库暂无可检索内容（检索器未装配）。"
+            try:
+                chunks = self._retriever.retrieve(
+                    query=str(query), competitor=competitor_fn(), dimension=dimension, top_k=5
+                )
+            except Exception:
+                logger.warning("kb_recall 检索失败", exc_info=True)
+                return "知识库检索失败，请改用其他方式获取信息。"
+            if not chunks:
+                return "知识库暂无可检索内容。"
+            lines = []
+            for c in chunks:
+                src = f"（来源: {c.source_url}）" if c.source_url else ""
+                lines.append(f"- [{c.competitor}/{c.dimension}]{src} {c.text[:300]}")
+            return "\n".join(lines)[: self._config.collector.max_content_chars]
+
+        return ToolSpec(
+            name="kb_recall",
+            func=kb_recall,
+            description="从知识库取回被折叠步骤的完整内容；仅当需要回溯旧步详情时使用",
+            params_schema={
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+            },
+        )
 
     def _ingest_fetched(self, competitor: str, dimension: str, url: str, text: str) -> None:
         """采集原文 → 知识库摄入（幂等：chunk_id 由内容哈希决定）。"""

@@ -26,7 +26,12 @@ from competitor_agent.config.loader import AppConfig, CollectorConfig
 from competitor_agent.domain_types.enums import ObservationStatus
 from competitor_agent.domain_types.observation import Observation, SourceEvidence
 from competitor_agent.evaluation.accuracy_eval import AccuracyEvaluator, AccuracyMetrics, EvalCase
-from competitor_agent.evaluation.behavior_eval import BehaviorMetrics, RecoveryEvaluator, RetrievalEvaluator
+from competitor_agent.evaluation.behavior_eval import (
+    BehaviorMetrics,
+    FoldRecallEvaluator,
+    RecoveryEvaluator,
+    RetrievalEvaluator,
+)
 from competitor_agent.evaluation.failure import FailureRecord, FailureType, classify_case
 from competitor_agent.evaluation.strategy_eval import StrategyCase, StrategyEvaluator, StrategyMetrics
 from competitor_agent.facade.api import CompetitorAnalysisAPI
@@ -58,6 +63,8 @@ GATE_HALLUCINATION_MAX = 0.05
 GATE_TOOL_SELECTION_MIN = 0.85
 GATE_TRACE_COMPLETENESS = 1.0
 GATE_RECOVERY_RATE_MIN = 0.9
+# 设计文档 56 M3：折叠后重复抓取门禁（可逆压缩闭环：取回替代重抓）
+GATE_REFETCH_AFTER_FOLD_MAX = 0
 
 # 单次采集/工具的估算成本（与主流程 IterationBudget 单次 0.01 对齐）
 UNIT_COST = 0.01
@@ -163,6 +170,7 @@ class BenchmarkReport:
                 "retrieval_hit_hybrid": self.behavior.retrieval_hit_hybrid,
                 "retrieval_hit_lexical": self.behavior.retrieval_hit_lexical,
                 "retrieval_n": self.behavior.retrieval_n,
+                "refetch_after_fold": self.behavior.refetch_after_fold,
             },
         }
 
@@ -1210,12 +1218,15 @@ class Benchmark:
         """
         recovery_rate, recovery_n = RecoveryEvaluator().run()
         hit_hybrid, hit_lexical, retrieval_n = RetrievalEvaluator().run()
+        # 设计文档 56 M3：折叠取回对照（pinned 存活断言在测试侧，门禁只卡重抓次数）
+        refetch_after_fold, _pinned_survived = FoldRecallEvaluator().run()
         return BehaviorMetrics(
             react_recovery_rate=recovery_rate,
             recovery_n=recovery_n,
             retrieval_hit_hybrid=hit_hybrid,
             retrieval_hit_lexical=hit_lexical,
             retrieval_n=retrieval_n,
+            refetch_after_fold=refetch_after_fold,
         )
 
     def _budget_exceeded(self, total_cost: float) -> bool:
@@ -1398,6 +1409,8 @@ def _write_csv(report: BenchmarkReport, out: Path, mock_report: BenchmarkReport 
     rows.append([report.harness_version, "behavior.retrieval_hit_hybrid", str(report.behavior.retrieval_hit_hybrid)])
     rows.append([report.harness_version, "behavior.retrieval_hit_lexical", str(report.behavior.retrieval_hit_lexical)])
     rows.append([report.harness_version, "behavior.retrieval_n", str(report.behavior.retrieval_n)])
+    # 设计文档 56 M3：折叠后重复抓取次数
+    rows.append([report.harness_version, "behavior.refetch_after_fold", str(report.behavior.refetch_after_fold)])
     # 设计文档 37：mock vs real 对比（real 报告内嵌 mock 基线，直答"评测是不是自证"）
     if mock_report is not None and mock_report.llm_mode != report.llm_mode:
         rows.append([report.harness_version, "vs.mock.accuracy.field_accuracy", str(mock_report.accuracy.field_accuracy)])
@@ -1440,6 +1453,7 @@ def _write_markdown(
     lines.append(f"| 检索命中率 hybrid | {report.behavior.retrieval_hit_hybrid:.2f} |")
     lines.append(f"| 检索命中率 lexical | {report.behavior.retrieval_hit_lexical:.2f} |")
     lines.append(f"| 检索样本数 | {report.behavior.retrieval_n} |")
+    lines.append(f"| 折叠后重抓次数（56 M3） | {report.behavior.refetch_after_fold} |")
 
     # 设计文档 37：mock vs real 对比段（real 报告内嵌 mock 基线，直答"评测是不是自证"）
     if mock_report is not None and mock_report.llm_mode != report.llm_mode:
@@ -1632,6 +1646,12 @@ def evaluate_gates(report: BenchmarkReport) -> list[GateCheck]:
             f">= lexical({b.retrieval_hit_lexical:.4f})",
             f"{b.retrieval_hit_hybrid:.4f}",
             b.retrieval_hit_hybrid >= b.retrieval_hit_lexical,
+        ),
+        GateCheck(
+            "behavior.refetch_after_fold",
+            f"<= {GATE_REFETCH_AFTER_FOLD_MAX}",
+            str(b.refetch_after_fold),
+            b.refetch_after_fold <= GATE_REFETCH_AFTER_FOLD_MAX,
         ),
     ]
 

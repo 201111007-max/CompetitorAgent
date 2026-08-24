@@ -9,6 +9,9 @@
 
 均为纯函数/闭包，注册进 Lead dispatcher（``extra_tools``）。安全兜底仍在代码：
 这些工具只提供"信息"，不决定预算/取消/渲染（那些不进 LLM）。
+
+设计文档 56 M2：``extract_verified_facts`` 从复核工具的 transcript 记录抽取
+「已核验事实」行（pinning 写侧），与压缩侧的 pinned 段插入（react_agent）配对。
 """
 from __future__ import annotations
 
@@ -20,6 +23,67 @@ from competitor_agent.domain_types.pricing import (
     estimate_costs,
     extract_profile,
 )
+from competitor_agent.domain_types.verification import _VERIFY_NUMERIC_KEYS
+
+
+def extract_verified_facts(rec: dict[str, Any]) -> list[str]:
+    """从复核工具的 transcript 记录抽取「已核验事实」行（设计文档 56 M2 pinning）。
+
+    只收 ``validate_facts``/``detect_conflict`` 的核验**通过**结论；details 中的
+    实体数值按 fact_verification 键空间（``_VERIFY_NUMERIC_KEYS``）抽为一行一条，
+    无数值命中时保留一条结论行（核验行为本身亦是事实）。
+    """
+    tool = str(rec.get("tool") or "")
+    brief = str(rec.get("result_brief") or "")
+    args = rec.get("args")
+    if not isinstance(args, dict):
+        return []
+    if tool == "validate_facts" and brief.startswith("真值核对通过"):
+        hits = _walk_verify_numeric(_parse_json_arg(args.get("details_json")))
+        return [f"{k}={v}（validate_facts 核验通过）" for k, v in hits] or [
+            "details 数值均可回溯到原文证据（validate_facts 核验通过）"
+        ]
+    if tool == "detect_conflict" and brief.startswith("跨维度冲突检测通过"):
+        hits = _walk_verify_numeric(_parse_json_arg(args.get("dimensions_json")))
+        return [f"{k}={v}（detect_conflict 核验通过）" for k, v in hits] or [
+            "各维度引用的同源事实值一致（detect_conflict 核验通过）"
+        ]
+    return []
+
+
+def _parse_json_arg(value: Any) -> Any:
+    """transcript args 可能是 dict/list 或 JSON 字符串（文本协议），统一解析。"""
+    if isinstance(value, (dict, list)):
+        return value
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return None
+    return None
+
+
+def _walk_verify_numeric(node: Any) -> list[tuple[str, Any]]:
+    """按 _VERIFY_NUMERIC_KEYS 键空间遍历抽取实体数值（与 verification 同纪律：非 0）。"""
+    hits: list[tuple[str, Any]] = []
+    stack: list[Any] = [node]
+    while stack:
+        cur = stack.pop()
+        if isinstance(cur, dict):
+            for key, value in cur.items():
+                if (
+                    key in _VERIFY_NUMERIC_KEYS
+                    and isinstance(value, (int, float))
+                    and not isinstance(value, bool)
+                    and value != 0
+                ):
+                    shown = int(value) if isinstance(value, float) and value.is_integer() else value
+                    hits.append((key, shown))
+                elif isinstance(value, (dict, list)):
+                    stack.append(value)
+        elif isinstance(cur, list):
+            stack.extend(item for item in cur if isinstance(item, (dict, list)))
+    return hits
 
 
 def build_validate_facts_tool() -> Callable[..., str]:

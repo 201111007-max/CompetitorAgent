@@ -70,12 +70,28 @@ def _derive_params_schema(spec: ToolSpec) -> dict[str, Any]:
     return schema
 
 
+def _register_extra_tools(
+    dispatcher: ToolDispatcher,
+    extra_tools: dict[str, Callable[..., str] | ToolSpec] | None,
+) -> None:
+    """注册 extra_tools（非 MCP 工具，设计文档 49/56）。
+
+    值为 ``ToolSpec`` 时携带描述/schema 注册（如 kb_recall 的使用纪律描述）；
+    普通 callable 沿用默认契约。
+    """
+    for name, tool in (extra_tools or {}).items():
+        if isinstance(tool, ToolSpec):
+            dispatcher.register(name, tool.func, spec=tool)
+        else:
+            dispatcher.register(name, tool)
+
+
 def build_react_dispatcher(
     *,
     config: AppConfig | None = None,
     web_extract: Callable[..., str] | None = None,
     exclude: tuple[str, ...] = (),
-    extra_tools: dict[str, Callable[..., str]] | None = None,
+    extra_tools: dict[str, Callable[..., str] | ToolSpec] | None = None,
     tracer: Any = None,  # 设计文档 54：tool.call span
 ) -> ToolDispatcher:
     """把 MCP 工具集（TOOLS + TOOL_SPECS）注册进 ToolDispatcher。
@@ -83,7 +99,8 @@ def build_react_dispatcher(
     - 默认全部工具走 ``mcp_server.tools`` 实现；
     - ``web_extract`` 非 None 时覆盖为该实现（facade 传 ``_react_web_extract``）；
     - ``exclude``：从工具面剔除的工具名（如防递归的 ``analyze_competitor``）；
-    - ``extra_tools``：追加的非 MCP 工具（Lead 编排的 make_plan/delegate/复核工具等）；
+    - ``extra_tools``：追加的非 MCP 工具（Lead 编排的 make_plan/delegate/复核工具、
+      设计文档 56 的 kb_recall 等）；值为 ToolSpec 时携带描述/schema 注册；
     - 默认超时读 ``config.collector.timeout_seconds``（未给 config 则尝试 load_config）。
     """
     if config is None:
@@ -96,8 +113,7 @@ def build_react_dispatcher(
             continue
         func = web_extract if name == "web_extract" and web_extract is not None else TOOLS[name]
         dispatcher.register(name, func, spec=spec)
-    for name, func in (extra_tools or {}).items():
-        dispatcher.register(name, func)
+    _register_extra_tools(dispatcher, extra_tools)
     return dispatcher
 
 
@@ -106,7 +122,7 @@ def build_subagent_dispatcher(
     *,
     config: AppConfig | None = None,
     web_extract: Callable[..., str] | None = None,
-    extra_tools: dict[str, Callable[..., str]] | None = None,
+    extra_tools: dict[str, Callable[..., str] | ToolSpec] | None = None,
     tracer: Any = None,  # 设计文档 54：子 Agent 的 tool.call span
 ) -> ToolDispatcher:
     """按子 Agent 配置的工具子集白名单构造工具面（设计文档 49 §3.6）。
@@ -129,6 +145,5 @@ def build_subagent_dispatcher(
             continue
         func = web_extract if tool_name == "web_extract" and web_extract is not None else TOOLS[tool_name]
         dispatcher.register(tool_name, func, spec=spec)
-    for tool_name, func in (extra_tools or {}).items():
-        dispatcher.register(tool_name, func)
+    _register_extra_tools(dispatcher, extra_tools)
     return dispatcher

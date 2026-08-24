@@ -1135,3 +1135,49 @@ dev:
   本机嵌套容器环境 overlay-on-overlay 不支持，本地构建未执行（Dockerfile/compose/yaml
   已通过静态语法校验）；`--gate` 门禁侧 13 条单测昨日已绿不受影响。
 
+## 28. 第十轮待办（上下文压缩可逆化：kb_recall 取回闭环 + Lead 摄入补齐 + 事实 pinning，设计文档 56）
+
+> 状态背景：2026-08-21 面试叙事深挖（"压缩有损是硬伤"追问）引出对 doc 46 压缩机制的复核，
+> 核实后修正口头分析的错误——doc 46 折叠**已有规则摘要雏形**（`_fold_pair`/
+> `_fold_native_turn`：一行一旧步「调用 工具[URL] → 结果前 80 字」），真缺口是
+> ① 摘要不可操作 + 循环内无知识库取回工具（假可逆：指针够不到内容，模型只能幻觉填空
+> 或 web_extract 重抓）② Lead `_react_web_extract` 抓完不摄入知识库（仅子 Agent
+> `_web_extract_for` 摄入）③ 已核验数值无 pinning，随折叠丢核验依据。
+> 用户拍板四决策：分三里程碑（M1 可逆化核心 / M2 事实 pinning / M3 对照实验门禁化）；
+> kb_recall Lead + 子 Agent 都加（含 Lead 摄入补齐）；摘要纯规则（不引入 LLM 摘要调用，
+> 保 mock 确定性）；`_MAX_HISTORY_STEPS=8` 配置化进 config（默认 8 不变）。
+> 关键架构决策：kb_recall 走 `extra_tools` 注入（同 make_plan/delegate），**不进
+> TOOLS/TOOL_SPECS**——有状态工具（依赖 Retriever + 竞品上下文）不进无状态函数面，
+> MCP 同源零涟漪。业界依据（Manus restorable compression / MemGPT archival search /
+> Anthropic tool result clearing / OpenHands keep_first / LangChain 四策略）见设计文档 §8。
+> 设计文档见 `doc/plan/issue_designs/56_context_compression_reversible_design.md`
+> （2026-08-21，待实施）。
+
+| 项 | 内容 | 优先级 | 状态 |
+|---|---|---|---|
+| **56 压缩可逆化** | M1：kb_recall（Lead 懒绑定 + 子 Agent 按维度绑定）+ Lead 摄入补齐 + 摘要指引可操作化 + `AgentConfig.max_history_steps` 配置化 + 单测；M2：核验事实 pinned 段（复用 fact_verification 键空间，永不折叠、双封顶）；M3：behavior_eval 折叠取回场景 + `refetch_after_fold=0` 门禁 | 中 | ✅ 2026-08-21（M1/M2/M3 一次落地） |
+
+> 实施明细（2026-08-21）：① `facade/api.py` 新增 `_build_kb_recall(competitor_fn, dimension)`
+> 闭包工厂（复用既有 Retriever 混合检索，空库/未装配返回可读信息保工具面稳定；ToolSpec
+> 携带"仅当需要回溯被折叠步骤的完整内容时使用"使用纪律描述）与 `_lead_web_extract`
+> （抓取成功摄入 `dimension="web"` 通用域，competitor 经 plan_box 懒绑定；闭包按 loop
+> 构造不挂 self，避免并行 analyze 串 competitor）；`_react_loop` 接线 extra_tools +
+> config 注入 `max_history_steps` + pinned 收集。② `react_agent.py` 摘要指引增补
+> "折叠步的完整内容已摄入知识库，可用 kb_recall(query) 取回"（双协议共用
+> `_SUMMARY_MSG_GUIDANCE`）；`_compress_history`/`_compress_history_native` 增
+> `pinned_facts` 参数，pinned 段（`_PINNED_MSG_PREFIX`）固定摘要块后、永不折叠/滚出、
+> 行数（8）+ 单行（120 字符）双封顶只保最近核验。③ `review_tools.py`
+> `extract_verified_facts` 只收 validate_facts/detect_conflict 核验**通过**结论，按
+> `_VERIFY_NUMERIC_KEYS` 键空间抽一行一条（失败/无关工具不 pin）。④ `react_loop.py`
+> 透传 `max_history_steps`/`pinned_facts`/`on_step` 附加回调；`tool_registry.py`
+> extra_tools 支持 ToolSpec 值（带描述/schema 注册）；`subagent_registry.py` 透传
+> `max_history_steps`；`config/loader.py` 新增 `AgentConfig`（默认 8）+ yaml `agent`
+> section。⑤ M3：`behavior_eval.py` `FoldRecallScriptedLLM`/`FoldRecallEvaluator`——
+> >8 步脚本决策完全由上下文驱动（摘要有 kb_recall 指引则取回、否则重抓），
+> `BehaviorMetrics.refetch_after_fold` 进门禁（`GATE_REFETCH_AFTER_FOLD_MAX=0`，
+> HARNESS_VERSION 不变）；monkeypatch 摘除指引即复现对照组 refetch=1。
+> 新增 4 个测试文件 + 更新 behavior/gate 测试（门禁 6→7 项、behavior 字段集），
+> ruff/mypy 改动文件通过；全量回归 899 passed / 5 failed——5 个失败均为存量问题
+> （refresh_stale 日期时间炸弹、rag_integration 与 ablation RAG 差分的 mock 流程，
+> 干净树上同样失败），与本次改动无关。
+

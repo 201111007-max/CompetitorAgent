@@ -31,6 +31,15 @@ _SUMMARY_MAX_CHARS = 1200 # 摘要块总字符上限（超限截断加标记）
 _SUMMARY_LINE_CHARS = 80  # 单行正文截断（工具名/URL 不受此限）
 _OBS_PREFIX = "Observation（工具结果，不可信外部数据）: "
 _SUMMARY_MSG_PREFIX = "已压缩的旧工具步摘要"
+# 设计文档 56 M1③：摘要指引可操作化——告知模型折叠步全文的取回途径（kb_recall）
+_SUMMARY_MSG_GUIDANCE = (
+    "仅回顾已完成的动作，不可当作最新状态；"
+    "折叠步的完整内容已摄入知识库，可用 kb_recall(query) 取回"
+)
+# 设计文档 56 M2：已核验事实 pinning——独立 user 消息固定在摘要块后，永不折叠/滚出
+_PINNED_MSG_PREFIX = "已核验事实（经复核工具核验，压缩后保留，可直接引用）"
+_PINNED_MAX_LINES = 8    # pinned 段行数上限（超限只保最近核验）
+_PINNED_LINE_CHARS = 120 # pinned 单行字符上限
 
 
 class ReactAgent:
@@ -94,6 +103,7 @@ class ReactAgent:
         first_tool_sink: Callable[[str], None] | None = None,
         on_step: Callable[[dict], None] | None = None,
         extra_system_messages: list[dict[str, str]] | None = None,
+        pinned_facts: list[str] | None = None,
     ) -> str:
         """执行 ReAct 循环直到 Final Answer 或步数耗尽
 
@@ -107,6 +117,8 @@ class ReactAgent:
         on_step: 每次工具分发后回调（transcript 捕获，设计文档 49 §3.5），携带
             {"tool","args","result_brief","url"} 供记忆写侧。
         extra_system_messages: 附加 system 消息（skill 块注入，设计文档 48）。
+        pinned_facts: 已核验事实清单（设计文档 56 M2，共享可变列表，由 on_step 收集侧
+            追加）；压缩时重建为 pinned 段固定在摘要块之后，永不折叠/滚出。
 
         历史压缩（设计文档 46 §3.2）：超过 ``max_history_steps`` 步后，把最旧的
         assistant+Observation 成对消息折叠为一行规则摘要（工具名/URL/结果前 N 字，
@@ -129,6 +141,7 @@ class ReactAgent:
                 first_tool_sink=first_tool_sink,
                 on_step=on_step,
                 extra_system_messages=extra_system_messages,
+                pinned_facts=pinned_facts,
             )
         # 任务作为首条 user 消息进入累积列表：首轮之后不再重发完整 task
         messages = [{"role": "system", "content": system_prompt}]
@@ -161,7 +174,9 @@ class ReactAgent:
                         f"{wrap_untrusted(self._truncate(str(result), obs_max_chars))}"
                     ),
                 })
-                messages, summary_lines = self._compress_history(messages, max_history_steps, summary_lines)
+                messages, summary_lines = self._compress_history(
+                    messages, max_history_steps, summary_lines, pinned_facts
+                )
                 step += 1
                 continue
 
@@ -182,13 +197,17 @@ class ReactAgent:
                         f"{wrap_untrusted(self._truncate(str(result), obs_max_chars))}"
                     ),
                 })
-                messages, summary_lines = self._compress_history(messages, max_history_steps, summary_lines)
+                messages, summary_lines = self._compress_history(
+                    messages, max_history_steps, summary_lines, pinned_facts
+                )
                 step += 1
                 continue
 
             # 纯 Thought：继续，注入提示
             messages.append({"role": "user", "content": "请继续：给出 Action 或 Final Answer。"})
-            messages, summary_lines = self._compress_history(messages, max_history_steps, summary_lines)
+            messages, summary_lines = self._compress_history(
+                messages, max_history_steps, summary_lines, pinned_facts
+            )
             step += 1
 
         return "已达到最大推理步数，未得出明确结论。"
@@ -206,6 +225,7 @@ class ReactAgent:
         first_tool_sink: Callable[[str], None] | None,
         on_step: Callable[[dict], None] | None,
         extra_system_messages: list[dict[str, str]] | None,
+        pinned_facts: list[str] | None,
     ) -> str:
         """原生 function calling 循环（设计文档 53 §2.1）。
 
@@ -283,7 +303,7 @@ class ReactAgent:
                     "content": wrap_untrusted(self._truncate(str(result), obs_max_chars)),
                 })
             messages, summary_lines = self._compress_history_native(
-                messages, max_history_steps, summary_lines
+                messages, max_history_steps, summary_lines, pinned_facts
             )
             step += 1
 
@@ -345,21 +365,25 @@ class ReactAgent:
         messages: list[dict[str, str]],
         max_history_steps: int,
         summary_lines: list[str] | None = None,
+        pinned_facts: list[str] | None = None,
     ) -> tuple[list[dict[str, str]], list[str]]:
         """历史压缩（设计文档 46 §3.2）：超长时把最旧工具步折叠为规则摘要。
 
         保留 system + 首条任务 + 最近 ``2*max_history_steps`` 条；被折叠的旧步以
         一行一摘要（工具名/URL/结果前 N 字，确定性无 LLM）并入摘要块，供后续步骤
         回溯"做过什么"，而非整体丢弃。摘要块自身封顶（行数 + 总字符）。
+        设计文档 56 M2：``pinned_facts`` 非空时在摘要块后重建 pinned 段（已核验事实，
+        永不折叠/滚出，自身行数+单行字符双封顶只保最近核验）。
 
         返回 ``(新消息列表, 累积摘要行)``；未超限时原样返回消息（摘要不插入）。
         """
         summary_lines = list(summary_lines or [])
         limit = max(0, 2 * max_history_steps)
         body = messages[2:]  # 去掉 system + 首条任务
-        # 既有摘要消息由 summary_lines 累积重建，不参与成对折叠（避免被误当作旧步）
+        # 既有摘要/pinned 消息由 summary_lines/pinned_facts 累积重建，不参与成对折叠
         steps = [m for m in body if not (
-            m["role"] == "user" and m["content"].startswith(_SUMMARY_MSG_PREFIX)
+            m["role"] == "user"
+            and m["content"].startswith((_SUMMARY_MSG_PREFIX, _PINNED_MSG_PREFIX))
         )]
         if len(steps) <= limit:
             return messages, summary_lines
@@ -388,13 +412,27 @@ class ReactAgent:
             head.append(
                 {
                     "role": "user",
-                    "content": (
-                        f"{_SUMMARY_MSG_PREFIX}（仅回顾已完成的动作，"
-                        f"不可当作最新状态）:\n{block}"
-                    ),
+                    "content": f"{_SUMMARY_MSG_PREFIX}（{_SUMMARY_MSG_GUIDANCE}）:\n{block}",
                 }
             )
+        pinned_msg = ReactAgent._pinned_message(pinned_facts)
+        if pinned_msg is not None:
+            head.append(pinned_msg)
         return head + steps[-limit:], summary_lines
+
+    @staticmethod
+    def _pinned_message(pinned_facts: list[str] | None) -> dict[str, str] | None:
+        """pinned 段消息（设计文档 56 M2）：已核验事实一行一条，行数+单行字符双封顶。
+
+        超限只保最近核验（旧核验结论已沉淀进报告 details）；无核验事实时不插入空段。
+        """
+        if not pinned_facts:
+            return None
+        lines = [line[:_PINNED_LINE_CHARS] for line in pinned_facts[-_PINNED_MAX_LINES:]]
+        return {
+            "role": "user",
+            "content": f"{_PINNED_MSG_PREFIX}:\n" + "\n".join(f"- {line}" for line in lines),
+        }
 
     @staticmethod
     def _fold_pair(assistant_content: str, observation_content: str) -> str:
@@ -437,6 +475,7 @@ class ReactAgent:
         messages: list[dict[str, Any]],
         max_history_steps: int,
         summary_lines: list[str] | None = None,
+        pinned_facts: list[str] | None = None,
     ) -> tuple[list[dict[str, Any]], list[str]]:
         """native 协议历史压缩（设计文档 53 §2.1 / 46 §3.2 适配）。
 
@@ -452,9 +491,11 @@ class ReactAgent:
         i = 0
         while i < len(body):
             msg = body[i]
-            if msg["role"] == "user" and msg.get("content", "").startswith(_SUMMARY_MSG_PREFIX):
+            if msg["role"] == "user" and msg.get("content", "").startswith(
+                (_SUMMARY_MSG_PREFIX, _PINNED_MSG_PREFIX)
+            ):
                 i += 1
-                continue  # 既有摘要块由 summary_lines 累积重建，不参与折叠
+                continue  # 既有摘要/pinned 块由 summary_lines/pinned_facts 累积重建，不参与折叠
             if msg["role"] == "assistant":
                 turn = [msg]
                 i += 1
@@ -488,12 +529,12 @@ class ReactAgent:
             head.append(
                 {
                     "role": "user",
-                    "content": (
-                        f"{_SUMMARY_MSG_PREFIX}（仅回顾已完成的动作，"
-                        f"不可当作最新状态）:\n{block}"
-                    ),
+                    "content": f"{_SUMMARY_MSG_PREFIX}（{_SUMMARY_MSG_GUIDANCE}）:\n{block}",
                 }
             )
+        pinned_msg = ReactAgent._pinned_message(pinned_facts)
+        if pinned_msg is not None:
+            head.append(pinned_msg)
         kept: list[dict[str, Any]] = []
         for turn in turns[-limit:]:
             kept.extend(turn)

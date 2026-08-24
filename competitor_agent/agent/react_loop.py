@@ -64,6 +64,9 @@ class ReactLoop:
         plan_first: bool = False,
         plan_sink: Callable[[str], None] | None = None,
         protocol: str | None = None,  # 设计文档 53：native|react；None 用 agent 自身配置
+        max_history_steps: int | None = None,  # 设计文档 56 Q4：配置化注入；None 用 ReactAgent 默认
+        pinned_facts: list[str] | None = None,  # 设计文档 56 M2：已核验事实共享列表（压缩时重建 pinned 段）
+        on_step: Callable[[dict], None] | None = None,  # transcript 捕获外的附加回调（pinned 收集等）
     ) -> None:
         self._agent = agent
         if protocol is not None:
@@ -79,6 +82,9 @@ class ReactLoop:
         self._system_prompt_override = system_prompt_override
         self._plan_first = plan_first
         self._plan_sink = plan_sink
+        self._max_history_steps = max_history_steps
+        self._pinned_facts = pinned_facts
+        self._on_step = on_step
         self.plan: dict | None = None  # make_plan 结果（供报告组装/记忆写侧）
 
     def run(self, task: str) -> str:
@@ -105,9 +111,11 @@ class ReactLoop:
                 max_steps=self._max_steps,
                 step_guard=self._step_guard(result),
                 obs_max_chars=self._obs_max_chars,
+                max_history_steps=self._max_history_steps,
                 mandatory_first_tool="make_plan" if self._plan_first else None,
                 first_tool_sink=self._on_plan,
-                on_step=lambda rec: result.transcript.append(rec),
+                on_step=self._transcript_sink(result),
+                pinned_facts=self._pinned_facts,
             )
             # 取消/预算中断时 ReactAgent 返回"已达最大步数"，此处覆盖为准确终止文案
             if result.cancelled:
@@ -133,6 +141,23 @@ class ReactLoop:
         子 Agent 不强制 make_plan（任务直接给定），独立预算/会话、共享取消/memory/RAG。
         """
         return self.run_with_result(task)
+
+    def _transcript_sink(self, result: ReactRunResult) -> Callable[[dict], None]:
+        """on_step 组合：transcript 捕获 + 附加回调（设计文档 56 M2 pinned 收集）。
+
+        附加回调异常不冒泡（收集失败不影响推理循环；ReactAgent 侧亦有兜底）。
+        """
+        extra = self._on_step
+
+        def _sink(rec: dict) -> None:
+            result.transcript.append(rec)
+            if extra is not None:
+                try:
+                    extra(rec)
+                except Exception:
+                    logger.warning("ReAct on_step 附加回调失败", exc_info=True)
+
+        return _sink
 
     def _on_plan(self, plan_text: str) -> None:
         """make_plan 结果接收器：尝试解析为 dict 存入 self.plan（供报告组装/记忆写侧）。

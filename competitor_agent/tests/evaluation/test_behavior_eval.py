@@ -16,6 +16,7 @@ import numpy as np
 import pytest
 
 from competitor_agent.evaluation.behavior_eval import (
+    FoldRecallEvaluator,
     RecoveryEvaluator,
     RecoveryScenario,
     RetrievalCase,
@@ -25,10 +26,12 @@ from competitor_agent.evaluation.behavior_eval import (
 )
 from competitor_agent.evaluation.benchmark import (
     GATE_RECOVERY_RATE_MIN,
+    GATE_REFETCH_AFTER_FOLD_MAX,
     Benchmark,
     BenchmarkReport,
     _write_csv,
     _write_markdown,
+    evaluate_gates,
 )
 from competitor_agent.knowledge_base.competitor_store import CompetitorStore, TextChunk
 from competitor_agent.knowledge_base.retriever import Retriever
@@ -187,6 +190,7 @@ class TestBenchmarkReportBehavior:
             "retrieval_hit_hybrid",
             "retrieval_hit_lexical",
             "retrieval_n",
+            "refetch_after_fold",
         }
 
     def test_markdown_includes_behavior_section(self, tmp_path):
@@ -214,3 +218,43 @@ class TestBenchmarkReportBehavior:
         assert report.accuracy.field_accuracy == 1.0
         assert report.accuracy.hallucination_rate == 0.0
         assert report.n_cases >= 20
+
+
+class TestFoldRecallGate:
+    """设计文档 56 M3：折叠取回对照实验——可逆压缩闭环的门禁化。
+
+    FoldRecallScriptedLLM 的决策完全由上下文驱动：摘要块含 kb_recall 指引则取回，
+    否则重抓。修复后 refetch_after_fold=0；monkeypatch 回修复前指引语句即复现 >0。
+    """
+
+    def test_refetch_zero_after_fix_and_pinned_survives(self):
+        refetch, pinned_survived = FoldRecallEvaluator().run()
+        assert refetch == 0, "折叠后应以 kb_recall 取回，零重复抓取"
+        assert pinned_survived, "pinned 段（已核验事实）压缩后应仍在消息列表"
+
+    def test_prefix_shape_without_guidance_reproduces_refetch(self, monkeypatch):
+        """对照：摘掉指引语句（修复前形状）→ 同一脚本退化为重抓（refetch=1）。"""
+        import competitor_agent.agent.react_agent as ra
+
+        monkeypatch.setattr(
+            ra, "_SUMMARY_MSG_GUIDANCE", "仅回顾已完成的动作，不可当作最新状态"
+        )
+        refetch, _ = FoldRecallEvaluator().run()
+        assert refetch == 1, "指针不可操作时模型只剩重抓一条路（对照组复现）"
+
+    def test_gate_blocks_refetch(self):
+        report = BenchmarkReport()
+        gates = {g.name: g for g in evaluate_gates(report)}
+        assert "behavior.refetch_after_fold" in gates
+        ok = gates["behavior.refetch_after_fold"]
+        assert ok.passed, "默认 0 次重抓应过门禁"
+        report.behavior.refetch_after_fold = 1
+        bad = {g.name: g for g in evaluate_gates(report)}["behavior.refetch_after_fold"]
+        assert not bad.passed, "重抓 >0 应被门禁拦截"
+        assert GATE_REFETCH_AFTER_FOLD_MAX == 0
+
+    def test_benchmark_report_includes_refetch_metric(self):
+        report = Benchmark(llm_mode="mock").run()
+        assert report.behavior.refetch_after_fold == 0
+        assert report.to_dict()["behavior"]["refetch_after_fold"] == 0
+
