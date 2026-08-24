@@ -200,24 +200,53 @@ def make_delegate_tool(
         task: str,
         trace_id: str | None,
         parent_span_id: str | None,
+        parallel: bool = True,
     ) -> str:
-        execution_ids: list[str] = []
-        for dim in dims:
-            execution_ids.append(
-                runner.spawn_with_parent(
+        """批量委派并合并回填。``parallel=True`` 全部 spawn 后统一 await（后台并发）；
+        ``parallel=False`` 逐个 spawn+await（串行，供 Lead 表达"任务聚焦/预算有限"）。
+        无论哪种节奏，单子 Agent 失败均不影响其余，结果按 dims 顺序合并。
+        """
+        merged: list[str] = []
+        if parallel:
+            execution_ids: list[str] = []
+            for dim in dims:
+                execution_ids.append(
+                    runner.spawn_with_parent(
+                        dim, f"{task}（请分析维度：{dim}）",
+                        trace_id=trace_id, parent_span_id=parent_span_id,
+                    )
+                )
+            for eid in execution_ids:
+                rec = runner.await_terminal(eid)
+                if rec is not None:
+                    merged.append(_render_record(rec))
+                    runner.cleanup(eid)
+        else:
+            for dim in dims:
+                eid = runner.spawn_with_parent(
                     dim, f"{task}（请分析维度：{dim}）",
                     trace_id=trace_id, parent_span_id=parent_span_id,
                 )
-            )
-        merged: list[str] = []
-        for eid in execution_ids:
-            rec = runner.await_terminal(eid)
-            if rec is not None:
-                merged.append(_render_record(rec))
-                runner.cleanup(eid)
+                rec = runner.await_terminal(eid)
+                if rec is not None:
+                    merged.append(_render_record(rec))
+                    runner.cleanup(eid)
         return "\n\n".join(merged) if merged else "delegate 失败：全部子 Agent 无结果。"
 
-    def delegate(dimensions: list[str], task: str = "") -> str:
+    def delegate(
+        dimensions: list[str],
+        task: str = "",
+        parallel: bool = True,
+        reason: str = "",
+    ) -> str:
+        """通用委派（设计文档 62 M1）：``dimensions`` 既可是预注册维度、也可是候选竞品名。
+
+        - ``parallel``：是否后台并发（Lead 决策；True=批量并发，False=串行逐个 await）；
+          细节并发度不暴露，由 ``DelegateRunner.max_concurrent`` 默认接管（代码硬收敛）。
+        - ``reason``：Lead 的调度意图说明（可观测，记入日志与 trace phase）。
+        - ``registry``：校验/过滤可委派维度；未命中由 ``runtime_factory`` 按名构造
+          （候选竞品子 Agent 由装配侧提供）。
+        """
         dims = [d for d in (dimensions or []) if registry.get(d)]
         if not dims:
             available = ", ".join(registry.names())
@@ -225,19 +254,22 @@ def make_delegate_tool(
                 f"delegate 失败：未指定可委派维度（可用：{available}）。"
                 "请给 dimensions 传数组，如 {\"dimensions\": [\"pricing\",\"feature\"]}。"
             )
+        if reason:
+            logger.info("delegate 调度意图（Lead）: parallel=%s reason=%s", parallel, reason)
+        _brief = f"dimensions={','.join(dims)}; parallel={parallel}" + (f"; reason={reason}" if reason else "")
         tracer = getattr(runner, "_tracer", None)
         if tracer is None:
-            return _delegate_spawn_and_merge(dims, task, None, None)
+            return _delegate_spawn_and_merge(dims, task, None, None, parallel)
         trace_id, parent = tracer.pop_tool_context()
         if trace_id is None:
             # 无活动 trace：仍正常委派，只是不产生 subagent span（零埋点降级）
-            return _delegate_spawn_and_merge(dims, task, None, None)
+            return _delegate_spawn_and_merge(dims, task, None, None, parallel)
         with tracer.span(
             "delegate", kind="phase", trace_id=trace_id, parent_span_id=parent,
-            input_brief=f"dimensions={','.join(dims)}",
+            input_brief=_brief,
         ) as dspan:
             parent_span = dspan["span_id"] if dspan is not None else parent
-            return _delegate_spawn_and_merge(dims, task, trace_id, parent_span)
+            return _delegate_spawn_and_merge(dims, task, trace_id, parent_span, parallel)
 
     return delegate
 
