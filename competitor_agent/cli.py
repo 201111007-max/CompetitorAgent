@@ -46,10 +46,10 @@ def _build_llm(cfg: AppConfig) -> LLMClient:
     )
 
 
-def _make_api(engine: str = "react", protocol: str = "native") -> CompetitorAnalysisAPI:
+def _make_api(engine: str = "react") -> CompetitorAnalysisAPI:
     cfg = load_config()
     return CompetitorAnalysisAPI(
-        llm=_build_llm(cfg), use_llm=True, config=cfg, engine=engine, protocol=protocol
+        llm=_build_llm(cfg), use_llm=True, config=cfg, engine=engine
     )
 
 
@@ -258,7 +258,7 @@ def _run_trace(action: str, sid: str | None) -> int:
             spans = int(s.get("span_count") or 0)
             tid = str(s.get("trace_id") or "")
             task = str(s.get("input_brief") or "")[:40]
-            print(f"{tid[:26]:<26}{str(s.get('name') or ''):<12}{str(s.get('status') or ''):<9}"
+            print(f"{tid[:26]:<26}{s.get('name') or ''!s:<12}{s.get('status') or ''!s:<9}"
                   f"{spans:>6}{tok:>8}{cost:>10.4f}  {task}")
         return 0
 
@@ -360,7 +360,6 @@ def build_parser() -> argparse.ArgumentParser:
     analyze_p.add_argument("--out", dest="out_dir", default=None, help="报告输出目录")
     analyze_p.add_argument("--mode", default="team", choices=["single", "team"], help="[已废弃] 历史参数，统一走 Lead ReAct 编排（设计文档 49）")
     analyze_p.add_argument("--engine", default="react", choices=["react", "langgraph"], help="编排引擎：react=自研 Lead ReAct（默认），langgraph=LangGraph StateGraph（设计文档 51，需 .[langgraph]）")
-    analyze_p.add_argument("--protocol", default="native", choices=["native", "react"], help="调用协议：native=原生 function calling（默认），react=文本 ReAct（fallback/对照，设计文档 53）")
 
     history_p = sub.add_parser("history", help="查询历史分析记录")
     history_p.add_argument("--competitor", default=None, help="按竞品过滤")
@@ -381,7 +380,6 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark_p.add_argument("--tag", default=None, help="按 tag 过滤用例子集（如 normal）控制成本")
     benchmark_p.add_argument("--cost-limit", type=float, default=None, dest="cost_limit", help="真实评测成本护栏上限（美元），缺省 real 模式 $1.0")
     benchmark_p.add_argument("--engine", choices=["react", "langgraph", "both"], default=None, help="编排引擎对照（设计文档 51）：both=双引擎顺序跑并落盘对比表")
-    benchmark_p.add_argument("--protocol", choices=["native", "react", "both"], default=None, help="调用协议（设计文档 53）：native=默认；both=双协议同 fixture 顺序跑并落盘对比表")
 
     sub.add_parser("rag-warmup", help="预缓存向量嵌入模型并打印向量层状态（设计文档 52 M2；唯一触网路径，需显式执行）")
 
@@ -396,20 +394,16 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     setup_logging(level=load_config().observability.log_level, log_dir=get_data_dir() / "logs")
     engine = getattr(args, "engine", None) or "react"
-    protocol = getattr(args, "protocol", None) or "native"
     if args.command == "benchmark":
         # benchmark 的引擎选择（含 both 对照）透传 evaluation.benchmark，不进 facade 构造
         engine = "react"
-        # benchmark 的协议选择（--protocol，含 both）同样透传 evaluation.benchmark；
-        # facade API 构造恒用 native 默认（对照实验在 benchmark 层跑）
-        protocol = "native"
     if args.command == "rag-warmup":
         # 无需 LLM/API 构造，在 _make_api 之前短路（设计文档 52 §2.2）
         return _run_rag_warmup()
     if args.command == "trace":
         # 链路追踪查看纯本地读 JSONL，无需构造 API/LLM（截图展示用）
         return _run_trace(args.action or "list", args.sid)
-    api = _make_api(engine=engine, protocol=protocol)
+    api = _make_api(engine=engine)
     llm = _build_llm(load_config())
     use_llm = True
 
@@ -451,8 +445,6 @@ def main(argv: list[str] | None = None) -> int:
             parts += ["--cost-limit", str(args.cost_limit)]
         if args.engine:
             parts += ["--engine", args.engine]
-        if getattr(args, "protocol", None):
-            parts += ["--protocol", args.protocol]
         _run_benchmark(" ".join(parts))
         return 0
 

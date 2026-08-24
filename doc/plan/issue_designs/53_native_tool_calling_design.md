@@ -109,8 +109,11 @@ fallback 链中任一模型不支持 tools（400 特征报错 / 端点明确拒�
 
 ### 2.5 明确不做
 
-- **不删文本协议与 `ResponseParser`**：保留为显式 fallback（protocol="react"）与
-  对照实验基准——Q1 决策。
+- **不删文本协议与 `ResponseParser`**：~~保留为显式 fallback（protocol="react"）与
+  对照实验基准——Q1 决策~~。**已被 doc 60 推翻**：2026-08-24 用户拍板彻底删除文本
+  ReAct，只保留 function calling（单协议），`ResponseParser`/文本循环/`--protocol both`
+  对照实验全部删除，LangGraph 节点迁移 native。本文档 Q1「双协议并存」为历史决策，
+  实际落地以 doc 60 为准。
 - **不动 MCP 层**：TOOL_SPECS 直接映射 tools 参数，`mcp_server/server.py` 零改动
   （MCP 是工具供给侧协议，与模型侧调用协议正交）。
 - **不动 dota_helper 的 ReActLoop**（独立子项目，不在本文档范围）。

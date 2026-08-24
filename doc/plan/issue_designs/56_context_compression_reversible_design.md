@@ -19,9 +19,10 @@
 
 ### 1.1 现有机制（doc 46/53，核实后）
 
-- 文本协议 `_compress_history`（react_agent.py:344）与 native 协议 `_compress_history_native`
-  （react_agent.py:435）：工具步超 `max_history_steps`（默认 8）后，保留 system + 首条任务 +
-  最近 `2*max_history_steps` 条，最旧步逐对折叠为一行确定性摘要并入摘要块。
+- 唯一压缩实现 `_compress_history`（doc 60 单协议：原 `_compress_history_native` 改名，
+  文本协议压缩随文本 ReAct 一并删除）：工具步超 `max_history_steps`（默认 8）后，保留
+  system + 首条任务 + 最近 `2*max_history_steps` 个 turn，最旧 turn 折叠为一行确定性
+  摘要并入摘要块。
 - 摘要块自身封顶：`_SUMMARY_MAX_LINES=6` 行（旧行滚出）+ `_SUMMARY_MAX_CHARS=1200`。
 - `ReactAgent.run` 已有 `max_history_steps` 参数，但 `ReactLoop.run_with_result`
   （react_loop.py:102）**不透传**——facade 无法注入，实际恒为默认值 8。

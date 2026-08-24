@@ -325,30 +325,43 @@ class FoldRecallScriptedLLM:
         self._decision_done = False
 
     def complete(self, messages: list[dict[str, str]], model: str | None = None, **kwargs: Any) -> Any:
+        """原生形状脚本（设计文档 60：单协议）：动作步返回带 ToolCall 的 ToolCallReply，
+        ``tool_calls`` 为空（纯 content）即最终回答终止信号。"""
+        from competitor_agent.llm.client import ToolCall, ToolCallReply
+
         self.calls.append([dict(m) for m in messages])
         self._round += 1
         if self._round <= self._n_fetches:
             url = f"https://example.com/pricing-p{self._round - 1}"
-            return f'Thought: 抓取定价来源\n<action>web_extract({{"url": "{url}"}})</action>'
+            return self._tool_reply(ToolCall(id=f"call_{self._round}", name="web_extract", arguments={"url": url}))
         if self._round == self._n_fetches + 1:
-            return (
-                "Thought: 核验已采集数值\n"
-                '<action>validate_facts({"details_json": {"monthly_price_usd": 20}, '
-                '"raw_text": "cursor pro plan costs $20 per month"})</action>'
+            return self._tool_reply(
+                ToolCall(
+                    id=f"call_{self._round}",
+                    name="validate_facts",
+                    arguments={
+                        "details_json": {"monthly_price_usd": 20},
+                        "raw_text": "cursor pro plan costs $20 per month",
+                    },
+                )
             )
         if not self._decision_done:
             self._decision_done = True
             summary = self._summary_block(messages)
             if "kb_recall" in summary:
-                return (
-                    "Thought: 摘要指引说折叠内容可用 kb_recall 取回，不重抓\n"
-                    '<action>kb_recall({"query": "cursor pro plan pricing p0"})</action>'
+                return self._tool_reply(
+                    ToolCall(id=f"call_{self._round}", name="kb_recall", arguments={"query": "cursor pro plan pricing p0"})
                 )
-            return (
-                "Thought: 需要 p0 全文但摘要未告知取回途径，重新抓取\n"
-                f'<action>web_extract({{"url": "{self.P0_URL}"}})</action>'
+            return self._tool_reply(
+                ToolCall(id=f"call_{self._round}", name="web_extract", arguments={"url": self.P0_URL})
             )
-        return "Final Answer: cursor pro 定价 $20/月"
+        return ToolCallReply(content="cursor pro 定价 $20/月")
+
+    @staticmethod
+    def _tool_reply(call: Any) -> Any:
+        from competitor_agent.llm.client import ToolCallReply
+
+        return ToolCallReply(tool_calls=[call])
 
     @staticmethod
     def _summary_block(messages: list[dict[str, str]]) -> str:
@@ -397,7 +410,6 @@ class FoldRecallEvaluator:
         agent = ReactAgent(
             llm=LLMClient(call_func=scripted.complete),
             dispatcher=dispatcher,
-            protocol="react",  # 文本协议：摘要块形状可直接断言
         )
         pinned_facts: list[str] = []
         loop = ReactLoop(

@@ -9,9 +9,9 @@ import asyncio
 
 import pytest
 from competitor_agent.agent import ReactAgent, ToolArgumentError
-from competitor_agent.agent.tool_registry import build_react_dispatcher
+from competitor_agent.agent.tool_registry import build_openai_tools, build_react_dispatcher
 from competitor_agent.config.loader import AppConfig
-from competitor_agent.llm.client import LLMClient
+from competitor_agent.llm.client import LLMClient, ToolCall, ToolCallReply
 from competitor_agent.mcp_server.tools import TOOL_SPECS, TOOLS
 
 
@@ -97,15 +97,18 @@ class TestMcpSameSource:
 def _run_react(responses, dispatcher):
     seen = []
 
-    def fake_llm(messages, model):
-        user_msgs = [m["content"] for m in messages if m["role"] == "user"]
-        seen.append(user_msgs)
+    def fake_llm(messages, model, **kwargs):
+        seen.append([dict(m) for m in messages])
         return responses[min(len(seen) - 1, len(responses) - 1)]
 
-    agent = ReactAgent(llm=LLMClient(call_func=fake_llm), dispatcher=dispatcher, protocol="react")
+    agent = ReactAgent(llm=LLMClient(call_func=fake_llm), dispatcher=dispatcher)
     answer = agent.run(agent.build_system_prompt(), "任务")
-    observations = [m for msgs in seen for m in msgs]
-    return answer, observations
+    tool_msgs = [str(m.get("content", "")) for msgs in seen for m in msgs if m["role"] == "tool"]
+    return answer, tool_msgs
+
+
+def _tool(name: str, args: dict) -> ToolCallReply:
+    return ToolCallReply(tool_calls=[ToolCall(id="call_0", name=name, arguments=args)])
 
 
 class TestMultiToolReact:
@@ -119,38 +122,39 @@ class TestMultiToolReact:
             return f"页面内容:{url}"
 
         d = build_react_dispatcher(config=_config(), web_extract=fake_extract)
-        answer, observations = _run_react(
+        answer, tool_msgs = _run_react(
             [
-                'Thought: 先搜索\n<action>web_search({"query": "Cursor 定价"})</action>',
-                'Thought: 抓取官网\n<action>web_extract({"url": "https://cursor.com/pricing"})</action>',
-                "Final Answer: 定价 $20/月",
+                _tool("web_search", {"query": "Cursor 定价"}),
+                _tool("web_extract", {"url": "https://cursor.com/pricing"}),
+                ToolCallReply(content="定价 $20/月"),
             ],
             d,
         )
         assert answer == "定价 $20/月"
         assert calls == ["https://cursor.com/pricing"]
-        # web_search 结果回灌（Observation 里含工具输出）
-        assert any("搜索功能需要接入搜索引擎 API" in m for m in observations)
+        # web_search 结果回灌（tool 消息含工具输出）
+        assert any("搜索功能需要接入搜索引擎 API" in m for m in tool_msgs)
 
     def test_recovers_from_unknown_tool(self):
         d = build_react_dispatcher(config=_config())
-        answer, observations = _run_react(
+        answer, tool_msgs = _run_react(
             [
-                'Thought: 用不存在的工具\n<action>ghost_tool({})</action>',
-                'Thought: 改用合法工具\n<action>web_search({"query": "cursor"})</action>',
-                "Final Answer: 完成",
+                _tool("ghost_tool", {}),
+                _tool("web_search", {"query": "cursor"}),
+                ToolCallReply(content="完成"),
             ],
             d,
         )
         assert answer == "完成"
-        assert any("工具不可用" in m for m in observations)
+        assert any("工具不可用" in m for m in tool_msgs)
         # 自恢复后合法工具结果也回灌
-        assert any("搜索功能需要接入搜索引擎 API" in m for m in observations)
+        assert any("搜索功能需要接入搜索引擎 API" in m for m in tool_msgs)
 
-    def test_system_prompt_lists_multi_tools(self):
+    def test_openai_tools_cover_dispatcher(self):
+        """native 单协议：工具经 build_openai_tools 下发，system prompt 不含工具描述。"""
         d = build_react_dispatcher(config=_config(), web_extract=lambda url: "")
-        agent = ReactAgent(llm=LLMClient(call_func=lambda m, mo: "Final Answer: x"), dispatcher=d, protocol="react")
+        agent = ReactAgent(llm=LLMClient(call_func=lambda m, mo, **k: ToolCallReply(content="x")), dispatcher=d)
         prompt = agent.build_system_prompt()
-        assert "web_search" in prompt
-        assert "github_stars" in prompt
-        assert "analyze_pricing" in prompt
+        assert "web_search" not in prompt and "github_stars" not in prompt
+        names = {t["function"]["name"] for t in build_openai_tools(d)}
+        assert {"web_search", "github_stars", "analyze_pricing"} <= names

@@ -145,7 +145,7 @@ def test_subagent_failure_marked_not_fatal():
 
 
 def test_plan_failure_degrades_to_partial():
-    llm = LLMClient(call_func=lambda messages, model=None: "无法规划")
+    llm = LLMClient(call_func=lambda messages, model=None, **kwargs: "无法规划")
     plan, answer, transcript = run_langgraph(
         "分析 Cursor",
         llm=llm,

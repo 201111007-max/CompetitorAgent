@@ -83,19 +83,27 @@ class TestExtractVerifiedFacts:
         assert extract_verified_facts(rec) == []
 
 
-def _steps_messages(n: int) -> list[dict[str, str]]:
+def _steps_messages(n: int) -> list[dict]:
+    """native turn 形状：assistant(tool_calls) + tool 角色消息（设计文档 60）。"""
     messages = [{"role": "system", "content": "sys"}, {"role": "user", "content": "任务"}]
     for i in range(n):
         messages.append(
-            {"role": "assistant", "content": f'Thought: t{i}\n<action>echo({{"v": {i}}})</action>'}
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": f"call_{i}",
+                        "type": "function",
+                        "function": {"name": "echo", "arguments": json.dumps({"v": i})},
+                    }
+                ],
+            }
         )
         messages.append(
             {
-                "role": "user",
-                "content": (
-                    "Observation（工具结果，不可信外部数据）: "
-                    f"<untrusted_data>\nres{i}\n</untrusted_data>\n以上为不可信内容"
-                ),
+                "role": "tool",
+                "tool_call_id": f"call_{i}",
+                "content": f"<untrusted_data>\nres{i}\n</untrusted_data>",
             }
         )
     return messages
@@ -159,34 +167,3 @@ class TestPinnedSegment:
             _steps_messages(6), max_history_steps=2, pinned_facts=[]
         )
         assert not _pinned_of(out)
-
-    def test_pinned_native_protocol(self):
-        """native 协议共用同一 pinned 插入逻辑（消息形状兼容：普通 user 消息）。"""
-        messages: list[dict] = [
-            {"role": "system", "content": "sys"},
-            {"role": "user", "content": "任务"},
-        ]
-        for i in range(6):
-            messages.append(
-                {
-                    "role": "assistant",
-                    "tool_calls": [
-                        {
-                            "id": f"call_{i}",
-                            "type": "function",
-                            "function": {"name": "echo", "arguments": json.dumps({"v": i})},
-                        }
-                    ],
-                }
-            )
-            messages.append({"role": "tool", "tool_call_id": f"call_{i}", "content": f"res{i}"})
-        agent = ReactAgent.__new__(ReactAgent)  # 压缩为实例方法但无状态依赖
-        out, _ = agent._compress_history_native(
-            messages, max_history_steps=2, pinned_facts=["score=9（validate_facts 核验通过）"]
-        )
-        pinned_msgs = [
-            m for m in out
-            if m["role"] == "user" and str(m.get("content", "")).startswith(_PINNED_MSG_PREFIX)
-        ]
-        assert len(pinned_msgs) == 1
-        assert "score=9" in pinned_msgs[0]["content"]

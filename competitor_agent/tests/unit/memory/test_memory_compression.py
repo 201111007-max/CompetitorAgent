@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from competitor_agent.agent.prompts.react_system import enrich_prompt
 from competitor_agent.interfaces.context import AnalysisSession
-from competitor_agent.llm.client import LLMClient
+from competitor_agent.llm.client import LLMClient, ToolCallReply
 from competitor_agent.memory import (
     EvolutionMemory,
     FourLayerMemory,
@@ -266,14 +266,13 @@ class TestMemoryContextInjection:
 
         captured: dict = {}
 
-        def fake_llm(messages, model):
+        def fake_llm(messages, model, **kwargs):
             captured["system"] = messages[0].get("content", "") if messages else ""
-            return "Final Answer: 分析完成"
+            return ToolCallReply(content="分析完成")
 
         agent = ReactAgent(
             llm=LLMClient(call_func=fake_llm),
             dispatcher=ToolDispatcher(tools={}),
-            protocol="react",  # 系统提示文本形状断言（设计文档 35）
         )
         loop = ReactLoop(
             agent,

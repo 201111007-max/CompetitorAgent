@@ -225,7 +225,7 @@ class LLMClient:
         - 注入 ``call_func`` 路径透传 kwargs（mock 双形态入口，设计文档 53 Q3）：
           mock 返回 ``ToolCallReply`` 原样采用，返回 str 包装为纯 content 回复；
         - 端点/模型不支持 tools（400 特征报错）→ 抛 ``LLMUnavailableError``（Q4：
-          不自动降级文本协议，报错给出 ``protocol='react'`` 可操作指引）。
+          不自动降级文本协议，报错给出可操作指引——更换支持工具调用的模型）。
         """
         started = time.monotonic()
         if self._call is not None:
@@ -266,7 +266,7 @@ class LLMClient:
                 if self._is_tools_unsupported(exc):
                     raise LLMUnavailableError(
                         f"模型 {model} 不支持 tool_calls（原生 function calling），"
-                        "请改用 protocol='react' 或更换支持工具调用的模型"
+                        "请更换支持工具调用的模型（设计文档 60：单协议，无文本降级）"
                     ) from exc
                 raise
 
@@ -461,7 +461,7 @@ class LLMClient:
                     retried=retried,
                     timed_out=timed_out,
                 )
-            except Exception:  # noqa: BLE001 - trace 埋点失败不影响主流程
+            except Exception:
                 logger.debug("generation trace 埋点失败，跳过", exc_info=True)
 
     def complete_json(

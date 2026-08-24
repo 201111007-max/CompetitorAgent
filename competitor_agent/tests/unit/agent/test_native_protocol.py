@@ -15,13 +15,10 @@ from __future__ import annotations
 
 import json
 
-import pytest
 from competitor_agent.agent.react_agent import ReactAgent
 from competitor_agent.agent.react_loop import ReactLoop
 from competitor_agent.agent.tool_dispatcher import ToolDispatcher
 from competitor_agent.llm.client import LLMClient, ToolCall, ToolCallReply
-
-from competitor_agent.agent.tool_registry import build_openai_tools
 
 
 def _reply(content: str = "", *calls: ToolCall) -> ToolCallReply:
@@ -239,31 +236,10 @@ class TestArgsErrorSelfHeal:
 
 
 def test_native_system_prompt_drops_text_format_help():
-    """native 模式：系统提示不含工具文本描述与 Thought/Action 格式说明（省 token）。"""
+    """native 单协议（设计文档 60）：系统提示不含工具文本描述与 Thought/Action 格式说明（省 token）。"""
     d = ToolDispatcher({"web_search": lambda query: "r"})
-    agent = ReactAgent(llm=LLMClient(), dispatcher=d, protocol="native")
+    agent = ReactAgent(llm=LLMClient(), dispatcher=d)
     prompt = agent.build_system_prompt()
     assert "Thought/Action/Final Answer" not in prompt
     assert "可用工具" not in prompt
-    assert "web_extract" not in prompt  # 工具经 tools 参数下发，不再文本描述
-    agent.protocol = "react"
-    prompt_r = agent.build_system_prompt()
-    assert "Thought/Action/Final Answer" in prompt_r
-    assert "web_search" in prompt_r  # 工具文本描述在 react 模式保留
-
-
-def test_invalid_protocol_rejected():
-    with pytest.raises(ValueError):
-        ReactAgent(llm=LLMClient(), dispatcher=ToolDispatcher(), protocol="bogus")
-    agent = ReactAgent(llm=LLMClient(), dispatcher=ToolDispatcher())
-    with pytest.raises(ValueError):
-        agent.protocol = "bogus"
-
-
-def test_build_system_respects_protocol_switch():
-    agent = ReactAgent(llm=LLMClient(), dispatcher=ToolDispatcher({"web_search": lambda query: "r"}))
-    assert agent.protocol == "native"  # 默认 native（设计文档 53 Q1）
-    assert "Thought/Action/Final Answer" not in agent.build_system_prompt()
-    agent.protocol = "react"
-    assert "Thought/Action/Final Answer" in agent.build_system_prompt()
-    assert agent.protocol == "react"
+    assert "web_search" not in prompt  # 工具经 tools 参数下发，不再文本描述

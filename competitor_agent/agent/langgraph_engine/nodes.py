@@ -1,8 +1,9 @@
 """LangGraph 引擎节点（设计文档 51 §2.1）
 
 plan → (Send fan-out) subagent×N → aggregate → report。
-节点内直接调 ``LLMClient.complete`` 与工具函数——mock、成本核算、埋点
-三个口径与自研 ReAct 引擎逐位一致（对照实验的控变量要求）。
+节点内直接调 ``LLMClient.complete_with_tools`` 与工具函数——mock、成本核算、埋点
+三个口径与自研 ReAct 引擎逐位一致（对照实验的控变量要求）。设计文档 60：
+plan/report 节点迁原生 function calling，与自研引擎同协议（单协议）。
 
 transcript 记录与 ``ReactAgent._step_record`` 同构（tool/args/result_brief/url），
 aggregate 节点追加一条 delegate 同形记录，使 ``_record_memory_success`` /
@@ -14,7 +15,6 @@ import json
 from typing import Any, Callable
 
 from competitor_agent.agent.prompts.trust_boundary import wrap_untrusted
-from competitor_agent.agent.response_parser import ResponseParser
 from competitor_agent.domain_types.events import ProgressEvent
 from competitor_agent.observability.logger import get_logger
 
@@ -37,30 +37,36 @@ def make_plan_node(
     make_plan_fn: Callable[..., str],
     *,
     system_prompt: str,
-    parser: ResponseParser | None = None,
 ) -> Callable[[dict], dict]:
-    """plan 节点：LLM 单发调 make_plan（PLAN_SCHEMA），校验后产出 plan dict。
+    """plan 节点：原生 function calling 单发调 make_plan（PLAN_SCHEMA），校验后产出 plan dict。
 
-    未产出合法 make_plan 调用 → plan=None（fan-out 跳过子 Agent，报告侧按
-    partial 处理，与自研路径「plan 无效 → partial」语义一致）。
+    设计文档 60：经 ``complete_with_tools`` + tool_choice 强制 make_plan（与自研
+    Lead 的 plan-first 同机制）。未产出合法 make_plan 调用 → plan=None（fan-out
+    跳过子 Agent，报告侧按 partial 处理，与自研路径「plan 无效 → partial」语义一致）。
     """
-    parser = parser or ResponseParser()
+    from competitor_agent.agent.tool_dispatcher import ToolDispatcher
+    from competitor_agent.agent.tool_registry import build_openai_tools
+
+    plan_dispatcher = ToolDispatcher()
+    plan_dispatcher.register("make_plan", make_plan_fn)
+    plan_tools = build_openai_tools(plan_dispatcher)
+    forced_plan = {"type": "function", "function": {"name": "make_plan"}}
 
     def plan_node(state: dict) -> dict:
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": state["task"]},
         ]
-        reply = llm.complete(messages)
-        parsed = parser.parse(reply)
+        reply = llm.complete_with_tools(messages, plan_tools, tool_choice=forced_plan)
         plan: dict[str, Any] | None = None
         result_text = ""
         args: dict[str, Any] = {}
-        if parsed.step_type.value == "action" and parsed.tool_name == "make_plan":
-            args = parsed.tool_args
-            if parsed.args_error:
-                result_text = f"make_plan 参数解析失败: {parsed.args_error}"
-                logger.warning("LangGraph plan 节点参数解析失败: %s", parsed.args_error)
+        call = reply.tool_calls[0] if reply.tool_calls else None
+        if call is not None and call.name == "make_plan":
+            args = call.arguments
+            if call.args_error:
+                result_text = f"make_plan 参数解析失败: {call.args_error}"
+                logger.warning("LangGraph plan 节点参数解析失败: %s", call.args_error)
             else:
                 result_text = str(make_plan_fn(**args))
                 try:
@@ -72,11 +78,11 @@ def make_plan_node(
                 else:
                     logger.warning("LangGraph plan 节点 plan 校验失败: %s", result_text[:120])
         else:
-            logger.warning("LangGraph plan 节点未调用 make_plan: %s", reply[:120])
+            logger.warning("LangGraph plan 节点未调用 make_plan: %s", (reply.content or "")[:120])
         record = {
             "tool": "make_plan",
             "args": args,
-            "result_brief": (result_text or reply)[:_BRIEF_CHARS],
+            "result_brief": (result_text or reply.content or "")[:_BRIEF_CHARS],
             "url": "",
         }
         return {"plan": plan, "transcript": [record]}
@@ -164,14 +170,13 @@ def make_report_node(
     llm: Any,
     *,
     system_prompt: str,
-    parser: ResponseParser | None = None,
 ) -> Callable[[dict], dict]:
     """report 节点：子 Agent 合并结果作为 Observation 回灌，LLM 产出 REPORT_SCHEMA JSON。
 
-    消息序列与自研 Lead 会话同形（system + 任务 + Observation），非 Final Answer
-    输出时以原文兜底（assemble 侧按 partial 降级）。
+    设计文档 60：单发 completion 取 content 即最终回答（无工具调用，非文本 ReAct
+    解析）；剥 ``Final Answer:`` 前缀后原文兜底（assemble 侧按 partial 降级）。
+    消息序列与自研 Lead 会话同形（system + 任务 + Observation）。
     """
-    parser = parser or ResponseParser()
 
     def report_node(state: dict) -> dict:
         merged = state.get("merged_results") or "（无子 Agent 结果）"
@@ -181,7 +186,7 @@ def make_report_node(
             {"role": "user", "content": f"{_OBS_PREFIX}{wrap_untrusted(merged)}"},
         ]
         reply = llm.complete(messages)
-        answer = parser.extract_final_answer(reply) or reply
+        answer = (reply or "").removeprefix("Final Answer: ")
         record = {"tool": "report", "args": {}, "result_brief": answer[:_BRIEF_CHARS], "url": ""}
         return {"final_answer": answer, "transcript": [record]}
 

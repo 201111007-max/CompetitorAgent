@@ -26,7 +26,7 @@ from competitor_agent.domain_types.report import CancelledResult, CompetitorRepo
 from competitor_agent.facade.api import CompetitorAnalysisAPI
 from competitor_agent.interfaces.context import SourceContext
 from competitor_agent.interfaces.exceptions import DataSourceUnavailableError
-from competitor_agent.llm.client import LLMClient
+from competitor_agent.llm.client import LLMClient, ToolCallReply
 
 CURSOR_PRICING = "Pro $20/month\nTeams $40/month\nUltra $60/month"
 
@@ -152,14 +152,13 @@ class TestReactLoopCooperativeCancellation:
     def _loop(sid: str | None):
         called = {"n": 0}
 
-        def fake_llm(messages, model):
+        def fake_llm(messages, model, **kwargs):
             called["n"] += 1
-            return "Final Answer: done"
+            return ToolCallReply(content="done")
 
         agent = ReactAgent(
             llm=LLMClient(call_func=fake_llm),
             dispatcher=ToolDispatcher(tools={}),
-            protocol="react",
         )
         loop = ReactLoop(agent, session_id=sid, plan_first=False)
         loop._called = called  # type: ignore[attr-defined]

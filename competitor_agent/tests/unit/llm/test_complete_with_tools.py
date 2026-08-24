@@ -6,7 +6,7 @@
 - dict / SDK 对象形态响应的 tool_calls 抽取（id/name/arguments）
 - arguments 非法 JSON → args_error 可读原因，不静默 {}（设计文档 38 语义）
 - usage 计价累计（复用 _log_call 成本核算）
-- Q4：端点不支持 tools（400 特征报错）→ LLMUnavailableError，指引含 protocol='react'；
+- Q4：端点不支持 tools（400 特征报错）→ LLMUnavailableError，指引更换支持工具的模型；
   SDK 路径 tools/tool_choice 透传校验（monkeypatch openai.OpenAI，零网络）
 - build_openai_tools：TOOL_SPECS 契约直映射；无 schema 工具从签名派生最小 parameters
 
@@ -219,11 +219,11 @@ class TestSdkPath:
         assert "tool_choice" not in completions.kwargs
 
     def test_tools_unsupported_raises_q4(self, monkeypatch) -> None:
-        """Q4：400 + 工具特征报错 → LLMUnavailableError，含 protocol='react' 可操作指引。"""
+        """Q4：400 + 工具特征报错 → LLMUnavailableError，含更换模型可操作指引。"""
         exc = FakeStatusError(400, "this model does not support tool_calls")
         _patch_openai(monkeypatch, _FakeCompletions(exc=exc))
         client = LLMClient(model="m0", api_key="sk-fake", fallback_models=["m1"])
-        with pytest.raises(LLMUnavailableError, match=r"protocol='react'") as err:
+        with pytest.raises(LLMUnavailableError, match=r"更换支持工具调用的模型") as err:
             client.complete_with_tools(MESSAGES, TOOLS_ARG)
         assert "m0 不支持 tool_calls" in str(err.value)
 
@@ -231,7 +231,7 @@ class TestSdkPath:
         exc = FakeStatusError(400, "tool_choice is not supported by this endpoint")
         _patch_openai(monkeypatch, _FakeCompletions(exc=exc))
         client = LLMClient(model="m0", api_key="sk-fake")
-        with pytest.raises(LLMUnavailableError, match=r"protocol='react'"):
+        with pytest.raises(LLMUnavailableError, match=r"更换支持工具调用的模型"):
             client.complete_with_tools(MESSAGES, TOOLS_ARG, tool_choice="auto")
 
     def test_plain_400_not_converted(self, monkeypatch) -> None:
