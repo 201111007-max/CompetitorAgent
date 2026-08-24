@@ -7,7 +7,8 @@ from competitor_agent.config.loader import AppConfig
 from competitor_agent.domain_types.competitor import Competitor
 from competitor_agent.facade.api import CompetitorAnalysisAPI
 
-_NOW = datetime(2026, 8, 13, 12, 0, 0, tzinfo=timezone.utc)
+# 相对"现在"锚定，避免写死历史日期导致 created_at 回退判定漂移（stale_under_ttl 用真实 now）
+_NOW = datetime.now(timezone.utc)
 
 
 class _Session:
