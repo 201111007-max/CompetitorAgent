@@ -1,73 +1,45 @@
-"""agent 层单测：response_parser / tool_dispatcher / react_agent / react_loop"""
+"""agent 层单测：tool_dispatcher / react_agent / react_loop
+
+设计文档 60：单协议（原生 function calling），mock 以 ToolCallReply 形状回放
+脚本（动作步 = ToolCall，收尾 = 纯 content）。
+"""
+from __future__ import annotations
+
 import time
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import pytest
 from competitor_agent.agent import (
     ReactAgent,
     ReactLoop,
-    ResponseParser,
-    StepType,
     ToolArgumentError,
     ToolDispatcher,
     ToolSpec,
 )
 from competitor_agent.domain_types.events import ProgressEvent
-from competitor_agent.llm.client import LLMClient
+from competitor_agent.llm.client import LLMClient, ToolCall, ToolCallReply
 
 
-class TestResponseParser:
-    def test_parse_action_tag(self):
-        out = 'Thought: 需要查定价\n<action>web_extract({"url": "https://x.com"})</action>'
-        step = ResponseParser().parse(out)
-        assert step.step_type == StepType.ACTION
-        assert step.tool_name == "web_extract"
-        assert step.tool_args["url"] == "https://x.com"
+def _tool(name: str, args: dict[str, Any]) -> ToolCallReply:
+    return ToolCallReply(tool_calls=[ToolCall(id="call_0", name=name, arguments=args)])
 
-    def test_parse_action_line(self):
-        out = "Thought: 查一下\nAction: web_extract\nArgs: {\"url\": \"https://y.com\"}"
-        step = ResponseParser().parse(out)
-        assert step.step_type == StepType.ACTION
-        assert step.tool_name == "web_extract"
-        assert step.tool_args["url"] == "https://y.com"
 
-    def test_parse_final_answer_line(self):
-        step = ResponseParser().parse("Thought: 完成\nFinal Answer: 定价 $20/mo")
-        assert step.step_type == StepType.FINAL_ANSWER
-        assert step.final_answer == "定价 $20/mo"
+def _fin(text: str) -> ToolCallReply:
+    return ToolCallReply(content=text)
 
-    def test_parse_final_answer_tag(self):
-        step = ResponseParser().parse("分析完成\n<final_answer>结论</final_answer>")
-        assert step.step_type == StepType.FINAL_ANSWER
-        assert step.final_answer == "结论"
 
-    def test_parse_pure_thought(self):
-        step = ResponseParser().parse("我先想想需要什么数据")
-        assert step.step_type == StepType.THOUGHT
+def _scripted(responses: list[ToolCallReply], track: list | None = None):
+    """构造接受 ``**kwargs``（tools/tool_choice）的顺序回放 call_func（native 单协议）。"""
+    calls = {"n": 0}
 
-    def test_action_line_without_args(self):
-        step = ResponseParser().parse("Action: web_extract")
-        assert step.step_type == StepType.ACTION
-        assert step.tool_args == {}
-        assert step.args_error == ""
+    def fake_llm(messages, model, **kwargs):
+        if track is not None:
+            track.append(list(messages))
+        r = responses[min(calls["n"], len(responses) - 1)]
+        calls["n"] += 1
+        return r
 
-    def test_parse_invalid_json_records_args_error(self):
-        step = ResponseParser().parse("Thought: x\nAction: web_extract\nArgs: {bad}")
-        assert step.step_type == StepType.ACTION
-        assert step.tool_name == "web_extract"
-        assert step.tool_args == {}
-        assert step.args_error
-
-    def test_parse_non_dict_args_records_args_error(self):
-        step = ResponseParser().parse("Thought: x\n<action>web_extract([1,2])</action>")
-        assert step.step_type == StepType.ACTION
-        assert step.args_error
-
-    def test_parse_json_args_raises(self):
-        with pytest.raises(ToolArgumentError, match="JSON 解析失败"):
-            ResponseParser._parse_json_args("{bad}")
-        with pytest.raises(ToolArgumentError, match="期望对象"):
-            ResponseParser._parse_json_args("[1,2]")
+    return fake_llm
 
 
 class TestToolDispatcher:
@@ -103,51 +75,43 @@ class TestToolDispatcher:
 
 class TestReactAgent:
     def _make_agent(self, responses, tools=None):
-        calls = {"n": 0}
-
-        def fake_llm(messages, model):
-            r = responses[min(calls["n"], len(responses) - 1)]
-            calls["n"] += 1
-            return r
-
         return ReactAgent(
-            llm=LLMClient(call_func=fake_llm),
+            llm=LLMClient(call_func=_scripted(responses)),
             dispatcher=tools or ToolDispatcher({"web_extract": lambda url: "fetched"}),
-            protocol="react",  # 文本 ReAct 形状断言（设计文档 53 react 回归基线）
         )
 
     def test_run_reaches_final_answer(self):
         agent = self._make_agent([
-            'Thought: 先抓页面\n<action>web_extract({"url": "https://x.com"})</action>',
-            "Final Answer: 页面已抓取",
+            _tool("web_extract", {"url": "https://x.com"}),
+            _fin("页面已抓取"),
         ])
         answer = agent.run(agent.build_system_prompt(), "分析定价")
         assert answer == "页面已抓取"
 
     def test_run_handles_unknown_tool(self):
         agent = self._make_agent([
-            'Thought: 用不存在的工具\n<action>ghost_tool({})</action>',
-            "Final Answer: 完成",
+            _tool("ghost_tool", {}),
+            _fin("完成"),
         ])
         answer = agent.run(agent.build_system_prompt(), "任务")
         assert answer == "完成"
 
     def test_run_max_steps_returns_warning(self):
-        agent = self._make_agent([
-            "Thought: 想想",
-            "Thought: 再想想",
-            "Thought: 继续想",
-            "Thought: 还想",
-            "Thought: 再想一下",
-            "Thought: 不断想",
-            "Thought: 一直想",
-        ])
+        agent = self._make_agent([_tool("web_extract", {"url": "https://x.com"})] * 7)
         answer = agent.run(agent.build_system_prompt(), "任务", max_steps=3)
         assert "最大推理步数" in answer
 
-    def test_system_prompt_contains_tools(self):
-        agent = self._make_agent(["Final Answer: x"])
-        assert "web_extract" in agent.build_system_prompt()
+    def test_system_prompt_native_no_tool_descriptions(self):
+        """设计文档 60：native 系统提示不含工具文本描述（工具经 tools 请求参数下发）。"""
+        agent = self._make_agent([_fin("x")])
+        prompt = agent.build_system_prompt()
+        assert "web_extract" not in prompt
+        assert "你是竞品情报分析 Agent" in prompt
+
+    def test_build_system_prompt_with_instructions(self):
+        agent = self._make_agent([_fin("x")])
+        prompt = agent.build_system_prompt(instructions="专项指令")
+        assert "专项指令" in prompt
 
 
 class TestReactLoop:
@@ -158,9 +122,8 @@ class TestReactLoop:
             events.append(e)
 
         agent = ReactAgent(
-            llm=LLMClient(call_func=lambda messages, model: "Final Answer: 结论"),
+            llm=LLMClient(call_func=_scripted([_fin("结论")])),
             dispatcher=ToolDispatcher(),
-            protocol="react",
         )
         loop = ReactLoop(agent, event_sink=sink)
         answer = loop.run("分析 cursor")
@@ -232,23 +195,23 @@ class TestToolTimeout:
         assert d.dispatch("add", {"a": 1, "b": 2}) == "3"
 
 
-class TestReActFeedback:
-    """设计文档 38：四类反馈（解析失败/参数错误/工具不存在/执行异常）回灌 Observation"""
+class TestNativeFeedback:
+    """设计文档 38：四类反馈（解析失败/参数错误/工具不存在/执行异常）回灌 tool 消息"""
 
     def _run(self, responses, tools):
         seen = []
 
-        def fake_llm(messages, model):
-            user_msgs = [m["content"] for m in messages if m["role"] == "user"]
-            seen.append(user_msgs)
+        def fake_llm(messages, model, **kwargs):
+            seen.append([dict(m) for m in messages])
             return responses[min(len(seen) - 1, len(responses) - 1)]
 
-        agent = ReactAgent(llm=LLMClient(call_func=fake_llm), dispatcher=tools, protocol="react")
+        agent = ReactAgent(llm=LLMClient(call_func=fake_llm), dispatcher=tools)
         return agent.run(agent.build_system_prompt(), "任务"), seen
 
     @staticmethod
     def _observations(seen):
-        return [msg for msgs in seen for msg in msgs]
+        # 回灌文本在 tool 角色消息（native 单协议，设计文档 60）
+        return [str(m.get("content", "")) for msgs in seen for m in msgs if m["role"] == "tool"]
 
     def test_argument_error_feedback(self):
         d = ToolDispatcher()
@@ -263,14 +226,14 @@ class TestReActFeedback:
             ),
         )
         _, seen = self._run(
-            ['Thought: x\n<action>web_extract({"url": 123})</action>', "Final Answer: 完成"],
+            [_tool("web_extract", {"url": 123}), _fin("完成")],
             d,
         )
         assert any("工具参数错误" in m for m in self._observations(seen))
 
     def test_unknown_tool_feedback(self):
         _, seen = self._run(
-            ['Thought: x\n<action>ghost({})</action>', "Final Answer: 完成"],
+            [_tool("ghost", {}), _fin("完成")],
             ToolDispatcher(),
         )
         assert any("工具不可用" in m for m in self._observations(seen))
@@ -281,21 +244,23 @@ class TestReActFeedback:
 
         d = ToolDispatcher({"boom": boom})
         _, seen = self._run(
-            ['Thought: x\n<action>boom({})</action>', "Final Answer: 完成"],
+            [_tool("boom", {}), _fin("完成")],
             d,
         )
         assert any("工具执行异常" in m for m in self._observations(seen))
         assert any("内部故障" in m for m in self._observations(seen))
 
-    def test_parse_error_feedback(self):
-        _, seen = self._run(
-            ['Thought: x\n<action>web_extract({bad json})</action>', "Final Answer: 完成"],
-            ToolDispatcher(),
+    def test_args_parse_error_feedback(self):
+        """arguments 非法 JSON → args_error → 可读回灌（设计文档 38/53 语义）。"""
+        bad_call = ToolCallReply(
+            tool_calls=[ToolCall(id="call_0", name="web_extract", arguments={},
+                                 args_error="arguments 不是合法 JSON: 测试")],
         )
+        _, seen = self._run([bad_call, _fin("完成")], ToolDispatcher())
         assert any("工具参数解析失败" in m for m in self._observations(seen))
 
 
-class TestReActRecovery:
+class TestNativeRecovery:
     """设计文档 38 集成：参数错误→回灌→修正参数→工具成功调用（自恢复闭环）"""
 
     def test_recovers_from_bad_args_to_valid(self):
@@ -317,17 +282,12 @@ class TestReActRecovery:
             ),
         )
 
-        n = {"v": 0}
-
-        def fake_llm(messages, model):
-            n["v"] += 1
-            if n["v"] == 1:
-                return 'Thought: 抓取\n<action>web_extract({"url": 123})</action>'
-            if n["v"] == 2:
-                return 'Thought: 修正参数\n<action>web_extract({"url": "https://x.com"})</action>'
-            return "Final Answer: 完成"
-
-        agent = ReactAgent(llm=LLMClient(call_func=fake_llm), dispatcher=d, protocol="react")
+        responses = [
+            _tool("web_extract", {"url": 123}),
+            _tool("web_extract", {"url": "https://x.com"}),
+            _fin("完成"),
+        ]
+        agent = ReactAgent(llm=LLMClient(call_func=_scripted(responses)), dispatcher=d)
         answer = agent.run(agent.build_system_prompt(), "任务")
         assert answer == "完成"
         assert calls == ["https://x.com"]

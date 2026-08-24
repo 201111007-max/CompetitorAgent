@@ -15,7 +15,7 @@ from competitor_agent.agent.tool_dispatcher import ToolDispatcher
 from competitor_agent.config.loader import load_config
 from competitor_agent.facade.api import CompetitorAnalysisAPI
 from competitor_agent.knowledge_base.competitor_store import CompetitorStore, TextChunk
-from competitor_agent.llm.client import LLMClient
+from competitor_agent.llm.client import LLMClient, ToolCall, ToolCallReply
 
 
 def _api(tmp_path, *, enable_rag: bool = True, max_content_chars: int | None = None) -> CompetitorAnalysisAPI:
@@ -89,7 +89,7 @@ class TestKbRecallClosure:
         assert len(kb.func("cursor pro plan")) <= 50
 
     def test_tool_spec_contract(self, tmp_path):
-        """描述含使用纪律；schema 要求 query（供文本/native 两协议下发）。"""
+        """描述含使用纪律；schema 要求 query（供 build_openai_tools 下发）。"""
         api = _api(tmp_path)
         spec = api._build_kb_recall(lambda: "")
         assert spec.name == "kb_recall"
@@ -115,19 +115,19 @@ class TestKbRecallUntrustedWrap:
         def scripted(messages, model=None, **kwargs):
             calls.append([dict(m) for m in messages])
             if len(calls) == 1:
-                return 'Thought: 取回旧步内容\n<action>kb_recall({"query": "pro plan"})</action>'
-            return "Final Answer: 完成"
+                return ToolCallReply(tool_calls=[ToolCall(
+                    id="call_0", name="kb_recall", arguments={"query": "pro plan"}
+                )])
+            return ToolCallReply(content="完成")
 
         agent = ReactAgent(
-            llm=LLMClient(call_func=scripted), dispatcher=dispatcher, protocol="react"
+            llm=LLMClient(call_func=scripted), dispatcher=dispatcher
         )
         agent.run(agent.build_system_prompt(), "任务")
-        obs = next(
-            m["content"] for m in calls[-1]
-            if m["role"] == "user" and "Observation" in m["content"]
-        )
-        assert "<untrusted_data" in obs
-        assert "costs $20 per month" in obs
+        tool_msgs = [m["content"] for m in calls[-1] if m["role"] == "tool"]
+        assert tool_msgs, "kb_recall 结果应以 tool 角色消息回灌"
+        assert "<untrusted_data" in tool_msgs[0]
+        assert "costs $20 per month" in tool_msgs[0]
 
 
 class TestLeadWiring:

@@ -52,7 +52,10 @@ STRATEGY_FIXTURE = "strategy_cases.json"
 # 0.6.0 → 0.7.0：主路径 ReAct 化（设计文档 47/49）——mock LLM 改 ReAct-scripted
 #   （make_plan → delegate → 子 Agent web_extract → Final Answer REPORT_SCHEMA），
 #   门禁基于多 Agent 链路真实输出重定。
-HARNESS_VERSION = "0.8.0"  # 设计文档 53：协议对照实验（native 默认，门禁对默认 native 重定）
+# 0.7.0 → 0.8.0：协议对照实验（native 默认，门禁对默认 native 重定，设计文档 53）。
+# 0.8.0 → 0.9.0：删除文本 ReAct 协议，只保留 function calling（设计文档 60）——
+#   mock 单形态、无 --protocol/对照表，门禁对唯一协议重定。
+HARNESS_VERSION = "0.9.0"
 
 # 门禁阈值单一来源（设计文档 55 M1）：--gate CLI、test_benchmark_integration、
 # test_behavior_eval 全部引用本组常量，不新造第二份数值。
@@ -278,10 +281,11 @@ class BenchmarkMockLLM:
         self._parsed_dimensions: list[str] | None = None
 
     def complete(self, messages: list[dict[str, str]], model: str | None = None, **kwargs: Any) -> Any:
-        """双形态入口（设计文档 53 Q3）：收到 ``tools=`` → 返回 ToolCallReply；否则返回文本。
+        """调用入口（设计文档 60：单协议）：``complete_with_tools`` 传 ``tools=`` →
+        返回 ToolCallReply；``llm.complete``（任务解析/单发 JSON）返回文本。
 
-        文本形态保留为对照基线与 react 协议；native 形态把脚本化的 Action/Args/Final Answer
-        文本映射为等价 tool_calls / 纯 content，同一脚本 fixture 双协议可跑，CI 确定性不变。
+        脚本化文本输出（Action/Args/Final Answer）由 ``_to_tool_reply`` 映射为等价
+        tool_calls / 纯 content，同一脚本 fixture 可跑，CI 确定性不变。
         """
         text = self._complete_text(messages)
         if kwargs.get("tools"):
@@ -289,7 +293,7 @@ class BenchmarkMockLLM:
         return text
 
     def _to_tool_reply(self, text: str):
-        """把脚本化文本 ReAct 输出映射为 native 协议等价物（设计文档 53 Q3）。
+        """把脚本化文本输出映射为 ToolCallReply（设计文档 53 Q3）。
 
         - ``Final Answer: <json>`` → 纯 content（无 tool_calls = 原生协议终止信号）;
         - ``Action: <name> / Args: <json>`` → ToolCall（scripts 同 fixture 一致性保持）。
@@ -984,7 +988,6 @@ def build_benchmark_api(
     rag_store: object | None = None,
     timeline: object | None = None,
     engine: str = "react",
-    protocol: str = "native",  # 设计文档 53：native|react
     llm_call_counter: list[int] | None = None,
 ) -> CompetitorAnalysisAPI:
     """按用例配置构建 API：mock 用确定性 MockLLM（无 Key、无网络），real 用真实 LLMClient。
@@ -1048,7 +1051,6 @@ def build_benchmark_api(
         timeline=timeline,  # type: ignore[arg-type]
         config=cfg,
         engine=engine,
-        protocol=protocol,
     )
 
 
@@ -1069,7 +1071,6 @@ class Benchmark:
         tag: str | None = None,
         cost_limit_usd: float | None = None,
         engine: str = "react",
-        protocol: str = "native",  # 设计文档 53：native|react
         llm_call_counter: list[int] | None = None,
     ) -> None:
         self._dir = fixtures_dir or FIXTURES_DIR
@@ -1080,12 +1081,12 @@ class Benchmark:
         if build_api is None:
             if llm is not None:
                 self._build_api = lambda case: build_benchmark_api(
-                    case, llm_mode=self._llm_mode, llm=llm, engine=engine, protocol=protocol,
+                    case, llm_mode=self._llm_mode, llm=llm, engine=engine,
                     llm_call_counter=llm_call_counter,
                 )
             else:
                 self._build_api = lambda case: build_benchmark_api(
-                    case, llm_mode=self._llm_mode, engine=engine, protocol=protocol,
+                    case, llm_mode=self._llm_mode, engine=engine,
                     llm_call_counter=llm_call_counter,
                 )
         else:
@@ -1656,43 +1657,6 @@ def evaluate_gates(report: BenchmarkReport) -> list[GateCheck]:
     ]
 
 
-def _write_protocol_compare(
-    native_report: BenchmarkReport,
-    react_report: BenchmarkReport,
-    *,
-    wall_seconds: dict[str, float],
-    llm_calls: dict[str, int],
-    path: Path,
-) -> None:
-    """双协议对照表落盘（设计文档 53 §2.4）：同 fixture/同 LLM/同工具/同出口，唯一变量是协议层。
-
-    native 恒 0 解析失败回灌（API 保证 arguments 合法 JSON），量化文本协议的自愈成本；
-    产出质量对比需 ``--llm real`` 手动跑（真实 LLM 不进 CI）。
-    """
-    rows = [
-        ("field_accuracy", f"{native_report.accuracy.field_accuracy:.4f}", f"{react_report.accuracy.field_accuracy:.4f}"),
-        ("hallucination_rate", f"{native_report.accuracy.hallucination_rate:.4f}", f"{react_report.accuracy.hallucination_rate:.4f}"),
-        ("tool_selection_accuracy", f"{native_report.strategy.tool_selection_accuracy:.4f}", f"{react_report.strategy.tool_selection_accuracy:.4f}"),
-        ("llm_calls", str(llm_calls.get("native", 0) or "—"), str(llm_calls.get("react", 0) or "—")),
-        ("total_cost_usd", f"{native_report.cost_usd:.6f}", f"{react_report.cost_usd:.6f}"),
-        ("wall_seconds", f"{wall_seconds.get('native', 0.0):.2f}", f"{wall_seconds.get('react', 0.0):.2f}"),
-        ("解析失败回灌次数", "native 恒 0（API 保证 arguments 合法 JSON）", f"{react_report.accuracy.hallucination_rate:.4f}（文本解析自愈成本）"),
-    ]
-    lines = [
-        "# 双协议对照（设计文档 53）：native（原生 function calling） vs react（文本 ReAct）",
-        "",
-        "> 控变量：同 fixture、同 LLM（含双形态 mock）、同工具面（TOOL_SPECS 契约）、同报告出口",
-        "> （react_report.assemble），唯一变量是协议层。mock 模式下成本恒 0，协议开销看 llm_calls / wall_seconds；",
-        "> 产出质量对比需 `--llm real` 手动跑。",
-        "",
-        "| 指标 | native | react |",
-        "|------|--------|-------|",
-    ]
-    lines += [f"| {name} | {r} | {l} |" for name, r, l in rows]
-    lines.append("")
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="benchmark", description="competitor_agent 评测基准（真实执行）")
     parser.add_argument(
@@ -1722,12 +1686,6 @@ def main(argv: list[str] | None = None) -> int:
         help="编排引擎（设计文档 51）：react=自研（默认，门禁口径不变），langgraph=StateGraph，both=双引擎顺序跑 + 对比表落盘",
     )
     parser.add_argument(
-        "--protocol",
-        choices=["native", "react", "both"],
-        default="native",
-        help="调用协议（设计文档 53）：native=原著 function calling（默认），react=文本 ReAct 对照，both=双协议顺序跑 + 对比表落盘",
-    )
-    parser.add_argument(
         "--gate",
         action="store_true",
         help="门禁执法（设计文档 55 M1）：跑完按 GATE_* 阈值逐项判定，任一项不达标退出码 1 并打印差距；不加本开关行为不变（恒 0）",
@@ -1753,8 +1711,6 @@ def main(argv: list[str] | None = None) -> int:
     # --engine both：主跑默认 react（门禁/产物口径不变），langgraph 作对照侧加跑
     suffix = "_langgraph" if args.engine == "langgraph" else ""
     engine_main = "langgraph" if args.engine == "langgraph" else "react"
-    # --protocol both：主跑默认 native（门禁/产物口径不变），react 作对照侧加跑
-    protocol_main = "react" if args.protocol == "react" else "native"
     shared_llm: LLMClient | None = None
     cost_limit: float | None = None
     main_calls: list[int] = []
@@ -1769,7 +1725,7 @@ def main(argv: list[str] | None = None) -> int:
         t0 = time.monotonic()
         report = Benchmark(
             llm_mode="real", llm=shared_llm, tag=args.tag, cost_limit_usd=cost_limit,
-            engine=engine_main, protocol=protocol_main,
+            engine=engine_main,
             llm_call_counter=main_calls if args.engine == "both" else None,
         ).run()
         main_wall = time.monotonic() - t0
@@ -1779,7 +1735,7 @@ def main(argv: list[str] | None = None) -> int:
         mock_report = None
         t0 = time.monotonic()
         report = Benchmark(
-            llm_mode="mock", tag=args.tag, engine=engine_main, protocol=protocol_main,
+            llm_mode="mock", tag=args.tag, engine=engine_main,
             llm_call_counter=main_calls if args.engine == "both" else None,
         ).run()
         main_wall = time.monotonic() - t0
@@ -1818,30 +1774,6 @@ def main(argv: list[str] | None = None) -> int:
             path=compare_path,
         )
         print(f"engine_compare: {compare_path}")
-
-    if args.protocol == "both":
-        # 设计文档 53：同 fixture 双协议顺序跑，产出协议对比表（protocol 是唯一变量）
-        rc_calls: list[int] = []
-        t0 = time.monotonic()
-        rc_report = Benchmark(
-            llm_mode=args.llm,
-            llm=shared_llm,
-            tag=args.tag,
-            cost_limit_usd=cost_limit,
-            engine=engine_main,
-            protocol="react",
-            llm_call_counter=rc_calls,
-        ).run()
-        rc_wall = time.monotonic() - t0
-        proto_compare_path = reports_dir / f"protocol_compare_{date}.md"
-        _write_protocol_compare(
-            report,
-            rc_report,
-            wall_seconds={"native": main_wall, "react": rc_wall},
-            llm_calls={"native": len(main_calls), "react": len(rc_calls)},
-            path=proto_compare_path,
-        )
-        print(f"protocol_compare: {proto_compare_path}")
 
     if args.gate:
         # 设计文档 55 M1：门禁执法——任一项不达标 return 1，逐项打印「指标/阈值/实测」

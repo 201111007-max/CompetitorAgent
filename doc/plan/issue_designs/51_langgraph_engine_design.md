@@ -33,8 +33,9 @@
   硬对齐等于用框架重写自研横切能力，失去对比意义；文档与对比报告中作为
   「框架省了编排代码，横切控制要自己补」的实证结论。
 - 不引入 langchain 全家桶：只依赖 `langgraph` + `langchain-core`（StateGraph 类型需要），
-  节点内仍直接调 `LLMClient.complete`，不用 `create_react_agent`/LangChain 模型封装——
-  保证 mock、成本核算、埋点三个口径与自研引擎逐位一致（对照实验的控变量要求）。
+  节点内仍直接调 `LLMClient.complete_with_tools`（doc 60 单协议：原生 function calling），
+  不用 `create_react_agent`/LangChain 模型封装——保证 mock、成本核算、埋点三个口径与
+  自研引擎逐位一致（对照实验的控变量要求）。
 
 ## 2. 目标设计
 
@@ -46,7 +47,7 @@ state = {task, competitor, memory_ctx, rag_ctx, plan, subagent_results: list, fi
 plan_node        → LLM 调 make_plan 同 schema（PLAN_SCHEMA），产出 plan dict
                    （memory_ctx/rag_ctx 注入系统提示，与自研路径同文本）
 delegate_node    → 按 plan.dimensions 用 Send API fan-out，每维度一条边
-subagent_node    → 单维度 mini ReAct 子图：thought/action 循环调共用 dispatcher
+subagent_node    → 单维度子 Agent：原生 function calling 循环调共用 dispatcher
                    （工具白名单同 _SUBAGENT_TOOLS；事件 emit phase_start/complete）
 aggregate_node   → 收拢 subagent_results（错乱序按 dimension 归位）
 report_node      → LLM 产出 REPORT_SCHEMA JSON → final_answer
@@ -98,8 +99,8 @@ langgraph_engine/
 ```
 
 - 全部 langgraph 导入局限在本包内，惰性 import；包外只接触 `run_langgraph` 签名。
-- 子 Agent 循环复用 `ReactAgent.run`（同一 parser/dispatcher），仅编排由 StateGraph 接管——
-  保证「唯一变量是编排层」。
+- 子 Agent 循环复用 `ReactAgent.run`（同一 dispatcher，doc 60 单协议 native），
+  仅编排由 StateGraph 接管——保证「唯一变量是编排层」。
 
 ### 3.2 修改点（均为增量，不改现有行为）
 

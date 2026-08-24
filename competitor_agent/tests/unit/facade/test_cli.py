@@ -267,15 +267,6 @@ class TestMain:
         assert main(["benchmark", "--llm", "real", "--tag", "normal", "--cost-limit", "0.5"]) == 0
         assert calls == ["--llm real --tag normal --cost-limit 0.5"]
 
-    def test_main_benchmark_protocol_passthrough(self, monkeypatch):
-        """--protocol 应透传给 _run_benchmark（设计文档 53 协议对照）。"""
-        calls = []
-        monkeypatch.setattr("competitor_agent.cli._run_benchmark", lambda a: calls.append(a))
-        from competitor_agent.cli import main
-
-        assert main(["benchmark", "--protocol", "both"]) == 0
-        assert calls == ["--protocol both"]
-
 
 class TestCompareRepl:
     def test_compare_two(self, capsys):

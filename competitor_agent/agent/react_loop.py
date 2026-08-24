@@ -63,14 +63,11 @@ class ReactLoop:
         system_prompt_override: str | None = None,
         plan_first: bool = False,
         plan_sink: Callable[[str], None] | None = None,
-        protocol: str | None = None,  # 设计文档 53：native|react；None 用 agent 自身配置
         max_history_steps: int | None = None,  # 设计文档 56 Q4：配置化注入；None 用 ReactAgent 默认
         pinned_facts: list[str] | None = None,  # 设计文档 56 M2：已核验事实共享列表（压缩时重建 pinned 段）
         on_step: Callable[[dict], None] | None = None,  # transcript 捕获外的附加回调（pinned 收集等）
     ) -> None:
         self._agent = agent
-        if protocol is not None:
-            agent.protocol = protocol
         self._max_steps = max_steps
         self._event_sink = event_sink
         self._session_id = session_id

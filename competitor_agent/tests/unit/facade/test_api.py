@@ -93,23 +93,22 @@ class TestAnalyzeReact:
         assert "不可用" in result  # 降级文案
 
     def test_analyze_react_success_with_fake_llm(self):
-        from competitor_agent.llm.client import LLMClient
+        from competitor_agent.llm.client import LLMClient, ToolCall, ToolCallReply
 
-        def fake_llm(messages, model):
-            # plan-first（设计文档 49）：首步必须先 make_plan，之后才可收尾
+        def fake_llm(messages, model, **kwargs):
+            # plan-first（设计文档 49）：首步必须先 make_plan，之后才可收尾（native 形状）
             if not any(m.get("role") == "assistant" for m in messages):
-                return (
-                    "Thought: 规划分析策略\nAction: make_plan\n"
-                    'Args: {"plan_json": {"competitor": "Cursor", "dimensions": ["pricing"]}}'
-                )
-            return "Final Answer: Cursor 定价已收集"
+                return ToolCallReply(tool_calls=[ToolCall(
+                    id="call_0", name="make_plan",
+                    arguments={"plan_json": {"competitor": "Cursor", "dimensions": ["pricing"]}},
+                )])
+            return ToolCallReply(content="Cursor 定价已收集")
 
         api = CompetitorAnalysisAPI(
             extractor=FakeExtractor(),
             llm=LLMClient(call_func=fake_llm),
             use_llm=True,
             config=_OFFLINE_CFG,
-            protocol="react",  # 文本假 LLM（make_plan Action/Args）按 react 协议回放
         )
         result = api.analyze_react("分析 Cursor")
         assert "定价" in result
