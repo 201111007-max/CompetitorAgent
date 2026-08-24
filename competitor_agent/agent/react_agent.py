@@ -47,9 +47,15 @@ class ReactAgent:
         self,
         llm: LLMClient,
         dispatcher: ToolDispatcher,
+        max_parallel_tool_calls: int = 4,
     ) -> None:
+        """``max_parallel_tool_calls``：单回合多 tool_calls 的并发上限（设计文档 59）。
+
+        1 = 完全串行（回归现状）；默认 4 并发分发、按原序收集。工具需线程安全（契约见 doc 59 §3.3）。
+        """
         self._llm = llm
         self._dispatcher = dispatcher
+        self._max_parallel_tool_calls = max_parallel_tool_calls
 
     def build_system_prompt(
         self,
@@ -193,8 +199,9 @@ class ReactAgent:
                 # 无 tool_calls 的 content 即最终回答（原生协议终止信号）
                 return reply.content or ""
 
-            for call in reply.tool_calls:
-                result = self._dispatch_call(call)
+            results = self._dispatch_in_parallel(reply.tool_calls)
+            # 后续 first_tool_sink / on_step / tool 回灌 / 压缩全部遍历 results（原序），逐字节不变
+            for call, result in results:
                 if call.name == mandatory_first_tool and not first_tool_done:
                     if first_tool_sink is not None:
                         first_tool_sink(str(result))
@@ -229,6 +236,27 @@ class ReactAgent:
             return f"工具不可用: {exc}"
         except Exception as exc:  # noqa: BLE001 — 执行异常也回灌，不冒泡卡死
             return f"工具执行异常: {type(exc).__name__}: {exc}"
+
+    def _dispatch_in_parallel(self, calls: list[Any]) -> list[tuple[Any, str]]:
+        """并发分发 + 原序收集（设计文档 59 §2/§3.1）。
+
+        单 tool_call 或 ``max_parallel_tool_calls<=1`` 走串行（现状路径）；否则
+        ThreadPoolExecutor 并发 submit，结果按 ``calls`` 原序收集——transcript/tool
+        回灌遍历顺序与串行逐字节一致。``_dispatch_call`` 已把错误转可回灌文本、不冒泡，
+        单个 future 失败不影响其他工具（隔离语义不变）。
+        """
+        if len(calls) <= 1 or self._max_parallel_tool_calls <= 1:
+            return [(call, self._dispatch_call(call)) for call in calls]
+        from concurrent.futures import ThreadPoolExecutor
+
+        executor = ThreadPoolExecutor(
+            max_workers=min(len(calls), self._max_parallel_tool_calls)
+        )
+        try:
+            futures = [(call, executor.submit(self._dispatch_call, call)) for call in calls]
+            return [(call, fut.result()) for call, fut in futures]
+        finally:
+            executor.shutdown(wait=True)
 
     @staticmethod
     def _step_record(tool_name: str, tool_args: dict, result: str) -> dict:

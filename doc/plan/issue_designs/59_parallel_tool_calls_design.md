@@ -80,7 +80,8 @@ LLM 回合返回 N 个 tool_calls
 
 - 调用方零改动（仅构造参数）；默认路径行为变化 = 多工具回合并发（墙钟缩短），单工具回合逐字节不变。
 - 回退：删并行分支（或设 `max_parallel_tool_calls=1`）即完全串行。
-- 文本协议（`protocol="react"`，doc 53 保留的 fallback）不动——它本无批量 tool_calls。
+- 已与 doc 60（删文本 ReAct，单协议）同期落地：只改 `_run_native`，与删除路径正交；
+  不再存在文本协议 fallback（doc 60 已整体删除）。
 
 ## 5. 验证方式
 
@@ -89,7 +90,7 @@ LLM 回合返回 N 个 tool_calls
 - **单测（边界）**：`max_parallel_tool_calls=1` → 行为与现状逐字节一致（回归网）；单 tool_call 不建线程池；
   `_dispatch_call` 单失败不影响其他（一个返回"工具不可用:..."其余正常）。
 - **集成**：mock 下 analyze 全链路通过；benchmark 门禁（mock 脚本不产批量 tool_calls）零突变；
-  `--protocol both` 对照（若 60 前保留）react 侧不受影响。
+  单协议（doc 60 已删文本 ReAct）下无 `--protocol both` 对照。
 - 全量 `pytest -q` + ruff/mypy。
 
 ## 6. 实现优先级与工作量

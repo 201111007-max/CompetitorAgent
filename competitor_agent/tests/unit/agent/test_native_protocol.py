@@ -4,7 +4,7 @@
 - native 循环端到端（双形态 mock：收到 tools= 出 ToolCallReply）
 - tool_choice plan-first 首轮强制（API 层保证首步 make_plan，零浪费步数）
 - tool 角色消息回灌含 tool_call_id（role:"tool" + tool_call_id 对应）
-- 并行 tool_calls 按序逐个执行、逐条回灌
+- 并行 tool_calls 并发执行、按原序逐条回灌（设计文档 59）
 - 历史压缩适配（assistant(tool_calls)+tool 对折叠，不丢任务）
 - arguments 非法 JSON → 回灌自恢复（设计文档 38 语义，不静默 {}）
 - system prompt native 模式不含工具文本描述与格式说明句
@@ -135,7 +135,7 @@ class TestToolRoleMessages:
         assert assistant_msgs and assistant_msgs[0]["tool_calls"][0]["id"] == "tc_echo"
 
     def test_parallel_calls_dispatched_in_order(self):
-        """并行 tool_calls：一期按序逐个执行、逐条回灌 tool 消息。"""
+        """并行 tool_calls：并发执行、按 tool_calls 原序回灌 tool 消息（设计文档 59）。"""
         order: list[str] = []
         captured: list[dict] = []
 
@@ -154,10 +154,11 @@ class TestToolRoleMessages:
         agent = ReactAgent(llm=LLMClient(call_func=spy), dispatcher=d)
         answer = agent.run(agent.build_system_prompt(), "任务")
         assert answer == "done"
-        assert order == ["e1", "e2", "e3"]  # 按 tool_call 顺序逐个执行
+        assert set(order) == {"e1", "e2", "e3"}  # 并发下执行序不确定，但三个工具都执行
+        assert len(order) == 3
         sent = captured[1]
         tool_msgs = [m for m in sent if m["role"] == "tool"]
-        assert [m["tool_call_id"] for m in tool_msgs] == ["c1", "c2", "c3"]  # 逐条回灌
+        assert [m["tool_call_id"] for m in tool_msgs] == ["c1", "c2", "c3"]  # 按原序回灌
 
 
 class TestNativeHistoryCompression:

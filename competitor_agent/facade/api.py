@@ -139,6 +139,7 @@ class CompetitorAnalysisAPI:
         tool_dispatcher: object | None = None,  # 历史兼容：已由 Lead 工具面取代，保留签名
         engine: str = "react",  # 设计文档 51：编排引擎 "react"（默认）| "langgraph"
         tracer: Any = None,  # 设计文档 54：链路追踪底座（None 用模块单例，默认 JsonlSink）
+        max_parallel_tool_calls: int = 4,  # 设计文档 59：单回合多 tool_calls 并发上限；1 = 串行
     ) -> None:
         # 配置注入：显式参数优先，其次 config，最后默认值
         cfg = config or load_config()
@@ -160,6 +161,7 @@ class CompetitorAnalysisAPI:
         # record_skill / record_outcome / archive_session），下游均判 `self._memory is None`
         self._memory = memory if enable_memory else None
         self._tool_dispatcher = tool_dispatcher
+        self._max_parallel_tool_calls = max_parallel_tool_calls
 
         self._extractor = extractor or WebExtractor()
         # 新鲜度 TTL（设计文档 26）：build() 为报告计算 freshness 元数据
@@ -590,6 +592,7 @@ class CompetitorAnalysisAPI:
                 obs_max_chars=self._config.collector.max_content_chars,
                 max_steps=6,
                 tracer=self._tracer,  # 设计文档 54：子 Agent span
+                max_parallel_tool_calls=self._max_parallel_tool_calls,
             ).run_subagent(sub_task)
 
         # Lead 系统提示与自研路径同（设计文档 60：单协议，无工具描述/格式说明）
@@ -676,6 +679,7 @@ class CompetitorAnalysisAPI:
                 max_steps=6,
                 tracer=self._tracer,  # 设计文档 54：子 Agent tool.call span
                 max_history_steps=max_history_steps,
+                max_parallel_tool_calls=self._max_parallel_tool_calls,
             )
 
         runner = DelegateRunner(
@@ -712,6 +716,7 @@ class CompetitorAnalysisAPI:
         agent = ReactAgent(
             llm=self._llm or LLMClient(tracer=self._tracer),
             dispatcher=dispatcher,
+            max_parallel_tool_calls=self._max_parallel_tool_calls,
         )
         # Lead 步数上限：默认 ≈12；用户显式传 max_iterations 时以其为准（含 0，预算耗尽→
         # partial，设计文档 14 承诺）；diminishing_threshold=0 关闭"边际递减"启发
