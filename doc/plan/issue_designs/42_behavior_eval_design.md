@@ -13,7 +13,7 @@
 - `Retriever.retrieve`（`knowledge_base/retriever.py:19-42`）提供 `strategy="hybrid"`（默认）与 `"lexical"`（消融），
   `search_hybrid`（competitor_store.py:150-185）在向量层不可用时**自动降级词袋**——但评测从不对比 hybrid vs lexical 的命中差异，
   "混合检索更准"无数据支撑，降级路径是否掉点也无从知晓。
-- 影响：agent 行为可靠性（自恢复）与 RAG 收益是 agent 项目的核心卖点，当前无量化口径；面试被问"怎么证明工具调用可靠/RAG 有效"无数据。
+- 影响：agent 行为可靠性（自恢复）与 RAG 收益是 agent 项目的核心卖点，当前无量化口径；"怎么证明工具调用可靠/RAG 有效"无数据。
 
 ## 2. 目标设计
 

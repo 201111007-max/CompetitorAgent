@@ -1,7 +1,7 @@
 # 设计文档 30 — 消融 / 对比实验（有无 RAG / rerank / memory）
 
 > 对应 `implementation_plan.md` §12.3 #10（P2）「无对比/消融实验」。
-> 触发：2026-08-13 简历达标审计——8 条标准中"有无 RAG / 有无 rerank / 有无 memory 对比实验"缺失，是简历与面试的最明显短板。
+> 触发：2026-08-13 评测体系复核——8 条评测能力标准中"有无 RAG / 有无 rerank / 有无 memory 对比实验"缺失，各组件收益无法量化。
 > 依赖：`evaluation/benchmark.py`（真实执行版，26 条用例）、`facade/api.py`（RAG/记忆注入点）。
 
 ## 1. 问题现状
@@ -9,7 +9,7 @@
 - `CompetitorAnalysisAPI.__init__`（`facade/api.py:114-121`）**无条件**组装 `CompetitorStore`/`Ingester`/`Retriever`，经 `api.py:251-252`（single）、`319-320`（team）注入 `GapExecutor`——RAG 无开关，无法回答"有 RAG 到底降了多少幻觉率"。
 - `memory`（L1-L4）为可注入参数，但无 `enable_memory` 语义开关；`use_llm`（`api.py:85`）是唯一现成开关。
 - **没有一份"同一用例集 × 有无组件"的对比实验**。`Benchmark.run()` 已对 26 条用例（17 accuracy + 9 strategy）真实执行并产出字段准确率/幻觉率/F1/工具选择准确率/成本效率（`benchmark.py:385-435`），恰好可作对照基线，但从未按变体并排跑过。
-- 简历/面试必被问："加 RAG 到底有没有用？加记忆呢？规则降级 vs LLM 差多少？"——当前无数据支撑。
+- 无数据支撑回答"加 RAG 到底有没有用？加记忆呢？规则降级 vs LLM 差多少？"——组件收益没有量化口径。
 
 ## 2. 目标设计
 
@@ -98,7 +98,7 @@ AblationRunner.run()
 
 ## 6. 实现优先级与工作量
 
-- 优先级：**中低**（P2；功能不影响交付，但直接影响简历可信度与面试叙事，建议在 23-29 功能落地后或穿插实现）。
+- 优先级：**中低**（P2；功能不影响交付，但影响评测体系的组件归因能力，建议在 23-29 功能落地后或穿插实现）。
 - 工作量：约 1-1.5 天。
   - `enable_rag`/`enable_memory` 开关 + 门控注入：0.5 天；
   - `AblationRunner` + 渲染 + CLI `--ablate`：0.5 天；

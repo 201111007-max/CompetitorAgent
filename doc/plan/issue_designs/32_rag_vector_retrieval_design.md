@@ -2,7 +2,7 @@
 
 > 对应 `implementation_plan.md` §16.1 RAG 行（"纯 TF-IDF 词袋，chromadb 从未实现"）。
 > 触发：2026-08-14 深度复查——设计文档 02 承诺的"向量化 + chromadb + 混合检索 + 重排序"仅完成"词袋余弦 + 维度过滤"，
-> 面试高频问题（embedding 选型 / chunk 策略 / 混合融合 / 重排）无实现可答。
+> 检索能力高频技术点（embedding 选型 / chunk 策略 / 混合融合 / 重排）无实现可答。
 > 依赖：`knowledge_base/competitor_store.py`、`knowledge_base/ingester.py`、`knowledge_base/retriever.py`；可选依赖 `[rag]`（chromadb / sentence-transformers 已在 pyproject.toml）。
 
 ## 1. 问题现状
@@ -76,7 +76,7 @@ CLI/eval 无改动；benchmark --ablate 可加 hybrid/lexical 两列
 
 ## 6. 实现优先级与工作量
 
-- 优先级：**高**（面试最高频 + 性价比最高，代码已预留 `[rag]` 依赖与接口）。
+- 优先级：**高**（检索能力核心短板 + 性价比最高，代码已预留 `[rag]` 依赖与接口）。
 - 工作量：约 1-1.5 天。
   - `VectorStore` + chromadb 接入：0.5 天；
   - `search_hybrid` 融合 + `Retriever`/`Ingester` 扩展：0.5 天；

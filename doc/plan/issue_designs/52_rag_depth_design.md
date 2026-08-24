@@ -1,9 +1,8 @@
 # 设计文档 52 — RAG 深化：L1 记忆召回向量化 + embedding 可用性治理 + 检索质量对照
 
-> 触发：2026-08-20 岗位差距分析（BOSS/猎聘 Agent 应用开发岗 JD 提炼）标出「词袋 TF 余弦，
-> 无真 Embedding/向量库」。经代码核实该判断**只说对一半**：知识库 RAG（设计文档 32）已是真 RAG
-> （chromadb + bge-small-zh + 词袋/向量 hybrid 融合），真正缺口是 L1 记忆召回
-> `SessionArchive._rank_entries` 仍为纯词袋。
+> 触发：2026-08-20 复核检索链路：知识库 RAG（设计文档 32）已是真 RAG
+> （chromadb + bge-small-zh + 词袋/向量 hybrid 融合）；但 L1 记忆召回 `SessionArchive._rank_entries`
+> 仍为「词袋 TF 余弦、无真 Embedding/向量库」，且 embedding 静默降级无感知。
 > 用户拍板：**不引入 FAISS**（chromadb 自带 HNSW 索引，几千 chunk 规模性能富余，避免重复依赖），
 > 记忆召回复用现有 VectorStore/chromadb 接入点，词袋保留为降级路径。
 > 前置：32（VectorStore/search_hybrid 混合检索）、35（SessionArchive 压缩与 recent_context 召回）。

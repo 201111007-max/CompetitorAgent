@@ -199,7 +199,7 @@ Collector→Analyzer→Validator→Reporter 协作；评测体系能量化字段
 2. **Trajectory Eval**：执行路径合理性 → `evaluation/strategy_eval.py`（工具选择准确率）
 3. **End-to-End Eval**：最终任务完成度 → `evaluation/accuracy_eval.py`（字段准确率/幻觉率）
 
-**最小 eval 集建议**：20 条起（10 正常 + 5 边界 + 3 工具失败 + 2 安全/拒绝），写进简历前扩到 50+ 并加回归；每次运行必须保存 trace（工具调用/参数/成本/耗时），否则无法归因失败。
+**最小 eval 集建议**：20 条起（10 正常 + 5 边界 + 3 工具失败 + 2 安全/拒绝），纳入正式评测前扩到 50+ 并加回归；每次运行必须保存 trace（工具调用/参数/成本/耗时），否则无法归因失败。
 
 ---
 
@@ -394,7 +394,7 @@ dev:
 > 核心判断：**项目主要问题不是"代码写得差"，而是"宣称的能力与实际接线严重不符"**——
 > 多 Agent、并行、RAG、评测四大卖点全部"存在但未接入主流程"。
 
-### 11.1 P0 — 必须正视（面试/验收必被问）
+### 11.1 P0 — 必须正视（审查/验收必被问）
 
 | # | 问题 | 位置 | 说明 |
 |---|------|------|------|
@@ -402,7 +402,7 @@ dev:
 | 2 | **RAG 完全未接线** | `knowledge_base/` | 只在自身和测试中被引用，`CompetitorAnalysisAPI` 组装了 planner/selector/extractor/analyzers/builder/budget，唯独没有知识库；且实际是词袋余弦检索，向量检索从未实现（`retriever.py:6` 注释"可选"） |
 | 3 | **benchmark 是静态 fixture 自证** | `evaluation/benchmark.py:77-90` | 只读 JSON fixture 里预先写好的 prediction，从不调用 agent/LLM/抓网页；门禁阈值（`test_benchmark_integration.py:43-60`）断言的是手写 fixture 本身，必然通过，无法反映真实质量 |
 
-### 11.2 P1 — 真实 bug（可当面试亮点）
+### 11.2 P1 — 真实 bug
 
 | # | 问题 | 位置 | 说明 |
 |---|------|------|------|
@@ -428,7 +428,7 @@ dev:
 | 13 | **死代码** | `web_app.py:57-62`、`facade/api.py:185-194` | Web 创建 API 实例后立即丢弃；`analyze_react()` 的 dispatcher 只注册一个返回硬编码字符串的玩具工具 |
 | 14 | **过度设计** | `team/message_bus.py` | topic/Envelope/history 回放为"多 Agent"叙事搭建完整基础设施，实际只当日志记录器用 |
 
-### 11.5 能站得住的正面点（面试主动讲）
+### 11.5 能站得住的正面点
 
 - **主路径单轨 LLM + mock 确定性评测**（设计文档 47）：任务解析 / 规划 / 竞品识别 / 维度分析只走 LLM，
   无 Key 抛 `LLMUnavailableError`；确定性由 `BenchmarkMockLLM` 在 LLM 版接口上固定返回承担，CI 无 Key 仍可复现。
@@ -476,7 +476,7 @@ dev:
 | 7 | **无趋势/时序** | `core/report_builder.py`、`markdown_renderer.py` | 报告为时间点快照，无竞品变化追踪（"Cursor 于 X 日加 background agents"） |
 | 8 | **输出仅 Markdown** | `core/report_builder.py` → `markdown_renderer.py` | 无结构化 JSON/矩阵导出、无定时跑、无"竞品异动"告警 |
 | 9 | **评测有盲区** | `evaluation/benchmark.py`、`tests/evaluation/fixtures/` | 真实执行 + 幻觉率指标是亮点，但 ground-truth fixture 偏通用；对"是否正确刻画 agentic 能力/生态/口碑"覆盖不足——而这恰是当前最弱的分析器（见 12.1 #2） |
-| 10 | **无对比/消融实验** | `facade/api.py:114-121`、`evaluation/benchmark.py` | RAG/记忆无条件组装、无开关，从未回答"有无 RAG / 有无 rerank / 有无 memory"的差分效果（简历/面试硬缺口）。已具备 26 条真实执行用例可作对照基线，只差变体运行器 |
+| 10 | **无对比/消融实验** | `facade/api.py:114-121`、`evaluation/benchmark.py` | RAG/记忆无条件组装、无开关，从未回答"有无 RAG / 有无 rerank / 有无 memory"的差分效果（评测体系硬缺口）。已具备 26 条真实执行用例可作对照基线，只差变体运行器 |
 | 11 | **无失败类型统计** | `evaluation/accuracy_eval.py:31`、`evaluation/benchmark.py:490` | 只有幻觉率 + 逐实例清单与工具选择混淆矩阵，无"失败根因（源不可用/幻觉/无数据/解析错/预算耗尽）→ 计数 → 占比"聚合口径；底层信号（BLOCKED/`collect.fail`/`[PARTIAL]`/`real_trace`）已存在但未聚合 |
 
 ### 12.4 建议落地顺序（与第 11 节协同）
@@ -487,8 +487,8 @@ dev:
 4. **新鲜度/陈旧度 + 定时重爬 + 竞品时间线**（对应 12.2 #5、12.3 #7）。
 5. **直连榜单源**拉性能数字，而非靠 LLM 读网页（对应 12.2 #4）。
 6. **结构化输出 + 定时/告警**（对应 12.3 #8）；并扩充评测 fixture 覆盖生态/口碑维度（对应 12.3 #9）。
-7. **消融/对比实验**（对应 12.3 #10）：加 `enable_rag`/`enable_memory` 开关 + `AblationRunner`，对 26 条真实执行用例跑 full / no-rag / no-memory / no-llm-rule 对比表（简历与面试叙事最直接的数据支撑）。
-8. **失败类型统计**（对应 12.3 #11）：`FailureType` 五类分类 + `BenchmarkReport.failure_stats` 聚合 + 分布报告，补齐归因能力与简历证据。
+7. **消融/对比实验**（对应 12.3 #10）：加 `enable_rag`/`enable_memory` 开关 + `AblationRunner`，对 26 条真实执行用例跑 full / no-rag / no-memory / no-llm-rule 对比表（组件收益最直接的量化证据）。
+8. **失败类型统计**（对应 12.3 #11）：`FailureType` 五类分类 + `BenchmarkReport.failure_stats` 聚合 + 分布报告，补齐归因能力。
 
 > 注：第 11 节的"RAG 未接线 / analyze_team 死代码 / ParallelRunner 未接入"若先修复，
 > 本节的"多源采集""N 向对比""生态分析"可直接建于其上，避免重复造轮子。
@@ -604,12 +604,12 @@ dev:
 | 多 Agent（`team/`，784 行） | 四 Agent + MessageBus + 编排闭环 | **顺序流水线非真协作**：`orchestrator.py:100-132` 逐步同步调用；`message_bus.py:75` 行 dict pub/sub 仅内存 log（:43-44）；`publish` 是事后记录（analyzer_agent.py:72），编排不靠订阅驱动——"事件驱动/多 Agent"名不副实 | 真异步协作（并行独立决策 + 结果协商/仲裁），或明确降级叙事为"流水线 + 状态机"，不再宣称多 Agent |
 | 分析器（`analyzers/`，1047 行） | LLM 优先 + 规则兜底 + 低置信护栏 | 每个分析器仅 `_build_prompt`/`_parse_result`/`_rule_extract` 三件套（各几十行）；`feature_analyzer.py` 兜底是 13 个关键词扫描（`_FEATURE_MARKERS`）；LLM 路径（base.py:62-81）是"包原文 → 一次 complete → `json.loads`"，无链式推理/多轮验证/结构化约束 | 结构化输出（JSON Schema / tool-call 强制）、链式抽取、每维度专业规则库与真值校验 |
 | 记忆（`memory/`，775 行） | 四层 + 时间线 + JSON 持久化 | "四层"= 四个 JSON 文件计数：`skill_store.py:47` 成功 +1.0 / :83 失败 -0.5 / 封顶 50（:20）；`evolution_memory.py` 仅 62 行；无向量记忆、无摘要压缩、无相关度召回 | 记忆摘要/压缩（替代原样存档）、向量召回、跨会话注意权重 |
-| LLM 层（`llm/client.py`，128 行） | 调用 + 成本估算 + 脱敏日志 | 单次 `chat.completions.create`（:61）；token 估算用正则（:28）；无重试/退避、无多模型路由、无结构化输出框架 | 重试与退避、结构化输出、多模型 fallback（简历"工程可靠性"加分点） |
+| LLM 层（`llm/client.py`，128 行） | 调用 + 成本估算 + 脱敏日志 | 单次 `chat.completions.create`（:61）；token 估算用正则（:28）；无重试/退避、无多模型路由、无结构化输出框架 | 重试与退避、结构化输出、多模型 fallback（工程可靠性补强） |
 | 评测（`evaluation/`，1588 行） | benchmark/消融/失败归因/门禁——全项目最深 | 38 用例大量跑 mock LLM，**真实 LLM 端到端质量未量化** | 跑 `--llm real` 出一份真实质量报告（字段准确率/幻觉率/成本），补上"评测深但只测了 mock"的最后一环 |
 
-### 16.2 补充优先级（按"面试被问概率 × 补齐成本"）
+### 16.2 补充优先级（按"技术重要性 × 补齐成本"）
 
-1. **RAG 接真向量检索**：面试最高频问题，代码已预留 `[rag]` 依赖与 chromadb 路径，性价比最高。
+1. **RAG 接真向量检索**：检索能力核心短板，代码已预留 `[rag]` 依赖与 chromadb 路径，性价比最高。
 2. **真实 LLM 评测报告**：`python -m competitor_agent.evaluation.benchmark --llm real`，补上 mock 与真实之间的信任缺口（对应 16.1 评测行）。
 3. **多 Agent 真协作或明确叙事**：消除"宣称多 Agent 实为顺序管道"的名不副实隐患。
 4. **记忆摘要压缩**：四层记忆从"计数"升级为"会遗忘/会凝练"，深度加分项。
@@ -623,7 +623,7 @@ dev:
 - 记忆：能说明压缩/召回相对"原样存档"在长会话上的增益。
 
 > 与 §11、§12 的关系：§11 是"接线类"问题（已由设计文档 01-31 修复），§12 是"产品能力"缺口（23-31 已落地），
-> 本节是**"深度"缺口**——三者互补，是项目从"能跑"走向"经得起社招深挖"的第三层。
+> 本节是**"深度"缺口**——三者互补，是项目从"能跑"走向"工程深度"的第三层。
 
 ## 17. 第二轮评审待办（agent 交互面 / 成本 / 安全 / 行为评测，设计文档 38-42）
 
@@ -663,7 +663,7 @@ dev:
 - **42 ✅**：mock 下 `react_recovery_rate ≥ 0.9`、`retrieval_hit_hybrid ≥ retrieval_hit_lexical`；`to_dict` 含 `behavior` 字段；`_write_markdown`/`_write_csv` 输出行为评测节/行；既有评测门禁零破坏——已实现，新增 17 条测试。
 
 > 与 §16 的关系：§16 补齐"每个模块往深一层"；本节补齐"**agent 之所以是 agent**"的交互层——工具契约、错误恢复、
-> 安全边界、行为量化。全部完成后项目可回答"工具调用怎么保稳 / SSRF 怎么防 / RAG 收益怎么证明"三类面试深挖问题。
+> 安全边界、行为量化。全部完成后项目可回答"工具调用怎么保稳 / SSRF 怎么防 / RAG 收益怎么证明"三类核心问题。
 > （"成本上限是否真实"属设计文档 39，已暂缓，后续想做再恢复。）
 
 ---
@@ -737,7 +737,7 @@ dev:
 
 > 与 §17 的关系：§17 补齐"agent 之所以是 agent"的交互层；本节把**两条智能（ReAct 循环 + 主流水线）**收敛为一条，
 > 让记忆 L4 真正被消费、LLM 从"抽一次 JSON"走向多步推理。全部完成后可回答"agent 主循环在哪 / 多 Agent 如何协作 /
-> 工具调用和主流程什么关系 / 记忆写了能不能用"四类最深追问。
+> 工具调用和主流程什么关系 / 记忆写了能不能用"四类核心问题。
 
 ## 19. 第五轮评审待办（写死代码知识型规则 → skill 化，设计文档 48）
 
@@ -910,7 +910,7 @@ dev:
 
 ## 23. 第九轮待办（可切换 LangGraph 引擎 + 双引擎对照，设计文档 51）
 
-> 状态背景：2026-08-20 岗位差距分析发现项目主流框架关键词缺失；用户拍板「可切换真实引擎 +
+> 状态背景：2026-08-20 编排层全自研、无主流编排框架对照实证；用户拍板「可切换真实引擎 +
 > benchmark 对照」方案——mini LangGraph 引擎接入 `CompetitorAnalysisAPI(engine=)` 真实可跑，
 > 主链路（plan→delegate→report）+ SSE 事件 + 记忆/RAG 召回对齐，取消/预算/checkpoint
 > 不对齐（作为自研差异化结论）。设计文档见
@@ -922,9 +922,9 @@ dev:
 
 ## 24. 第九轮待办（RAG 深化：记忆召回向量化 + 可用性治理 + 检索对照，设计文档 52）
 
-> 状态背景：2026-08-20 岗位差距分析标出「词袋 TF 余弦，无真 Embedding/向量库」；经代码核实
-> 知识库 RAG（doc 32：chromadb + bge-small-zh + hybrid 融合）已是真 RAG，真正缺口是 L1 记忆召回
-> `SessionArchive._rank_entries` 仍为纯词袋，且 embedding 静默降级无感知。用户拍板不引入 FAISS
+> 状态背景：2026-08-20 复核检索链路：知识库 RAG（doc 32：chromadb + bge-small-zh + hybrid 融合）
+> 已是真 RAG，真正缺口是 L1 记忆召回 `SessionArchive._rank_entries` 仍为纯词袋，且 embedding
+> 静默降级无感知。用户拍板不引入 FAISS
 > （chromadb 自带 HNSW，规模无瓶颈），记忆召回复用现有 VectorStore 接入点、词袋保留降级。
 > 设计文档见 `doc/plan/issue_designs/52_rag_depth_design.md`（2026-08-20）。
 > **M1 已实现（2026-08-20，见 §24.1）；M2 已实现（2026-08-20，见 §24.2）；M3 已实现（2026-08-20，见 §24.3）**。
@@ -1000,7 +1000,7 @@ dev:
 
 ## 25. 第九轮待办（原生 Function Calling：双协议并存 + 默认 tool_calls，设计文档 53）
 
-> 状态背景：2026-08-20 岗位差距分析标出「文本 ReAct 解析，非原生 tool-calling API」，经代码核实
+> 状态背景：2026-08-20 复核工具调用协议：当前为「文本 ReAct 解析，非原生 tool-calling API」，
 > 属实（`LLMClient.complete` 只回纯文本，从不传 `tools=`）。用户拍板四决策：双协议并存 +
 > `protocol="native"` 默认（文本 ReAct 保留 fallback/对照）；Lead 主循环 + 子 Agent 一并覆盖；
 > mock 双形态（按 `tools=` kwarg 出形状）；模型不支持 tools 直接报错不自动降级。
@@ -1052,7 +1052,7 @@ dev:
 
 ## 26. 第九轮待办（Langfuse 式链路追踪：自研 trace 总线 + 可选 exporter，设计文档 54）
 
-> 状态背景：2026-08-20 岗位差距分析标出「无 OpenTelemetry/Langfuse 式链路追踪」，经代码核实属实
+> 状态背景：2026-08-20 复核可观测性：无 OpenTelemetry/Langfuse 式链路追踪，经代码核实属实
 > （结构化日志/成本埋点已有，但无 trace→span 树、工具无结构化埋点、无 trace 聚合视图）。
 > 用户拍板三决策：自研轻量 trace 为底座 + Langfuse 作可选 exporter（三环境变量齐全才启用）；
 > span 三档全要（llm.call/tool.call/子 Agent 嵌套）；查看方式 = CLI 文本瀑布图 + JSONL 落盘。
@@ -1067,7 +1067,7 @@ dev:
 
 ## 27. 第九轮待办（部署/LLMOps：Dockerfile 双 target + compose + benchmark 门禁化，设计文档 55）
 
-> 状态背景：2026-08-20 岗位差距分析标出「无 Dockerfile、无 CI 产物」，经代码核实说错一半——
+> 状态背景：2026-08-20 复核部署/LLMOps：无 Dockerfile/部署文档、benchmark 门禁不执法。
 > CI 已有（ruff/mypy/pytest 矩阵 + benchmark 报告 artifact），真正缺口是 ① 无 Docker 化与
 > 部署文档、② benchmark 门禁不执法（`main()` 恒 return 0，质量退化 CI 不变红）。
 > 用户拍板四决策：范围 = Dockerfile + compose + 部署文档 + CI 补强（主体不动）；multi-stage
@@ -1137,8 +1137,8 @@ dev:
 
 ## 28. 第十轮待办（上下文压缩可逆化：kb_recall 取回闭环 + Lead 摄入补齐 + 事实 pinning，设计文档 56）
 
-> 状态背景：2026-08-21 面试叙事深挖（"压缩有损是硬伤"追问）引出对 doc 46 压缩机制的复核，
-> 核实后修正口头分析的错误——doc 46 折叠**已有规则摘要雏形**（`_fold_pair`/
+> 状态背景：2026-08-21 复核 doc 46 压缩机制时发现"压缩有损"缺口。
+> 核实后修正了一个判断错误——doc 46 折叠**已有规则摘要雏形**（`_fold_pair`/
 > `_fold_native_turn`：一行一旧步「调用 工具[URL] → 结果前 80 字」），真缺口是
 > ① 摘要不可操作 + 循环内无知识库取回工具（假可逆：指针够不到内容，模型只能幻觉填空
 > 或 web_extract 重抓）② Lead `_react_web_extract` 抓完不摄入知识库（仅子 Agent

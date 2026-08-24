@@ -10,7 +10,7 @@
 - `GapExecutor.execute`（`core/gap_executor.py:127`）`self._budget.consume(delta_cost=0.01)`：固定 1 分/候选源，与 `LLMClient.total_cost_usd`（`llm/client.py:93`，设计文档 37 按真实 token 计价）**完全脱钩**——LLM 用得多也不多扣。
 - `IterationBudget._check_diminishing`（`core/budget.py:61-68`）要求 `delta_tokens` 非 0 才可能触发，但全项目调用 `consume()` 时 `delta_tokens` 恒为 0（gap_executor.py:127 未传）→ **边际递减逻辑从未生效**（死逻辑）。
 - `BudgetController.cost_limit`（`core/budget_controller.py:37`，config 默认 $1.0）靠 `total_cost` 判定，但 `record_iteration(cost=0.01)` 传常数 → **cost_limit 永不触顶**（除非迭代量极大）。
-- 影响：config 的 `cost_limit_usd` 无实际约束力；长任务无法按真实成本提前止损；"成本控制"作为简历点无数据支撑。
+- 影响：config 的 `cost_limit_usd` 无实际约束力；长任务无法按真实成本提前止损；"成本控制"缺数据支撑。
 
 ## 2. 目标设计
 
@@ -87,7 +87,7 @@ facade（self._llm 已持有）→ GapExecutor(llm=self._llm) / record_iteration
 
 ## 6. 实现优先级与工作量
 
-- 优先级：**中高**（"成本上限"是 config 显式能力，必须真实生效，否则是简历谎言）。
+- 优先级：**中高**（"成本上限"是 config 显式能力，必须真实生效，否则是虚假宣称）。
 - 工作量：约 0.5 天。
   - `snapshot_cost/snapshot_tokens` + `_log_call` 累计：0.15 天；
   - GapExecutor 补记 + facade record_iteration 改真实增量：0.2 天；

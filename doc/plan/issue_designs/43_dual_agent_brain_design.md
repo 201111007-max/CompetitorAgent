@@ -18,7 +18,7 @@
   （规则仲裁）、ReporterAgent（模板汇总）全是确定性阶段，只有 AnalyzerAgent 内的一发 `complete_json`
   （analyzers/base.py:157）用了 LLM。`TeamOrchestrator.run`（team/orchestrator.py:100-153）是硬编码顺序调用，
   `MessageBus` 的订阅只服务 async 分支（`_handle_async`），无 agent 间 LLM 协商/规划/反思。
-- 影响：项目自称 "agent 项目"，但"会推理的循环（ReAct）"与"能产报告的流水线"两条智能各走各的；面试被问
+- 影响：项目自称 "agent 项目"，但"会推理的循环（ReAct）"与"能产报告的流水线"两条智能各走各的；
   "agent 主循环在哪 / 多 Agent 如何协作 / 工具调用和主流程什么关系"答不圆，且两条路径的行为（记忆注入、预算、
   取消）已在漂移（见设计文档 45）。
 
@@ -83,7 +83,7 @@ analyze_react（独立交互）──► 复用同一 ReactLoop，产物结构�
 
 ## 6. 实现优先级与工作量
 
-- 优先级：**高**（"agent 主循环在哪"是项目叙事的根基，双大脑不统一是最先会被追问的架构问题）。
+- 优先级：**高**（"agent 主循环在哪"是项目叙事的根基，双大脑不统一是最显眼的架构问题）。
 - 工作量：约 1.5-2 天。
   - ReactLoop 上下文（cancel/budget/记忆/RAG）：0.5 天；
   - 分析阶段 ReAct 闭环 + 结构化：0.8 天；
