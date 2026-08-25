@@ -9,7 +9,7 @@ M1 为本地同步工具分发（MCP Server 在 M4 接入）。
 from __future__ import annotations
 
 import inspect
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from dataclasses import dataclass
 from typing import Any, Callable
 
