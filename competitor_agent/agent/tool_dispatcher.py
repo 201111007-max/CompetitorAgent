@@ -8,6 +8,7 @@ M1 为本地同步工具分发（MCP Server 在 M4 接入）。
 """
 from __future__ import annotations
 
+import concurrent.futures
 import inspect
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from dataclasses import dataclass
@@ -106,7 +107,8 @@ class ToolDispatcher:
         future = executor.submit(func, **args)
         try:
             return str(future.result(timeout))
-        except TimeoutError:
+        except (TimeoutError, concurrent.futures.TimeoutError):
+            # 3.10 中 concurrent.futures.TimeoutError 非内置 TimeoutError 子类，须两者都捕获
             executor.shutdown(wait=False, cancel_futures=True)
             return f"工具执行超时: {tool_name}"
         finally:
