@@ -12,6 +12,17 @@ from competitor_agent.secret_vault import (
     get_data_dir,
 )
 
+try:  # pragma: no cover
+    import cryptography  # noqa: F401
+
+    _HAS_CRYPTOGRAPHY = True
+except Exception:  # noqa: BLE001 - cryptography 缺失时跳过加解密用例 # pragma: no cover
+    _HAS_CRYPTOGRAPHY = False
+
+_skip_no_crypto = pytest.mark.skipif(
+    not _HAS_CRYPTOGRAPHY, reason="cryptography 未安装，加解密回环不可测"
+)
+
 
 @pytest.fixture
 def vault() -> SecretVault:
@@ -94,6 +105,7 @@ class TestEncryptedPersistence:
             vault.load_file(str(tmp_path / "secrets.enc"))
 
 
+@_skip_no_crypto
 class TestEncryptionRoundtrip:
     def test_roundtrip(self, tmp_path: Path) -> None:
         from cryptography.fernet import Fernet
