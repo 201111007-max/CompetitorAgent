@@ -125,11 +125,12 @@ class SecretVault:
         """将当前内存覆盖加密落盘（Fernet 对称加密）"""
         import json
 
-        from cryptography.fernet import Fernet
-
         fernet_key = key or os.getenv(ENCRYPTION_KEY_ENV)
         if not fernet_key:
             raise CredentialError(ENCRYPTION_KEY_ENV, hint="加密凭据文件需要 Fernet 密钥")
+        # cryptography 为可选依赖：缺 key 路径在装包前判定，错误语义不依赖可选 extra
+        from cryptography.fernet import Fernet
+
         payload = json.dumps(self._overrides, ensure_ascii=False).encode("utf-8")
         token = Fernet(fernet_key.encode()).encrypt(payload)
         with open(path, "wb") as f:
@@ -140,11 +141,12 @@ class SecretVault:
         """从加密 JSON 文件加载凭据覆盖"""
         import json
 
-        from cryptography.fernet import Fernet, InvalidToken
-
         fernet_key = key or os.getenv(ENCRYPTION_KEY_ENV)
         if not fernet_key:
             raise CredentialError(ENCRYPTION_KEY_ENV, hint="解密凭据文件需要 Fernet 密钥")
+        # cryptography 为可选依赖：缺 key 路径在装包前判定，错误语义不依赖可选 extra
+        from cryptography.fernet import Fernet, InvalidToken
+
         with open(path, "rb") as f:
             token = f.read()
         try:

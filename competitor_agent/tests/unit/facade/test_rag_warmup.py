@@ -14,6 +14,7 @@ import types
 from competitor_agent import cli
 from competitor_agent.facade.api import CompetitorAnalysisAPI
 from competitor_agent.knowledge_base import vector_store as vs_mod
+from competitor_agent.knowledge_base.competitor_store import CompetitorStore
 from competitor_agent.knowledge_base.vector_store import VectorStore, warmup_status
 
 try:  # pragma: no cover
@@ -142,13 +143,18 @@ class TestRagWarmupCommand:
 class TestStartupStatusLog:
     """api __init__ enable_rag 时打一行向量层状态（设计文档 52 §2.2）。"""
 
-    def _construct(self, vs, caplog):
+    def _construct(self, vs, caplog, tmp_path):
+        # rag_store 用隔离 data_dir：避免默认知识库目录残留 chunks 触发向量重建（需 chromadb），
+        # 该测试只验证启动状态日志，不依赖向量后端
+        store = CompetitorStore(data_dir=tmp_path / "kb", vector_store=vs)
         with caplog.at_level(logging.INFO, logger="competitor_agent.facade.api"):
-            CompetitorAnalysisAPI(extractor=None, use_llm=False, enable_rag=True, vector_store=vs)
+            CompetitorAnalysisAPI(
+                extractor=None, use_llm=False, enable_rag=True, vector_store=vs, rag_store=store
+            )
 
     def test_log_available(self, tmp_path, caplog):
         vs = VectorStore(embed_fn=lambda texts: [[0.0]] * len(texts), data_dir=tmp_path / "vs")
-        self._construct(vs, caplog)
+        self._construct(vs, caplog, tmp_path)
         messages = [r.getMessage() for r in caplog.records]
         assert any("向量层状态: available(BAAI/bge-small-zh-v1.5)" in m for m in messages)
 
@@ -156,7 +162,7 @@ class TestStartupStatusLog:
         vs = VectorStore(
             model_name="BAAI/not-cached-model-for-test", embed_fn=None, data_dir=tmp_path / "vs"
         )
-        self._construct(vs, caplog)
+        self._construct(vs, caplog, tmp_path)
         messages = [r.getMessage() for r in caplog.records]
         assert any(
             "向量层状态: degraded(模型 BAAI/not-cached-model-for-test 未缓存，降级词袋)" in m
