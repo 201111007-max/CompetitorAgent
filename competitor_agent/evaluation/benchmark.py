@@ -57,7 +57,11 @@ STRATEGY_FIXTURE = "strategy_cases.json"
 #   mock 单形态、无 --protocol/对照表，门禁对唯一协议重定。
 # 0.9.0 → 0.10.0：设计文档 62 全链路编排收敛——候选子 Agent 注册（competitor 命名空间）、
 #   delegate 候选委派、aggregate_report 聚合工具、统一 run() 入口、删 execution.mode。
-HARNESS_VERSION = "0.10.0"
+# 0.10.0 → 0.11.0：run() 单 Lead 统一（设计文档 62 §6 M3/M4）——mock 增 DISCOVERY/COMPARE
+#   ReAct-scripted 分支（make_plan(competitors+resolution) → web_search_candidates →
+#   delegate(候选) → aggregate_report → Final comparison JSON）；候选子 Agent 确定性返回
+#   标准多维度 dimensions[]；Lead 按 resolution 分型收尾。
+HARNESS_VERSION = "0.11.0"
 
 # 门禁阈值单一来源（设计文档 55 M1）：--gate CLI、test_benchmark_integration、
 # test_behavior_eval 全部引用本组常量，不新造第二份数值。
@@ -347,6 +351,9 @@ class BenchmarkMockLLM:
         if "维度子 Agent" in system:
             # 维度子 Agent 会话（独立完整 agent 自己的 ReAct 会话）
             return self._subagent_step(messages, user, system)
+        if "候选竞品「" in system:
+            # 候选竞品子 Agent（设计文档 62 §3.4）：标准多维度 dimensions[]（REPORT_SCHEMA）
+            return self._candidate_subagent_step(messages, user, system)
         if "战略规划器" in system:
             # 设计文档 47 规划 prompt：返回合法 PLAN_SCHEMA（competitor 优先取自用例）
             competitor = self._competitor or self._infer_competitor(user)
@@ -392,15 +399,26 @@ class BenchmarkMockLLM:
 
     @classmethod
     def _registry_competitors(cls, text: str) -> list[str]:
-        """任务文本中的注册表竞品名（保序去重，mock 固定 oracle）。"""
+        """任务文本中的注册表竞品名（按任务中首次出现位置排序、去重，mock 固定 oracle）。
+
+        按出现位置排序贴近真实 LLM parse 的输入顺序（多竞品对比按用户列举次序），
+        而非注册表字典序——保证 compare("Cursor","Windsurf","Copilot") 输出与输入同序。
+        """
         from competitor_agent.core.competitor_registry import COMPETITOR_REGISTRY
 
         lowered = text.lower()
-        hits: list[str] = []
+        found: list[tuple[int, str]] = []
         for canon, competitor in COMPETITOR_REGISTRY.items():
-            if canon in lowered or any(a in lowered for a in competitor.aliases):
-                hits.append(competitor.name)
-        return hits
+            positions: list[int] = []
+            if canon in lowered:
+                positions.append(lowered.index(canon))
+            for alias in competitor.aliases:
+                if alias in lowered:
+                    positions.append(lowered.index(alias))
+            if positions:
+                found.append((min(positions), competitor.name))
+        found.sort(key=lambda item: item[0])
+        return [name for _, name in found]
 
     def _infer_competitor(self, text: str) -> str:
         """规划 mock：注册表命中优先；否则取任务段首 ASCII 词作为规范名（mock oracle）。
@@ -448,18 +466,27 @@ class BenchmarkMockLLM:
         )
 
     def _lead_step(self, messages: list[dict[str, str]]) -> str:
-        """Lead 会话状态机：make_plan → delegate → Final Answer（REPORT_SCHEMA）。
+        """Lead 会话状态机：make_plan → (registry 维度委派 | DISCOVERY/COMPARE 编排) → Final Answer。
 
         阶段由会话消息内容推导（不依赖跨调用持久状态）：共享同一 mock 实例的
         并行 compare / 复用分析中，多个 analyze 同任务时会话内容各自独立，
         ``_convs`` 持久状态会在不同 analyze 运行间泄漏（首步跳过 make_plan →
         plan-first 回灌 → 预算耗尽）。``no_tools`` 消融变体：make_plan 后直接
         Final Answer（无工具循环，测委派价值）。
+
+        设计文档 62 §6 M3：registry（单竞品）走 make_plan → delegate(维度) → Final Answer
+        REPORT_SCHEMA；compare/discovery 走同一单 Lead loop 内的 ReAct-scripted 编排
+        （web_search_candidates → delegate(候选) → aggregate_report → Final comparison
+        JSON），由 ``_orchestration_step`` 驱动（Obs 回填即阶段信号）。
         """
         obs = self._last_observation(messages)
+        if self._no_tools:
+            return self._lead_final(messages)
         if not obs:
             return self._make_plan_action(messages)
-        if self._no_tools or "维度子 Agent 结果" in obs:
+        if self._session_resolution(messages) in ("compare", "discovery"):
+            return self._orchestration_step(messages)
+        if "维度子 Agent 结果" in obs:
             return self._lead_final(messages)
         return self._delegate_action(messages)
 
@@ -478,14 +505,20 @@ class BenchmarkMockLLM:
     def _make_plan_action(self, messages: list[dict[str, str]]) -> str:
         from competitor_agent.agent.react_schemas import DIMENSIONS
 
-        competitor = self._lead_task_competitor(messages)
         dimensions = self._dimensions or self._parsed_dimensions or list(DIMENSIONS)
-        plan = {
-            "competitor": competitor,
+        plan: dict[str, Any] = {
             "dimensions": dimensions,
             "budget": {"max_steps": 8},
             "custom_sources": {},
         }
+        resolution = self._session_resolution(messages)
+        if resolution in ("compare", "discovery"):
+            # 设计文档 62 §3.1：多竞品 plan 用 competitors + resolution + scheduling
+            plan["resolution"] = resolution
+            plan["competitors"] = self._session_competitors(messages)
+            plan["scheduling"] = {"parallel": True, "reason": "候选多需并行"}
+        else:
+            plan["competitor"] = self._lead_task_competitor(messages)
         return (
             "Thought: 规划分析策略\nAction: make_plan\n"
             f"Args: {json.dumps({'plan_json': plan}, ensure_ascii=False)}"
@@ -521,6 +554,153 @@ class BenchmarkMockLLM:
             {"competitor": competitor, "dimensions": dimensions}, ensure_ascii=False
         )
 
+    # ── DISCOVERY/COMPARE 单 Lead 编排（设计文档 62 §6 M3）──────────────────
+
+    def _session_resolution(self, messages: list[dict[str, str]]) -> str:
+        """本会话的编排分辨率（mock 固定 oracle）：注册表≥2 → compare；发现标记 → discovery；否则 registry。"""
+        user = self._task_text(messages)
+        competitors = self._registry_competitors(user)
+        if len(competitors) >= 2:
+            return "compare"
+        if any(m in user.lower() for m in self._DISCOVERY_MARKERS):
+            return "discovery"
+        return "registry"
+
+    def _session_competitors(self, messages: list[dict[str, str]]) -> list[str]:
+        """本会话任务文本中的注册表竞品（保序去重）；DISCOVERY 候选未知时为 []。"""
+        return self._registry_competitors(self._task_text(messages))
+
+    def _orchestration_step(self, messages: list[dict[str, str]]) -> str:
+        """compare/discovery 单 Lead loop 的 ReAct-scripted 编排状态机（Obs 即阶段信号）。
+
+        make_plan(plan JSON) → discovery: web_search_candidates(候选清单) → delegate(候选) →
+        aggregate_report → Final comparison JSON；compare 跳过枚举直接 delegate(已知竞品)。
+        工具结果经 ``wrap_untrusted`` 包裹（设计文档 06/41），先剥壳再判断候选清单形态。
+        """
+        obs = self._last_observation(messages)
+        stripped = self._page_from_observation(obs).strip()
+        if "aggregate_report 决策" in obs or "未发现候选竞品" in obs:
+            # 聚合后收尾 / 候选为空 → 优雅收尾（空矩阵 + 结论，不无限重试）
+            return self._comparison_final(messages)
+        if "[维度子 Agent 结果" in obs:
+            return self._aggregate_action(messages)
+        if stripped.startswith("["):
+            # web_search_candidates 回填的候选清单 → delegate
+            return self._delegate_candidates_action(messages, self._candidates_from_obs(stripped))
+        if self._session_resolution(messages) == "discovery":
+            return self._web_search_candidates_action(messages)
+        return self._delegate_candidates_action(messages, self._session_competitors(messages))
+
+    def _web_search_candidates_action(self, messages: list[dict[str, str]]) -> str:
+        task = self._task_text(messages)
+        return (
+            "Thought: 联网枚举候选竞品清单\nAction: web_search_candidates\n"
+            f"Args: {json.dumps({'scope': task}, ensure_ascii=False)}"
+        )
+
+    def _delegate_candidates_action(self, messages: list[dict[str, str]], candidates: list[str]) -> str:
+        task = self._task_text(messages)
+        return (
+            "Thought: 委派候选子 Agent 并行分析\nAction: delegate\n"
+            f"Args: {json.dumps({'dimensions': candidates, 'task': task, 'parallel': True, 'reason': '候选多需并行'}, ensure_ascii=False)}"
+        )
+
+    def _aggregate_action(self, messages: list[dict[str, str]]) -> str:
+        kind = "compare" if self._session_resolution(messages) == "compare" else "position"
+        return (
+            "Thought: 聚合候选结论，产出市场格局核心结论\nAction: aggregate_report\n"
+            f"Args: {json.dumps({'parts': '候选分析完成，回填各候选维度结论', 'kind': kind}, ensure_ascii=False)}"
+        )
+
+    def _comparison_final(self, messages: list[dict[str, str]]) -> str:
+        """Final Answer：comparison JSON（Lead 结论段，矩阵由组装器渲染）。"""
+        from competitor_agent.agent.react_schemas import DIMENSIONS
+
+        competitors = self._session_competitors(messages)
+        if not competitors:
+            conclusion = "未发现候选竞品（联网枚举无结果），请缩小或调整范围后再试。"
+        else:
+            conclusion = (
+                "整体最佳 Cursor（best_per_dimension：pricing→Cursor、feature→Windsurf、"
+                "performance→Cursor、ecosystem→Windsurf、sentiment→Cursor、roadmap→Windsurf）。"
+                "趋势：AI 编辑器市场竞争加剧，生态与定价是主要分水岭；替代关系：Windsurf 与 "
+                "Cursor 互为直接替代。"
+            )
+        return "Final Answer: " + json.dumps(
+            {
+                "competitors": competitors,
+                "kind": "compare",
+                "dimensions": list(DIMENSIONS),
+                "conclusion": conclusion,
+                "best_per_dimension": {"pricing": "cursor", "feature": "windsurf"},
+                "gaps": [],
+            },
+            ensure_ascii=False,
+        )
+
+    @staticmethod
+    def _candidates_from_obs(obs: str) -> list[str]:
+        """从 web_search_candidates 的候选清单 Obs（JSON 列表）提取候选名。"""
+        text = obs.strip()
+        if not text.startswith("["):
+            return []
+        try:
+            data = json.loads(text)
+        except (json.JSONDecodeError, TypeError):
+            return []
+        names: list[str] = []
+        for item in data:
+            if isinstance(item, dict):
+                name = str(item.get("name") or "").strip()
+                if name:
+                    names.append(name)
+            elif isinstance(item, str) and item.strip():
+                names.append(item)
+        return names
+
+    @staticmethod
+    def _candidate_from_system(system: str) -> str:
+        """从候选子 Agent 系统提示取候选竞品名：「分析候选竞品「cursor」」。"""
+        import re as _re
+
+        match = _re.search(r"分析候选竞品「([^」]+)」", system)
+        return match.group(1) if match else ""
+
+    def _candidate_url(self, candidate: str) -> str:
+        """候选子 Agent 兜底抓取 URL（评测未标注 best_url 时，确定性可复现假源）。"""
+        return self._best_url or f"https://example.com/{candidate}/home"
+
+    def _candidate_subagent_step(self, messages: list[dict[str, str]], user: str, system: str) -> str:
+        """候选子 Agent 状态机：web_extract → Final Answer 标准多维度 dimensions[]（REPORT_SCHEMA）。
+
+        与维度子 Agent 同构（首步抓取候选官方页 → 收尾），但输出对齐 REPORT_SCHEMA 的
+        ``{competitor, dimensions: [...]}``（逐维度条目）+ official_links，供聚合/组装引用。
+        """
+        candidate = self._candidate_from_system(system) or "unknown"
+        tried = self._tried_urls(messages)
+        last_obs = self._last_observation(messages)
+        if not tried:
+            return self._web_extract_action(self._candidate_url(candidate))
+        if "抓取失败" in last_obs:
+            url = self._candidate_url(candidate)
+            if url not in tried:
+                return self._web_extract_action(url)
+        return self._candidate_subagent_final(candidate, messages, tried)
+
+    def _candidate_subagent_final(self, candidate: str, messages: list[dict[str, str]], tried: list[str]) -> str:
+        from competitor_agent.agent.react_schemas import DIMENSIONS
+
+        page = self._page or self._page_from_observation(self._last_observation(messages))
+        dims = [self._dimension_payload(dim, page, tried) for dim in DIMENSIONS]
+        return "Final Answer: " + json.dumps(
+            {
+                "competitor": candidate,
+                "dimensions": dims,
+                "official_links": {"home": f"https://example.com/{candidate}"},
+            },
+            ensure_ascii=False,
+        )
+
     def _subagent_step(self, messages: list[dict[str, str]], user: str, system: str) -> str:
         """子 Agent 会话状态机：web_extract（首候选源失败则回退 best_url）→ Final Answer。
 
@@ -546,6 +726,12 @@ class BenchmarkMockLLM:
 
     def _subagent_final(self, dim: str, tried: list[str], last_obs: str) -> str:
         page = self._page or self._page_from_observation(last_obs)
+        return "Final Answer: " + json.dumps(
+            self._dimension_payload(dim, page, tried), ensure_ascii=False
+        )
+
+    def _dimension_payload(self, dim: str, page: str, tried: list[str]) -> dict[str, Any]:
+        """单维度结果载荷（SUBAGENT_RESULT_SCHEMA）：维度子 Agent 与候选子 Agent 共用。"""
         if dim == "pricing":
             plans = self._plans(page)
             details: dict[str, Any] = {"plans": plans}
@@ -577,17 +763,14 @@ class BenchmarkMockLLM:
             confidence = 0.3
         else:
             details, summary, confidence = {}, "", 0.5
-        return "Final Answer: " + json.dumps(
-            {
-                "dimension": dim,
-                "summary": summary,
-                "details": details,
-                "confidence": confidence,
-                # 证据只含成功来源（最后一次成功抓取的 URL），不含失败的首候选源
-                "evidence_urls": list(tried[-1:]),
-            },
-            ensure_ascii=False,
-        )
+        return {
+            "dimension": dim,
+            "summary": summary,
+            "details": details,
+            "confidence": confidence,
+            # 证据只含成功来源（最后一次成功抓取的 URL），不含失败的首候选源
+            "evidence_urls": list(tried[-1:]),
+        }
 
     def _preferred_url(self, dim: str) -> str:
         """子 Agent 首选源：标注 fail_urls 先试故障源（降级恢复）；否则首选最优源

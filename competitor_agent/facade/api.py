@@ -15,7 +15,6 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import AsyncIterator
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Callable, cast
 
@@ -284,60 +283,162 @@ class CompetitorAnalysisAPI:
                 builder=self._builder,
                 terminal_state=terminal,
             )
-            log_event(
-                slog, "report.built", "report",
-                f"报告生成，{len(report.dimension_results)} 个维度",
-                dimension_count=len(report.dimension_results),
-                overall_confidence=round(report.overall_confidence, 3),
-            )
-            # 记忆沉淀（唯一写侧）：成功与取消部分结果都沉淀（对齐 single 路径）
-            self._record_memory_success(report, transcript)
-            if is_cancelled(sid):
-                # 取消完成：保留 checkpoint 供 /resume 续跑，返回带部分结果的取消报告
-                logger.info("会话 %s 取消后返回部分结果（%d 个维度）", sid, len(report.dimension_results))
-                self._save_checkpoint_for_resume(sid, task, report)
-                close_session_log(sid)
-                self._emit(
-                    ProgressEvent(
-                        event="cancelled",
-                        phase="report",
-                        message=f"分析已取消，返回 {len(report.dimension_results)} 个已完成维度",
-                    )
-                )
-                self._tracer.end_trace(
-                    sid, status="cancelled", output_brief=report.markdown_report
-                )
-                return CancelledResult(
-                    competitor=report.competitor,
-                    dimension_results=report.dimension_results,
-                    overall_score=report.overall_score,
-                    overall_confidence=report.overall_confidence,
-                    gaps_pending=report.gaps_pending,
-                    markdown_report=report.markdown_report,
-                    terminal_state="cancelled",
-                    created_at=report.created_at,
-                    cancelled=True,
-                )
-            # 分析正常完成：记录时间线 diff + 归档带新鲜度的会话（设计文档 26）
-            self._record_timeline(report)
-            self._archive_report(report, task, sid)
-            self._export_competitor_json(report, sid)
-            delete_checkpoint(sid)
-            close_session_log(sid)
-            self._emit(
-                ProgressEvent(
-                    event="report",
-                    phase="report",
-                    progress=1.0,
-                    message=f"报告生成完成，终态={terminal}",
-                )
-            )
-            self._tracer.end_trace(sid, status=terminal, output_brief=report.markdown_report)
-            return report
+            # 设计文档 62 §3.5：组装后收尾提取为共享 helper（analyze/run registry 分型共用）
+            return self._finalize_competitor_report(report, task, sid, transcript, terminal)
         except Exception:
             # 异常路径：闭合 trace 为 error，避免残留悬半根节点（设计文档 54 §2.2）
             self._tracer.end_trace(sid, status="error", output_brief="")
             raise
+
+    def _finalize_competitor_report(
+        self,
+        report: CompetitorReport,
+        task: str,
+        sid: str,
+        transcript: list[dict],
+        terminal: str,
+    ) -> CompetitorReport:
+        """单竞品报告组装后收尾（log/记忆/取消 checkpoint/时间线/归档/导出/事件/trace）。
+
+        由 analyze()（registry 单竞品）与 run()（registry 分型）共用；返回最终报告
+        （正常 CompetitorReport 或取消时的 CancelledResult）。异常路径的 trace 闭合
+        由调用方 try/except 负责。
+        """
+        slog = get_session_logger(sid)
+        log_event(
+            slog, "report.built", "report",
+            f"报告生成，{len(report.dimension_results)} 个维度",
+            dimension_count=len(report.dimension_results),
+            overall_confidence=round(report.overall_confidence, 3),
+        )
+        # 记忆沉淀（唯一写侧）：成功与取消部分结果都沉淀（对齐 single 路径）
+        self._record_memory_success(report, transcript)
+        if is_cancelled(sid):
+            # 取消完成：保留 checkpoint 供 /resume 续跑，返回带部分结果的取消报告
+            logger.info("会话 %s 取消后返回部分结果（%d 个维度）", sid, len(report.dimension_results))
+            self._save_checkpoint_for_resume(sid, task, report)
+            close_session_log(sid)
+            self._emit(
+                ProgressEvent(
+                    event="cancelled",
+                    phase="report",
+                    message=f"分析已取消，返回 {len(report.dimension_results)} 个已完成维度",
+                )
+            )
+            self._tracer.end_trace(
+                sid, status="cancelled", output_brief=report.markdown_report
+            )
+            return CancelledResult(
+                competitor=report.competitor,
+                dimension_results=report.dimension_results,
+                overall_score=report.overall_score,
+                overall_confidence=report.overall_confidence,
+                gaps_pending=report.gaps_pending,
+                markdown_report=report.markdown_report,
+                terminal_state="cancelled",
+                created_at=report.created_at,
+                cancelled=True,
+            )
+        # 分析正常完成：记录时间线 diff + 归档带新鲜度的会话（设计文档 26）
+        self._record_timeline(report)
+        self._archive_report(report, task, sid)
+        self._export_competitor_json(report, sid)
+        delete_checkpoint(sid)
+        close_session_log(sid)
+        self._emit(
+            ProgressEvent(
+                event="report",
+                phase="report",
+                progress=1.0,
+                message=f"报告生成完成，终态={terminal}",
+            )
+        )
+        self._tracer.end_trace(sid, status=terminal, output_brief=report.markdown_report)
+        return report
+
+    def _finalize_comparison_report(
+        self,
+        loop: ReactLoop,
+        result: ReactRunResult,
+        plan: dict[str, Any],
+        sid: str,
+        terminal: str,
+    ) -> ComparisonReport:
+        """compare/discovery 组装 + 收尾（矩阵 + 结论段 + 导出 + 事件/trace）。
+
+        候选子 Agent 的 ``dimensions[]``（delegate 收集器）→ 每候选最小 CompetitorReport →
+        ``build_comparison`` 矩阵（执行层）；Lead Final Answer 的结论段拼入。
+        """
+        from competitor_agent.facade.comparison_report import assemble_comparison
+
+        report = assemble_comparison(
+            lead_answer=result.answer,
+            plan=plan,
+            candidate_results=getattr(loop, "_delegate_collector", {}) or {},
+            builder=self._builder,
+            terminal_state=terminal,
+        )
+        self._export_comparison_json(report)
+        close_session_log(sid)
+        self._emit(
+            ProgressEvent(
+                event="report",
+                phase="report",
+                progress=1.0,
+                message=f"报告生成完成，终态={terminal}",
+            )
+        )
+        self._tracer.end_trace(sid, status=terminal, output_brief=report.markdown_report)
+        return report
+
+    @staticmethod
+    def _plan_resolution(plan: dict[str, Any] | None, parsed: Any) -> str:
+        """组装分型的 resolution：优先 plan.resolution（Lead 声明），缺失按 plan/解析推断。
+
+        registry（单竞品）→ CompetitorReport；compare/discovery → ComparisonReport。
+        """
+        resolution = str((plan or {}).get("resolution") or "").lower()
+        if resolution:
+            return resolution
+        if (plan or {}).get("competitors"):
+            return "discovery" if parsed.resolution == ResolutionDecision.DISCOVERY else "compare"
+        return "registry"
+
+    def _web_search_candidates(self, scope: str) -> str:
+        """候选竞品枚举工具（设计文档 62 §3.2）：联网返回候选清单 JSON，供 Lead DISCOVERY 编排。
+
+        Observation 为候选列表（name + official_links），Lead 读取后 delegate(targets=候选)。
+        逐候选实时推送 ``discovery.candidate`` + 汇总 ``discovery`` 事件（Web SSE 契约，
+        沿用 _run_discovery 时代的相位；枚举失败/无候选 → 可读回灌供 Lead 自恢复）。
+        """
+        import json as _json
+
+        try:
+            raw = self._discoverer.candidates(scope or "")
+        except Exception:  # noqa: BLE001 — 枚举失败可回灌自恢复
+            logger.warning("候选竞品枚举失败: scope=%r", scope, exc_info=True)
+            return "候选竞品枚举失败（联网搜索不可用），请改用已注册竞品或缩小 scope。"
+        names = [str(c.get("name")) for c in raw if c.get("name")]
+        if not raw:
+            return f"未发现候选竞品（scope={scope!r}）。"
+        for name in names:
+            self._emit(
+                ProgressEvent(
+                    event="discovery.candidate",
+                    phase="strategic",
+                    message=f"发现候选: {name}",
+                    payload={"candidate": name},
+                )
+            )
+        self._emit(
+            ProgressEvent(
+                event="discovery",
+                phase="strategic",
+                message=f"发现 {len(names)} 个候选竞品: {', '.join(names)}",
+                payload={"candidates": names},
+            )
+        )
+        return _json.dumps(raw, ensure_ascii=False)
 
     @property
     def memory(self) -> IFourLayerMemory | None:
@@ -638,8 +739,11 @@ class CompetitorAnalysisAPI:
             raise CompetitorAgentError("subagents.enabled=false 时 analyze() 主路径不可用（设计文档 49）")
         # 设计文档 62 §3.8：delegate 并发硬上限 = execution.max_parallel_subagents（不再自决）
         max_concurrent = self._config.execution.max_parallel_subagents
+        max_candidates = self._config.execution.max_discover_candidates
         timeout_seconds = self._config.subagents.timeout_seconds
         lead_competitor = self._react_competitor(task)
+        # 设计文档 62 §3.5：候选子 Agent 结构化结果收集器（comparison 组装器读取）
+        delegate_collector: dict[str, dict[str, Any]] = {}
         # 设计文档 62 §3.6/§3.9：子 Agent 沿用 react_agent 默认压缩保留步数；
         # Lead 编排会话用独立 lead.max_history_steps（候选委派回填更长）
         agent_max_history_steps = self._config.agent.max_history_steps
@@ -702,7 +806,14 @@ class CompetitorAnalysisAPI:
         )
         extra_tools: dict[str, Callable[..., str] | ToolSpec] = {
             "make_plan": build_make_plan_tool(),
-            "delegate": make_delegate_tool(runner, registry=get_subagent_registry()),
+            "delegate": make_delegate_tool(
+                runner,
+                registry=get_subagent_registry(),
+                collector=delegate_collector,
+                max_candidates=max_candidates,
+            ),
+            # 设计文档 62 §3.2：候选竞品枚举（DISCOVERY 时 Lead 自调；观察回填驱动 delegate）
+            "web_search_candidates": self._web_search_candidates,
             # 设计文档 62 §3.3：Lead 聚合 DISCOVERY/COMPARE 候选结论，产出市场格局核心结论
             "aggregate_report": make_aggregate_tool(),
             # 设计文档 56 M1①：Lead kb_recall（competitor 懒绑定，plan 落地前全局检索）
@@ -756,6 +867,8 @@ class CompetitorAnalysisAPI:
         )
         # 收尾 shutdown 用（挂 loop 实例而非 self，避免并行 analyze 互相误杀线程池）
         loop._delegate_runner = runner
+        # 设计文档 62 §3.5：候选子 Agent 结构化结果收集器挂 loop，供 comparison 组装器读取
+        loop._delegate_collector = delegate_collector
         plan_box["loop"] = loop  # kb_recall/Lead 摄入的 competitor 懒绑定数据源
         return loop
 
@@ -1362,29 +1475,63 @@ class CompetitorAnalysisAPI:
         *,
         session_id: str | None = None,
     ) -> CompetitorReport | ComparisonReport:
-        """统一入口（设计文档 62 §3.5/§3.7）：取代 web/CLI/MCP 各自的分派 if-else。
+        """统一入口（设计文档 62 §3.5）：全部 resolution 同走一条单 Lead loop。
 
-        parse_task（LLM）→ 按语义路由：DISCOVERY→discover 语义、COMPARE→N 向对比、
-        其余→单竞品 analyze。resolution 作为上下文标注透传，入口不再写重复分派。
+        parse_task（LLM）→ 构建单个 Lead ReactLoop（resolution 仅作 querySource 标注、
+        不分派）→ 运行 → 组装按 ``plan.resolution`` 统一分型：registry→CompetitorReport、
+        compare/discovery→ComparisonReport（矩阵 + 市场格局核心结论段）。
+
+        run() 内无 resolution 分派 if-else——DISCOVERY/COMPARE 的候选枚举、并行、聚合
+        由 Lead 回合内自调 web_tool/delegate/aggregate_report 完成，代码只守硬上限。
         """
         task = sanitize_task(task)
         parsed = parse_task(task, llm=self._llm, use_llm=self._use_llm)
-        if parsed.resolution == ResolutionDecision.DISCOVERY:
-            return self._run_discovery(task, session_id=session_id)
-        if parsed.is_compare and len(parsed.competitors) >= 2:
-            return self._run_compare(list(parsed.competitors), session_id=session_id)
-        return self.analyze(task, session_id=session_id)
+        sid = session_id or f"sess_{uuid.uuid4().hex[:8]}"
+        set_current_session(sid)
+        self._tracer.start_trace("run", trace_id=sid, input_brief=task)
+        try:
+            slog = get_session_logger(sid)
+            log_event(slog, "session_started", "init", f"会话 {sid} 启动", task=task)
+            self._emit(
+                ProgressEvent(
+                    event="phase_start",
+                    phase="react",
+                    message=f"Lead 编排: {task}",
+                )
+            )
+            loop, result = self._run_react_loop(task, sid)
+            plan = loop.plan or {}
+            terminal = (
+                "cancelled"
+                if result.cancelled
+                else ("partial" if result.budget_exhausted else "success")
+            )
+            # 组装按 plan.resolution 统一分型（同一单 Lead loop 产物）
+            if self._plan_resolution(plan, parsed) in ("compare", "discovery"):
+                return self._finalize_comparison_report(loop, result, plan, sid, terminal)
+            report = react_report.assemble(
+                lead_answer=result.answer,
+                competitor=self._lead_competitor(task, plan),
+                loop_plan=plan,
+                transcript=result.transcript,
+                builder=self._builder,
+                terminal_state=terminal,
+            )
+            return self._finalize_competitor_report(report, task, sid, result.transcript, terminal)
+        except Exception:
+            self._tracer.end_trace(sid, status="error", output_brief="")
+            raise
 
     def discover(self, task: str) -> ComparisonReport:
         """兼容保留（设计文档 62 §3.5）：= run(task) 的 DISCOVERY 语义路径（deprecated 告警）。"""
         logger.warning("discover() 已废弃（历史兼容）：请改用 run() 统一入口")
-        return self._run_discovery(task)
+        return cast(ComparisonReport, self.run(task))
 
     def compare(self, *competitors: str) -> ComparisonReport:
         """兼容保留（设计文档 62 §3.5）：= run(task) 的 COMPARE 语义路径（deprecated 告警）。
 
         兼容旧签名 compare(a, b=None)：单个参数会被解析（"对比 A 和 B" / "A vs B"）；
-        多个参数逐个作为竞品名处理。
+        多个参数逐个作为竞品名处理；最终统一委托 run()（单 Lead loop）执行。
         """
         logger.warning("compare() 已废弃（历史兼容）：请改用 run() 统一入口")
         names: list[str] = []
@@ -1399,82 +1546,7 @@ class CompetitorAnalysisAPI:
                     names.append(primary)
         if len(names) < 2:
             raise ValueError("对比需要两个及以上竞品（或用 /compare A 和 B）")
-        return self._run_compare(names)
-
-    def _run_compare(self, names: list[str], session_id: str | None = None) -> ComparisonReport:
-        """N 向对比执行（设计文档 62 §3.5）：多竞品并行分析（硬上限），按输入顺序稳定返回。
-
-        不再读取 execution.mode（设计文档 62 §3.8：并行与否归 Lead/delegate，代码只守
-        execution.max_parallel_subagents 硬上限）；单竞品失败不回滚整体。
-        """
-        self._emit(
-            ProgressEvent(
-                event="phase_start",
-                phase="compare",
-                message=f"N 向对比 {len(names)} 个竞品: {', '.join(names)}",
-            )
-        )
-        workers = min(self._config.execution.max_parallel_subagents, len(names))
-        if len(names) <= 1 or workers <= 1:
-            reports = [self.analyze(name, session_id=session_id) for name in names]
-        else:
-            self._emit(
-                ProgressEvent(
-                    event="phase_start",
-                    phase="compare",
-                    message=f"并行分析 {len(names)} 个竞品，max_workers={workers}",
-                )
-            )
-            done: list[CompetitorReport] = []
-            with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="cmp") as pool:
-                futures = {
-                    pool.submit(self.analyze, name, session_id=session_id): name
-                    for name in names
-                }
-                for future in as_completed(futures):
-                    try:
-                        done.append(future.result())
-                    except Exception:  # 单竞品失败不影响对比整体
-                        logger.exception("并行对比竞品 %s 失败", futures[future])
-            by_name = {r.competitor.name: r for r in done}
-            reports = [by_name[n] for n in names if n in by_name]
-        comparison = self._builder.build_comparison(reports)
-        self._export_comparison_json(comparison)
-        return comparison
-
-    def _run_discovery(self, task: str, session_id: str | None = None) -> ComparisonReport:
-        """市场普查/发现执行（设计文档 62 §3.5）：联网枚举候选 → 逐个分析 → 品类格局报告。
-
-        候选枚举仍由 CompetitorDiscoverer（web_tool）负责；逐竞品分析走 Lead ReAct，
-        官方源经 _task_with_sources 注入（避免未知竞品 0 候选 → 0 维度）。
-        """
-        competitors = self._discoverer.discover(
-            task,
-            on_candidate=lambda n: self._emit(
-                ProgressEvent(
-                    event="discovery.candidate",
-                    phase="strategic",
-                    message=f"发现候选: {n}",
-                    payload={"candidate": n},
-                )
-            ),
-        )
-        if not competitors:
-            raise ValueError(f"未能发现任何竞品: {task[:60]}")
-        names = [c.name for c in competitors]
-        self._emit(
-            ProgressEvent(
-                event="discovery",
-                phase="strategic",
-                message=f"发现 {len(names)} 个候选竞品: {', '.join(names)}",
-                payload={"candidates": names},
-            )
-        )
-        reports = [
-            self.analyze(self._task_with_sources(c), session_id=session_id)
-            for c in competitors
-        ]
-        return self._builder.build_comparison(reports)
+        return cast(ComparisonReport, self.run(f"对比 {' 和 '.join(names)}"))
 
     @staticmethod
     def _task_with_sources(competitor: Competitor) -> str:

@@ -11,7 +11,7 @@ ReactLoop 负责跨轮次的预算控制、错误处理与 ProgressEvent 产出�
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable
+from typing import Any, Callable
 
 from competitor_agent.agent.react_agent import ReactAgent
 from competitor_agent.core.budget import IterationBudget
@@ -83,6 +83,9 @@ class ReactLoop:
         self._pinned_facts = pinned_facts
         self._on_step = on_step
         self.plan: dict | None = None  # make_plan 结果（供报告组装/记忆写侧）
+        # 设计文档 62 §3.5：facade 装配侧挂载（非构造参数）——delegate 线程池与候选结果收集器
+        self._delegate_runner: Any = None
+        self._delegate_collector: dict[str, dict[str, Any]] = {}
 
     def run(self, task: str) -> str:
         """运行一次分析会话，返回最终结论文本（向后兼容：不携带取消/预算状态）。"""
@@ -169,10 +172,14 @@ class ReactLoop:
             logger.warning("make_plan 结果非 JSON，plan 未记录: %s", plan_text[:80])
             self.plan = None
             return
-        if isinstance(parsed, dict) and parsed.get("competitor"):
+        # 设计文档 62 §3.1：单竞品 plan 用 competitor，多竞品 plan 用 competitors；
+        # discovery 候选枚举前可仅带 resolution（候选后 web_tool 枚举，组装侧据此分型）
+        if isinstance(parsed, dict) and (
+            parsed.get("competitor") or parsed.get("competitors") or parsed.get("resolution")
+        ):
             self.plan = parsed
         else:
-            logger.warning("make_plan 结果缺 competitor，plan 未记录")
+            logger.warning("make_plan 结果缺 competitor/competitors/resolution，plan 未记录")
             self.plan = None
 
     def _step_guard(self, result: ReactRunResult) -> Callable[[], bool] | None:

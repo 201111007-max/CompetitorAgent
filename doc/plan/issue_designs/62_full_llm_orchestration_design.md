@@ -9,6 +9,7 @@
   2. Claude/业内主流（LangGraph、Claude `queryLoop`）是"代码守骨架、LLM 回合内自调通用工具"，不把并发度/分批强行 schema 化——故 `SCHEDULE_SCHEMA` 降为 `delegate` 的**可选参数** `{parallel, reason}`，并发细节交给 `DelegateRunner` 默认；
   3. 上下文压缩（`ReactAgent._compress_history`）与四层记忆（`IFourLayerMemory`）项目内**已实现**，本设计只做注入装配，不重写。
 - 保留的三个价值点：`aggregate_report`（品类市场格局核心结论，LLM）、统一 `run()` 入口（消灭三入口代码 if-else 分派）、`resolution` 从"分派终点"改为"编排起点/上下文标注"。
+- 本轮补充（实现口径收敛，修订本文档）：① **候选子 Agent Final Answer 输出标准多维度 `dimensions[]` 数组**（对齐 REPORT_SCHEMA 维度条目结构），不再复用单维度 `SUBAGENT_RESULT_SCHEMA`——矩阵按"维度 × 竞品"渲染，按维度条目产出才能直接支撑每候选多维度 CompetitorReport，无需组装器二次猜测维度归属；② **`run()` 全 resolution 同走一条单 Lead loop**，组装统一按 `plan.resolution` 分型（registry→CompetitorReport / compare、discovery→ComparisonReport），消灭 run() 内部按 resolution 的分派 if-else。
 
 ## 1. 问题现状
 
@@ -49,7 +50,7 @@ doc 49 只做到了"单个竞品内部"的 Lead 编排；DISCOVERY/COMPARE 独�
 
 **关键点**：
 
-1. **单个 Lead 贯穿到底**：不做 `discover()/compare()` 两个代码薄调度方法，统一为 `run()` 内一条 LLM 编排。`resolution` 只是 Lead 的起始上下文，**不产生 Lead 之外的硬件分派路径**（对齐 Claude `querySource` 只作标注、不驱动分支）。
+1. **单个 Lead 贯穿到底**：不做 `discover()/compare()` 两个代码薄调度方法，统一为 `run()` 内一条 LLM 编排。`resolution` 只是 Lead 的起始上下文，**不产生 Lead 之外的硬件分派路径**（对齐 Claude `querySource` 只作标注、不驱动分支）；单竞品（registry）/对比（compare）/普查（discovery）**同走一条 Lead loop**，仅 `plan.resolution` 不同，组装据此统一分型（CompetitorReport / ComparisonReport）。
 2. **候选分析 = 复用通用 `delegate`**：不新增 `discover_candidates` / `analyze_competitor` 专属工具。候选子 Agent 注册进 `SubagentRegistry`，Lead 通过既有 `delegate(targets, ...)` 批量后台委派。是否并行由 Lead 在 `delegate` 的可选参数表达；**并发细节（max_workers/分批）不暴露给 LLM**，交 `DelegateRunner` 默认接管。
 3. **调度参数 = "LLM 意图 + 代码守边界"**：`delegate` 仅增可选 `{parallel: bool=true, reason: str}`；代码做硬上限收敛（并发不超 `budget.max_parallel_subagents`，候选不超 `max_discover_candidates`），不再读取 `execution.mode` 自决。
 4. **聚合保留 `aggregate_report`**：Lead 决定聚合口径并产出"市场格局核心结论"（最佳/最差、趋势、替代关系），矩阵仍由 `ReportBuilder` 渲染（执行层）。
@@ -112,7 +113,7 @@ def aggregate_report(parts: str, dimensions: list[str] | None = None,
   - 何时并行（候选多/任务聚焦或预算有限 → 串行/小批）由 Lead 依据上下文决策，调用 `delegate` 时给出 `parallel` 与 `reason`；
   - 聚合时输出市场格局核心结论（最佳/最差/趋势/替代），不只交矩阵；
   - 复用 planning / fact_verification skills。
-- 候选子 Agent system prompt：延续 `build_subagent_system_prompt`，Final Answer 复用 `SUBAGENT_RESULT_SCHEMA`（维度结果 JSON），额外要求携带 `official_links` 供聚合阶段引用。
+- 候选子 Agent system prompt：延续 `build_subagent_system_prompt`，但 **Final Answer 输出标准多维度 `dimensions[]` 数组**（对齐 REPORT_SCHEMA 的维度条目结构：`{competitor, dimensions: [{dimension, summary, details, confidence, evidence_urls}]}`，逐维度填全），并额外携带 `official_links` 供聚合阶段引用。理由：矩阵按"维度 × 竞品"渲染，候选子 Agent 按维度条目产出可直接支撑每候选多维度 CompetitorReport，组装器无需二次猜测维度归属。
 
 ### 3.5 修改 `facade/api.py`（统一入口 + 装配）
 
@@ -120,8 +121,13 @@ def aggregate_report(parts: str, dimensions: list[str] | None = None,
 class CompetitorAnalysisAPI:
     def run(self, task: str, *, session_id: str | None = None) -> CompetitorReport | ComparisonReport:
         """统一入口：取代 web/CLI/MCP 各自分派。
-        parse_task（LLM）→ 构建带 delivery 的 Lead ReactLoop → 运行 → assemble。
-        resolution 作为 querySource 上下文标注，不在此分支分派。
+        parse_task（LLM）→ 构建单个 Lead ReactLoop（resolution 作 querySource 标注）
+        → 运行 → assemble。
+        全部 resolution（registry/compare/discovery）都走同一条单 Lead loop，
+        run() 内**无 resolution 分派 if-else**——DISCOVERY/COMPARE 的候选枚举、
+        并行、聚合由 Lead 回合内自调 web_tool/delegate/aggregate_report 完成。
+        组装按 `plan.resolution` 统一分型：registry→CompetitorReport、
+        compare/discovery→ComparisonReport（矩阵 + 市场格局核心结论段）。
         Lead 工具面装配：make_plan / web_tool(discover) / delegate(+parallel/reason) /
         aggregate_report / web_extract / 复核。
         """
@@ -132,7 +138,8 @@ class CompetitorAnalysisAPI:
     def compare(self, *names):       # = run(task) 的 COMPARE 语义路径（deprecated 告警）
 ```
 
-- 删除 `_analyze_discovered_parallel`（代码写死并行）与 `_compare_parallel` 的 `execution.mode` 自决逻辑（并行由 `delegate` 的 `parallel` 表达，代码只硬收敛上限）。
+- 删除 `_analyze_discovered_parallel`（代码写死并行）、`_compare_parallel` 的 `execution.mode` 自决逻辑，以及 `run()` 内按 resolution 的三分支代码分派（并行由 `delegate` 的 `parallel` 表达，调度/聚合由 Lead 自编排，代码只硬收敛上限）。
+- 新增 **comparison 组装器**：从单 Lead loop 的产物（`loop.plan.resolution` + delegate 回填的候选子 Agent `dimensions[]` 结果 + Lead Final Answer 结论段）→ ComparisonReport——每候选子 Agent 的 `dimensions[]` 组装为最小 CompetitorReport → `build_comparison` 渲染矩阵；Lead Final Answer 的【市场格局核心结论】拼入结论段。
 - `DelegateRunner` 实例化传入 `max_concurrent=budget.max_parallel_subagents` 作为默认并发上限。
 - `_task_with_sources` 逻辑并入候选子 Agent 运行时注入（把 `official_links` 带进子 Agent 提示）。
 - `build_comparison` 保留为**执行层渲染**，位于 `aggregate_report` 结论段之上（Lead 已产出结论段，矩阵补充可视化）。
@@ -179,11 +186,13 @@ run("帮我分析市面上常用的 coding agent")
        首步 make_plan → plan={..., scheduling:{parallel:true, reason:"候选多需并行"}}
        → web_tool(scope="市面上常用的 coding agent") → 候选 JSON 回填（doc 61）
        → delegate(targets=[候选竞品名], parallel=true, reason="候选多") → 后台并发委派候选子 Agent
-            → 各子 Agent Final Answer(SUBAGENT_RESULT_SCHEMA + official_links) 合并回填
+            → 各子 Agent Final Answer(dimensions[] 多维度条目 + official_links) 合并回填
        → aggregate_report(parts, kind="position") → 市场格局核心结论（LLM）
        → Final Answer 收尾
   → assemble：矩阵渲染（ReportBuilder）+ 结论段 → ComparisonReport
 ```
+
+> 同一 Lead loop 亦承载 registry（单竞品：无需 web_tool 枚举，delegate 维度 → Final Answer REPORT_SCHEMA → CompetitorReport）与 compare（无 web_tool，delegate(targets=[已知竞品], parallel) → aggregate_report(kind="compare") → ComparisonReport）；区别仅在 `plan.resolution` 标注与是否需候选枚举。
 
 ### 4.2 配置（`review_config.yaml`）
 
@@ -198,15 +207,15 @@ lead:
 
 ### 4.3 评测/确定性
 
-- `BenchmarkMockLLM` 增 DISCOVERY/COMPARE 的 **ReAct-scripted** 分支：收到 `web_tool` → 返回固定候选；收到 `delegate` → 逐候选/维度确定性返回；收到 `aggregate_report` → 返回固定结论。评测无需真实网络/LLM，门禁可复现。
+- `BenchmarkMockLLM` 增 DISCOVERY/COMPARE 的 **ReAct-scripted** 分支：收到 `web_tool` → 返回固定候选；收到 `delegate` → 候选子 Agent 确定性返回标准 `dimensions[]`（逐候选多维度条目 + official_links）、维度子 Agent 确定性返回单维度条目；收到 `aggregate_report` → 返回固定结论；Lead 按 resolution 确定性收尾（registry→REPORT_SCHEMA，compare/discovery→comparison JSON）。评测无需真实网络/LLM，门禁可复现。
 - `HARNESS_VERSION` 递增并登记（house 规则）。
 
 ## 5. 验证方式
 
 - **单测（delegate 扩展）**：`test_delegate_candidate.py` —— `targets` 候选/维度兼用；`parallel` 触发批量 spawn、`parallel=false` 串行；并发度硬收敛不超上限；超时 `TIMED_OUT`；单候选失败不影响整体；`reason` 记入事件/日志可观测性。
 - **单测（aggregate）**：`test_aggregate_tool.py` —— `kind` 校验、结论段含竞品名、缺失竞品标注、`aggregate_report` 缺失时 `build_comparison` 矩阵兜底不报错。
-- **单测（装配）**：`run()` 三入口分派收敛——web/CLI 不再有 DISCOVERY/COMPARE 分派 if-else；`compare/discover` 兼容薄包装告警；配置语义（`execution.mode` 移除、`lead.max_orchestration_steps`/`max_history_steps` 解析）。
-- **集成**：mock Lead 下 `run("市面上所有 coding agent")` 全链路——Lead make_plan→web_tool→delegate(并发)→aggregate_report→多竞品报告；候选并行计数；单候选失败聚合其余；**压缩**：超 `lead.max_history_steps` 后确认 Lead 消息被 `_compress_history` 折叠且 pinned 保留；**记忆**：确认 Lead 聚合前收到品类级 `recent_context` 召回。
+- **单测（装配）**：`run()` 统一单 Lead——内部无 resolution 分派 if-else；registry/compare/discovery 同走一条 Lead loop，组装按 `plan.resolution` 分型（CompetitorReport/ComparisonReport）；`compare/discover` 兼容薄包装告警；配置语义（`execution.mode` 移除、`lead.max_orchestration_steps`/`max_history_steps` 解析）。
+- **集成**：mock Lead 下 `run("市面上所有 coding agent")` 全链路——Lead make_plan(competitors+scheduling)→web_tool→delegate(并发)→aggregate_report→多竞品报告；候选并行计数；单候选失败聚合其余；候选子 Agent 结果含标准 `dimensions[]` 且组装为每候选 CompetitorReport 出矩阵；`run("分析 Cursor")` 同走一条 Lead loop 且组装为 CompetitorReport（按 `plan.resolution` 分型）；**压缩**：超 `lead.max_history_steps` 后确认 Lead 消息被 `_compress_history` 折叠且 pinned 保留；**记忆**：确认 Lead 聚合前收到品类级 `recent_context` 召回。
 - **回归**：既有 `test_discovery.py`/`test_compare*`/`test_search_provider.py` 迁移到新装配断言；全量 `pytest` 保持绿；mypy 改动文件不新增错误。
 - **实测**：有 Key 环境 `run("帮我分析市面上常用的 coding agent")`，日志应见 Lead 依次调用 `web_tool → delegate(并行) → aggregate_report`，报告含矩阵 + 市场格局核心结论段；不再出现"预算耗尽/代码固定并行"提示。
 
@@ -216,9 +225,9 @@ lead:
 |---|---|---|
 | 0 | 本设计文档 + README 索引登记 | 收敛原则（对齐 Claude/业内：代码骨架 + LLM 内容） |
 | 1 | `delegate` 扩展 + 候选子 Agent 注册 | 候选/维度兼用、`parallel/reason`、并发硬收敛 |
-| 2 | `aggregate_tool.py` + Lead prompt 扩展 | `aggregate_report` + 编排提示 |
-| 3 | `api.run()` 统一入口 + 三入口收敛 + 删代码并行 | `_analyze_discovered_parallel`/`_compare_parallel` 并行移除；`resolution` 改 querySource 标注 |
-| 4 | 压缩/记忆装配 + 测试迁移 | Lead `max_history_steps`、品类级 `recent_context`；mock ReAct-scripted 分支 + HARNESS_VERSION |
+| 2 | `aggregate_tool.py` + Lead prompt 扩展 | `aggregate_report` + 编排提示（候选子 Agent 标准 `dimensions[]` 产出指引） |
+| 3 | `run()` 单 Lead 统一 + comparison 组装 | 全 resolution 走同一 Lead loop、无分派 if-else；组装按 `plan.resolution` 分型；候选子 Agent `dimensions[]` → 每候选 CompetitorReport → 矩阵 + 结论段 |
+| 4 | 压缩/记忆装配 + mock 分支 + 测试迁移 | Lead 品类级召回、`lead.max_history_steps`；DISCOVERY/COMPARE ReAct-scripted 分支 + HARNESS_VERSION；既有测试迁移 |
 | 5 | 文档收口 + 提交 | README/CHANGELOG/docs 同步 |
 
 每里程碑独立提交（`feat(agent)` / `refactor(...)` / `test(...)` / `docs(design)`）。

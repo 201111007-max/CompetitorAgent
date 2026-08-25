@@ -31,6 +31,7 @@ class ExecutionConfig:
     """执行调度硬上限（设计文档 62 §3.8）：不再有 mode 决策开关——并行与否归 Lead（delegate.parallel）"""
 
     max_parallel_subagents: int = 4  # 并行子代理硬上限（DelegateRunner 默认并发）
+    max_discover_candidates: int = 10  # 候选竞品数硬上限（delegate 工具内收敛）
 
 
 @dataclass

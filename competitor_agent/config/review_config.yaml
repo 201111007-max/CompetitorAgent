@@ -33,6 +33,7 @@ budget:
 # 代码只守硬上限（max_parallel_subagents = DelegateRunner 默认并发）。
 execution:
   max_parallel_subagents: 4   # 并行子代理硬上限（= DelegateRunner.max_concurrent 默认）
+  max_discover_candidates: 10 # 候选竞品数硬上限（delegate 工具内收敛）
 
 # ===== 维度清单 =====
 dimensions:

@@ -109,16 +109,26 @@ def _dimension_header(name: str, desc: str) -> str:
 
 
 def _build_competitor_prompt(name: str, cfg: object) -> str:
-    """候选竞品子 Agent 的整竞品 schema（设计文档 62 §3.4：携带 official_links 供聚合引用）。"""
+    """候选竞品子 Agent 的整竞品 schema（设计文档 62 §3.4：标准多维度 dimensions[] + official_links）。
+
+    候选子 Agent Final Answer 对齐 REPORT_SCHEMA 的维度条目结构（competitor + dimensions[]
+    逐维度填全 + official_links），矩阵按"维度 × 竞品"渲染时可直接支撑每候选多维度
+    CompetitorReport，组装器无需二次猜测维度归属。
+    """
+    from competitor_agent.agent.react_schemas import DIMENSIONS
+
     skills = list(getattr(cfg, "skills", ()))
     header = (
         f"你是竞品分析子 Agent，分析候选竞品「{name}」。\n任务：{getattr(cfg, 'system_prompt', '')}\n"
         "自行调用可用工具采集信息（web_extract / web_search / github_* / analyze_pricing），"
         "交叉核验来源后收尾。\n"
-        "以 Final Answer 输出 SUBAGENT_RESULT_SCHEMA JSON：\n"
-        f'{{"dimension": "{name}", "summary": "整竞品结论", "details": {{...}}, '
-        '"confidence": 0.0-1.0, "evidence_urls": ["实际引用的来源URL"], '
+        "以 Final Answer 输出标准多维度 REPORT_SCHEMA JSON（对齐报告维度条目）：\n"
+        '{"competitor": "竞品规范名", "dimensions": [{"dimension": "维度名", '
+        '"summary": "该维度结论", "details": {...}, "confidence": 0.0-1.0, '
+        '"evidence_urls": ["实际引用的来源URL"]}], '
         '"official_links": {"home": "官网", "pricing": "定价页", "docs": "文档", "changelog": "更新日志"}}\n'
+        f"逐维度填全 dimensions（全部 {len(DIMENSIONS)} 个维度：{'/'.join(DIMENSIONS)}；"
+        "无法核实的维度 summary 标注『待核验』且 confidence 置低，不得编造）。\n"
         "details 键名遵循各维度抽取惯例：pricing→plans、feature→features、performance→benchmarks、"
         "ecosystem→mcp_servers/plugins/ide_support、sentiment→polarity、roadmap→events。\n"
         "official_links 填写你核实到的官方来源（供聚合阶段引用），无法核实留空。"

@@ -303,7 +303,9 @@ def close_session_log(session_id: str | None) -> None:
 # ── 结构化事件埋点 ───────────────────────────────────────────────────────────
 
 
-def _emit_with_extra(logger: logging.Logger, message: str, extra: dict[str, Any]) -> None:
+def _emit_with_extra(
+    logger: logging.Logger | logging.LoggerAdapter, message: str, extra: dict[str, Any]
+) -> None:
     """向 logger 打日志并合并 extra。
 
     LoggerAdapter.process 会用 self.extra 覆盖调用方 extra，因此这里直接合并后
@@ -312,7 +314,7 @@ def _emit_with_extra(logger: logging.Logger, message: str, extra: dict[str, Any]
     # 过滤与 LogRecord 保留属性冲突的字段（如 name/msg），避免 makeRecord 抛 KeyError
     extra = {k: v for k, v in extra.items() if k not in _RESERVED_ATTRS or k in ("session_id", "event", "phase")}
     if isinstance(logger, logging.LoggerAdapter):
-        merged = {**logger.extra, **extra}
+        merged = {**(logger.extra or {}), **extra}
         logger.logger.info(message, extra=merged)
     else:
         if "session_id" not in extra and _current_session_id():
@@ -321,7 +323,7 @@ def _emit_with_extra(logger: logging.Logger, message: str, extra: dict[str, Any]
 
 
 def log_event(
-    logger: logging.Logger,
+    logger: logging.Logger | logging.LoggerAdapter,
     event: str,
     phase: str = "",
     message: str = "",

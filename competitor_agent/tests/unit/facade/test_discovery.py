@@ -78,11 +78,12 @@ class TestDiscover:
         assert "ai-coding-agent" not in md
         assert "品类格局矩阵" in md
 
-    def test_discover_without_web_tool_raises(self, mock_llm):
-        """设计文档 47：无 web_tool → 无候选，不编造内置清单 → discover 报错。"""
+    def test_discover_without_web_tool_graceful(self, mock_llm):
+        """设计文档 62 §3.5：无 web_tool → 候选枚举返回可读回灌，Lead 优雅收尾（空矩阵 + 结论），不报错。"""
         api = _api(mock_llm)
-        with pytest.raises(ValueError):
-            api.discover("市场上所有 AI coding agent")
+        result = api.discover("市场上所有 AI coding agent")
+        assert isinstance(result, ComparisonReport)
+        assert "未发现候选竞品" in result.markdown_report
 
     def test_discover_emits_discovery_event(self, mock_llm):
         events = []

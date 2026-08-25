@@ -1,7 +1,8 @@
-"""设计文档 62 M3 — 统一 run() 入口分派单测。
+"""设计文档 62 §6 M3 — run() 单 Lead 统一入口单测。
 
-覆盖：run() 按 resolution 语义路由（DISCOVERY→discover 语义 / COMPARE→N 向对比 /
-单竞品→analyze）；session_id 透传；discover()/compare() 兼容薄包装（deprecated 告警）。
+覆盖：registry/compare/discovery 全部 resolution 同走一条单 Lead loop（run() 内无
+resolution 分派 if-else），组装按 plan.resolution 分型（CompetitorReport /
+ComparisonReport）；session_id 透传；discover()/compare() 兼容薄包装（deprecated 告警）。
 """
 from __future__ import annotations
 
@@ -58,11 +59,16 @@ class TestRunRouting:
         assert "品类格局矩阵" in report.markdown_report
 
     def test_run_propagates_session_id(self, mock_llm, monkeypatch):
+        # 设计文档 62 §3.5：run() 单 Lead loop 把外部 session_id 透传给循环构建层
         api = _api(mock_llm)
         seen: dict[str, object] = {}
-        api._run_compare = lambda names, session_id=None: seen.update(sid=session_id) or ComparisonReport(
-            competitors=[Competitor("a"), Competitor("b")], reports=[], markdown_report="x"
-        )
+        orig = api._run_react_loop
+
+        def _wrapped(task: str, session_id: str | None = None):
+            seen["sid"] = session_id
+            return orig(task, session_id)
+
+        monkeypatch.setattr(api, "_run_react_loop", _wrapped)
         api.run("对比 Cursor 和 Windsurf", session_id="sess_abc")
         assert seen["sid"] == "sess_abc"
 
