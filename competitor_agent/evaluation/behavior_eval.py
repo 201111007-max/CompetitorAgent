@@ -318,7 +318,9 @@ class FoldRecallScriptedLLM:
 
     P0_URL = "https://example.com/pricing-p0"
 
-    def __init__(self, n_fetches: int = 9) -> None:
+    # 16 = 需超过 2*max_history_steps(=8) 压缩窗口：折叠发生在 >16 个 turn 后，
+    # 脚本总 turn 数不足则摘要不生成、决策轮无从取回（设计文档 60 单协议阈值）。
+    def __init__(self, n_fetches: int = 16) -> None:
         self.calls: list[list[dict[str, Any]]] = []
         self._round = 0
         self._n_fetches = n_fetches
