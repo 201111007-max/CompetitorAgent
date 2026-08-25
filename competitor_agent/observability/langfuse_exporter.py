@@ -179,5 +179,5 @@ def flush_langfuse() -> None:
         for sink in get_tracer()._sinks if hasattr(get_tracer(), "_sinks") else []:
             if isinstance(sink, LangfuseExporter):
                 sink.flush()
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.debug("Langfuse flush 兜底异常忽略", exc_info=True)

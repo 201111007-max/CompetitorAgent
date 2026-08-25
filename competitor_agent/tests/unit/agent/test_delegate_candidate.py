@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 import pytest
-
 from competitor_agent.agent.delegate_tool import (
     DelegateRunner,
     SubagentRuntime,

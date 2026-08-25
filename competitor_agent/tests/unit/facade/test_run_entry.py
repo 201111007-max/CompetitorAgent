@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import logging
 
-from competitor_agent.domain_types.competitor import Competitor
 from competitor_agent.domain_types.report import ComparisonReport, CompetitorReport
 from competitor_agent.facade.api import CompetitorAnalysisAPI
 

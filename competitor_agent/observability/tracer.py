@@ -26,10 +26,11 @@ import logging
 import threading
 import uuid
 from collections import defaultdict, deque
+from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator, Protocol
+from typing import Any, Protocol
 
 from competitor_agent.secret_vault import get_data_dir
 
@@ -91,9 +92,8 @@ class JsonlSink:
         self._dir.mkdir(parents=True, exist_ok=True)
         line = json.dumps(record, ensure_ascii=False)
         path = self._path_for(str(record.get("start") or _now()))
-        with self._lock:
-            with path.open("a", encoding="utf-8") as f:
-                f.write(line + "\n")
+        with self._lock, path.open("a", encoding="utf-8") as f:
+            f.write(line + "\n")
 
 
 class Tracer:
@@ -240,7 +240,7 @@ class Tracer:
         self._stack().append({"trace_id": tid, "span_id": span_id})
         try:
             yield base
-        except BaseException as exc:  # noqa: BLE001 - 记录后重抛，不吞异常
+        except BaseException as exc:
             base["status"] = ERROR
             base["error"] = _brief(f"{type(exc).__name__}: {exc}")
             self._end_span(base)
@@ -334,7 +334,7 @@ class Tracer:
         for sink in self._sinks:
             try:
                 sink.emit(record)
-            except Exception:  # noqa: BLE001 - 单 sink 失败不影响其它/主流程
+            except Exception:
                 logger.warning("trace sink 写入失败: %s", type(sink).__name__, exc_info=True)
 
 
@@ -412,8 +412,8 @@ def _children_by(spans: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]
     children: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for s in spans:
         children[str(s.get("parent_span_id") or "")].append(s)
-    for key in children:
-        children[key].sort(key=lambda s: str(s.get("start") or ""))
+    for values in children.values():
+        values.sort(key=lambda s: str(s.get("start") or ""))
     return children
 
 
@@ -442,7 +442,6 @@ def render_waterfall(spans: list[dict[str, Any]]) -> str:
         s for s in spans if not s.get("parent_span_id")
     ]
     total_ms = max(_duration_ms(s.get("end"), s.get("start")) for s in spans) or 1.0
-    bar_width = int(round(total_ms / total_ms))  # 基准：根=40 格，留给后续按比例扩展
     # 实际每行 bar 长度按自身占比 × 40 格
     max_bars = 40
 
@@ -464,14 +463,13 @@ def render_waterfall(spans: list[dict[str, Any]]) -> str:
     def visit(s: dict[str, Any], depth: int, is_last: bool, prefix: str) -> None:
         dms = _duration_ms(s.get("end"), s.get("start"))
         frac = dms / total_ms if total_ms else 0.0
-        bars = "█" * max(0, int(round(frac * max_bars)))
+        bars = "█" * max(0, round(frac * max_bars))
         label = str(s.get("name") or s.get("kind") or "span")
         st = s.get("status") or SUCCESS
         model = f" {s.get('model')}" if s.get("model") else ""
         ts = token_txt(s)
         cost = fmt_cost(s)
         connector = "└─ " if is_last else "├─ "
-        indent = "  " * depth
         lines.append(
             f"{prefix}{connector}{label}{model}"
             f"{ts}{cost}  {dms/1000:.1f}s {bars}"
@@ -493,13 +491,13 @@ TraceKindValues = (KIND_TRACE, KIND_PHASE, KIND_TOOL, KIND_SUBAGENT, KIND_LLM)
 __all__ = [
     "CANCELLED",
     "ERROR",
-    "JsonlSink",
     "KIND_LLM",
     "KIND_PHASE",
     "KIND_SUBAGENT",
     "KIND_TOOL",
     "KIND_TRACE",
     "SUCCESS",
+    "JsonlSink",
     "SpanSink",
     "TraceKindValues",
     "Tracer",

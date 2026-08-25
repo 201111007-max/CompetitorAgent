@@ -415,7 +415,7 @@ class CompetitorAnalysisAPI:
 
         try:
             raw = self._discoverer.candidates(scope or "")
-        except Exception:  # noqa: BLE001 — 枚举失败可回灌自恢复
+        except Exception:  # 枚举失败可回灌自恢复
             logger.warning("候选竞品枚举失败: scope=%r", scope, exc_info=True)
             return "候选竞品枚举失败（联网搜索不可用），请改用已注册竞品或缩小 scope。"
         names = [str(c.get("name")) for c in raw if c.get("name")]

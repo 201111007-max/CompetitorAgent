@@ -139,7 +139,7 @@ class DelegateRunner:
                     trace_id=rec.trace_id,
                     parent_span_id=rec.parent_span_id,
                     input_brief=task,
-                ) as sub_span:
+                ) as _:
                     result = runtime.run(task)
             rec.result = getattr(result, "answer", "") or str(result)
             rec.status = "done"
