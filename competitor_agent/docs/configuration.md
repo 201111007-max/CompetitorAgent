@@ -23,10 +23,11 @@ budget:
   token_high_water_mark: 120000  # 上下文 token 高水位，触发压缩
   token_compression_target: 80000 # 压缩后目标 token
 
-# ===== 执行调度 =====
+# ===== 执行调度（设计文档 62 §3.8：硬上限，不再有 mode 决策开关）=====
+# 并行与否归 Lead 决策（delegate 的 parallel+reason），代码只守硬上限。
 execution:
-  mode: "single"              # single 串行（默认，兼容）
-  max_parallel_subagents: 4   # 并行子代理上限
+  max_parallel_subagents: 4   # 并行子代理硬上限（= DelegateRunner 默认并发）
+  max_discover_candidates: 10 # 候选竞品数硬上限（delegate 工具内收敛，注册维度不裁）
 
 # ===== 维度清单 =====
 dimensions:
@@ -75,12 +76,23 @@ freshness:
   dimension_ttl_days: {pricing: 7, performance: 14, feature: 30, ecosystem: 30, sentiment: 7, roadmap: 14}
   refresh_check_enabled: true
 
-# ===== 多 Agent LLM 主导编排（设计文档 49）=====
-# analyze() 主路径 = Lead ReAct 编排：make_plan → delegate 维度子 Agent → 复核工具 → Final Answer。
+# ===== 多 Agent LLM 主导编排（设计文档 49/62）=====
+# run() 统一入口 = Lead ReAct 编排：make_plan → delegate 维度/候选子 Agent → 复核工具
+# →（DISCOVERY 可 web_search_candidates 枚举 / 多竞品可 aggregate_report 聚合）→ Final Answer。
 subagents:
   enabled: true             # 主路径开关（Lead 编排委派子 Agent）
-  max_concurrent: 3         # delegate 一次最大并发子 Agent 数（对齐 budget.max_parallel_subagents）
+  max_concurrent: 3         # delegate 一次最大并发子 Agent 数（对齐 execution.max_parallel_subagents）
   timeout_seconds: 60       # 子 Agent 单次执行超时
+
+# ===== ReAct 循环压缩（设计文档 56 M1 Q4）=====
+agent:
+  max_history_steps: 8      # 子 Agent 工具步超过后折叠旧步为摘要（默认 8，行为不变）
+
+# ===== Lead 编排（设计文档 62 §3.8）=====
+lead:
+  max_orchestration_steps: 24  # Lead 编排步数硬上限（调度场景可容纳，默认 24）
+  max_history_steps: 12        # Lead 上下文压缩保留步数（透传 ReactAgent._compress_history）
+
 tools:
   validate_facts: true      # 复核工具（事实/数值冲突核验）注册
   detect_conflict: true     # 跨维度冲突检测工具注册

@@ -44,6 +44,21 @@ class CompetitorAnalysisAPI:
 
 ### 方法
 
+#### `run(task: str, *, session_id: str | None = None) -> CompetitorReport | ComparisonReport`
+
+**统一入口（设计文档 62 §3.5）**：registry（单竞品）/ compare（对比）/ discovery（普查）
+全 resolution 同走一条单 Lead loop，无代码分派 if-else；组装按 `plan.resolution` 统一分型
+（registry → `CompetitorReport`，compare/discovery → `ComparisonReport` 矩阵 + 市场格局核心结论段）。
+Lead 回合内自调通用工具编排（`make_plan` → `delegate` 委派维度/候选子 Agent → 可选
+`web_search_candidates` 枚举候选 / `aggregate_report` 聚合）。
+
+```python
+api = CompetitorAnalysisAPI(llm=LLMClient(...), use_llm=True)  # 需配置 API Key
+r1 = api.run("分析 Cursor")                          # → CompetitorReport
+r2 = api.run("对比 Cursor 和 Windsurf")              # → ComparisonReport
+r3 = api.run("帮我找市场上所有 coding agent")        # → ComparisonReport
+```
+
 #### `analyze(task: str, conversation_history: list[ChatMessage] | None = None) -> CompetitorReport`
 
 执行一次竞品分析（同步）。返回含 Markdown 报告的 `CompetitorReport`。
@@ -95,15 +110,22 @@ report = api.resume("sess_abc123")
 
 查询历史分析报告。`competitor` 可选，留空返回全部。
 
-#### `compare(a: str, b: str | None = None) -> ComparisonReport`
+#### `compare(*competitors: str) -> ComparisonReport`
 
-竞品对比：传入两个竞品名（或一个"对比 A 和 B"任务）→ 对比报告。
-内部复用任务解析的对比拆分，逐个 `analyze` 后拼装 `ComparisonReport`（含 Markdown 对比表）。
+竞品对比（**deprecated，历史兼容**，设计文档 62 §3.5）：`= run(task)` 的 COMPARE 语义路径，
+发出废弃告警。请改用统一入口 `run("对比 A 和 B")`。单个参数支持"对比 A 和 B"/"A vs B"
+任务文本解析；多参数逐个作为竞品名处理。
 
 ```python
-result = api.compare("Cursor", "Windsurf")
+result = api.run("对比 Cursor 和 Windsurf")          # 推荐
+result = api.compare("Cursor", "Windsurf")            # deprecated → 内部转 run()
 print(result.markdown_report)
 ```
+
+#### `discover(task: str) -> ComparisonReport`
+
+市场普查（**deprecated，历史兼容**，设计文档 62 §3.5）：`= run(task)` 的 DISCOVERY 语义路径，
+发出废弃告警。请改用统一入口 `run("帮我找市场上所有 …")`。
 
 #### `continue_analysis(session_id: str) -> CompetitorReport`
 

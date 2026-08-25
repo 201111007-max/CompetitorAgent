@@ -63,12 +63,11 @@ python -m competitor_agent.mcp_server.server --transport stdio
 
 ## 架构要点
 
-- **主路径仅 LLM**：Lead Agent 用 ReAct 编排的 LLM 主导多 Agent 流程——`make_plan` 规划 →
-  `delegate` 批量并发委派 6 维度独立 LLM 子 Agent → 结果回填 → Final Answer 组 REPORT_SCHEMA。
-- **保证型逻辑代码兜底**：url_guard / 注入防护 / 预算 / 取消 / checkpoint / 聚合渲染 / 评测不进 LLM 决策。
+- **主路径仅 LLM**：`run()` 统一入口——registry/compare/discovery 全 resolution 同走一条 Lead Agent 单 loop，LLM 回合内自调通用工具编排（`make_plan` 规划 → `delegate` 批量并发委派维度/候选子 Agent → 可选 `web_search_candidates` 枚举候选 / `aggregate_report` 聚合 → Final Answer 组 REPORT_SCHEMA/dimensions[]），组装按 `plan.resolution` 统一分型（CompetitorReport / ComparisonReport 矩阵 + 结论段）。
+- **保证型逻辑代码兜底**：url_guard / 注入防护 / 预算 / 取消 / checkpoint / 聚合渲染 / 并发与候选数硬上限 / 评测不进 LLM 决策。
 - **新鲜度与时间线**：维度 TTL / 过期重爬 / 跨分析 diff → 时间线事件。
 - **结构化导出 + 定时跑 + 异动告警**：竞品/对比矩阵 JSON + `api.run_scheduled` + 告警 sink。
-- **评测体系**：benchmark / ablation / failure 类型统计（HARNESS 0.7.0）。
+- **评测体系**：benchmark / ablation / failure 类型统计（HARNESS 0.11.0）。
 
 ## 文档
 
