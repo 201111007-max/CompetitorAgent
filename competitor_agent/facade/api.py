@@ -905,10 +905,22 @@ class CompetitorAnalysisAPI:
         return self._react_competitor(task)
 
     def _react_memory_context(self, task: str) -> str:
-        """记忆召回（设计文档 35 recent_context）：失败静默降级。"""
+        """Lead 记忆召回（设计文档 35 §3.2 + 62 §3.9）：失败静默降级。
+
+        单竞品（registry）按竞品名召回既有经验；无具体竞品（compare/discovery
+        编排）走品类级召回 ``recent_context(competitor="", query=task)``——
+        跨竞品按任务语义召回最近会话/摘要，供 Lead 聚合前参考。
+        """
         if self._memory is None:
             return ""
-        return self._memory_ctx_for(self._react_competitor(task).name, task)
+        competitor = self._react_competitor(task).name
+        if competitor and competitor != "unknown":
+            return self._memory_ctx_for(competitor, task)
+        try:
+            return "\n".join(self._memory.recent_context("", top_k=3, query=task))
+        except Exception:
+            logger.warning("ReAct 品类级记忆召回失败", exc_info=True)
+            return ""
 
     def _memory_ctx_for(self, competitor: str, task: str) -> str:
         """按已知竞品名做记忆召回（子 Agent 复用，避免逐子 Agent 重复解析任务）。"""

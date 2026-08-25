@@ -176,6 +176,24 @@ class TestSessionArchiveCompression:
         arch = SessionArchive(tmp_path / "mem")
         assert arch.recent_context("nobody") == []
 
+    def test_recent_context_category_recall_across_competitors(self, tmp_path):
+        """品类级召回（设计文档 62 §3.9）：competitor=\"\" 跨竞品聚合，按任务语义排序。"""
+        arch = SessionArchive(tmp_path / "mem")
+        arch.archive(_session("s1", competitor="cursor", dimensions=[_dim("pricing", "Cursor Pro is $20 per month", 0.9)]))
+        arch.archive(_session("s2", competitor="windsurf", dimensions=[_dim("pricing", "Windsurf is $15 per month", 0.9)]))
+        arch.archive(_session("s3", competitor="cline", dimensions=[_dim("feature", "Cline runs in terminal", 0.9)]))
+        out = arch.recent_context("", top_k=5, query="coding agent pricing")
+        joined = "\n\n".join(out)
+        assert "Cursor Pro is $20" in joined, "聚合应含 cursor 竞品结论"
+        assert "Windsurf is $15" in joined, "聚合应含 windsurf 竞品结论"
+        # 任务语义排序：query 命中 pricing 结论 → 两条 pricing 排前，无关 feature 靠后
+        assert "Cline runs in terminal" not in out[0] and "Cline runs in terminal" not in out[1]
+        assert len(out) == 3
+
+    def test_recent_context_category_empty_when_no_sessions(self, tmp_path):
+        arch = SessionArchive(tmp_path / "mem")
+        assert arch.recent_context("", top_k=5, query="coding agent") == []
+
 
 # ── 4. Skill 语义化（设计文档 35 §3.3） ───────────────────────────────
 

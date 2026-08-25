@@ -204,6 +204,48 @@ class TestCandidatePromptAndDelegate:
             runner.shutdown()
 
 
+class _FakeMemory:
+    """最小记忆替身：记录 recent_context 调用（品类级 competitor=\"\" vs 单竞品）。"""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, int, str]] = []
+
+    def recent_context(self, competitor: str, top_k: int = 5, query: str = "") -> list[str]:
+        self.calls.append((competitor, top_k, query))
+        return ["品类经验：pricing 建议用官网源"]
+
+
+class TestM4MemoryCompressionWiring:
+    """设计文档 62 §6 M4：Lead 压缩/记忆装配（lead.max_history_steps 透传 + 品类级召回）。"""
+
+    def test_lead_loop_wires_lead_max_history_steps_and_pinned(self, mock_llm) -> None:
+        api = _api(mock_llm, web_tool=_two_candidate_web_tool)
+        loop = api._react_loop("对比 Cursor 和 Windsurf", None)
+        try:
+            assert loop._max_history_steps == api._config.lead.max_history_steps  # 压缩保留步数透传
+            assert loop._pinned_facts == []  # 已核验事实 pinned 收集装配
+            assert loop._on_step is not None
+            assert loop._memory_context_fn.__self__ is api  # 记忆召回装配到本 api
+        finally:
+            loop._delegate_runner.shutdown()
+
+    def test_lead_category_recall_for_discovery(self, mock_llm) -> None:
+        """无具体竞品（discovery 编排）：Lead 走品类级 recent_context(competitor=\"\", query=task)。"""
+        mem = _FakeMemory()
+        api = _api(mock_llm, memory=mem)
+        ctx = api._react_memory_context("帮我找市场上所有 coding agent")
+        assert ctx == "品类经验：pricing 建议用官网源"
+        assert mem.calls and mem.calls[0][0] == ""  # 品类级召回
+        assert "coding agent" in mem.calls[0][2]
+
+    def test_lead_per_competitor_recall_for_registry(self, mock_llm) -> None:
+        """单竞品（registry）：Lead 按竞品名召回既有经验（行为不变）。"""
+        mem = _FakeMemory()
+        api = _api(mock_llm, memory=mem)
+        api._react_memory_context("分析 Cursor")
+        assert mem.calls and mem.calls[0][0] == "cursor"
+
+
 class _FakeRegistry:
     """最小 registry 替身：维度可委派 + competitor 命名空间兜底。"""
 
