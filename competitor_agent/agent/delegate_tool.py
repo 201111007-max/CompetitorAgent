@@ -12,6 +12,7 @@ fire-and-poll 状态机。子 Agent 取消/超时逐维度标注，不影响其�
 """
 from __future__ import annotations
 
+import json
 import threading
 import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -182,12 +183,18 @@ class DelegateRunner:
 def make_delegate_tool(
     runner: DelegateRunner,
     registry: Any | None = None,
+    *,
+    collector: dict[str, dict[str, Any]] | None = None,
+    max_candidates: int | None = None,
 ) -> Callable[..., str]:
     """构造 delegate 工具函数（Lead 工具面注册用）。
 
     - ``registry``：SubagentRegistry（校验维度是否可委派；None 时不过滤）；
-    - 工具签名 ``delegate(task, dimensions)``：批量 spawn 全部指定维度子 Agent
-      （后台并发），轮询全部 terminal 后合并各结果（状态 + 截断正文）回填；
+    - 工具签名 ``delegate(task, dimensions, parallel, reason)``：批量 spawn 全部指定
+      维度/候选子 Agent（后台并发），轮询全部 terminal 后合并各结果（状态 + 截断正文）回填；
+    - ``collector``：可选结构化结果收集器（候选子 Agent REPORT_SCHEMA JSON 按名落盘，
+      供 comparison 组装器读取；维度子 Agent 单维度结果不收集）；
+    - ``max_candidates``：候选竞品数硬上限（设计文档 62 §3.2，候选超限只保留前 N）；
     - 设计文档 54：后台线程里先领取 dispatch 压入的 (trace_id, tool span) 上下文，
       包一层 ``delegate`` phase span，并让同一批子 Agent 共享该 span 作父节点。
     """
@@ -220,6 +227,7 @@ def make_delegate_tool(
                 rec = runner.await_terminal(eid)
                 if rec is not None:
                     merged.append(_render_record(rec))
+                    _collect_candidate(collector, rec)
                     runner.cleanup(eid)
         else:
             for dim in dims:
@@ -230,6 +238,7 @@ def make_delegate_tool(
                 rec = runner.await_terminal(eid)
                 if rec is not None:
                     merged.append(_render_record(rec))
+                    _collect_candidate(collector, rec)
                     runner.cleanup(eid)
         return "\n\n".join(merged) if merged else "delegate 失败：全部子 Agent 无结果。"
 
@@ -255,22 +264,38 @@ def make_delegate_tool(
                 f"delegate 失败：未指定可委派目标（可用：{available}；或传候选竞品名）。"
                 "请给 dimensions 传数组，如 {\"dimensions\": [\"pricing\",\"feature\"]}。"
             )
+        # 候选竞品数硬上限（设计文档 62 §3.2/§3.8）：注册维度不裁剪，仅收敛候选目标
+        candidates = [d for d in dims if not _is_registered_dimension(registry, d)]
+        capped_note = ""
+        if max_candidates is not None and len(candidates) > max_candidates:
+            keep = set(candidates[:max_candidates])
+            dims = [
+                d for d in dims
+                if d in keep or _is_registered_dimension(registry, d)
+            ]
+            capped_note = (
+                f"\n（delegate 候选数超过硬上限 {max_candidates}，"
+                f"仅保留前 {max_candidates} 个候选，注册维度不受影响）"
+            )
         if reason:
             logger.info("delegate 调度意图（Lead）: parallel=%s reason=%s", parallel, reason)
         _brief = f"dimensions={','.join(dims)}; parallel={parallel}" + (f"; reason={reason}" if reason else "")
         tracer = getattr(runner, "_tracer", None)
         if tracer is None:
-            return _delegate_spawn_and_merge(dims, task, None, None, parallel)
-        trace_id, parent = tracer.pop_tool_context()
-        if trace_id is None:
-            # 无活动 trace：仍正常委派，只是不产生 subagent span（零埋点降级）
-            return _delegate_spawn_and_merge(dims, task, None, None, parallel)
-        with tracer.span(
-            "delegate", kind="phase", trace_id=trace_id, parent_span_id=parent,
-            input_brief=_brief,
-        ) as dspan:
-            parent_span = dspan["span_id"] if dspan is not None else parent
-            return _delegate_spawn_and_merge(dims, task, trace_id, parent_span, parallel)
+            merged = _delegate_spawn_and_merge(dims, task, None, None, parallel)
+        else:
+            trace_id, parent = tracer.pop_tool_context()
+            if trace_id is None:
+                # 无活动 trace：仍正常委派，只是不产生 subagent span（零埋点降级）
+                merged = _delegate_spawn_and_merge(dims, task, None, None, parallel)
+            else:
+                with tracer.span(
+                    "delegate", kind="phase", trace_id=trace_id, parent_span_id=parent,
+                    input_brief=_brief,
+                ) as dspan:
+                    parent_span = dspan["span_id"] if dspan is not None else parent
+                    merged = _delegate_spawn_and_merge(dims, task, trace_id, parent_span, parallel)
+        return merged + capped_note
 
     return delegate
 
@@ -289,3 +314,31 @@ def _resolvable(registry: Any, name: str) -> bool:
     if resolve is not None:
         return resolve(name) is not None
     return registry.get(name) is not None
+
+
+def _is_registered_dimension(registry: Any, name: str) -> bool:
+    """委派目标是注册维度（非候选竞品）判定：``get`` 命中且不是通用 competitor 命名空间。
+
+    候选竞品（未注册维度）走 ``resolve`` 落到 competitor 配置——按 registry 唯一键源区分，
+    避免维度/候选混用时误裁候选（设计文档 62 §3.2 风险 4）。
+    """
+    cfg = getattr(registry, "get", lambda n: None)(name)
+    return cfg is not None and getattr(cfg, "name", "") != "competitor"
+
+
+def _collect_candidate(
+    collector: dict[str, dict[str, Any]] | None, rec: _BackgroundRecord
+) -> None:
+    """把候选子 Agent 的标准多维度结果收集到 collector（供 comparison 组装器读取）。
+
+    只收 REPORT_SCHEMA 形态（``dimensions`` 为数组）；维度子 Agent 的单维度结果
+    （无 ``dimensions`` 键）不收集。解析失败静默跳过（组装器有矩阵兜底）。
+    """
+    if collector is None or rec.status != "done":
+        return
+    try:
+        payload = json.loads(rec.result or "")
+    except (json.JSONDecodeError, TypeError):
+        return
+    if isinstance(payload, dict) and isinstance(payload.get("dimensions"), list):
+        collector[rec.name] = payload

@@ -1,8 +1,10 @@
-"""§13 增强：compare 多竞品并行分析（设计文档 62 §3.8：无 mode 开关，默认硬上限并行）
+"""§13 增强：compare 多竞品（设计文档 62 §3.5：单 Lead loop，并行归 Lead delegate 决策）
 
-N 向对比用 ThreadPoolExecutor 并行分析多个竞品（硬上限 max_parallel_subagents）：
-- 结果按输入顺序稳定返回，语义一致（矩阵/竞品顺序相同）
-- 发出 compare.phase_start 并行埋点
+compare 不再有代码并行的 ThreadPoolExecutor 相位——N 向对比同走单 Lead loop，
+并行由 Lead 的 delegate(parallel=true) 表达（DelegateRunner 后台并发，代码只守
+execution.max_parallel_subagents 硬上限）。断言迁移到新装配：
+- 结果按输入顺序稳定返回（矩阵/竞品顺序相同）
+- 单 Lead loop 信号（Lead 编排 phase_start + 完成 report 事件）
 """
 from competitor_agent.config.loader import AppConfig, ExecutionConfig
 from competitor_agent.domain_types.report import ComparisonReport
@@ -60,9 +62,13 @@ class TestCompareParallel:
         ]
         assert _strip_ts(r_serial.markdown_report) == _strip_ts(r_parallel.markdown_report)
 
-    def test_parallel_compare_emits_parallel_phase_event(self, mock_llm):
+    def test_compare_emits_single_lead_loop_signal(self, mock_llm):
+        """设计文档 62 §3.5：compare 走单 Lead loop（parallel 由 Lead delegate 决策，不再有代码并行相位）。"""
         events = []
         api = _parallel_api(llm=mock_llm, event_sink=events.append)
-        api.compare("Cursor", "Windsurf")
-        msgs = [e.message for e in events if e.event == "phase_start"]
-        assert any("并行" in m for m in msgs)
+        result = api.compare("Cursor", "Windsurf")
+        assert isinstance(result, ComparisonReport)
+        assert [r.competitor.name for r in result.reports] == ["cursor", "windsurf"]
+        # 单 Lead loop 信号：编排 phase_start + 完成 report 事件
+        assert any("Lead 编排" in (e.message or "") for e in events if e.event == "phase_start")
+        assert any(e.event == "report" for e in events)

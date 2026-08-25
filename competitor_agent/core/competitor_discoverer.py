@@ -66,6 +66,14 @@ class CompetitorDiscoverer:
                     on_candidate(name)
         return self._to_competitors(candidates)
 
+    def candidates(self, task: str) -> list[dict[str, Any]]:
+        """候选竞品清单（名称 + official_links）供 Lead DISCOVERY 编排工具读取（设计文档 62 §3.2）。
+
+        与 ``discover`` 同源（``_search``），但不触发 on_candidate 事件、不转 Competitor 对象，
+        直接返回原始候选 JSON（Lead 回合内可观测）。
+        """
+        return self._search(task)
+
     def _search(self, task: str) -> list[dict[str, Any]]:
         """候选枚举：注册表命中 → web_tool 联网搜索（无内置兜底，设计文档 47）。"""
         # 1) 注册表命中：任务文本直接含已知竞品（数据查询，不算规则解析）

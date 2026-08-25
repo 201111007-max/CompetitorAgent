@@ -22,15 +22,28 @@ DIMENSIONS: list[str] = [
 _DIM_ENUM: list[str] = list(DIMENSIONS)
 
 # 设计文档 44：规划 LLM 化的结构化输出约束（从 core/strategic_loop.PLAN_SCHEMA 迁入）
+# 设计文档 62 §3.1：competitor 可空，新增 competitors/resolution/scheduling——
+# 单竞品（registry）用 competitor；多竞品（compare/discovery）用 competitors；
+# resolution 是编排起点标注（querySource 语义），scheduling 是 Lead 的并行意图提示。
+# competitor XOR competitors 由 make_plan 工具手动校验（schema 保持宽松，缺省即合法）。
 PLAN_SCHEMA: dict[str, Any] = {
     "type": "object",
-    "required": ["competitor"],
+    "required": [],
     "properties": {
         "competitor": {"type": "string"},
+        "competitors": {"type": "array", "items": {"type": "string"}},
         "dimensions": {"type": "array", "items": {"type": "string", "enum": _DIM_ENUM}},
         "priorities": {"type": "object"},
         "budget": {"type": "object"},
         "custom_sources": {"type": "object"},
+        "resolution": {"type": "string", "enum": ["registry", "discovery", "compare"]},
+        "scheduling": {
+            "type": ["object", "null"],
+            "properties": {
+                "parallel": {"type": "boolean"},
+                "reason": {"type": "string"},
+            },
+        },
     },
 }
 
