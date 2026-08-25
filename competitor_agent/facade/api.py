@@ -659,6 +659,10 @@ class CompetitorAnalysisAPI:
             pinned_facts.extend(extract_verified_facts(rec))
 
         def _subagent_loop(name: str, sub_task: str) -> ReactLoop:
+            # 记忆/RAG 绑定竞品（设计文档 62 §3.9）：维度子 Agent → Lead 竞品；
+            # 候选竞品名 → 候选自身（按竞品名召回复用单竞品记忆，不误绑 Lead 竞品）
+            is_dimension = get_subagent_registry().get(name) is not None
+            bind_competitor = lead_competitor.name if is_dimension else name
             # 子 Agent 步数由其 max_steps 兜底；diminishing_threshold=0 关闭"边际递减"
             # 启发（ReAct 恒传 delta_tokens=0，否则第 3 步后必然误判预算耗尽）
             budget = IterationBudget(
@@ -670,15 +674,15 @@ class CompetitorAnalysisAPI:
                 name,
                 self._llm or LLMClient(tracer=self._tracer),
                 config=self._config,
-                web_extract=self._web_extract_for(lead_competitor.name, name),
+                web_extract=self._web_extract_for(bind_competitor, name),
                 extra_tools={
                     # 设计文档 56 M1①：子 Agent kb_recall 按（竞品×维度）绑定
-                    "kb_recall": self._build_kb_recall(lambda: lead_competitor.name, name),
+                    "kb_recall": self._build_kb_recall(lambda: bind_competitor, name),
                 },
                 session_id=session_id,
                 budget=budget,
-                memory_context_fn=lambda t: self._memory_ctx_for(lead_competitor.name, t),
-                rag_fn=lambda t: self._rag_ctx_for(lead_competitor.name, t),
+                memory_context_fn=lambda t: self._memory_ctx_for(bind_competitor, t),
+                rag_fn=lambda t: self._rag_ctx_for(bind_competitor, t),
                 event_sink=self._event_sink,
                 obs_max_chars=self._config.collector.max_content_chars,
                 max_steps=6,

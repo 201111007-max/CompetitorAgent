@@ -55,7 +55,9 @@ STRATEGY_FIXTURE = "strategy_cases.json"
 # 0.7.0 → 0.8.0：协议对照实验（native 默认，门禁对默认 native 重定，设计文档 53）。
 # 0.8.0 → 0.9.0：删除文本 ReAct 协议，只保留 function calling（设计文档 60）——
 #   mock 单形态、无 --protocol/对照表，门禁对唯一协议重定。
-HARNESS_VERSION = "0.9.0"
+# 0.9.0 → 0.10.0：设计文档 62 全链路编排收敛——候选子 Agent 注册（competitor 命名空间）、
+#   delegate 候选委派、aggregate_report 聚合工具、统一 run() 入口、删 execution.mode。
+HARNESS_VERSION = "0.10.0"
 
 # 门禁阈值单一来源（设计文档 55 M1）：--gate CLI、test_benchmark_integration、
 # test_behavior_eval 全部引用本组常量，不新造第二份数值。
