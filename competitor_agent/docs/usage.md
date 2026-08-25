@@ -139,9 +139,12 @@ from competitor_agent import CompetitorAnalysisAPI
 
 api = CompetitorAnalysisAPI(llm=LLMClient(...), use_llm=True)
 
-# 对比（可传两个竞品，或一个"对比 A 和 B"任务）
-result = api.compare("Cursor", "Windsurf")
-print(result.markdown_report)
+# 统一入口 run()（设计文档 62）：registry/compare/discovery 全走同一入口
+r_single = api.run("分析 Cursor")                    # → CompetitorReport
+r_compare = api.run("对比 Cursor 和 Windsurf")        # → ComparisonReport（矩阵 + 结论段）
+r_market = api.run("帮我找市场上所有 coding agent")    # → ComparisonReport（discovery 需 web_tool）
+print(r_compare.markdown_report)
+# 兼容：api.compare("Cursor", "Windsurf") / api.discover(task)（deprecated 告警，内部转 run()）
 
 # 多轮追问（conversation_history 支持，第二轮相对指代可从历史承接竞品）
 report1 = api.analyze("Cursor")
@@ -168,8 +171,8 @@ report = api.resume("sess_abc123")
 
 | 操作 | 命令/接口 |
 |------|----------|
-| 分析 | `analyze(task)` / CLI `analyze` |
-| 对比 | `compare(a, b)` / CLI `analyze "对比 A 和 B"` / `/compare` |
+| 分析/对比/普查 | `run(task)` 统一入口（registry→CompetitorReport，compare/discovery→ComparisonReport） |
+| 兼容入口 | `analyze(task)` / `compare(*names)` / `discover(task)`（deprecated 告警，内部转 run()） |
 | 多轮追问 | `analyze(task, conversation_history=[...])` |
 | 流式分析 | `analyze_stream(task)` |
 | 取消 | `cancel(session_id)` |
