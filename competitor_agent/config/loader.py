@@ -28,10 +28,9 @@ class BudgetConfig:
 
 @dataclass
 class ExecutionConfig:
-    """执行调度配置（并行缺口分析）"""
+    """执行调度硬上限（设计文档 62 §3.8）：不再有 mode 决策开关——并行与否归 Lead（delegate.parallel）"""
 
-    mode: str = "single"  # single 串行（默认，兼容）；parallel 并行执行独立缺口
-    max_parallel_subagents: int = 4  # 并行子代理上限
+    max_parallel_subagents: int = 4  # 并行子代理硬上限（DelegateRunner 默认并发）
 
 
 @dataclass
@@ -141,10 +140,12 @@ class SecurityConfig:
 
 @dataclass
 class SubagentsConfig:
-    """维度子 Agent（设计文档 49 §3.2/§4.1）：analyze() 主路径 = Lead ReAct 编排 + delegate 并发"""
+    """维度子 Agent（设计文档 49 §3.2/§4.1）：analyze() 主路径 = Lead ReAct 编排 + delegate 并发
+
+    delegate 并发硬上限取 execution.max_parallel_subagents（设计文档 62 §3.8），此处不再重复。
+    """
 
     enabled: bool = True  # 主路径开关（Lead 编排委派子 Agent）
-    max_concurrent: int = 3  # delegate 一次最大并发子 Agent 数（对齐 budget.max_parallel_subagents）
     timeout_seconds: float = 60  # 子 Agent 单次执行超时
 
 
@@ -162,7 +163,15 @@ class ToolsConfig:
 class AgentConfig:
     """ReAct 循环配置（设计文档 56 M1 Q4）"""
 
-    max_history_steps: int = 8  # 工具步超过后折叠旧步为摘要（默认 8，行为不变）
+    max_history_steps: int = 8  # 子 Agent 工具步超过后折叠旧步为摘要（默认 8，行为不变）
+
+
+@dataclass
+class LeadConfig:
+    """Lead 编排配置（设计文档 62 §3.8）：编排步数与上下文压缩保留步数硬上限"""
+
+    max_orchestration_steps: int = 24  # Lead 编排步数硬上限（调度场景从单竞品约 12 上调）
+    max_history_steps: int = 12  # Lead 上下文压缩保留步数（透传 ReactAgent._compress_history）
 
 
 @dataclass
@@ -186,6 +195,7 @@ class AppConfig:
     subagents: SubagentsConfig = field(default_factory=SubagentsConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
     agent: AgentConfig = field(default_factory=AgentConfig)
+    lead: LeadConfig = field(default_factory=LeadConfig)
 
 
 def _build_section(cls: type[Any], data: dict[str, Any] | None) -> Any:
@@ -228,6 +238,7 @@ def load_config(path: str | os.PathLike | None = None) -> AppConfig:
         subagents=_build_section(SubagentsConfig, raw.get("subagents")),
         tools=_build_section(ToolsConfig, raw.get("tools")),
         agent=_build_section(AgentConfig, raw.get("agent")),
+        lead=_build_section(LeadConfig, raw.get("lead")),
     )
 
 

@@ -27,8 +27,9 @@ class TestCompareIntegration:
         assert md.startswith("# cursor vs windsurf vs copilot 竞品格局对比报告")
 
     def test_compare_combined_task(self, fake_extractor, mock_llm) -> None:
+        # 设计文档 62 §3.5：统一入口 run() 的 COMPARE 语义路由
         api = CompetitorAnalysisAPI(extractor=fake_extractor, llm=mock_llm, use_llm=True, max_iterations=10)
-        result = api.compare("对比 Cursor 和 Windsurf")
+        result = api.run("对比 Cursor 和 Windsurf")
         assert len(result.reports) == 2
 
 
@@ -45,7 +46,8 @@ class TestDiscoveryIntegration:
         api = CompetitorAnalysisAPI(
             extractor=fake_extractor, llm=mock_llm, use_llm=True, max_iterations=10, web_tool=web_tool
         )
-        result = api.discover("帮我寻找市场上所有 AI coding agent")
+        # 设计文档 62 §3.5：统一入口 run() 的 DISCOVERY 语义路由
+        result = api.run("帮我寻找市场上所有 AI coding agent")
 
         assert len(result.reports) >= 2
         names = [r.competitor.name for r in result.reports]
@@ -57,12 +59,12 @@ class TestDiscoveryIntegration:
         assert any(r.dimension_results for r in result.reports)
 
     def test_discovery_without_web_tool_raises(self, fake_extractor, mock_llm) -> None:
-        """设计文档 47 移除了内置兜底清单：无 web_tool 的 discover 应直接抛错。"""
+        """设计文档 47 移除了内置兜底清单：无 web_tool 的 run(DISCOVERY) 应直接抛错。"""
         api = CompetitorAnalysisAPI(
             extractor=fake_extractor, llm=mock_llm, use_llm=True, max_iterations=10
         )
         with pytest.raises(ValueError):
-            api.discover("市场上所有 AI coding agent")
+            api.run("市场上所有 AI coding agent")
 
     def test_full_analyze_discovery_task_via_cli_path(self, fake_extractor, capsys, mock_llm) -> None:
         """普查任务经 analyze 路由：真实产出矩阵而非 0 维度（问题 20 主诉求）。"""

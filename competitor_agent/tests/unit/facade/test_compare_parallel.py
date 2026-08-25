@@ -1,7 +1,7 @@
-"""§13 增强：compare 并行分析（execution.mode=parallel）
+"""§13 增强：compare 多竞品并行分析（设计文档 62 §3.8：无 mode 开关，默认硬上限并行）
 
-N 向对比在 parallel 模式下用 ThreadPoolExecutor 并行分析多个竞品：
-- 结果按输入顺序稳定返回，语义与串行一致（矩阵/竞品顺序相同）
+N 向对比用 ThreadPoolExecutor 并行分析多个竞品（硬上限 max_parallel_subagents）：
+- 结果按输入顺序稳定返回，语义一致（矩阵/竞品顺序相同）
 - 发出 compare.phase_start 并行埋点
 """
 from competitor_agent.config.loader import AppConfig, ExecutionConfig
@@ -25,7 +25,8 @@ class FakeExtractor:
 
 
 def _parallel_api(llm=None, **kwargs) -> CompetitorAnalysisAPI:
-    cfg = AppConfig(execution=ExecutionConfig(mode="parallel", max_parallel_subagents=4))
+    # 设计文档 62 §3.8：不再有 execution.mode 决策开关；compare 多竞品默认并行（硬上限）
+    cfg = AppConfig(execution=ExecutionConfig(max_parallel_subagents=4))
     kwargs.setdefault("extractor", FakeExtractor())
     kwargs.setdefault("llm", llm)
     kwargs.setdefault("use_llm", True)
@@ -49,11 +50,11 @@ class TestCompareParallel:
             assert n in md
 
     def test_parallel_compare_same_semantics_as_serial(self, mock_llm):
-        cfg_serial = AppConfig(execution=ExecutionConfig(mode="single", max_parallel_subagents=4))
-        serial = CompetitorAnalysisAPI(extractor=FakeExtractor(), llm=mock_llm, use_llm=True, config=cfg_serial)
-        parallel = _parallel_api(llm=mock_llm)
-        r_serial = serial.compare("Cursor", "Windsurf")
-        r_parallel = parallel.compare("Cursor", "Windsurf")
+        # 语义一致：多次 compare（默认并行）竞品顺序与矩阵内容稳定
+        a = _parallel_api(llm=mock_llm)
+        b = _parallel_api(llm=mock_llm)
+        r_serial = a.compare("Cursor", "Windsurf")
+        r_parallel = b.compare("Cursor", "Windsurf")
         assert [r.competitor.name for r in r_serial.reports] == [
             r.competitor.name for r in r_parallel.reports
         ]

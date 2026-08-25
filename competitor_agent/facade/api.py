@@ -64,7 +64,7 @@ from competitor_agent.core.report_exporter import (
     export_comparison_json,
     export_competitor_json,
 )
-from competitor_agent.core.task_parser import parse_task
+from competitor_agent.core.task_parser import ResolutionDecision, parse_task
 from competitor_agent.core.url_guard import URLError, guard_http_url
 from competitor_agent.domain_types.competitor import Competitor
 from competitor_agent.domain_types.enums import GapStatus, ResultStatus
@@ -636,10 +636,14 @@ class CompetitorAnalysisAPI:
             from competitor_agent.interfaces.exceptions import CompetitorAgentError
 
             raise CompetitorAgentError("subagents.enabled=false 时 analyze() 主路径不可用（设计文档 49）")
-        max_concurrent = self._config.subagents.max_concurrent
+        # 设计文档 62 §3.8：delegate 并发硬上限 = execution.max_parallel_subagents（不再自决）
+        max_concurrent = self._config.execution.max_parallel_subagents
         timeout_seconds = self._config.subagents.timeout_seconds
         lead_competitor = self._react_competitor(task)
-        max_history_steps = self._config.agent.max_history_steps
+        # 设计文档 62 §3.6/§3.9：子 Agent 沿用 react_agent 默认压缩保留步数；
+        # Lead 编排会话用独立 lead.max_history_steps（候选委派回填更长）
+        agent_max_history_steps = self._config.agent.max_history_steps
+        lead_max_history_steps = self._config.lead.max_history_steps
         # 设计文档 56 M1/M2：Lead 级共享状态——plan 懒绑定 cell + 已核验事实 pinned 清单
         plan_box: dict[str, ReactLoop | None] = {"loop": None}
         pinned_facts: list[str] = []
@@ -679,7 +683,7 @@ class CompetitorAnalysisAPI:
                 obs_max_chars=self._config.collector.max_content_chars,
                 max_steps=6,
                 tracer=self._tracer,  # 设计文档 54：子 Agent tool.call span
-                max_history_steps=max_history_steps,
+                max_history_steps=agent_max_history_steps,
                 max_parallel_tool_calls=self._max_parallel_tool_calls,
             )
 
@@ -721,8 +725,9 @@ class CompetitorAnalysisAPI:
             dispatcher=dispatcher,
             max_parallel_tool_calls=self._max_parallel_tool_calls,
         )
-        # Lead 步数上限：默认 ≈12；用户显式传 max_iterations 时以其为准（含 0，预算耗尽→
-        # partial，设计文档 14 承诺）；diminishing_threshold=0 关闭"边际递减"启发
+        # Lead 步数上限：默认 lead.max_orchestration_steps（设计文档 62 §3.8，编排场景可容纳）；
+        # 用户显式传 max_iterations 时以其为准（含 0，预算耗尽→partial，设计文档 14 承诺）；
+        # diminishing_threshold=0 关闭"边际递减"启发
         # （ReAct 恒传 delta_tokens=0，否则第 3 步后必然误判预算耗尽）
         lead_max = self._budget.max_iterations if self._budget.max_iterations is not None else _LEAD_MAX_STEPS
         budget = IterationBudget(
@@ -732,7 +737,7 @@ class CompetitorAnalysisAPI:
         )
         loop = ReactLoop(
             agent,
-            max_steps=_LEAD_MAX_STEPS,
+            max_steps=self._config.lead.max_orchestration_steps,
             event_sink=self._event_sink,
             session_id=session_id,
             budget=budget,
@@ -741,7 +746,7 @@ class CompetitorAnalysisAPI:
             obs_max_chars=self._config.collector.max_content_chars,
             system_prompt_override=build_lead_system_prompt(),
             plan_first=True,
-            max_history_steps=max_history_steps,
+            max_history_steps=lead_max_history_steps,
             pinned_facts=pinned_facts,
             on_step=_collect_pinned,
         )
@@ -1347,12 +1352,37 @@ class CompetitorAnalysisAPI:
                     return competitor.name
         return ""
 
+    def run(
+        self,
+        task: str,
+        *,
+        session_id: str | None = None,
+    ) -> CompetitorReport | ComparisonReport:
+        """统一入口（设计文档 62 §3.5/§3.7）：取代 web/CLI/MCP 各自的分派 if-else。
+
+        parse_task（LLM）→ 按语义路由：DISCOVERY→discover 语义、COMPARE→N 向对比、
+        其余→单竞品 analyze。resolution 作为上下文标注透传，入口不再写重复分派。
+        """
+        task = sanitize_task(task)
+        parsed = parse_task(task, llm=self._llm, use_llm=self._use_llm)
+        if parsed.resolution == ResolutionDecision.DISCOVERY:
+            return self._run_discovery(task, session_id=session_id)
+        if parsed.is_compare and len(parsed.competitors) >= 2:
+            return self._run_compare(list(parsed.competitors), session_id=session_id)
+        return self.analyze(task, session_id=session_id)
+
+    def discover(self, task: str) -> ComparisonReport:
+        """兼容保留（设计文档 62 §3.5）：= run(task) 的 DISCOVERY 语义路径（deprecated 告警）。"""
+        logger.warning("discover() 已废弃（历史兼容）：请改用 run() 统一入口")
+        return self._run_discovery(task)
+
     def compare(self, *competitors: str) -> ComparisonReport:
-        """N 向竞品对比（设计文档 20）：接受 ≥2 个竞品（或单个"对比 A 和 B"任务）。
+        """兼容保留（设计文档 62 §3.5）：= run(task) 的 COMPARE 语义路径（deprecated 告警）。
 
         兼容旧签名 compare(a, b=None)：单个参数会被解析（"对比 A 和 B" / "A vs B"）；
-        多个参数逐个作为竞品名处理。逐个 analyze 后聚合为品类格局对比报告。
+        多个参数逐个作为竞品名处理。
         """
+        logger.warning("compare() 已废弃（历史兼容）：请改用 run() 统一入口")
         names: list[str] = []
         if len(competitors) == 1:
             parsed = parse_task(competitors[0], llm=self._llm, use_llm=self._use_llm)
@@ -1363,10 +1393,16 @@ class CompetitorAnalysisAPI:
                 primary = parsed.primary_competitor
                 if primary and primary != "unknown" and primary not in names:
                     names.append(primary)
-
         if len(names) < 2:
             raise ValueError("对比需要两个及以上竞品（或用 /compare A 和 B）")
+        return self._run_compare(names)
 
+    def _run_compare(self, names: list[str], session_id: str | None = None) -> ComparisonReport:
+        """N 向对比执行（设计文档 62 §3.5）：多竞品并行分析（硬上限），按输入顺序稳定返回。
+
+        不再读取 execution.mode（设计文档 62 §3.8：并行与否归 Lead/delegate，代码只守
+        execution.max_parallel_subagents 硬上限）；单竞品失败不回滚整体。
+        """
         self._emit(
             ProgressEvent(
                 event="phase_start",
@@ -1374,43 +1410,39 @@ class CompetitorAnalysisAPI:
                 message=f"N 向对比 {len(names)} 个竞品: {', '.join(names)}",
             )
         )
-        if self._config.execution.mode == "parallel" and len(names) >= 2:
-            reports = self._compare_parallel(names)
+        workers = min(self._config.execution.max_parallel_subagents, len(names))
+        if len(names) <= 1 or workers <= 1:
+            reports = [self.analyze(name, session_id=session_id) for name in names]
         else:
-            reports = [self.analyze(name) for name in names]
+            self._emit(
+                ProgressEvent(
+                    event="phase_start",
+                    phase="compare",
+                    message=f"并行分析 {len(names)} 个竞品，max_workers={workers}",
+                )
+            )
+            done: list[CompetitorReport] = []
+            with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="cmp") as pool:
+                futures = {
+                    pool.submit(self.analyze, name, session_id=session_id): name
+                    for name in names
+                }
+                for future in as_completed(futures):
+                    try:
+                        done.append(future.result())
+                    except Exception:  # 单竞品失败不影响对比整体
+                        logger.exception("并行对比竞品 %s 失败", futures[future])
+            by_name = {r.competitor.name: r for r in done}
+            reports = [by_name[n] for n in names if n in by_name]
         comparison = self._builder.build_comparison(reports)
         self._export_comparison_json(comparison)
         return comparison
 
-    def _compare_parallel(self, names: list[str]) -> list[CompetitorReport]:
-        """execution.mode=parallel 时并行分析多个竞品（共享预算），按输入顺序稳定返回。
+    def _run_discovery(self, task: str, session_id: str | None = None) -> ComparisonReport:
+        """市场普查/发现执行（设计文档 62 §3.5）：联网枚举候选 → 逐个分析 → 品类格局报告。
 
-        单竞品失败不回滚整体：跳过该竞品，仍聚合其余报告。
-        """
-        workers = min(self._config.execution.max_parallel_subagents, len(names))
-        self._emit(
-            ProgressEvent(
-                event="phase_start",
-                phase="compare",
-                message=f"并行分析 {len(names)} 个竞品，max_workers={workers}",
-            )
-        )
-        done: list[CompetitorReport] = []
-        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="cmp") as pool:
-            futures = {pool.submit(self.analyze, name): name for name in names}
-            for future in as_completed(futures):
-                try:
-                    done.append(future.result())
-                except Exception:  # 单竞品失败不影响对比整体
-                    logger.exception("并行对比竞品 %s 失败", futures[future])
-        by_name = {r.competitor.name: r for r in done}
-        return [by_name[n] for n in names if n in by_name]
-
-    def discover(self, task: str) -> ComparisonReport:
-        """市场普查/发现（设计文档 20）：LLM 判定 DISCOVERY 后被调用。
-
-        CompetitorDiscoverer 联网枚举候选（名称 + 官网，无 Key 走内置兜底清单），
-        逐个 analyze 后合并为品类格局对比报告——根治"所有 X"拼成假竞品导致 0 维度。
+        候选枚举仍由 CompetitorDiscoverer（web_tool）负责；逐竞品分析走 Lead ReAct，
+        官方源经 _task_with_sources 注入（避免未知竞品 0 候选 → 0 维度）。
         """
         competitors = self._discoverer.discover(
             task,
@@ -1434,7 +1466,10 @@ class CompetitorAnalysisAPI:
                 payload={"candidates": names},
             )
         )
-        reports = [self.analyze(self._task_with_sources(c)) for c in competitors]
+        reports = [
+            self.analyze(self._task_with_sources(c), session_id=session_id)
+            for c in competitors
+        ]
         return self._builder.build_comparison(reports)
 
     @staticmethod
@@ -1464,7 +1499,7 @@ class CompetitorAnalysisAPI:
         """陈旧度检测 + 定时重爬（设计文档 26 §3.3）。
 
         扫描记忆/存档中每个竞品的最新会话，按维度 TTL 判定过期后重分析。
-        并发安全沿用 execution.mode（analyze 内部分派）；单竞品失败不回滚整体。
+        逐竞品分析走 run()/analyze（并行归 Lead delegate）；单竞品失败不回滚整体。
 
         Args:
             ttl_override: 覆盖默认维度 TTL（天），None 用 config.freshness。

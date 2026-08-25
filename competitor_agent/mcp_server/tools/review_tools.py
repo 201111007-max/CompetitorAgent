@@ -14,7 +14,8 @@ def analyze_competitor(task: str) -> str:
         from competitor_agent.llm.client import LLMClient
 
         api = CompetitorAnalysisAPI(llm=LLMClient(), use_llm=True, config=load_config())
-        report = api.analyze(task)
+        # 设计文档 62 §3.7：内部走统一入口 run()（单竞品/对比/普查由库内路由）
+        report = api.run(task)
         return report.markdown_report or "⚠ 报告为空"
     except Exception as e:  # noqa: BLE001
         logger.warning("analyze_competitor(%s) 异常: %s", task, e)

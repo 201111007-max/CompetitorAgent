@@ -1,7 +1,7 @@
 """facade/api.py 并行缺口执行（问题 10）集成测试
 
-execution.mode == parallel 时，单 Agent 路径（mode="single"）用 ThreadPoolExecutor
-并行执行独立缺口：
+设计文档 62 §3.8：analyze 并行由 Lead delegate 并发委派（无 execution.mode 决策开关）；
+execution 只保留 max_parallel_subagents 硬上限。
 - 结果按缺口原始顺序稳定合并
 - 共享预算原子扣减、不超发
 - 取消能提前终止（协作式取消贯通到并行子任务）
@@ -43,8 +43,9 @@ class FakeExtractor:
 
 
 def _parallel_api(llm=None, **kwargs) -> CompetitorAnalysisAPI:
+    # 设计文档 62 §3.8：analyze 并行由 Lead delegate 驱动；execution 只保留硬上限
     cfg = AppConfig(
-        execution=ExecutionConfig(mode="parallel", max_parallel_subagents=4),
+        execution=ExecutionConfig(max_parallel_subagents=4),
         collector=_OFFLINE_CFG,
     )
     kwargs.setdefault("extractor", FakeExtractor())
@@ -81,7 +82,7 @@ class TestParallelExecution:
 
     def test_parallel_same_results_as_serial(self, mock_llm):
         cfg_serial = AppConfig(
-            execution=ExecutionConfig(mode="single", max_parallel_subagents=4),
+            execution=ExecutionConfig(max_parallel_subagents=4),
             collector=_OFFLINE_CFG,
         )
         serial = CompetitorAnalysisAPI(extractor=FakeExtractor(), llm=mock_llm, use_llm=True, config=cfg_serial)

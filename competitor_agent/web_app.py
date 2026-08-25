@@ -35,7 +35,6 @@ from competitor_agent import CompetitorAnalysisAPI
 from competitor_agent.config.loader import AppConfig, load_config
 from competitor_agent.core.checkpoint import set_cancel
 from competitor_agent.core.report_archiver import report_file_path, save_report_markdown
-from competitor_agent.core.task_parser import ResolutionDecision, parse_task
 from competitor_agent.domain_types.events import ProgressEvent
 from competitor_agent.domain_types.report import (
     CancelledResult,
@@ -124,19 +123,16 @@ async def _event_generator(
         config=load_config(),
     )
 
-    # 启动后台分析任务（按 resolution 路由：DISCOVERY→发现对比 / COMPARE→N 向对比 / 其余→单竞品）
-    # 设计文档 47：路由也用真实 LLM 解析（无规则降级）；LLM 不可用 → 抛可读错误由外层转 SSE error
+    # 统一入口 run()（设计文档 62 §3.7）：解析/分派收敛到库内，HTTP 层不再写 DISCOVERY/COMPARE
+    # 分支；LLM 不可用 → 抛可读错误由外层转 SSE error。
     async def _run_analysis() -> CompetitorReport | ComparisonReport:
         loop = asyncio.get_running_loop()
         try:
-            parsed = parse_task(task, llm=llm_client, use_llm=True)
+            return await loop.run_in_executor(
+                None, lambda: api_with_sink.run(task, session_id=session_id)
+            )
         except Exception as exc:  # LLM 不可用 → 可读错误，Web 普查不崩溃
             raise RuntimeError(f"需要配置 LLM API Key 才能分析（LLM 不可用: {exc}）") from exc
-        if parsed.resolution == ResolutionDecision.DISCOVERY:
-            return await loop.run_in_executor(None, api_with_sink.discover, task)
-        if parsed.is_compare and len(parsed.competitors) >= 2:
-            return await loop.run_in_executor(None, api_with_sink.compare, *parsed.competitors)
-        return await loop.run_in_executor(None, api_with_sink.analyze, task, None, "team", session_id)
 
     analysis_task = asyncio.create_task(_run_analysis())
 
