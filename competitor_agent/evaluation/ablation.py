@@ -17,7 +17,7 @@ import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, cast
 
 from competitor_agent.config.loader import AppConfig, CollectorConfig
 from competitor_agent.evaluation.benchmark import (
@@ -152,7 +152,10 @@ class AblationRunner:
             bench = Benchmark(
                 fixtures_dir=self._dir,
                 llm_mode=self._llm_mode,
-                build_api=lambda case, _v=variant, _mem=memory, _st=store: self._make_api(_v, case, _mem, _st),
+                build_api=cast(
+                    Callable[[object], CompetitorAnalysisAPI],
+                    lambda case, _v=variant, _mem=memory, _st=store: self._make_api(_v, case, _mem, _st),
+                ),
             )
             results.append(AblationResult(variant=variant, report=bench.run()))
         return results

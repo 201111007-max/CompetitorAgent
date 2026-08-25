@@ -172,7 +172,7 @@ class VectorStore:
             from sentence_transformers import SentenceTransformer
 
             model = SentenceTransformer(self._model_name)
-            return model.encode  # type: ignore[return-value]
+            return model.encode
         except Exception as exc:  # noqa: BLE001 - 模型损坏等偶发 # pragma: no cover
             logger.warning("加载向量模型失败: %s", exc)
             return None

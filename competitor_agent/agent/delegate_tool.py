@@ -149,7 +149,7 @@ class DelegateRunner:
             rec.status = "error"
             rec.result = f"子 Agent 执行异常: {type(exc).__name__}: {exc}"
 
-    def await_terminal(self, execution_id: str, timeout_seconds: float | None = None) -> _BackgroundRecord:
+    def await_terminal(self, execution_id: str, timeout_seconds: float | None = None) -> _BackgroundRecord | None:
         """阻塞轮询直到子 Agent terminal（done/error/timed_out），返回记录。
 
         超时 → 标记 ``timed_out``（best-effort；后台 future 由其自身步数上限兜底结束，

@@ -140,6 +140,6 @@ exclude = ".*tests.*"
 follow_imports = "skip"
 
 [[tool.mypy.overrides]]
-module = ["yaml", "openai", "httpx", "bs4", "numpy.*", "numpy", "playwright.*", "playwright"]
+module = ["yaml", "openai", "httpx", "bs4", "numpy.*", "numpy", "playwright.*", "playwright", "langfuse"]
 follow_imports = "skip"
 ignore_missing_imports = true

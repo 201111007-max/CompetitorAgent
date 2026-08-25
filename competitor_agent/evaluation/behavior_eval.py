@@ -23,7 +23,7 @@ from competitor_agent.agent.react_loop import ReactLoop
 from competitor_agent.agent.tool_dispatcher import ToolDispatcher
 from competitor_agent.knowledge_base.competitor_store import CompetitorStore, TextChunk
 from competitor_agent.knowledge_base.retriever import Retriever
-from competitor_agent.llm.client import LLMClient
+from competitor_agent.llm.client import LLMClient, ToolCallReply
 
 # 设计文档 38 四类反馈关键词：ScriptedLLM 据此"读取" Observation 修正重试
 _ERROR_MARKERS = ("工具参数错误", "工具不可用", "工具参数解析失败", "工具执行异常")
@@ -144,7 +144,7 @@ class ScriptedLLM:
         return text
 
     @staticmethod
-    def _to_tool_reply(text: str):
+    def _to_tool_reply(text: str) -> ToolCallReply:
         """把脚本化文本映射为 native 等价物：兼容 plan-first（Action:/Args:）与 <action> 两种格式。"""
         from competitor_agent.llm.client import ToolCall, ToolCallReply
 

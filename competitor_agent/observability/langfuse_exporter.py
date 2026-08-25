@@ -56,7 +56,7 @@ class LangfuseExporter:
             logger.debug("Langfuse 未启用：三环境变量不齐全（host/public_key/secret_key）")
             return None
         try:
-            from langfuse import Langfuse  # type: ignore[import-untyped]
+            from langfuse import Langfuse
 
             # 三变量为构造必需；其余(host 已在 env)由 SDK 读取
             return Langfuse(public_key=self._getenv(_PUBLIC_KEY_ENV), secret_key=self._getenv(_SECRET_KEY_ENV))
@@ -75,7 +75,7 @@ class LangfuseExporter:
         import queue as queue_mod
         import threading
 
-        self._queue: Any = queue_mod.Queue(maxsize=_QUEUE_MAX)
+        self._queue = queue_mod.Queue(maxsize=_QUEUE_MAX)
         self._worker = threading.Thread(
             target=self._run_loop, name="langfuse-exporter", daemon=True,
         )
