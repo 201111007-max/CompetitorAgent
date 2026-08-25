@@ -42,6 +42,22 @@ _SUBAGENT_DESCRIPTIONS: dict[str, str] = {
     "roadmap": "分析竞品路线图与版本发布节奏。",
 }
 
+# 候选竞品子 Agent（设计文档 62 §3.2）：整竞品分析，工具面排除 delegate 防递归。
+_COMPETITOR_TOOLS = (
+    "web_extract",
+    "web_search",
+    "github_stars",
+    "github_releases",
+    "github_commits",
+    "analyze_pricing",
+)
+_COMPETITOR_SKILLS = ("fact_verification", "confidence_disclosure")
+_COMPETITOR_DESCRIPTION = (
+    "分析候选竞品全貌：定价/功能/性能/生态/口碑/路线图，"
+    "输出整竞品结论与核实到的官方来源。"
+)
+_COMPETITOR_NAME = "competitor"
+
 
 @dataclass(frozen=True)
 class SubagentConfig:
@@ -61,20 +77,39 @@ class SubagentConfig:
             system_prompt=_SUBAGENT_DESCRIPTIONS.get(name, ""),
         )
 
+    @classmethod
+    def for_competitor(cls) -> SubagentConfig:
+        """候选竞品子 Agent 的通用配置（设计文档 62 §3.2，独立命名空间）。"""
+        return cls(
+            name=_COMPETITOR_NAME,
+            tools=tuple(_COMPETITOR_TOOLS),
+            skills=tuple(_COMPETITOR_SKILLS),
+            system_prompt=_COMPETITOR_DESCRIPTION,
+        )
+
 
 class SubagentRegistry:
-    """预注册 6 维度子 Agent 配置；可按名查询/追加注册。"""
+    """预注册 6 维度 + 1 通用 candidate 命名空间子 Agent 配置；可按名查询/追加注册。
+
+    设计文档 62 §3.2：注册表是唯一委派键源——维度名 → 维度配置；其他任意名
+    （候选竞品）经 ``resolve`` 落到 ``competitor`` 通用配置，无需逐个登记即可委派。
+    """
 
     def __init__(self) -> None:
         self._configs: dict[str, SubagentConfig] = {}
         for dim in DIMENSIONS:
             self.register(SubagentConfig.for_dimension(dim))
+        self.register(SubagentConfig.for_competitor())
 
     def register(self, config: SubagentConfig) -> None:
         self._configs[config.name] = config
 
     def get(self, name: str) -> SubagentConfig | None:
         return self._configs.get(name)
+
+    def resolve(self, name: str) -> SubagentConfig | None:
+        """把委派目标名解析为子 Agent 配置（候选竞品名回退到 competitor 命名空间）。"""
+        return self._configs.get(name) or self._configs.get(_COMPETITOR_NAME)
 
     def names(self) -> list[str]:
         return list(self._configs)

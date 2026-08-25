@@ -45,9 +45,18 @@ def build_lead_system_prompt() -> str:
         "不得先调用其他工具或直接给出 Final Answer。\n"
         "规划完成后你可自主：\n"
         "- 调用 delegate 把维度子任务批量委派给后台并发执行的维度子 Agent"
-        "（可用维度：pricing/feature/performance/ecosystem/sentiment/roadmap），读取回填结果；\n"
+        "（可用维度：pricing/feature/performance/ecosystem/sentiment/roadmap；或候选竞品名），"
+        "读取回填结果；\n"
         "- 或自行调用 web_extract / web_search / github_* 采集与补证；\n"
         "- 对低置信或冲突的关键数值调用 validate_facts 或重新抓取核验，不得凭印象下结论。\n"
+        "若任务是市场普查（DISCOVERY）或多竞品对比（COMPARE）：\n"
+        "- resolution 只是起点不是终点——先用 web_search 联网枚举候选竞品清单，"
+        "再 delegate(targets=[候选竞品名], parallel=true/false, reason=...) 批量委派候选子 Agent，"
+        "最后调用 aggregate_report(parts, kind=\"compare\"|\"position\") 聚合；\n"
+        "- 是否并行由你依据上下文决策：候选多/任务聚焦→并行（parallel=true）；"
+        "预算有限或任务依赖→串行/小批（parallel=false），并在 reason 里说明调度意图；\n"
+        "- 聚合时输出【市场格局核心结论】（各维度最优者、整体最佳/最差、趋势、替代关系），"
+        "不要只交数据矩阵——矩阵由报告器另行渲染。\n"
         "全部维度就绪后，以 Final Answer 输出 REPORT_SCHEMA JSON：\n"
         '{"competitor": "竞品规范名", "dimensions": [{"dimension": "维度名", '
         '"summary": "结论", "details": {...}, "confidence": 0.0-1.0, "evidence_urls": ["来源URL"]}]}\n'
@@ -59,16 +68,35 @@ def build_lead_system_prompt() -> str:
 
 
 def build_subagent_system_prompt(name: str) -> str:
-    """维度子 Agent 系统提示（设计文档 49 §3.7）：维度任务说明 + 对应 skills + SUBAGENT_RESULT_SCHEMA。
+    """子 Agent 系统提示：维度子 Agent（设计文档 49 §3.7）或候选竞品子 Agent（设计文档 62 §3.2）。
 
-    ``name`` 必须是预注册维度（SubagentRegistry），否则退化为通用维度提示。
+    维度名 → 维度任务说明 + 对应 skills + SUBAGENT_RESULT_SCHEMA；
+    其他名（候选竞品）→ 通用 competitor 配置 + 整竞品 schema（含 official_links 供聚合引用）。
     """
     from competitor_agent.agent.subagent_registry import get_subagent_registry
 
-    cfg = get_subagent_registry().get(name)
-    desc = cfg.system_prompt if cfg else f"分析竞品的 {name} 维度。"
-    skills = list(cfg.skills) if cfg else [f"{name}_analysis"]
-    header = (
+    registry = get_subagent_registry()
+    cfg = registry.get(name)
+    if cfg is not None and cfg.name == "competitor":
+        # 显式委派通用 competitor 命名空间：按候选竞品名出整竞品 schema
+        return _build_competitor_prompt(name, cfg)
+    if cfg is None:
+        cfg = registry.resolve(name)  # 候选竞品名 → competitor 配置
+        if cfg is not None and cfg.name == "competitor":
+            return _build_competitor_prompt(name, cfg)
+        desc = f"分析竞品的 {name} 维度。"
+        skills = [f"{name}_analysis"]
+        header = _dimension_header(name, desc)
+        return _with_skills(header, skills)
+    desc = cfg.system_prompt
+    skills = list(cfg.skills)
+    header = _dimension_header(name, desc)
+    return _with_skills(header, skills)
+
+
+def _dimension_header(name: str, desc: str) -> str:
+    """维度子 Agent 的 schema 头部（SUBAGENT_RESULT_SCHEMA）。"""
+    return (
         f"你是竞品分析的「{name}」维度子 Agent。\n任务：{desc}\n"
         "自行调用可用工具采集信息（web_extract / web_search / 维度专属工具），"
         "交叉核验来源后收尾。\n"
@@ -77,6 +105,25 @@ def build_subagent_system_prompt(name: str) -> str:
         '"confidence": 0.0-1.0, "evidence_urls": ["实际引用的来源URL"]}\n'
         "evidence_urls 必须填实际采集/引用的来源 URL（供证据链与记忆沉淀），"
         "无来源则留空数组，不得编造。只输出 JSON，不要其他文字。"
+    )
+
+
+def _build_competitor_prompt(name: str, cfg: object) -> str:
+    """候选竞品子 Agent 的整竞品 schema（设计文档 62 §3.4：携带 official_links 供聚合引用）。"""
+    skills = list(getattr(cfg, "skills", ()))
+    header = (
+        f"你是竞品分析子 Agent，分析候选竞品「{name}」。\n任务：{getattr(cfg, 'system_prompt', '')}\n"
+        "自行调用可用工具采集信息（web_extract / web_search / github_* / analyze_pricing），"
+        "交叉核验来源后收尾。\n"
+        "以 Final Answer 输出 SUBAGENT_RESULT_SCHEMA JSON：\n"
+        f'{{"dimension": "{name}", "summary": "整竞品结论", "details": {{...}}, '
+        '"confidence": 0.0-1.0, "evidence_urls": ["实际引用的来源URL"], '
+        '"official_links": {"home": "官网", "pricing": "定价页", "docs": "文档", "changelog": "更新日志"}}\n'
+        "details 键名遵循各维度抽取惯例：pricing→plans、feature→features、performance→benchmarks、"
+        "ecosystem→mcp_servers/plugins/ide_support、sentiment→polarity、roadmap→events。\n"
+        "official_links 填写你核实到的官方来源（供聚合阶段引用），无法核实留空。"
+        "evidence_urls 必须填实际采集/引用的来源 URL，无来源则留空数组，不得编造。"
+        "只输出 JSON，不要其他文字。"
     )
     return _with_skills(header, skills)
 

@@ -244,14 +244,15 @@ def make_delegate_tool(
         - ``parallel``：是否后台并发（Lead 决策；True=批量并发，False=串行逐个 await）；
           细节并发度不暴露，由 ``DelegateRunner.max_concurrent`` 默认接管（代码硬收敛）。
         - ``reason``：Lead 的调度意图说明（可观测，记入日志与 trace phase）。
-        - ``registry``：校验/过滤可委派维度；未命中由 ``runtime_factory`` 按名构造
-          （候选竞品子 Agent 由装配侧提供）。
+        - ``registry``：唯一委派键源（``resolve`` 收敛）——维度名 → 维度配置；
+          其他名（候选竞品）落到 ``competitor`` 命名空间；未命中由 ``runtime_factory``
+          按名构造（候选竞品子 Agent 由装配侧提供）。
         """
-        dims = [d for d in (dimensions or []) if registry.get(d)]
+        dims = [d for d in (dimensions or []) if _resolvable(registry, d)]
         if not dims:
             available = ", ".join(registry.names())
             return (
-                f"delegate 失败：未指定可委派维度（可用：{available}）。"
+                f"delegate 失败：未指定可委派目标（可用：{available}；或传候选竞品名）。"
                 "请给 dimensions 传数组，如 {\"dimensions\": [\"pricing\",\"feature\"]}。"
             )
         if reason:
@@ -279,3 +280,12 @@ def _render_record(rec: _BackgroundRecord) -> str:
     label = _STATUS_LABELS.get(rec.status, rec.status)
     body = (rec.result or "（空结果）")[:4000]
     return f"[维度子 Agent 结果: {rec.name} | 状态: {label}]\n{wrap_untrusted(body)}"
+
+
+def _resolvable(registry: Any, name: str) -> bool:
+    """注册表按名收敛（设计文档 62 §3.2）：``resolve`` 优先（候选名回退 competitor 命名空间），
+    无 ``resolve`` 的旧式 registry 退化到 ``get``。"""
+    resolve = getattr(registry, "resolve", None)
+    if resolve is not None:
+        return resolve(name) is not None
+    return registry.get(name) is not None
