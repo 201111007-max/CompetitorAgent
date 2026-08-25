@@ -45,8 +45,6 @@ def _save(session_id: str, marker: str = "tried", **overrides) -> Checkpoint:
         dimension_results=[],
         iterations_used=3,
         max_iterations=10,
-        cost_used=0.5,
-        cost_limit=1.0,
         sources_tried=[marker],
         **overrides,
     )
@@ -110,8 +108,6 @@ class TestSaveLoadDelete:
                 "dimension_results": [],
                 "iterations_used": 1,
                 "max_iterations": 10,
-                "cost_used": 0.1,
-                "cost_limit": 1.0,
                 "sources_tried": ["backup"],
             },
         )
@@ -138,8 +134,6 @@ class TestSaveLoadDelete:
                 "dimension_results": [],
                 "iterations_used": 1,
                 "max_iterations": 10,
-                "cost_used": 0.1,
-                "cost_limit": 1.0,
                 "sources_tried": ["backup"],
             },
         )

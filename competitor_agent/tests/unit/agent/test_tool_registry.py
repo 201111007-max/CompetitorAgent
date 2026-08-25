@@ -9,6 +9,11 @@ import asyncio
 
 import pytest
 from competitor_agent.agent import ReactAgent, ToolArgumentError
+from competitor_agent.agent.delegate_tool import (
+    DelegateRunner,
+    SubagentRuntime,
+    make_delegate_tool,
+)
 from competitor_agent.agent.tool_registry import build_openai_tools, build_react_dispatcher
 from competitor_agent.config.loader import AppConfig
 from competitor_agent.llm.client import LLMClient, ToolCall, ToolCallReply
@@ -158,3 +163,34 @@ class TestMultiToolReact:
         assert "web_search" not in prompt and "github_stars" not in prompt
         names = {t["function"]["name"] for t in build_openai_tools(d)}
         assert {"web_search", "github_stars", "analyze_pricing"} <= names
+
+
+class TestDelegateSchemaDerivation:
+    """设计文档 62 — delegate 的 dimensions: list[str] 注解应派生为 array（而非 string）。
+
+    修复前 ``_derive_params_schema`` 把 ``list[str]`` 降级为 ``"string"``，LLM 据此把
+    候选名单当成字符串逐字符传入 → 产生单字符子 Agent。此处验证 schema 契约已纠正。
+    """
+
+    def _delegate_tool(self):
+        """构造一个真实 delegate 工具（其 dimensions 注解为 list[str]），注册进 dispatcher。"""
+        runner = DelegateRunner(lambda name: SubagentRuntime(name=name, run=lambda t: "ok"), max_concurrent=2)
+        d = build_react_dispatcher(
+            config=_config(),
+            web_extract=lambda url: "",
+            extra_tools={"delegate": make_delegate_tool(runner, registry=None)},
+        )
+        return d
+
+    def test_delegate_dimensions_derived_as_array(self) -> None:
+        """dimensions: list[str] 应派生为 {"type": "array", "items": {"type": "string"}}。"""
+        d = self._delegate_tool()
+        tools = {t["function"]["name"]: t["function"] for t in build_openai_tools(d)}
+        dims_schema = tools["delegate"]["parameters"]["properties"]["dimensions"]
+        assert dims_schema["type"] == "array"
+        assert dims_schema["items"] == {"type": "string"}
+
+    def test_delegate_required_includes_dimensions(self) -> None:
+        d = self._delegate_tool()
+        tools = {t["function"]["name"]: t["function"] for t in build_openai_tools(d)}
+        assert "dimensions" in tools["delegate"]["parameters"]["required"]

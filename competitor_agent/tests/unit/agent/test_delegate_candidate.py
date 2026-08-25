@@ -14,6 +14,7 @@ from competitor_agent.agent.delegate_tool import (
     SubagentRuntime,
     make_delegate_tool,
 )
+from competitor_agent.observability.logger import current_session, set_current_session
 
 
 class _FakeRegistry:
@@ -104,3 +105,30 @@ def test_delegate_mixed_empty_error(runner: DelegateRunner, delegate: object) ->
 def test_delegate_runner_concurrency_cap(runner: DelegateRunner) -> None:
     """并发细节不暴露给 Lead，由 DelegateRunner 默认上限收敛（对齐 budget.max_parallel）。"""
     assert runner._max_concurrent == 2
+
+
+def test_delegate_rejects_string_dimensions(runner: DelegateRunner, delegate: object) -> None:
+    """防御：LLM 偶发把 dimensions 传成字符串（而非数组）时返回可读错误，
+    绝不逐字符迭代成单字符子 Agent。"""
+    text = delegate(dimensions="cursor,cline", task="分析 X")  # type: ignore[arg-type]
+    assert "delegate 参数错误" in text
+    assert "dimensions 必须是字符串数组" in text
+    # 未 spawn 任何子 Agent
+    assert runner.running_count() == 0
+
+
+def test_delegate_worker_thread_inherits_session() -> None:
+    """修复：后台子 Agent 线程应继承 Lead 的 session 上下文，使日志能路由到 logs/<sid>.log。"""
+    seen: list[str | None] = []
+
+    def runtime_factory(name: str) -> SubagentRuntime:
+        return SubagentRuntime(name=name, run=lambda task: (seen.append(current_session()), "ok"))
+
+    runner = DelegateRunner(runtime_factory, max_concurrent=2)
+    tool = make_delegate_tool(runner, registry=_FakeRegistry())
+    set_current_session("sess_delegate_worker")
+    try:
+        tool(dimensions=["pricing"], task="分析 X")
+    finally:
+        set_current_session(None)
+    assert seen and seen[0] == "sess_delegate_worker"

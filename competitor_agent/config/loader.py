@@ -21,7 +21,6 @@ _CONFIG_ENV = "COMPETITOR_AGENT_CONFIG"
 class BudgetConfig:
     max_iterations: int = 10
     max_parallel_subagents: int = 4
-    cost_limit_usd: float = 1.0
     token_high_water_mark: int = 120000
     token_compression_target: int = 80000
 
@@ -169,9 +168,10 @@ class AgentConfig:
 
 @dataclass
 class LeadConfig:
-    """Lead 编排配置（设计文档 62 §3.8）：编排步数与上下文压缩保留步数硬上限"""
+    """Lead 编排配置（设计文档 62 §3.8）：上下文压缩保留步数上限。
+    迭代次数限制已移除（max_steps=None 无限循环），故不再有 max_orchestration_steps。
+    """
 
-    max_orchestration_steps: int = 24  # Lead 编排步数硬上限（调度场景从单竞品约 12 上调）
     max_history_steps: int = 12  # Lead 上下文压缩保留步数（透传 ReactAgent._compress_history）
 
 

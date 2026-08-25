@@ -60,8 +60,6 @@ class Checkpoint:
     # 预算状态
     iterations_used: int = 0
     max_iterations: int = 10
-    cost_used: float = 0.0
-    cost_limit: float = 1.0
     # 已尝试数据源
     sources_tried: list[str] = field(default_factory=list)
 
@@ -189,8 +187,6 @@ def save_checkpoint(
     dimension_results: list[DimensionResult],
     iterations_used: int,
     max_iterations: int,
-    cost_used: float,
-    cost_limit: float,
     sources_tried: list[str],
 ) -> Checkpoint:
     """保存分析会话的 checkpoint"""
@@ -225,8 +221,6 @@ def save_checkpoint(
         ],
         iterations_used=iterations_used,
         max_iterations=max_iterations,
-        cost_used=cost_used,
-        cost_limit=cost_limit,
         sources_tried=sources_tried,
     )
     path = _checkpoint_path(session_id)

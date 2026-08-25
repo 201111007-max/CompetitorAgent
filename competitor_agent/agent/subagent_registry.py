@@ -148,7 +148,7 @@ def build_subagent(
     rag_fn: Callable[[str], str] | None = None,
     event_sink: Callable[..., None] | None = None,
     obs_max_chars: int | None = None,
-    max_steps: int = 6,
+    max_steps: int | None = None,
     tracer: Any = None,  # 设计文档 54：子 Agent tool.call span（透传 ToolDispatcher）
     max_history_steps: int | None = None,  # 设计文档 56 Q4：配置化注入；None 用 ReactAgent 默认
     max_parallel_tool_calls: int = 4,  # 设计文档 59：单回合多 tool_calls 并发上限；1 = 串行

@@ -73,12 +73,11 @@ class TestParallelExecution:
 
     def test_parallel_shared_budget_not_exceeded(self, mock_llm):
         """doc 49：analyze 末尾统一记账；预算扣减不超过上限。"""
-        api = _parallel_api(llm=mock_llm, max_iterations=10, cost_limit=1.0)
+        api = _parallel_api(llm=mock_llm, max_iterations=10)
         report = api.analyze("分析 Cursor", mode="single")
         assert report.terminal_state == "success"
         assert api._budget.iteration_count >= 1
         assert api._budget.iteration_count <= api._budget.max_iterations
-        assert api._budget.total_cost > 0
 
     def test_parallel_same_results_as_serial(self, mock_llm):
         cfg_serial = AppConfig(

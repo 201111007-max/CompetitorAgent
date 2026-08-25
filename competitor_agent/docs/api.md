@@ -16,7 +16,6 @@ class CompetitorAnalysisAPI:
         llm: LLMClient | None = None,
         use_llm: bool = True,
         max_iterations: int = 10,
-        cost_limit: float = 1.0,
         event_sink: Callable[[ProgressEvent], None] | None = None,
         extractor: WebExtractor | None = None,
         memory: IFourLayerMemory | None = None,
@@ -30,7 +29,6 @@ class CompetitorAnalysisAPI:
 | `llm` | `LLMClient \| None` | `None` | LLM 客户端（设计文档 47：主路径仅 LLM，缺失时抛 `LLMUnavailableError`） |
 | `use_llm` | `bool` | `True` | 是否启用 LLM（设计文档 46：默认开启，与 CLI 对齐；`False` 时抛 `LLMUnavailableError`） |
 | `max_iterations` | `int` | `10` | 最大迭代次数 |
-| `cost_limit` | `float` | `1.0` | 成本上限（美元） |
 | `event_sink` | `Callable` | `None` | 进度事件回调 |
 | `extractor` | `WebExtractor` | `None` | 自定义采集器 |
 | `memory` | `IFourLayerMemory` | `None` | 四层记忆（可选） |

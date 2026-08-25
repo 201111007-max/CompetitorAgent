@@ -12,7 +12,7 @@ tools 请求参数格式（原生 function calling 下发用），与文本协�
 from __future__ import annotations
 
 import inspect
-from typing import Any, Callable
+from typing import Any, Callable, List, get_origin
 
 from competitor_agent.agent.tool_dispatcher import ToolDispatcher, ToolSpec
 from competitor_agent.config.loader import AppConfig
@@ -52,16 +52,40 @@ def build_openai_tools(dispatcher: ToolDispatcher) -> list[dict[str, Any]]:
     return tools
 
 
+def _is_list_annotation(ann: Any) -> bool:
+    """判定注解是否为 list 容器（兼容 typing 对象与 ``from __future__ import annotations``
+    下以字符串形式出现的 ``list[str]`` / ``List[str]``）。"""
+    if isinstance(ann, str):
+        canonical = ann.strip().replace("typing.", "").lower()
+        return canonical.startswith("list[")
+    try:
+        return get_origin(ann) in (list, List) or ann in (list, List)
+    except TypeError:  # 某些 forward-ref 对象 get_origin 抛错
+        return False
+
+
 def _derive_params_schema(spec: ToolSpec) -> dict[str, Any]:
-    """无契约工具从函数签名派生最小 JSON Schema（required = 无默认值参数）。"""
+    """无契约工具从函数签名派生最小 JSON Schema（required = 无默认值参数）。
+
+    - 简单类型注解（str/int/float/bool/list/dict）按 ``_ANNOTATION_TYPE_MAP`` 映射；
+    - 泛型容器 ``list[str]``（如 delegate 的 ``dimensions``，含字符串形式
+      ``"list[str]"``）正确派生为 ``{"type": "array", "items": {"type": "string"}}``——
+      此前被降级为 ``"string"``，导致 LLM 收到错误的类型契约、把候选名单当成
+      字符串逐字符传入（单字符子 Agent）。
+    """
     properties: dict[str, Any] = {}
     required: list[str] = []
     for p in inspect.signature(spec.func).parameters.values():
         if p.name in ("self", "cls"):
             continue
         ann = p.annotation
-        ptype = "string" if ann is inspect.Parameter.empty else _ANNOTATION_TYPE_MAP.get(ann, "string")
-        properties[p.name] = {"type": ptype}
+        if ann is inspect.Parameter.empty:
+            ptype: dict[str, Any] = {"type": "string"}
+        elif _is_list_annotation(ann):
+            ptype = {"type": "array", "items": {"type": "string"}}
+        else:
+            ptype = {"type": _ANNOTATION_TYPE_MAP.get(ann, "string")}
+        properties[p.name] = ptype
         if p.default is inspect.Parameter.empty:
             required.append(p.name)
     schema: dict[str, Any] = {"type": "object", "properties": properties}

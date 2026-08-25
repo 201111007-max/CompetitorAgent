@@ -70,7 +70,7 @@ class TestAnalyze:
 
     def test_analyze_gap_pending_not_crashed(self, mock_llm):
         # 未关闭缺口会进报告，但不崩溃
-        api = _api(mock_llm, max_iterations=1, cost_limit=0.05)
+        api = _api(mock_llm, max_iterations=1)
         report = api.analyze("分析 Cursor")
         assert report.gaps_pending is not None
 

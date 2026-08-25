@@ -182,3 +182,7 @@ function cancelAnalysis() {
     addLog('cancelled', '正在取消...');
   }
 }
+
+/* 绑定按钮事件（index.html 依赖 JS 绑定，非内联 onclick） */
+document.getElementById('start-btn').addEventListener('click', startAnalysis);
+document.getElementById('cancel-btn').addEventListener('click', cancelAnalysis);

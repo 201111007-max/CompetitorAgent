@@ -45,7 +45,6 @@ from competitor_agent.collector.web_extractor import WebExtractor
 from competitor_agent.config.loader import AppConfig, load_config
 from competitor_agent.core.alerting import Alert, AlertSink, ConsoleAlertSink
 from competitor_agent.core.alerting import report_diff as _diff_to_alerts
-from competitor_agent.core.budget import IterationBudget
 from competitor_agent.core.budget_controller import BudgetController
 from competitor_agent.core.checkpoint import (
     checkpoint_to_report,
@@ -98,9 +97,6 @@ from competitor_agent.observability.logger import (
 
 logger = logging.getLogger("competitor_agent.facade.api")
 
-# Lead Agent 推理步数上限（设计文档 49：make_plan → delegate → 复核 → Final Answer）
-_LEAD_MAX_STEPS = 12
-
 
 def _delegate_section_url(result: str, dimension: str) -> str:
     """delegate 批量回填文本中该维度子结果块的首个 URL（按结果头切分）。"""
@@ -125,7 +121,6 @@ class CompetitorAnalysisAPI:
         llm: LLMClient | None = None,
         use_llm: bool = True,
         max_iterations: int | None = None,
-        cost_limit: float | None = None,
         event_sink: Callable[[ProgressEvent], None] | None = None,
         extractor: WebExtractor | None = None,
         memory: IFourLayerMemory | None = None,
@@ -152,7 +147,6 @@ class CompetitorAnalysisAPI:
             ensure_langgraph_available()
         self._engine = engine
         max_iterations = max_iterations if max_iterations is not None else cfg.budget.max_iterations
-        cost_limit = cost_limit if cost_limit is not None else cfg.budget.cost_limit_usd
         self._config = cfg
         self._llm = llm
         self._use_llm = use_llm
@@ -166,7 +160,7 @@ class CompetitorAnalysisAPI:
         self._extractor = extractor or WebExtractor()
         # 新鲜度 TTL（设计文档 26）：build() 为报告计算 freshness 元数据
         self._builder = ReportBuilder(dimension_ttl_days=cfg.freshness.dimension_ttl_days)
-        self._budget = BudgetController(max_iterations=max_iterations, cost_limit=cost_limit)
+        self._budget = BudgetController(max_iterations=max_iterations)
         # 竞品时间线记忆（设计文档 26 §3.4）：跨分析 diff，独立于四层记忆
         self._timeline = timeline or TimelineMemory()
 
@@ -661,7 +655,7 @@ class CompetitorAnalysisAPI:
             if runner is not None:
                 runner.shutdown()
         if result.steps:
-            self._budget.record_iteration(cost=0.01 * result.steps)
+            self._budget.record_iteration()
         return loop, result
 
     def _run_langgraph_engine(
@@ -681,24 +675,19 @@ class CompetitorAnalysisAPI:
         lead_competitor = self._react_competitor(task)
 
         def _subagent_run(name: str, sub_task: str) -> ReactRunResult:
-            # 子 Agent 运行时与自研路径同工厂（独立预算/共享取消/记忆/RAG/事件）
-            budget = IterationBudget(
-                max_iterations=6,
-                cost_limit=self._budget.cost_limit,
-                diminishing_threshold=0,
-            )
+            # 子 Agent 运行时与自研路径同工厂（共享取消/记忆/RAG/事件）；
+            # 迭代限制已移除（max_steps=None 无限循环，靠 LLM 自然收敛 Final Answer）
             return build_subagent(
                 name,
                 llm,
                 config=self._config,
                 web_extract=self._web_extract_for(lead_competitor.name, name),
                 session_id=session_id,
-                budget=budget,
                 memory_context_fn=lambda t: self._memory_ctx_for(lead_competitor.name, t),
                 rag_fn=lambda t: self._rag_ctx_for(lead_competitor.name, t),
                 event_sink=self._event_sink,
                 obs_max_chars=self._config.collector.max_content_chars,
-                max_steps=6,
+                max_steps=None,
                 tracer=self._tracer,  # 设计文档 54：子 Agent span
                 max_parallel_tool_calls=self._max_parallel_tool_calls,
             ).run_subagent(sub_task)
@@ -729,7 +718,7 @@ class CompetitorAnalysisAPI:
             system_prompt=base_prompt,
         )
         if transcript:
-            self._budget.record_iteration(cost=0.01 * len(transcript))
+            self._budget.record_iteration()
         return plan, answer, transcript
 
     def _react_loop(self, task: str, session_id: str | None) -> ReactLoop:
@@ -773,13 +762,8 @@ class CompetitorAnalysisAPI:
             # 候选竞品名 → 候选自身（按竞品名召回复用单竞品记忆，不误绑 Lead 竞品）
             is_dimension = get_subagent_registry().get(name) is not None
             bind_competitor = lead_competitor.name if is_dimension else name
-            # 子 Agent 步数由其 max_steps 兜底；diminishing_threshold=0 关闭"边际递减"
-            # 启发（ReAct 恒传 delta_tokens=0，否则第 3 步后必然误判预算耗尽）
-            budget = IterationBudget(
-                max_iterations=6,
-                cost_limit=self._budget.cost_limit,
-                diminishing_threshold=0,
-            )
+            # 子 Agent 迭代限制已移除（max_steps=None 无限循环，靠 LLM 自然收敛
+            # Final Answer；取消经共享 session_id 协作）
             return build_subagent(
                 name,
                 self._llm or LLMClient(tracer=self._tracer),
@@ -790,12 +774,11 @@ class CompetitorAnalysisAPI:
                     "kb_recall": self._build_kb_recall(lambda: bind_competitor, name),
                 },
                 session_id=session_id,
-                budget=budget,
                 memory_context_fn=lambda t: self._memory_ctx_for(bind_competitor, t),
                 rag_fn=lambda t: self._rag_ctx_for(bind_competitor, t),
                 event_sink=self._event_sink,
                 obs_max_chars=self._config.collector.max_content_chars,
-                max_steps=6,
+                max_steps=None,
                 tracer=self._tracer,  # 设计文档 54：子 Agent tool.call span
                 max_history_steps=agent_max_history_steps,
                 max_parallel_tool_calls=self._max_parallel_tool_calls,
@@ -846,22 +829,15 @@ class CompetitorAnalysisAPI:
             dispatcher=dispatcher,
             max_parallel_tool_calls=self._max_parallel_tool_calls,
         )
-        # Lead 步数上限：默认 lead.max_orchestration_steps（设计文档 62 §3.8，编排场景可容纳）；
-        # 用户显式传 max_iterations 时以其为准（含 0，预算耗尽→partial，设计文档 14 承诺）；
-        # diminishing_threshold=0 关闭"边际递减"启发
-        # （ReAct 恒传 delta_tokens=0，否则第 3 步后必然误判预算耗尽）
-        lead_max = self._budget.max_iterations if self._budget.max_iterations is not None else _LEAD_MAX_STEPS
-        budget = IterationBudget(
-            max_iterations=lead_max,
-            cost_limit=self._budget.cost_limit,
-            diminishing_threshold=0,
-        )
+        # Lead 编排：移除迭代次数限制（max_steps=None 无限循环，靠 LLM 自然收敛 Final
+        # Answer 收尾；取消仍经 step_guard 协作）。防失控退化为子 Agent 各自的 max_steps
+        # 兜底 + LLM/tool 层超时与硬性安全护栏（url_guard/检查/取消）。
         loop = ReactLoop(
             agent,
-            max_steps=self._config.lead.max_orchestration_steps,
+            max_steps=None,
             event_sink=self._event_sink,
             session_id=session_id,
-            budget=budget,
+            budget=None,
             memory_context_fn=self._react_memory_context,
             rag_fn=self._react_rag_context,
             obs_max_chars=self._config.collector.max_content_chars,
@@ -1200,8 +1176,6 @@ class CompetitorAnalysisAPI:
             dimension_results=report.dimension_results,
             iterations_used=self._budget.iteration_count,
             max_iterations=self._budget.max_iterations,
-            cost_used=self._budget.total_cost,
-            cost_limit=self._budget.cost_limit,
             sources_tried=[e.url for r in report.dimension_results for e in r.evidence],
         )
 

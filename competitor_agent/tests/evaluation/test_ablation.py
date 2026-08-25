@@ -364,7 +364,6 @@ class TestRagDifferential:
             llm=mock,
             use_llm=True,
             max_iterations=8,
-            cost_limit=1.0,
             enable_rag=True,
             rag_store=store,
         )
@@ -378,7 +377,6 @@ class TestRagDifferential:
             llm=mock,
             use_llm=True,
             max_iterations=8,
-            cost_limit=1.0,
             enable_rag=False,
         )
         no_rag_report = no_rag_api.analyze("只分析 cursor 的定价", mode="single")
@@ -404,7 +402,6 @@ class TestRagDifferential:
             llm=mock,
             use_llm=True,
             max_iterations=8,
-            cost_limit=1.0,
             enable_rag=True,
             rag_store=store,
         )

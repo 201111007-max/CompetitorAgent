@@ -53,7 +53,7 @@ class ReactLoop:
     def __init__(
         self,
         agent: ReactAgent,
-        max_steps: int = 6,
+        max_steps: int | None = 6,
         event_sink: Callable[[ProgressEvent], None] | None = None,
         session_id: str | None = None,
         budget: IterationBudget | None = None,
@@ -183,16 +183,25 @@ class ReactLoop:
             self.plan = None
 
     def _step_guard(self, result: ReactRunResult) -> Callable[[], bool] | None:
-        """每步前置检查：先取消、后预算。返回 False 提前终止循环。"""
+        """每步前置检查：先取消、后预算。返回 False 提前终止循环。
+
+        取消/预算均为可选（未注入时跳过对应检查），但步数计数始终生效——
+        ``result.steps`` 供上层迭代/token 记账（Lead 无预算时仍累计真实步数）。
+        """
         if self._session_id is None and self._budget is None:
-            return None
+            # 既无取消也无预算约束：仅需步数计数，仍返回 guard 递增 steps
+            def count_only() -> bool:
+                result.steps += 1
+                return True
+
+            return count_only
 
         def guard() -> bool:
             if self._session_id and is_cancelled(self._session_id):
                 logger.info("会话 %s 已取消，中断 ReAct 循环", self._session_id)
                 result.cancelled = True
                 return False
-            if self._budget is not None and not self._budget.consume(delta_cost=0.0):
+            if self._budget is not None and not self._budget.consume():
                 logger.warning("ReAct 预算耗尽，中断推理循环")
                 result.budget_exhausted = True
                 return False

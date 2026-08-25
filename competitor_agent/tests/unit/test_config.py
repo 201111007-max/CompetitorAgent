@@ -28,7 +28,7 @@ def test_budget_defaults_present() -> None:
         raw = yaml.safe_load(f)
     budget = raw["budget"]
     assert budget["max_iterations"] == 10
-    assert budget["cost_limit_usd"] == 1.0
+    assert "cost_limit_usd" not in budget  # 成本核算已移除（仅保留 token 统计）
     assert budget["max_parallel_subagents"] == 4
 
 
@@ -56,14 +56,14 @@ def test_load_config_returns_appconfig() -> None:
     cfg = load_config()
     assert isinstance(cfg, AppConfig)
     assert cfg.budget.max_iterations == 10
-    assert cfg.budget.cost_limit_usd == 1.0
+    assert not hasattr(cfg.budget, "cost_limit_usd")  # 成本核算已移除
     assert cfg.budget.max_parallel_subagents == 4
     assert "pricing" in cfg.dimensions.enabled
     assert cfg.collector.rate_limit_per_second == 2
     assert cfg.memory.enabled is True
     assert cfg.observability.log_level == "INFO"
     assert cfg.execution.max_parallel_subagents == 4
-    assert cfg.lead.max_orchestration_steps == 24
+    assert not hasattr(cfg.lead, "max_orchestration_steps")  # Lead 迭代限制已移除
     assert cfg.lead.max_history_steps == 12
     assert cfg.subagents.enabled is True
     assert cfg.tools.validate_facts is True
@@ -81,13 +81,12 @@ def test_load_config_env_override(monkeypatch) -> None:
     import tempfile
 
     with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False, encoding="utf-8") as f:
-        f.write("budget:\n  max_iterations: 3\n  cost_limit_usd: 0.5\n")
+        f.write("budget:\n  max_iterations: 3\n")
         tmp = f.name
     try:
         monkeypatch.setenv("COMPETITOR_AGENT_CONFIG", tmp)
         cfg = load_config()
         assert cfg.budget.max_iterations == 3
-        assert cfg.budget.cost_limit_usd == 0.5
     finally:
         import os
 
@@ -95,20 +94,19 @@ def test_load_config_env_override(monkeypatch) -> None:
 
 
 def test_load_config_parses_execution_and_lead_section(tmp_path) -> None:
-    """execution/lead section 解析：硬上限 + Lead 编排步数进入对应 Config（设计文档 62 §3.8）。"""
+    """execution/lead section 解析：硬上限 + Lead 上下文压缩保留步数（设计文档 62 §3.8）。"""
     from competitor_agent.config.loader import ExecutionConfig, LeadConfig
 
     p = tmp_path / "cfg.yaml"
     p.write_text(
-        "execution:\n  max_parallel_subagents: 8\nlead:\n  max_orchestration_steps: 30\n"
-        "  max_history_steps: 10\nbudget:\n  max_iterations: 3\n",
+        "execution:\n  max_parallel_subagents: 8\nlead:\n  max_history_steps: 10\n"
+        "budget:\n  max_iterations: 3\n",
         encoding="utf-8",
     )
     cfg = load_config(str(p))
     assert isinstance(cfg.execution, ExecutionConfig)
     assert cfg.execution.max_parallel_subagents == 8
     assert isinstance(cfg.lead, LeadConfig)
-    assert cfg.lead.max_orchestration_steps == 30
     assert cfg.lead.max_history_steps == 10
     assert cfg.budget.max_iterations == 3
 
@@ -127,18 +125,16 @@ def test_api_uses_config_budget() -> None:
     from competitor_agent.config.loader import AppConfig, BudgetConfig
     from competitor_agent.facade.api import CompetitorAnalysisAPI
 
-    cfg = AppConfig(budget=BudgetConfig(max_iterations=7, cost_limit_usd=0.3))
+    cfg = AppConfig(budget=BudgetConfig(max_iterations=7))
     api = CompetitorAnalysisAPI(config=cfg)
     assert api._budget.max_iterations == 7
-    assert api._budget.cost_limit == 0.3
 
 
 def test_api_explicit_args_override_config() -> None:
-    """显式传入的 max_iterations/cost_limit 优先于 config。"""
+    """显式传入的 max_iterations 优先于 config。"""
     from competitor_agent.config.loader import AppConfig, BudgetConfig
     from competitor_agent.facade.api import CompetitorAnalysisAPI
 
-    cfg = AppConfig(budget=BudgetConfig(max_iterations=7, cost_limit_usd=0.3))
-    api = CompetitorAnalysisAPI(config=cfg, max_iterations=5, cost_limit=2.0)
+    cfg = AppConfig(budget=BudgetConfig(max_iterations=7))
+    api = CompetitorAnalysisAPI(config=cfg, max_iterations=5)
     assert api._budget.max_iterations == 5
-    assert api._budget.cost_limit == 2.0

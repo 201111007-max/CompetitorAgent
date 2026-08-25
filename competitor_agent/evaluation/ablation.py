@@ -194,7 +194,6 @@ class AblationRunner:
             llm=llm,
             use_llm=True,
             max_iterations=8,
-            cost_limit=1.0,
             enable_rag=variant.enable_rag,
             enable_memory=variant.enable_memory,
             memory=memory,
