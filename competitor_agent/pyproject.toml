@@ -140,6 +140,34 @@ exclude = ".*tests.*"
 follow_imports = "skip"
 
 [[tool.mypy.overrides]]
-module = ["yaml", "openai", "httpx", "bs4", "numpy.*", "numpy", "playwright.*", "playwright", "langfuse"]
+# 可选 extra 依赖（mcp/rag/crawler/spa/web/langgraph/langfuse/eval 等）：CI 只装 [dev]，
+# 这些模块不装 → ignore_missing_imports 静默缺失（生产代码均 try/except 或降级路径兜底）
+module = [
+    "bs4",
+    "chromadb.*",
+    "chromadb",
+    "cryptography.*",
+    "cryptography",
+    "fastapi.*",
+    "fastapi",
+    "httpx",
+    "huggingface_hub.*",
+    "huggingface_hub",
+    "langfuse",
+    "langgraph.*",
+    "langgraph",
+    "mcp.*",
+    "mcp",
+    "numpy.*",
+    "numpy",
+    "openai",
+    "playwright.*",
+    "playwright",
+    "sentence_transformers.*",
+    "sentence_transformers",
+    "uvicorn.*",
+    "uvicorn",
+    "yaml",
+]
 follow_imports = "skip"
 ignore_missing_imports = true
