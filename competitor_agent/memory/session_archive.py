@@ -89,13 +89,30 @@ class SessionArchive:
         不可用/集合为空/任何异常 → 回退词袋 TF 余弦（行为与现状逐位一致）；
         query 为空取最近 top_k 条。返回可直接拼入 prompt 的文本行列表。
         """
-        entries = self._summary_store.get(competitor, [])
+        if not competitor:
+            # 品类级召回（设计文档 62 §3.9）：无具体竞品 → 跨竞品聚合摘要，按任务语义排序
+            entries = self._category_entries()
+        else:
+            entries = self._summary_store.get(competitor, [])
         if not isinstance(entries, list) or not entries:
             return []
         if query:
-            ranked = self._vector_rank(entries, competitor, query)
-            entries = ranked if ranked is not None else _rank_entries(entries, query)
+            if competitor:
+                ranked = self._vector_rank(entries, competitor, query)
+                entries = ranked if ranked is not None else _rank_entries(entries, query)
+            else:
+                # 跨竞品条目无单一 competitor 键，向量按竞品过滤不可用 → 词袋排序（条目文本含竞品名）
+                entries = _rank_entries(entries, query)
         return [_format_entry(e) for e in entries[:top_k]]
+
+    def _category_entries(self) -> list[dict[str, Any]]:
+        """聚合全部竞品的压缩上下文条目（品类级召回数据源）。"""
+        merged: list[dict[str, Any]] = []
+        for comp in self._store:
+            comp_entries = self._summary_store.get(comp, [])
+            if isinstance(comp_entries, list):
+                merged.extend(comp_entries)
+        return merged
 
     def retrieve(self, competitor: str, limit: int = 20) -> list[AnalysisSession]:
         """取回某竞品最近会话（按 created_at 降序）"""
