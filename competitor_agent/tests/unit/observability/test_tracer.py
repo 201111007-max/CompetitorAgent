@@ -22,8 +22,8 @@ class TestSpanTree:
     def test_nested_auto_parent(self, tmp_path: Path) -> None:
         t = _tracer(tmp_path)
         tid = t.start_trace("analyze", trace_id="sess_tree", input_brief="t")
-        with t.span("llm.call", kind="llm") as sp:
-            sub_span_id = sp["span_id"]
+        with t.span("llm.call", kind="llm"):
+            pass
         t.end_trace(tid)
         records = {r["name"]: r for r in _read_all(tmp_path)}
         assert records["analyze"]["kind"] == "trace"
@@ -63,9 +63,8 @@ class TestSpanTree:
     def test_jsonl_roundtrip_reconstruct(self, tmp_path: Path) -> None:
         t = _tracer(tmp_path)
         tid = t.start_trace("analyze", trace_id="sess_rt", input_brief="t")
-        with t.span("delegate", kind="phase"):
-            with t.span("pricing", kind="subagent"):
-                pass
+        with t.span("delegate", kind="phase"), t.span("pricing", kind="subagent"):
+            pass
         t.end_trace(tid, status="success", output_brief="done")
         spans = T.load_trace("sess_rt", tmp_path)
         assert len(spans) == 3
@@ -74,7 +73,7 @@ class TestSpanTree:
         assert len(roots) == 1
         children = [s for s in spans if s["parent_span_id"] == "sess_rt"]
         assert [c["name"] for c in children] == ["delegate"]
-        pricing = [s for s in spans if s["name"] == "pricing"][0]
+        pricing = next(s for s in spans if s["name"] == "pricing")
         deleg_id = children[0]["span_id"]
         assert pricing["parent_span_id"] == deleg_id
 
@@ -82,7 +81,7 @@ class TestSpanTree:
 class TestStatusAndDesensitization:
     def test_exception_marks_error(self, tmp_path: Path) -> None:
         t = _tracer(tmp_path)
-        tid = t.start_trace("analyze", trace_id="sess_exc", input_brief="t")
+        t.start_trace("analyze", trace_id="sess_exc", input_brief="t")
         try:
             with t.span("tool.web_extract", kind="tool"):
                 raise RuntimeError("boom")
@@ -101,8 +100,8 @@ class TestStatusAndDesensitization:
         t.end_trace(tid)
         records = _read_all(tmp_path)
         # 根与子 span 的 brief 均截断到 200 字符
-        assert len([r["input_brief"] for r in records if r["kind"] == "trace"][0]) == 200
-        gen = [r for r in records if r["kind"] == "llm"][0]
+        assert len(next(r["input_brief"] for r in records if r["kind"] == "trace")) == 200
+        gen = next(r for r in records if r["kind"] == "llm")
         # generation 不落 prompt 全文（仅空 brief），模型/计数直搬
         assert gen["input_brief"] == ""
         assert gen["model"] == "m"
@@ -118,7 +117,7 @@ class TestAggregation:
         t.record_generation(model="m", prompt_tokens=10, completion_tokens=10,
                             elapsed_ms=20, cost_usd=0.0001)
         t.end_trace(tid)
-        root = [r for r in _read_all(tmp_path) if r["kind"] == "trace"][0]
+        root = next(r for r in _read_all(tmp_path) if r["kind"] == "trace")
         assert root["total_tokens"] == 170
         assert abs(root["total_cost_usd"] - 0.0005) < 1e-6
 
@@ -168,7 +167,7 @@ def test_record_payload_has_no_key_or_prompt(tmp_path: Path) -> None:
     t = _tracer(tmp_path)
     t.start_trace("analyze", trace_id="sess_sec", input_brief="SECRET_MARKER " * 10)
     t.end_trace("sess_sec")
-    raw = list(Path(tmp_path).glob("*.jsonl"))[0].read_text(encoding="utf-8")
+    raw = next(iter(Path(tmp_path).glob("*.jsonl"))).read_text(encoding="utf-8")
     lines = [json.loads(l) for l in raw.splitlines() if l.strip()]
     text = "\n".join(json.dumps(l, ensure_ascii=False) for l in lines)
     assert "SECRET_MARKER" * 10 not in text  # 只截断保留前缀，不会完整重复

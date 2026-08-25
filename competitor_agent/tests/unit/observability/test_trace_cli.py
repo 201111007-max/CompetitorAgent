@@ -1,12 +1,11 @@
 """cli `trace` 子命令单测（设计文档 54 Q3）：list 空/有数据、show 瀑布渲染、parser 选项。"""
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 
 import pytest
-from competitor_agent.observability import tracer as T
 from competitor_agent.cli import _run_trace, build_parser
+from competitor_agent.observability import tracer as T
 
 
 @pytest.fixture(autouse=True)

@@ -3,8 +3,7 @@
 ObservabilityConfig.langfuse_enabled 派生属性各组合。"""
 from __future__ import annotations
 
-import os
-from typing import Any
+from typing import Any, Self
 
 import pytest
 from competitor_agent.config.loader import ObservabilityConfig
@@ -20,10 +19,10 @@ class _FakeCM:
         self._start = start
         self.updated: dict | None = None
 
-    def __enter__(self) -> "_FakeCM":
+    def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, *_: Any) -> None:
+    def __exit__(self, *_: object) -> None:
         self._sink.append({"type": self._kind, "start": self._start, "update": self.updated or {}})
 
     def update(self, **kw: Any) -> None:

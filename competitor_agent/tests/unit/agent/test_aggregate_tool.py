@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import pytest
-
 from competitor_agent.agent.aggregate_tool import (
     aggregate_payload_valid,
     make_aggregate_tool,

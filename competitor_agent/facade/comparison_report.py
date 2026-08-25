@@ -106,4 +106,4 @@ def _extract_conclusion(lead_answer: str) -> str:
     return text
 
 
-__all__ = ["assemble_comparison", "_extract_conclusion"]
+__all__ = ["_extract_conclusion", "assemble_comparison"]

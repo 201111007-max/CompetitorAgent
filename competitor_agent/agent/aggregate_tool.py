@@ -58,4 +58,4 @@ def aggregate_payload_valid(payload: dict[str, Any]) -> bool:
     return payload.get("kind") in _VALID_KINDS
 
 
-__all__ = ["make_aggregate_tool", "aggregate_payload_valid"]
+__all__ = ["aggregate_payload_valid", "make_aggregate_tool"]

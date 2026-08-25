@@ -111,7 +111,7 @@ class ObservabilityConfig:
                 and os.environ.get("LANGFUSE_SECRET_KEY")):
             return False
         try:
-            import importlib.util  # noqa: PLC0415 - 原地惰性探测
+            import importlib.util
 
             return importlib.util.find_spec("langfuse") is not None
         except Exception:  # noqa: BLE001 - 探测失败保守视为未启用
