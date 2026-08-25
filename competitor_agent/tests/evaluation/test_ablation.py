@@ -213,7 +213,15 @@ class _RagAwarePricingMock:
     def __init__(self) -> None:
         self._convs: dict[str, dict] = {}
 
-    def complete(self, messages, model=None):
+    def complete(self, messages, model=None, **kwargs):
+        """设计文档 60 单协议：``complete_with_tools`` 传 ``tools=`` → 映射 ToolCallReply；
+        任务解析等单发路径返回文本。"""
+        text = self._complete_text(messages)
+        if kwargs.get("tools"):
+            return self._to_tool_reply(text)
+        return text
+
+    def _complete_text(self, messages):
         if not messages:
             return "{}"
         system = messages[0].get("content", "")
@@ -226,6 +234,28 @@ class _RagAwarePricingMock:
         if "维度子 Agent" in system:
             return self._subagent_step(messages)
         return "{}"
+
+    def _to_tool_reply(self, text):
+        """脚本化文本 → ToolCallReply（与 BenchmarkMockLLM 同映射，设计文档 53 Q3）。"""
+        from competitor_agent.llm.client import ToolCall, ToolCallReply
+
+        if text.startswith("Final Answer: "):
+            return ToolCallReply(content=text[len("Final Answer: "):])
+        action = re.search(r"Action:\s*(\w+)", text)
+        if not action:
+            return ToolCallReply(content=text)
+        arguments: dict[str, str] = {}
+        args_raw = re.search(r"Args:\s*(\{.*\})", text, re.DOTALL)
+        if args_raw:
+            try:
+                parsed = json.loads(args_raw.group(1))
+                if isinstance(parsed, dict):
+                    arguments = parsed
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return ToolCallReply(
+            tool_calls=[ToolCall(id="call_0", name=action.group(1), arguments=arguments)]
+        )
 
     def _lead_step(self, messages):
         state = self._convs.setdefault("lead", {})
@@ -284,9 +314,14 @@ class _RagAwarePricingMock:
 
     @staticmethod
     def _last_observation(messages) -> str:
+        # 原生协议（设计文档 60）：工具结果以 role="tool" + <untrusted_data> 回灌，
+        # 无 "Observation" 前缀；按维度子 Agent 结果块标记定位 delegate 观察。
         for message in reversed(messages):
-            if message.get("role") == "user" and "Observation" in str(message.get("content", "")):
-                return str(message.get("content", ""))
+            content = str(message.get("content", ""))
+            if "[维度子 Agent 结果" in content:
+                return content
+            if message.get("role") == "user" and "Observation" in content:
+                return content
         return ""
 
     @staticmethod
