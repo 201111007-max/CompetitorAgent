@@ -82,12 +82,16 @@ test = [
     "respx>=0.23.0",
 ]
 dev = [
+    # 测试套件依赖：web（fastapi/uvicorn）+ eval（numpy）测试模块级 import，CI 只装 [dev] 必须齐
     "pytest>=8.0",
     "pytest-asyncio>=0.23.0",
     "respx>=0.23.0",
     "ruff>=0.1.0",
     "mypy>=1.0",
     "pytest-cov>=4.0",
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.29.0",
+    "numpy>=1.24",
 ]
 
 [tool.pytest.ini_options]
