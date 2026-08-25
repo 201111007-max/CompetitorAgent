@@ -53,7 +53,7 @@ web = [
     "uvicorn[standard]>=0.29.0",
 ]
 eval = [
-    "numpy>=1.24",
+    "numpy>=1.24,<2",
     "pandas>=2.0",
 ]
 langgraph = [
@@ -73,7 +73,7 @@ all = [
     "playwright>=1.40.0",
     "fastapi>=0.110.0",
     "uvicorn[standard]>=0.29.0",
-    "numpy>=1.24",
+    "numpy>=1.24,<2",
     "pandas>=2.0",
 ]
 test = [
@@ -82,7 +82,8 @@ test = [
     "respx>=0.23.0",
 ]
 dev = [
-    # 测试套件依赖：web（fastapi/uvicorn）+ eval（numpy）测试模块级 import，CI 只装 [dev] 必须齐
+    # 测试套件依赖：web（fastapi/uvicorn）+ eval（numpy）测试模块级 import，CI 只装 [dev] 必须齐；
+    # numpy 固定 <2：2.x 的 .pyi 用 3.12 type 语法，mypy python_version=3.10 解析报 syntax 错误
     "pytest>=8.0",
     "pytest-asyncio>=0.23.0",
     "respx>=0.23.0",
@@ -91,7 +92,7 @@ dev = [
     "pytest-cov>=4.0",
     "fastapi>=0.110.0",
     "uvicorn[standard]>=0.29.0",
-    "numpy>=1.24",
+    "numpy>=1.24,<2",
 ]
 
 [tool.pytest.ini_options]
