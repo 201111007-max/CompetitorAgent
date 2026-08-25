@@ -18,13 +18,18 @@ from competitor_agent.agent.delegate_tool import (
 
 
 class _FakeRegistry:
-    """最小 registry 替身：只校验维度是否可委派（make_delegate_tool 依赖 get/names）。"""
+    """最小 registry 替身：维度可委派 + competitor 命名空间兜底（make_delegate_tool 依赖 resolve/get/names）。"""
+
+    _COMPETITOR = object()
 
     def __init__(self) -> None:
         self._dims = {"pricing": object(), "feature": object(), "performance": object()}
 
     def get(self, name: str) -> object:
         return self._dims.get(name)
+
+    def resolve(self, name: str) -> object:
+        return self._dims.get(name) or self._COMPETITOR
 
     def names(self) -> list[str]:
         return list(self._dims)
@@ -75,18 +80,26 @@ def test_delegate_parallel_true_explicit(
     assert "<result pricing>" in text
 
 
-def test_delegate_unknown_dimensions_filtered(
+def test_delegate_candidate_names_delegate_via_competitor(
     runner: DelegateRunner, delegate: object
 ) -> None:
-    """未注册维度被 registry 过滤；全部未命中返回可读错误，不 spawn。"""
-    text = delegate(dimensions=["not_a_dimension"], task="分析 X")
-    assert "未指定可委派维度" in text
+    """设计文档 62 §3.2：未注册维度名（候选竞品）经 competitor 命名空间可委派。"""
+    text = delegate(dimensions=["cursor", "cline"], task="分析这些候选")
+    assert "<result cursor>" in text
+    assert "<result cline>" in text
+
+def test_delegate_candidate_parallel_false(
+    runner: DelegateRunner, delegate: object
+) -> None:
+    """候选委派同样支持串行走法。"""
+    text = delegate(dimensions=["cursor"], task="分析 X", parallel=False)
+    assert "<result cursor>" in text
 
 
 def test_delegate_mixed_empty_error(runner: DelegateRunner, delegate: object) -> None:
     """空清单返回可读错误。"""
     text = delegate(dimensions=[], task="分析 X")
-    assert "未指定可委派维度" in text
+    assert "未指定可委派目标" in text
 
 
 def test_delegate_runner_concurrency_cap(runner: DelegateRunner) -> None:

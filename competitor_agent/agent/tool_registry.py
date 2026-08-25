@@ -125,11 +125,11 @@ def build_subagent_dispatcher(
     extra_tools: dict[str, Callable[..., str] | ToolSpec] | None = None,
     tracer: Any = None,  # 设计文档 54：子 Agent 的 tool.call span
 ) -> ToolDispatcher:
-    """按子 Agent 配置的工具子集白名单构造工具面（设计文档 49 §3.6）。
+    """按子 Agent 配置的工具子集白名单构造工具面（设计文档 49 §3.6 / 62 §3.2）。
 
     子 Agent 只注册 ``SubagentConfig.tools`` 命中的工具（一律不含 analyze_competitor，
-    天然防递归）；``web_extract`` 可覆盖为真实采集链路；``extra_tools`` 追加专属工具
-    （如 pricing 子 Agent 的 estimate_costs）。
+    天然防递归）；候选竞品名经 ``resolve`` 落到 competitor 配置（设计文档 62 §3.2）；
+    ``web_extract`` 可覆盖为真实采集链路；``extra_tools`` 追加专属工具。
     """
     from competitor_agent.agent.subagent_registry import get_subagent_registry
 
@@ -137,7 +137,7 @@ def build_subagent_dispatcher(
         from competitor_agent.config.loader import load_config
 
         config = load_config()
-    cfg = get_subagent_registry().get(name)
+    cfg = get_subagent_registry().resolve(name)
     whitelist = set(cfg.tools) if cfg is not None else set()
     dispatcher = ToolDispatcher(default_timeout=config.collector.timeout_seconds, tracer=tracer)
     for tool_name, spec in TOOL_SPECS.items():

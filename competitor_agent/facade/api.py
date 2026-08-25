@@ -19,6 +19,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Callable, cast
 
+from competitor_agent.agent.aggregate_tool import make_aggregate_tool
 from competitor_agent.agent.delegate_tool import (
     DelegateRunner,
     SubagentRuntime,
@@ -694,6 +695,8 @@ class CompetitorAnalysisAPI:
         extra_tools: dict[str, Callable[..., str] | ToolSpec] = {
             "make_plan": build_make_plan_tool(),
             "delegate": make_delegate_tool(runner, registry=get_subagent_registry()),
+            # 设计文档 62 §3.3：Lead 聚合 DISCOVERY/COMPARE 候选结论，产出市场格局核心结论
+            "aggregate_report": make_aggregate_tool(),
             # 设计文档 56 M1①：Lead kb_recall（competitor 懒绑定，plan 落地前全局检索）
             "kb_recall": self._build_kb_recall(_lead_competitor_now),
         }
