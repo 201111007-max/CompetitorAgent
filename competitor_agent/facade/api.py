@@ -172,6 +172,12 @@ class CompetitorAnalysisAPI:
 
         # RAG 知识库：分析后摄入 + Lead/子 Agent 检索注入（外部事实依据，降低幻觉）
         # enable_rag=False：不组装知识库，Lead/子 Agent 对 None 走"跳过检索"路径
+        # knowledge_base ↔ memory 存在循环依赖，类只能局部导入 → 属性标注用 Any
+        # （不做模块级 import，避免 circular import）
+        self._store: Any = None
+        self._ingester: Any = None
+        self._retriever: Any = None
+        self._vector_store: Any = None
         if enable_rag:
             from competitor_agent.knowledge_base.competitor_store import CompetitorStore
             from competitor_agent.knowledge_base.ingester import Ingester
@@ -199,7 +205,7 @@ class CompetitorAnalysisAPI:
                 )
 
             # 启动状态日志（设计文档 52 §2.2）：消除静默降级
-            vs = cast(VectorStore, self._vector_store)
+            vs = self._vector_store
             if vs.is_available():
                 logger.info("向量层状态: available(%s)", vs.model_name)
             else:

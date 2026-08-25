@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from competitor_agent.domain_types.competitor import Competitor
-from competitor_agent.domain_types.enums import ResultStatus
+from competitor_agent.domain_types.enums import GapStatus, ResultStatus
 from competitor_agent.domain_types.info_gap import InfoGap
 from competitor_agent.domain_types.observation import SourceEvidence
 from competitor_agent.domain_types.report import CompetitorReport, DimensionResult
@@ -78,7 +78,7 @@ def assemble(
     planned = _planned_dimensions(loop_plan)
     produced = {d.dimension for d in dimensions}
     missing = [dim for dim in planned if dim not in produced]
-    gaps_pending = [InfoGap(field=dim, priority=5, status=ResultStatus.PARTIAL) for dim in missing]
+    gaps_pending = [InfoGap(field=dim, priority=5, status=GapStatus.PARTIAL) for dim in missing]
 
     report = builder.build(
         competitor=competitor,
@@ -111,12 +111,15 @@ def _dimension_from_item(item: dict[str, Any]) -> DimensionResult | None:
     if not dim:
         return None
     summary = str(item.get("summary") or "")
-    details = item.get("details") if isinstance(item.get("details"), dict) else {}
+    raw_details = item.get("details")
+    details: dict[str, Any] = raw_details if isinstance(raw_details, dict) else {}
     raw_confidence = item.get("confidence")
-    try:
-        confidence = max(0.0, min(1.0, float(raw_confidence)))
-    except (TypeError, ValueError):
-        confidence = 0.5
+    confidence = 0.5
+    if raw_confidence is not None:
+        try:
+            confidence = max(0.0, min(1.0, float(raw_confidence)))
+        except (TypeError, ValueError):
+            confidence = 0.5
     urls = [str(u) for u in (item.get("evidence_urls") or []) if u]
     # 数值真值核对兜底：details 非空但零证据 → 置信度封顶并标注（防无来源断言）
     if details and not urls:
@@ -175,7 +178,7 @@ def _fallback_single_dimension(
         status=status,
     )
     planned = _planned_dimensions(loop_plan)
-    gaps_pending = [InfoGap(field=dim, priority=5, status=ResultStatus.PARTIAL) for dim in planned]
+    gaps_pending = [InfoGap(field=dim, priority=5, status=GapStatus.PARTIAL) for dim in planned]
     return builder.build(
         competitor=competitor,
         results=[dr],

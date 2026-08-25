@@ -17,7 +17,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import time
 import uuid
 from collections.abc import AsyncIterator
@@ -324,7 +323,7 @@ async def index() -> str:
 
 
 # 静态资源（css/js/vendor）：设计文档 50 P2 抽离内嵌 HTML，避免改动前端需动 .py
-app.mount("/static", StaticFiles(directory=os.fspath(_STATIC_DIR)), name="static")
+app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
 
 @app.get("/api/analyze")

@@ -20,7 +20,7 @@ try:
     _HAS_MCP = True
 except ImportError:
     _HAS_MCP = False
-    FastMCP = None  # type: ignore[assignment,misc]
+    FastMCP = None
 
 
 def _require_mcp() -> None:

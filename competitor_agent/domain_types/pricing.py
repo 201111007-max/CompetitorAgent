@@ -237,12 +237,12 @@ def plan_cost(plan: PricingPlan, usage: UsageBilling | None, monthly_requests: i
         limit = included if included is not None else cap
         overage = max(0, monthly_requests - (limit or 0))
         return base + overage * per
-    base = plan.monthly_price_usd
-    if base is None:
+    flat_base = plan.monthly_price_usd
+    if flat_base is None:
         return None
     if cap is not None and monthly_requests > cap:
         return None  # 超限额但无按量单价：无法估算
-    return base
+    return flat_base
 
 
 def profile_from_details(

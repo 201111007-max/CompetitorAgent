@@ -187,7 +187,7 @@ def make_report_node(
         ]
         reply = llm.complete(messages)
         answer = (reply or "").removeprefix("Final Answer: ")
-        record = {"tool": "report", "args": {}, "result_brief": answer[:_BRIEF_CHARS], "url": ""}
+        record: dict[str, Any] = {"tool": "report", "args": {}, "result_brief": answer[:_BRIEF_CHARS], "url": ""}
         return {"final_answer": answer, "transcript": [record]}
 
     return report_node

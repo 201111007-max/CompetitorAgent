@@ -10,7 +10,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from competitor_agent.agent.react_loop import ReactLoop
 from competitor_agent.agent.react_schemas import DIMENSIONS
+from competitor_agent.agent.tool_dispatcher import ToolSpec
 from competitor_agent.llm.client import LLMClient
 from competitor_agent.observability.logger import get_logger
 
@@ -139,7 +141,7 @@ def build_subagent(
     *,
     config: Any | None = None,
     web_extract: Callable[..., str] | None = None,
-    extra_tools: dict[str, Callable[..., str]] | None = None,
+    extra_tools: dict[str, Callable[..., str] | ToolSpec] | None = None,
     session_id: str | None = None,
     budget: Any | None = None,
     memory_context_fn: Callable[[str], str] | None = None,
@@ -150,7 +152,7 @@ def build_subagent(
     tracer: Any = None,  # 设计文档 54：子 Agent tool.call span（透传 ToolDispatcher）
     max_history_steps: int | None = None,  # 设计文档 56 Q4：配置化注入；None 用 ReactAgent 默认
     max_parallel_tool_calls: int = 4,  # 设计文档 59：单回合多 tool_calls 并发上限；1 = 串行
-):
+) -> ReactLoop:
     """构造一个维度子 Agent（独立 ReactAgent + ReactLoop）。
 
     - 工具面 = ``SubagentConfig.tools`` 白名单（经 ``build_subagent_dispatcher`` 过滤，

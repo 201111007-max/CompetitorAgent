@@ -29,7 +29,7 @@ def resolve_all(host: str) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address
         infos = socket.getaddrinfo(host, None)
     except socket.gaierror as exc:
         raise URLError(f"域名解析失败: {host}（{exc}）") from exc
-    ips: list[ipaddress._BaseAddress] = []
+    ips: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = []
     for info in infos:
         ip = ipaddress.ip_address(str(info[4][0]).split("%")[0])
         if ip not in ips:
@@ -37,7 +37,7 @@ def resolve_all(host: str) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address
     return ips
 
 
-def _is_blocked(ip: ipaddress._BaseAddress) -> bool:
+def _is_blocked(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     mapped = getattr(ip, "ipv4_mapped", None)
     if mapped is not None:
         ip = mapped  # IPv4-mapped IPv6（::ffff:x.x.x.x）按底层 IPv4 判定

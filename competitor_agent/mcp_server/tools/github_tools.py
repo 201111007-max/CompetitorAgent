@@ -37,7 +37,7 @@ def _get(path: str) -> dict[str, Any] | list[Any]:
         timeout=15.0,
     )
     resp.raise_for_status()
-    return resp.json()  # type: ignore[no-any-return]
+    return resp.json()
 
 
 def github_stars(repo: str) -> str:

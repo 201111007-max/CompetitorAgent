@@ -17,10 +17,10 @@ import weakref
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Self
+from typing import Any
 
 try:
-    import fcntl  # type: ignore[import-not-found]  # Unix
+    import fcntl  # Unix
 
     _HAS_FCNTL = True
 except ImportError:
@@ -128,9 +128,9 @@ class CheckpointLock:
 
     def __init__(self, path: Path) -> None:
         self._lock_path = path.with_suffix(path.suffix + ".lock")
-        self._fh = None
+        self._fh: Any = None
 
-    def __enter__(self) -> Self:
+    def __enter__(self) -> CheckpointLock:  # noqa: PYI034  # typing.Self 需 py3.11+，项目 3.9/3.10 不可用
         self._fh = self._lock_path.open("a+b")
         self._fh.seek(0, os.SEEK_END)
         if self._fh.tell() == 0:
@@ -142,7 +142,7 @@ class CheckpointLock:
         else:
             import msvcrt
 
-            msvcrt.locking(self._fh.fileno(), msvcrt.LK_LOCK, 1)
+            msvcrt.locking(self._fh.fileno(), msvcrt.LK_LOCK, 1)  # type: ignore[attr-defined]  # Windows 专用
         return self
 
     def __exit__(self, *exc: object) -> None:
@@ -155,7 +155,7 @@ class CheckpointLock:
 
             try:
                 self._fh.seek(0)
-                msvcrt.locking(self._fh.fileno(), msvcrt.LK_UNLCK, 1)
+                msvcrt.locking(self._fh.fileno(), msvcrt.LK_UNLCK, 1)  # type: ignore[attr-defined]  # Windows 专用
             except OSError:
                 pass
         self._fh.close()

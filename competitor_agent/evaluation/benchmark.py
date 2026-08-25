@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from competitor_agent.collector.web_extractor import WebExtractor
 from competitor_agent.config.loader import AppConfig, CollectorConfig
 from competitor_agent.domain_types.enums import ObservationStatus
 from competitor_agent.domain_types.observation import Observation, SourceEvidence
@@ -37,7 +38,7 @@ from competitor_agent.evaluation.strategy_eval import StrategyCase, StrategyEval
 from competitor_agent.facade.api import CompetitorAnalysisAPI
 from competitor_agent.interfaces.context import SourceContext
 from competitor_agent.interfaces.exceptions import DataSourceUnavailableError
-from competitor_agent.llm.client import LLMClient
+from competitor_agent.llm.client import LLMClient, ToolCallReply
 from competitor_agent.memory.timeline_memory import TimelineMemory
 from competitor_agent.secret_vault import get_reports_dir
 
@@ -187,10 +188,11 @@ class BenchmarkReport:
 # ── 确定性采集（设计文档 §3.4：mock 采集保证可复现） ─────────────────
 
 
-class BenchmarkExtractor:
+class BenchmarkExtractor(WebExtractor):
     """确定性采集器：固定网页内容；fail_urls 中的 URL 抛故障（模拟首候选源失败）。
 
     供 BenchmarkMockLLM / 规则分析器消费同一份固定内容，保证 CI 无网络、无 Key 可复现。
+    继承 WebExtractor 以满足 API ``extractor`` 参数（共享 fetch 契约），仅重写确定性取数。
     """
 
     source_name = "web_extractor"
@@ -298,7 +300,7 @@ class BenchmarkMockLLM:
             return self._to_tool_reply(text)
         return text
 
-    def _to_tool_reply(self, text: str):
+    def _to_tool_reply(self, text: str) -> ToolCallReply:
         """把脚本化文本输出映射为 ToolCallReply（设计文档 53 Q3）。
 
         - ``Final Answer: <json>`` → 纯 content（无 tool_calls = 原生协议终止信号）;
@@ -830,13 +832,13 @@ class BenchmarkMockLLM:
         return ""
 
     @staticmethod
-    def _tried_urls(messages: list[dict[str, str]]) -> list[str]:
+    def _tried_urls(messages: list[dict[str, Any]]) -> list[str]:
         """本会话已尝试的抓取 URL：react 从 assistant Action Args 提取；native 从 tool_calls 提取。"""
         urls: list[str] = []
         for message in messages:
             if message.get("role") != "assistant":
                 continue
-            calls = message.get("tool_calls") or []
+            calls: list[Any] = message.get("tool_calls") or []
             if calls:
                 for call in calls:
                     url = BenchmarkMockLLM._first_call_url(call)
@@ -1296,53 +1298,53 @@ class Benchmark:
 
         # 字段真实评测：逐 case 调用 api.analyze() → 从真实报告提取 prediction
         acc_eval_cases: list[EvalCase] = []
-        for case in acc_cases:
+        for acc_case in acc_cases:
             if self._budget_exceeded(total_cost):
                 budget_aborted = True
                 break
             before = self._cost_now()
-            report = self._analyze(case)
+            report = self._analyze(acc_case)
             cost = round(self._cost_now() - before, 6)
             total_cost = round(total_cost + cost, 6)
-            per_case_cost[case.case_id or case.task] = cost
-            reports_by_case[case.case_id or case.task] = report
-            prediction = extract_prediction(report, case.dimension, case.ground_truth)
+            per_case_cost[acc_case.case_id or acc_case.task] = cost
+            reports_by_case[acc_case.case_id or acc_case.task] = report
+            prediction = extract_prediction(report, acc_case.dimension, acc_case.ground_truth)
             acc_eval_cases.append(
                 EvalCase(
-                    task=case.task,
+                    task=acc_case.task,
                     prediction=prediction,
-                    ground_truth=case.ground_truth,
-                    case_id=case.case_id,
-                    competitor=case.competitor,
-                    dimension=case.dimension,
-                    tags=case.tags,
+                    ground_truth=acc_case.ground_truth,
+                    case_id=acc_case.case_id,
+                    competitor=acc_case.competitor,
+                    dimension=acc_case.dimension,
+                    tags=acc_case.tags,
                     trace=real_trace(report),
                 )
             )
 
         # 策略真实评测：真实证据（选中/降级 URL）反推命中与成本
         strat_eval_cases: list[StrategyCase] = []
-        for case in strat_cases:
+        for strat_case in strat_cases:
             if self._budget_exceeded(total_cost):
                 budget_aborted = True
                 break
             before = self._cost_now()
-            report = self._analyze(case)
+            report = self._analyze(strat_case)
             cost = round(self._cost_now() - before, 6)
             total_cost = round(total_cost + cost, 6)
-            per_case_cost[case.case_id or case.task] = cost
-            reports_by_case[case.case_id or case.task] = report
-            urls, cost, complete = extract_strategy(report, case.best_url, case.fail_urls)
+            per_case_cost[strat_case.case_id or strat_case.task] = cost
+            reports_by_case[strat_case.case_id or strat_case.task] = report
+            urls, cost, complete = extract_strategy(report, strat_case.best_url, strat_case.fail_urls)
             strat_eval_cases.append(
                 StrategyCase(
-                    task=case.task,
+                    task=strat_case.task,
                     chosen_sources=urls,
-                    best_source=case.best_url,
+                    best_source=strat_case.best_url,
                     total_cost=cost,
                     outcome_complete=complete,
                     depth=len(urls),
-                    case_id=case.case_id,
-                    tags=case.tags,
+                    case_id=strat_case.case_id,
+                    tags=strat_case.tags,
                     trace=real_trace(report),
                 )
             )
@@ -1425,7 +1427,7 @@ class Benchmark:
         """当前累计 LLM 成本（设计文档 37：共享实例累计；无共享实例则 0）。"""
         return self._llm.total_cost_usd if self._llm is not None else 0.0
 
-    def _analyze(self, case: object) -> object:
+    def _analyze(self, case: AccuracyCase | BenchStrategyCase) -> object:
         api = self._build_api(case)
         return api.analyze(case.task, mode=getattr(case, "mode", "single"))
 
@@ -1473,7 +1475,7 @@ class Benchmark:
         strat_cases: list[StrategyCase],
     ) -> float:
         """trace 完整率 = 有真实证据 trace 的 case / 总 case（设计文档 §6 目标 100%）"""
-        all_cases: list[object] = acc_cases + strat_cases
+        all_cases: list[Any] = [*acc_cases, *strat_cases]
         if not all_cases:
             return 0.0
         with_trace = sum(1 for c in all_cases if c.trace)
@@ -1516,18 +1518,18 @@ def _classify_failures(
     - 按 (case_id, type) 去重，计数 + 占比在渲染层计算。
     """
     records: list[FailureRecord] = []
-    for case in acc_eval_cases:
-        report = reports_by_case.get(case.case_id) or reports_by_case.get(case.task)
-        records.extend(classify_case(case, case.prediction, case.ground_truth, report))
-    for case in strat_eval_cases:
-        if case.best_source in case.chosen_sources:
+    for acc_case in acc_eval_cases:
+        report = reports_by_case.get(acc_case.case_id) or reports_by_case.get(acc_case.task)
+        records.extend(classify_case(acc_case, acc_case.prediction, acc_case.ground_truth, report))
+    for strat_case in strat_eval_cases:
+        if strat_case.best_source in strat_case.chosen_sources:
             continue
-        report = reports_by_case.get(case.case_id) or reports_by_case.get(case.task)
+        report = reports_by_case.get(strat_case.case_id) or reports_by_case.get(strat_case.task)
         urls = _evidence_urls(report)
-        if not case.chosen_sources:
+        if not strat_case.chosen_sources:
             records.append(
                 FailureRecord(
-                    case.case_id,
+                    strat_case.case_id,
                     "",
                     FailureType.SOURCE_UNAVAILABLE,
                     "降级链全灭，无有效数据源（源抓取失败/BLOCKED）",
@@ -1537,7 +1539,7 @@ def _classify_failures(
         else:
             records.append(
                 FailureRecord(
-                    case.case_id,
+                    strat_case.case_id,
                     "",
                     FailureType.PARSE_FAILURE,
                     "有源但未命中标注最优源",

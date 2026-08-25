@@ -274,9 +274,8 @@ def _best_for_dim(
         if best is None:
             best = (report.competitor.name, r.confidence, r.status, r.summary)
             continue
-        if rank > _STATUS_RANK.get(best[2], 0) or (
-            rank == _STATUS_RANK.get(best[2], 0) and r.confidence > best[1]
-        ):
+        best_rk = _STATUS_RANK.get(best[2], 0) if best[2] is not None else 0
+        if rank > best_rk or (rank == best_rk and r.confidence > best[1]):
             best = (report.competitor.name, r.confidence, r.status, r.summary)
     return best if best is not None else ("", 0.0, None, "")
 

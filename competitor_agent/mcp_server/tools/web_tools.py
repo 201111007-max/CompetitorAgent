@@ -45,6 +45,7 @@ def web_extract(url: str, selector: str = "") -> str:
             current = urllib.parse.urljoin(current, location)
             if collector.block_private_urls:
                 current = guard_http_url(current)
+        assert resp is not None  # 循环至少执行一次，resp 必然已赋值
         resp.raise_for_status()
 
         try:

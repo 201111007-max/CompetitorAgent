@@ -250,11 +250,11 @@ def _run_trace(action: str, sid: str | None) -> int:
         for s in sums:
             cost = float(s.get("total_cost_usd") or 0.0)
             tok = int(s.get("total_tokens") or 0)
-            spans = int(s.get("span_count") or 0)
+            span_count = int(s.get("span_count") or 0)
             tid = str(s.get("trace_id") or "")
             task = str(s.get("input_brief") or "")[:40]
             print(f"{tid[:26]:<26}{s.get('name') or ''!s:<12}{s.get('status') or ''!s:<9}"
-                  f"{spans:>6}{tok:>8}{cost:>10.4f}  {task}")
+                  f"{span_count:>6}{tok:>8}{cost:>10.4f}  {task}")
         return 0
 
     if not sid:

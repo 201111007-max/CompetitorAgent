@@ -15,7 +15,12 @@ from typing import Any
 
 from competitor_agent.core.checkpoint import _write_bytes_atomic
 from competitor_agent.core.report_archiver import _safe_filename, resolve_output_dir
-from competitor_agent.domain_types.report import ComparisonReport, CompetitorReport
+from competitor_agent.domain_types.enums import ResultStatus
+from competitor_agent.domain_types.report import (
+    ComparisonReport,
+    CompetitorReport,
+    DimensionResult,
+)
 
 REPORT_SCHEMA_VERSION = "1.0.0"
 
@@ -33,7 +38,7 @@ def _dimension_to_dict(result: object) -> dict[str, Any]:
     status = getattr(result, "status", None)
     return {
         "field": str(getattr(result, "dimension", "")),
-        "status": status.value if hasattr(status, "value") else str(status),
+        "status": status.value if status is not None and hasattr(status, "value") else str(status),
         "confidence": round(float(getattr(result, "confidence", 0.0) or 0.0), 3),
         "summary": str(getattr(result, "summary", "") or ""),
         "evidence": evidence,
@@ -149,25 +154,24 @@ def _comparison_matrix(report: ComparisonReport) -> dict[str, Any]:
 def _best_for_dim(
     dim: str,
     reports: list[CompetitorReport],
-    dims_by_rep: list[dict[str, object]],
-) -> tuple[str, float, object, str]:
+    dims_by_rep: list[dict[str, DimensionResult]],
+) -> tuple[str, float, ResultStatus | None, str]:
     """维度最佳：状态排序（OK > PARTIAL > N/A）+ 置信度（与 MarkdownRenderer 一致）。"""
-    from competitor_agent.domain_types.enums import ResultStatus
-
     rank = {ResultStatus.COMPLETE: 3, ResultStatus.PARTIAL: 2, ResultStatus.UNAVAILABLE: 1}
-    best: tuple[str, float, object, str] | None = None
+    best: tuple[str, float, ResultStatus | None, str] | None = None
     for report, dmap in zip(reports, dims_by_rep):
         r = dmap.get(dim)
         if r is None:
             continue
-        status = getattr(r, "status", None)
+        status = r.status
         rk = rank.get(status, 0)
-        conf = float(getattr(r, "confidence", 0.0) or 0.0)
+        conf = float(r.confidence or 0.0)
         if best is None:
-            best = (report.competitor.name, conf, status, str(getattr(r, "summary", "") or ""))
+            best = (report.competitor.name, conf, status, str(r.summary or ""))
             continue
-        if rk > rank.get(best[2], 0) or (rk == rank.get(best[2], 0) and conf > best[1]):
-            best = (report.competitor.name, conf, status, str(getattr(r, "summary", "") or ""))
+        best_rk = rank.get(best[2], 0) if best[2] is not None else 0
+        if rk > best_rk or (rk == best_rk and conf > best[1]):
+            best = (report.competitor.name, conf, status, str(r.summary or ""))
     return best if best is not None else ("", 0.0, None, "")
 
 

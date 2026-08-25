@@ -90,7 +90,7 @@ class AccuracyEvaluator:
         per_case: list[dict[str, Any]] = []
 
         for case in cases:
-            case_hits = 0
+            case_hits = 0.0
             case_fields = 0
             case_pred = 0
             case_supported = 0

@@ -211,7 +211,7 @@ class Tracer:
         parent_span_id: str | None = None,
         input_brief: Any = "",
         **extra: Any,
-    ) -> Iterator[dict[str, Any]]:
+    ) -> Iterator[dict[str, Any] | None]:
         """开启一个子 span 上下文：with 块退出时按其 outcome 自动闭合。
 
         - 同线程嵌套：``parent_span_id`` 缺省取当前线程栈顶（自动挂 parent）；
@@ -385,7 +385,7 @@ def list_summaries(path: Path | None = None) -> list[dict[str, Any]]:
     """
     records = iter_traces(path)
     roots: list[dict[str, Any]] = []
-    children = defaultdict(int)
+    children: dict[str, int] = defaultdict(int)
     seen: set[str] = set()
     for r in records:
         tid = r.get("trace_id")
@@ -398,7 +398,7 @@ def list_summaries(path: Path | None = None) -> list[dict[str, Any]]:
             roots.append(r)
         children[tid] += 1
     for r in roots:
-        r["span_count"] = children.get(r.get("trace_id"), 1) - 1  # 去掉根自身
+        r["span_count"] = children.get(r.get("trace_id") or "", 1) - 1  # 去掉根自身
     roots.sort(key=lambda r: str(r.get("start") or ""), reverse=True)
     return roots
 
@@ -420,6 +420,7 @@ def _children_by(spans: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]
 def _duration_ms(end: str | None, start: str | None) -> float:
     start = start or end
     end = end or start
+    assert start is not None and end is not None
     try:
         s = datetime.fromisoformat(start)
         e = datetime.fromisoformat(end)
