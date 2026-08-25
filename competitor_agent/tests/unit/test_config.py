@@ -45,7 +45,8 @@ def test_subagents_config_section() -> None:
         raw = yaml.safe_load(f)
     sub = raw["subagents"]
     assert sub["enabled"] is True
-    assert sub["max_concurrent"] >= 1
+    # 并发硬上限收敛到 execution.max_parallel_subagents（设计文档 62 §3.8）
+    assert raw["execution"]["max_parallel_subagents"] >= 1
 
 
 # ── M6：load_config() 加载为类型安全 AppConfig ──────────────────────────────
@@ -61,8 +62,9 @@ def test_load_config_returns_appconfig() -> None:
     assert cfg.collector.rate_limit_per_second == 2
     assert cfg.memory.enabled is True
     assert cfg.observability.log_level == "INFO"
-    assert cfg.execution.mode == "single"
     assert cfg.execution.max_parallel_subagents == 4
+    assert cfg.lead.max_orchestration_steps == 24
+    assert cfg.lead.max_history_steps == 12
     assert cfg.subagents.enabled is True
     assert cfg.tools.validate_facts is True
 
@@ -92,20 +94,32 @@ def test_load_config_env_override(monkeypatch) -> None:
         os.unlink(tmp)
 
 
-def test_load_config_parses_execution_section(tmp_path) -> None:
-    """execution section 解析：mode 与 max_parallel_subagents 进入 ExecutionConfig。"""
-    from competitor_agent.config.loader import ExecutionConfig
+def test_load_config_parses_execution_and_lead_section(tmp_path) -> None:
+    """execution/lead section 解析：硬上限 + Lead 编排步数进入对应 Config（设计文档 62 §3.8）。"""
+    from competitor_agent.config.loader import ExecutionConfig, LeadConfig
 
     p = tmp_path / "cfg.yaml"
     p.write_text(
-        "execution:\n  mode: parallel\n  max_parallel_subagents: 8\nbudget:\n  max_iterations: 3\n",
+        "execution:\n  max_parallel_subagents: 8\nlead:\n  max_orchestration_steps: 30\n"
+        "  max_history_steps: 10\nbudget:\n  max_iterations: 3\n",
         encoding="utf-8",
     )
     cfg = load_config(str(p))
     assert isinstance(cfg.execution, ExecutionConfig)
-    assert cfg.execution.mode == "parallel"
     assert cfg.execution.max_parallel_subagents == 8
+    assert isinstance(cfg.lead, LeadConfig)
+    assert cfg.lead.max_orchestration_steps == 30
+    assert cfg.lead.max_history_steps == 10
     assert cfg.budget.max_iterations == 3
+
+
+def test_load_config_ignores_unknown_execution_key(tmp_path) -> None:
+    """execution.mode 已删除（设计文档 62 §3.8）：未知键被忽略不报错。"""
+    p = tmp_path / "cfg.yaml"
+    p.write_text("execution:\n  mode: parallel\n  max_parallel_subagents: 4\n", encoding="utf-8")
+    cfg = load_config(str(p))
+    assert not hasattr(cfg.execution, "mode")
+    assert cfg.execution.max_parallel_subagents == 4
 
 
 def test_api_uses_config_budget() -> None:

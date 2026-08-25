@@ -40,6 +40,15 @@ class StubAPI:
     def analyze(self, task, conversation_history=None, mode="single"):
         return StubReport()
 
+    def run(self, task, session_id=None):
+        """统一入口 stub：镜像真实 run() 的语义路由（设计文档 62 §3.5）。"""
+        if "对比" in task and "和" in task:
+            a, _, b = task.partition("和")
+            return self.compare(a.replace("对比", "").strip(), b.strip())
+        if "市场" in task or "所有" in task or "寻找" in task:
+            return self.discover(task)
+        return self.analyze(task)
+
     def compare(self, a, b=None):
         return ComparisonReport(
             competitors=[Competitor(name=a), Competitor(name=b or "b")],

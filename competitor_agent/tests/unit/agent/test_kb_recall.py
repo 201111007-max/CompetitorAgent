@@ -140,8 +140,8 @@ class TestLeadWiring:
         assert "kb_recall" in dispatcher.get_tool_descriptions()
 
     def test_react_loop_max_history_steps_from_config(self, tmp_path):
-        """max_history_steps 配置化注入（Q4）：config → ReactLoop。"""
+        """Lead max_history_steps 配置化注入（设计文档 62 §3.8）：lead.max_history_steps → Lead ReactLoop。"""
         api = _api(tmp_path)
-        api._config.agent.max_history_steps = 3
+        api._config.lead.max_history_steps = 3
         loop = api._react_loop("分析 cursor 定价", None)
         assert loop._max_history_steps == 3

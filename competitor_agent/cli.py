@@ -20,8 +20,8 @@ from typing import NoReturn
 from competitor_agent.config.loader import AppConfig, load_config
 from competitor_agent.core.command_registry import command_dispatch
 from competitor_agent.core.input_sanitizer import sanitize_task
-from competitor_agent.core.task_parser import ResolutionDecision, parse_task
-from competitor_agent.domain_types.report import CompetitorReport
+from competitor_agent.core.task_parser import parse_task
+from competitor_agent.domain_types.report import ComparisonReport, CompetitorReport
 from competitor_agent.facade.api import CompetitorAnalysisAPI
 from competitor_agent.interfaces.exceptions import LLMUnavailableError
 from competitor_agent.llm.client import LLMClient
@@ -77,26 +77,21 @@ def _run_analyze(
         print("用法: analyze <竞品或任务>")
         return 0
     try:
-        parsed = parse_task(args, llm=llm, use_llm=use_llm)
+        # LLM 可用性守卫（设计文档 47：无 Key → 退出码 2）；解析失败即短路
+        parse_task(args, llm=llm, use_llm=use_llm)
     except LLMUnavailableError as exc:
         print(f"需要配置 LLM API Key 才能分析（LLM 不可用: {exc}）")
         return 2
-    markdown = ""
-    name = parsed.primary_competitor
-    if parsed.resolution == ResolutionDecision.DISCOVERY:
-        # 市场普查/发现：联网发现竞品 → 逐个分析 → 品类格局报告
-        report = api.discover(args)
-        markdown = report.markdown_report
-        print(markdown)
-    elif parsed.is_compare and len(parsed.competitors) >= 2:
-        report = api.compare(*parsed.competitors)
+    # 设计文档 62 §3.7：分派收敛到统一 run()（DISCOVERY/COMPARE/单竞品由库内路由）
+    report = api.run(args)
+    if isinstance(report, ComparisonReport):
         markdown = report.markdown_report
         print(markdown)
         name = "compare"
     else:
-        rep = api.analyze(args, mode=mode)
-        _print_report(rep)
-        markdown = rep.markdown_report
+        _print_report(report)
+        markdown = report.markdown_report
+        name = report.competitor.name
     if out_dir:
         _save_markdown(markdown, name, out_dir)
     return 0
@@ -342,7 +337,8 @@ def _run_compare_repl(api: CompetitorAnalysisAPI, args: str) -> None:
     if len(parts) < 2:
         print("用法: /compare A 和 B")
         return
-    report = api.compare(parts[0], parts[1])
+    # 设计文档 62 §3.7：统一入口 run()（COMPARE 语义由库内路由）
+    report = api.run(f"对比 {parts[0]} 和 {parts[1]}")
     print(report.markdown_report)
 
 
