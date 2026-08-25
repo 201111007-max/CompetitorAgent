@@ -79,7 +79,7 @@ class ReactAgent:
         self,
         system_prompt: str,
         user_message: str,
-        max_steps: int = 6,
+        max_steps: int | None = 6,
         step_guard: Callable[[], bool] | None = None,
         obs_max_chars: int | None = None,
         max_history_steps: int | None = None,
@@ -131,7 +131,7 @@ class ReactAgent:
         system_prompt: str,
         user_message: str,
         *,
-        max_steps: int,
+        max_steps: int | None,
         step_guard: Callable[[], bool] | None,
         obs_max_chars: int,
         max_history_steps: int,
@@ -171,7 +171,7 @@ class ReactAgent:
             forced_choice = {"type": "function", "function": {"name": mandatory_first_tool}}
         summary_lines: list[str] = []
         step = 0
-        while step < max_steps:
+        while max_steps is None or step < max_steps:
             if step_guard is not None and not step_guard():
                 break
             tool_choice: Any = None if first_tool_done else forced_choice

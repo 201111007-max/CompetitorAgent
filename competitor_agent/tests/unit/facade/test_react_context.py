@@ -71,7 +71,7 @@ class TestSharedContext:
         assert "历史经验" not in rec.systems[0]
 
     def test_budget_consumed_per_step(self):
-        budget = IterationBudget(max_iterations=10, cost_limit=1.0)
+        budget = IterationBudget(max_iterations=10)
         loop = _react_loop(budget=budget)
         result = loop.run_with_result("分析 cursor")
         assert result.answer == "结论"
@@ -80,7 +80,7 @@ class TestSharedContext:
         assert result.budget_exhausted is False
 
     def test_budget_exhausted_interrupts(self):
-        budget = IterationBudget(max_iterations=1, cost_limit=1.0)
+        budget = IterationBudget(max_iterations=1)
         rec = Recorder([_tool("echo", {}), _fin("不应到达")])
         agent = ReactAgent(llm=LLMClient(call_func=rec), dispatcher=ToolDispatcher())
         loop = ReactLoop(agent, budget=budget)

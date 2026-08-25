@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from competitor_agent.agent.prompts.trust_boundary import wrap_untrusted
-from competitor_agent.observability.logger import get_logger
+from competitor_agent.observability.logger import current_session, get_logger, set_current_session
 
 logger = get_logger("agent.delegate_tool")
 
@@ -51,6 +51,7 @@ class _BackgroundRecord:
     execution_id: str
     name: str
     task: str
+    session_id: str | None = None  # 设计文档 56/62：worker 线程日志路由所需的会话上下文
     trace_id: str | None = None  # 设计文档 54：跨线程 subagent span 归属的 trace
     parent_span_id: str | None = None  # 设计文档 54：subagent span 挂在 delegate 下的父 span
     future: Future | None = None
@@ -91,6 +92,7 @@ class DelegateRunner:
             execution_id=execution_id,
             name=name,
             task=task,
+            session_id=current_session(),
             trace_id=trace_id,
             parent_span_id=parent_span_id,
         )
@@ -110,6 +112,7 @@ class DelegateRunner:
             execution_id=execution_id,
             name=name,
             task=task,
+            session_id=current_session(),
             trace_id=trace_id,
             parent_span_id=parent_span_id,
         )
@@ -126,7 +129,11 @@ class DelegateRunner:
         return self._tracer.pop_tool_context()
 
     def _run(self, name: str, task: str, rec: _BackgroundRecord) -> None:
+        prev_session = current_session()
         try:
+            # 设计文档 56/62：worker 线程注入会话上下文，使子 Agent 日志能路由到
+            # 对应 logs/<sid>.log（否则 SessionRouterHandler 因无 session 丢弃）。
+            set_current_session(rec.session_id)
             runtime = self._runtime_factory(name)
             if self._tracer is None:
                 result = runtime.run(task)
@@ -148,6 +155,9 @@ class DelegateRunner:
             logger.warning("子 Agent 执行异常: %s (%s): %s", name, rec.execution_id, exc)
             rec.status = "error"
             rec.result = f"子 Agent 执行异常: {type(exc).__name__}: {exc}"
+        finally:
+            # 清理 worker 线程的会话上下文，避免污染线程池后续任务。
+            set_current_session(prev_session)
 
     def await_terminal(self, execution_id: str, timeout_seconds: float | None = None) -> _BackgroundRecord | None:
         """阻塞轮询直到子 Agent terminal（done/error/timed_out），返回记录。
@@ -257,6 +267,15 @@ def make_delegate_tool(
           其他名（候选竞品）落到 ``competitor`` 命名空间；未命中由 ``runtime_factory``
           按名构造（候选竞品子 Agent 由装配侧提供）。
         """
+        # 防御：LLM 偶发把 dimensions 传成字符串而非数组（schema 纠正前的老手型）。
+        # 按字符串直接返回可读错误，避免被逐字符迭代成单字符子 Agent。
+        if isinstance(dimensions, str):
+            return (
+                "delegate 参数错误：dimensions 必须是字符串数组，"
+                f"收到字符串 {dimensions!r}。请重试并传数组，"
+                '如 {"dimensions": ["pricing", "feature"]}。'
+            )
+        # 防御：过滤空串与空白项（防止候选名单里残留无效项）。
         dims = [d for d in (dimensions or []) if _resolvable(registry, d)]
         if not dims:
             available = ", ".join(registry.names())

@@ -1,7 +1,8 @@
-"""迭代预算控制器：迭代 + 成本 + 边际递减
+"""迭代预算控制器：迭代 + token 边际递减
 
-从 dota_helper/engines/budget.py 通用化迁移：
-- 记录迭代次数与已消耗成本（美元）
+从 dota_helper/engines/budget.py 通用化迁移，并移除成本核算：
+- 记录迭代次数（预算门禁）
+- 按 token 做边际递减启发（供停止决策参考），保留 token 统计但不再折算美元成本
 - 提供 consume() / refund() / 剩余资源查询
 - ThreadSafe（供并行子代理共享）
 """
@@ -15,44 +16,40 @@ logger = logging.getLogger("competitor_agent.core.budget")
 
 
 class IterationBudget:
-    """迭代 + 成本预算控制器"""
+    """迭代预算控制器（仅迭代门禁 + token 边际递减，无美元成本）
+
+    成本已从核心运行路径移除（设计决策）：预算按迭代次数收敛，
+    token 统计仅在求边际递减时使用，不再作为美元成本记账。
+    """
 
     def __init__(
         self,
         max_iterations: int,
-        cost_limit: float,
         diminishing_threshold: int = 500,
         min_continuations: int = 3,
     ) -> None:
         self._max_iterations = max_iterations
-        self._cost_limit = cost_limit
         self._diminishing_threshold = diminishing_threshold
         self._min_continuations = min_continuations
 
         self._used_iterations = 0
-        self._used_cost = 0.0
         self._recent_deltas: list[int] = []
         self._lock = Lock()
 
-    def consume(self, delta_cost: float = 0.0, delta_tokens: int = 0) -> bool:
-        """消费一个迭代配额。返回 True 表示允许继续，False 表示预算耗尽/递减。
+    def consume(self, delta_tokens: int = 0) -> bool:
+        """消费一个迭代配额，返回 True 表示允许继续，False 表示预算耗尽/递减。
 
-        与 dota_helper 不同：这里消费迭代 + 累计成本，
-        是否真正停止由 BudgetController 综合四条件判定。
+        预算仅按迭代数收敛（无成本上限）；是否真正停止由调用方综合判断。
         """
         with self._lock:
             if self._used_iterations >= self._max_iterations:
                 logger.warning("预算控制器: 迭代耗尽 %d/%d", self._used_iterations, self._max_iterations)
-                return False
-            if self._used_cost >= self._cost_limit:
-                logger.warning("预算控制器: 成本耗尽 %.4f/%.4f", self._used_cost, self._cost_limit)
                 return False
             if self._used_iterations >= self._min_continuations and self._check_diminishing(delta_tokens):
                 logger.info("预算控制器: 边际递减，建议停止")
                 return False
 
             self._used_iterations += 1
-            self._used_cost += delta_cost
             self._recent_deltas.append(delta_tokens)
             if len(self._recent_deltas) > 2:
                 self._recent_deltas.pop(0)
@@ -73,10 +70,10 @@ class IterationBudget:
             if self._used_iterations > 0:
                 self._used_iterations -= 1
 
-    def snapshot(self) -> tuple[int, int, float, float]:
-        """返回 (已用迭代, 总迭代, 已用成本, 成本上限)"""
+    def snapshot(self) -> tuple[int, int]:
+        """返回 (已用迭代, 总迭代)"""
         with self._lock:
-            return (self._used_iterations, self._max_iterations, self._used_cost, self._cost_limit)
+            return (self._used_iterations, self._max_iterations)
 
     @property
     def used_iterations(self) -> int:
@@ -84,11 +81,5 @@ class IterationBudget:
             return self._used_iterations
 
     @property
-    def used_cost(self) -> float:
-        with self._lock:
-            return self._used_cost
-
-    @property
     def remaining_iterations(self) -> int:
-        with self._lock:
-            return self._max_iterations - self._used_iterations
+        return self._max_iterations - self._used_iterations

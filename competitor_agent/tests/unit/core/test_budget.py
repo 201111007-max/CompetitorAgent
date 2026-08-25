@@ -1,4 +1,4 @@
-"""core/budget.py + budget_controller.py 单测：四条件终止分支"""
+"""core/budget.py + budget_controller.py 单测：终止分支（成本条件已移除）"""
 
 from concurrent.futures import ThreadPoolExecutor
 
@@ -13,52 +13,45 @@ def _gap(field="pricing", priority=5, confidence=0.0, status=GapStatus.OPEN):
 
 class TestIterationBudget:
     def test_consume_allows_continue(self):
-        b = IterationBudget(max_iterations=5, cost_limit=1.0)
-        assert b.consume(delta_cost=0.1) is True
+        b = IterationBudget(max_iterations=5)
+        assert b.consume() is True
         assert b.used_iterations == 1
-        assert b.used_cost == 0.1
 
     def test_consume_stops_at_iteration_limit(self):
-        b = IterationBudget(max_iterations=2, cost_limit=1.0)
+        b = IterationBudget(max_iterations=2)
         assert b.consume() is True
         assert b.consume() is True
         assert b.consume() is False
 
-    def test_consume_stops_at_cost_limit(self):
-        b = IterationBudget(max_iterations=10, cost_limit=0.5)
-        assert b.consume(delta_cost=0.4) is True
-        assert b.consume(delta_cost=0.4) is True  # 0.8 >= 0.5，仍在预算内
-        assert b.consume(delta_cost=0.4) is False  # 下次检查已超限
-
     def test_remaining_iterations(self):
-        b = IterationBudget(max_iterations=5, cost_limit=1.0)
+        b = IterationBudget(max_iterations=5)
         assert b.remaining_iterations == 5
         b.consume()
         assert b.remaining_iterations == 4
 
     def test_refund(self):
-        b = IterationBudget(max_iterations=3, cost_limit=1.0)
+        b = IterationBudget(max_iterations=3)
         b.consume()
         b.refund()
         assert b.used_iterations == 0
 
     def test_snapshot(self):
-        b = IterationBudget(max_iterations=3, cost_limit=0.5)
-        b.consume(delta_cost=0.2)
-        used_i, max_i, used_c, max_c = b.snapshot()
-        assert (used_i, max_i, used_c, max_c) == (1, 3, 0.2, 0.5)
+        b = IterationBudget(max_iterations=3)
+        b.consume()
+        used_i, max_i = b.snapshot()
+        assert (used_i, max_i) == (1, 3)
 
     def test_shared_budget_no_overconsume_under_parallel(self):
         """并行缺口共享同一 IterationBudget：并发扣减不超发（原子性）。"""
-        budget = IterationBudget(max_iterations=5, cost_limit=10.0, min_continuations=999)
+        budget = IterationBudget(max_iterations=5, min_continuations=999)
         with ThreadPoolExecutor(max_workers=8) as pool:
-            outcomes = list(pool.map(lambda i: budget.consume(delta_cost=0.01), range(20)))
+            outcomes = list(pool.map(lambda i: budget.consume(), range(20)))
         assert outcomes.count(True) == 5  # 恰好消耗满配额
         assert outcomes.count(False) == 15
         assert budget.used_iterations == 5
 
     def test_diminishing_returns_false(self):
-        b = IterationBudget(max_iterations=10, cost_limit=1.0, diminishing_threshold=500, min_continuations=3)
+        b = IterationBudget(max_iterations=10, diminishing_threshold=500, min_continuations=3)
         assert b.consume(delta_tokens=100) is True
         assert b.consume(delta_tokens=90) is True
         assert b.consume(delta_tokens=80) is True  # 尚未到 min_continuations
@@ -93,16 +86,6 @@ class TestBudgetControllerCondition2:
 
 
 class TestBudgetControllerCondition3:
-    def test_cost_limit_reached(self):
-        ctrl = BudgetController(cost_limit=1.0)
-        ctrl.record_iteration(cost=0.6)
-        ctrl.record_iteration(cost=0.6)
-        d = ctrl.should_stop([_gap(status=GapStatus.OPEN)])
-        assert d.should_stop
-        assert d.reason == StopReason.COST_LIMIT_REACHED
-
-
-class TestBudgetControllerCondition4:
     def test_core_satisfaction_reached(self):
         ctrl = BudgetController(core_priority_threshold=8, core_confidence=0.8)
         gaps = [
@@ -128,9 +111,8 @@ class TestBudgetControllerCondition4:
 
 class TestBudgetControllerConcurrency:
     def test_record_iteration_thread_safe(self):
-        """并行缺口共享 BudgetController：并发 record_iteration 计数/成本不丢失。"""
-        ctrl = BudgetController(max_iterations=100, cost_limit=100.0)
+        """并行缺口共享 BudgetController：并发 record_iteration 计数不丢失。"""
+        ctrl = BudgetController(max_iterations=100)
         with ThreadPoolExecutor(max_workers=8) as pool:
-            pool.map(lambda i: ctrl.record_iteration(cost=0.01), range(20))
+            pool.map(lambda i: ctrl.record_iteration(), range(20))
         assert ctrl.iteration_count == 20
-        assert abs(ctrl.total_cost - 0.2) < 1e-9

@@ -19,7 +19,6 @@
 budget:
   max_iterations: 10          # Lead ReAct 最大步数（设计文档 49：步数上限）
   max_parallel_subagents: 4   # 并行子代理上限
-  cost_limit_usd: 1.0         # 单次分析 LLM 成本上限（美元，事后记账）
   token_high_water_mark: 120000  # 上下文 token 高水位，触发压缩
   token_compression_target: 80000 # 压缩后目标 token
 
@@ -89,8 +88,8 @@ agent:
   max_history_steps: 8      # 子 Agent 工具步超过后折叠旧步为摘要（默认 8，行为不变）
 
 # ===== Lead 编排（设计文档 62 §3.8）=====
+# 迭代次数限制已移除（Lead max_steps=None 无限循环，靠 LLM 自然收敛 Final Answer）
 lead:
-  max_orchestration_steps: 24  # Lead 编排步数硬上限（调度场景可容纳，默认 24）
   max_history_steps: 12        # Lead 上下文压缩保留步数（透传 ReactAgent._compress_history）
 
 tools:
@@ -116,7 +115,6 @@ observability:
 | 字段 | 类型 | 默认 | 说明 |
 |------|------|------|------|
 | `budget.max_iterations` | int | 10 | Lead ReAct 最大步数，防死循环（设计文档 49） |
-| `budget.cost_limit_usd` | float | 1.0 | 成本上限（事后记账口径，超额在报告中体现） |
 | `budget.token_high_water_mark` | int | 120000 | 上下文高水位，触发压缩 |
 | `dimensions.enabled` | list | 6 项 | 实际执行维度白名单 |
 | `collector.cache_ttl_seconds` | int | 86400 | 采集缓存有效期 |

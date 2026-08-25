@@ -1230,7 +1230,6 @@ def build_benchmark_api(
         llm=llm,
         use_llm=True,
         max_iterations=8,
-        cost_limit=1.0,
         enable_rag=enable_rag,
         enable_memory=enable_memory,
         memory=memory,  # type: ignore[arg-type]

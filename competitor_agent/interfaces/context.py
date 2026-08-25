@@ -33,9 +33,7 @@ class BudgetState:
     """预算状态快照（供验证器共享）"""
 
     iterations_used: int = 0
-    total_cost: float = 0.0
     max_iterations: int = 1
-    cost_limit: float = 1.0
 
 
 @dataclass

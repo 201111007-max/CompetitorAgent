@@ -97,11 +97,11 @@ class TestCancelResume:
 
 
 class TestBudgetConsistency:
-    def test_budget_exhaustion_terminates_early(self, fake_extractor, mock_llm) -> None:
-        """预算耗尽时提前终止（同一 BudgetController，终态 partial）。"""
+    def test_lead_not_bounded_by_max_iterations(self, fake_extractor, mock_llm) -> None:
+        """Lead 移除迭代次数限制：max_iterations 不再强制提前终止（终态 success）。"""
         api = CompetitorAnalysisAPI(extractor=fake_extractor, llm=mock_llm, use_llm=True, max_iterations=0)
         report = api.analyze("分析 Cursor", mode="single")
-        assert report.terminal_state == "partial", "预算耗尽应标记 partial"
+        assert report.terminal_state == "success", "Lead 不受迭代预算限制，应完整收敛"
 
 
 class TestMemoryConsistency:
