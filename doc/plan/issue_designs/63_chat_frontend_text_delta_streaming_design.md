@@ -34,7 +34,7 @@
 ## 2. 目标设计
 
 1. **对话式前端**：`对话列表（上） + 输入框/发送按钮（下）`。发送即开启新助手回合；消息区为「用户消息/助手消息」的气泡流；多轮可连续追问；支持停止当前回合。
-2. **Option C 流式分词**：`LLMClient.stream()` 暴露流式增量（`text(text_delta)` / 可选 `thinking(thinking_delta)`），经 ReactAgent（Lead/子 Agent）→ 事件桥 → SSE → 前端逐段追加重渲染，**把模型的实时叙述 / 工具调用 / 推理链给到用户**（类 Claude）。
+2. **Option C 流式分词**：`LLMClient.stream()` 暴露流式增量（`text(text_delta)` / 可选 `thinking(thinking_delta)`），经 ReactAgent（**仅 Lead**；子 Agent 思考不展示，见主旨2）→ 事件桥 → SSE → 前端逐段追加重渲染，**把 Lead 的实时叙述 / 工具调用 / 推理链给到用户**（类 Claude）。
 3. **多轮会话**：以 `session_id` 关联；同会话内把前文（用户问句 + 助手结论摘要）带进下一轮上下文（复用既有 Lead 记忆/RecentSession，不引入大改动）。
 
 ---
@@ -69,6 +69,10 @@
 
 - 保留 `GET /api/analyze?task=&session_id=`（EventSource 原生支持、自动重连）作为**单回合分析流式**通道：前端每次发送 → 建立/续用一个 session_id 的 SSE 流。
 - （可选进阶）若后续需要 POST body（长 task、结构化上下文），切 `POST /api/chat` + `fetch` + `ReadableStream`；v1 不必，task 是短字符串。
+
+#### TODO（未实现）：多轮回灌上下文
+
+> `session_id` 多轮提交与会话状态（§4.2）、心跳保活（§4.3）当前**均未实现**，见文末「待办事项」。
 
 ### 4.2 多轮与会话状态
 
@@ -146,6 +150,10 @@ def stream(self, messages, *, json_mode=False):
 - **已下发的增量与回退替更**：一旦发生 fallback，新模型重头产出，语义上属于「新一条回答」。约定：回退时发 `message.start`(新 id) + `text.stop`(旧 id, `final=false`)；前端展示旧条目失效即可，不强制回滚已显示文本。
 - **首块超时**：以「连接+读」超时包裹取首块，`timeout` 复用 `self._timeout`。
 
+#### TODO（未实现）：流式计价/埋点
+
+> 当前 `stream()` 纯产出增量，**未收尾调用 `_log_call`** 记账（与会话内成本核算对不上）。见文末「待办事项」。
+
 ### 5.4 计价 / 埋点
 
 - 流式结束（收完 chunk）后按 SDK 返回的 `usage` 复用 `_log_call` 记 `llm.call`（模型/tokens/耗时/成本），保证成本核算与 `complete()` 一致。
@@ -154,36 +162,36 @@ def stream(self, messages, *, json_mode=False):
 ### 5.5 注入 / mock 兼容
 
 - 注入 `call_func` 若为生成器函数（`inspect.isgeneratorfunction`）→ 透传 yield；否则一次性 `yield StreamDelta(kind="text", text=fn(...))` 兜底（兼容既有 mock）。
-- `complete/complete_with_tools/complete_json` **不变**——结构化/聚合仍走非流式收口，保证 JSON 完整可解析（doc 49 子 Agent 的 `SUBAGENT_RESULT_SCHEMA` / doc 62 候选的 `REPORT_SCHEMA`）。
+- `complete/complete_json` 及**默认路径**的 `complete_with_tools` **不变**——结构化/聚合仍走非流式收口，保证 JSON 完整可解析（doc 49 子 Agent 的 `SUBAGENT_RESULT_SCHEMA` / doc 62 候选的 `REPORT_SCHEMA`）。
+- **仅 Lead 的流式旁路（主旨1/2）**：Web 端触发分析时，给 Lead 的 ReAct 循环传入一个**默认关闭**的 `stream_sink`；仅该循环内的 `complete_with_tools` 走 `stream()`（逐块产出 `thinking_delta`/`text_delta` + 从流式增量重构出与 `complete_with_tools` 等价的 `ToolCallReply`），使 Lead 的思考渐进可见。其余 **54 个调用方**不传 `stream_sink`，行为逐字节不变。子 Agent 不出流。
 
 ---
 
 ## 6. 层层中转：文本增量如何汇聚
 
+> **范围限定（本版修订，主旨2）**：子 Agent 的思考**不流式、不展示**。子 Agent 在前台后台线程执行，其结果仅以**文本回灌给 Lead**（由 Lead 在最终叙述/报告中总结），不产生 `text_delta`。因此中转只处理 Lead 一路。
+
 ### 6.1 源分层（`source` 字段）
 
 | source | 谁产出 | 前端呈现 |
 |---|---|---|
-| `lead` | Lead Agent 的规划/复盘/结论叙述 | 主对话流（展开） |
-| `sub.<dim>` | 维度/候选子 Agent 的 ReAct 文本 | 子任务气泡（默认折叠为一行） |
+| `lead` | Lead Agent 的规划/复盘/结论叙述、推理链 | 主对话流（思考折叠 + 正文打字机） |
 | `report` | 最终报告（`report`/`report.section`） | 报告 Markdown 面板 |
 
-### 6.2 并发归并（子 Agent 并行时）
+> `sub.<dim>` 源已删除：子 Agent 未流式下发（主旨2）。若未来要展示子 Agent，需另引入独立 `message_id` + 独立流；协议已预留 `message_id` 契约（本轮不做）。
 
-- 并行子 Agent 各自 `stream()` 产出多路增量。**两条策略**：
-  1. **顺序串流（默认，v1）**：Lead 把委派结果按完成序回灌，前端统一到**一条助手流**，`source` 标注 `sub.<dim>`——实现简单、无跳动，代价是并行收益在视觉上被「串行化」。
-  2. **并行视口（可选增强）**：每条 `sub.<dim>` 独立 `message_id` 气泡，前端并排/可折叠（Claude 式「N 个并行子任务」）。需要前端按 `message_id` 分行缓冲 + 居中聚合滚底。
-- v1 选**顺序串流**，保留 message_id 契约以便后续切并行视口无需改协议。
+### 6.2 （已删）并发归并
 
-### 6.3 思考 vs 产出
+- 原"并行子 Agent × 多路 `stream()` 归并"设计随"子 Agent 不流式"而作废，整节约简：子 Agent 结果全部**文本回灌 Lead**，前端只见 Lead 一条流。
 
-- `thinking_delta`（推理链）→ 前端折叠块（如「已思考 · 展开」），不打断正文字流；`text_delta` → 正文打字机。
-- 模型不暴露 reasoning_content 时，`stream()` 只有 `text`，则「思考过程」退化为**模型的实时叙述 + 工具调用活动**（同样满足「看见模型在做什么」）。
+### 6.3 思考 vs 产出（保留，改为仅 Lead）
 
-### 6.4 结构化 Final Answer 的展示取舍
+- `thinking_delta`（Lead 推理链）→ 前端折叠块（如「已思考 · 展开」），不打断正文字流；`text_delta`（Lead 叙述/结论正文）→ 打字机。
+- Lead 模型不暴露 reasoning_content 时，`stream()` 只有 `text`，则「思考过程」退化为 **Lead 的实时叙述 + 工具调用活动**（同样满足「看见 Lead 在做什么」，主旨1）。
 
-- 子 Agent 的 `Final Answer` 是 JSON（`summary/details/confidence`）。**原始 `text_delta` 是正在构造的 JSON，对用户不友好**。
-- 约定：`stream()` 产出的原始 token **只用于「思考/叙述」展示**，不直接注入报告；报告正文仍来自 `report` 事件（渲染后的 markdown），并走 `report.section` 支持逐维度流入。**思考过程 ≠ 报告**，二者由不同事件承载。
+### 6.4 思考与报告分离（保留）
+
+- `stream()` 产出的原始 token **只用于「思考/叙述」展示**，不直接注入报告；报告正文仍来自 `report` 事件（渲染后的 markdown），并走 `report.section` 支持逐维度流入。**思考过程 ≠ 报告**，二者由不同事件承载（Lead 的 Final Answer 亦为叙述，不替代报告）。
 
 ---
 
@@ -255,18 +263,16 @@ let assistantBuf = new Map(); // message_id -> {element, text, thinkingOpen, too
 用户(发送 task) → 前端 user 气泡 + EventSource(sid)
   POST/GET /api/analyze?sess_id&task          (web_app._event_generator)
   → [message.start msg=A source=lead]
-  → [text_delta msg=A "针对市面上常见的 coding agent…"]   # Lead 规划，打字机
-  → [thinking_delta msg=A …]                               # 若模型暴露推理链,折叠
+  → [thinking_delta msg=A …]                               # Lead 推理链（折叠）
+  → [text_delta msg=A "针对市面上常见的 coding agent…"]   # Lead 叙述/结论，打字机
   → [tool_use msg=A delegate make_plan]  → [tool_result ✓]
   → [discovery.candidate claude-code] [discovery.candidate copilot]  # 既有
-  → [message.start msg=B source=sub.feature] [text_delta msg=B …]    # 子 Agent 思考
-  → [tool_use msg=B web_extract github.com/…] → [tool_result]
+  → ── 子 Agent 后台执行，仅文本回灌 Lead，不出流（主旨2）──
   → [report.section dimension=feature markdown=…]   # 报告逐段流入(可选)
-  → [message.stop msg=B]
-  → (其它维度 …) → [report markdown_report report_url report_path]
+  → [report markdown_report report_url report_path]
   → [message.stop msg=A]
   → SSE EOF
-前端：user 气泡 → lead 气泡打字机 → 子任务气泡 → 报告面板落定 +「报告已生成·地址…」
+前端：user 气泡 → lead 气泡打字机（思考折叠+正文） → 报告面板落定 +「报告已生成·地址…」
 ```
 
 ---
@@ -298,10 +304,10 @@ let assistantBuf = new Map(); // message_id -> {element, text, thinkingOpen, too
 | 里程碑 | 内容 | 依赖 |
 |---|---|---|
 | M1 | 事件协议扩展（`message.* / text_delta / thinking_delta / tool_use / tool_result`）+ `LLMClient.stream()` + 单测 | 无 |
-| M2 | Lead/子 Agent ReAct 文本接 `text_delta` 中转 + `source` 分层（顺序串流，v1） | M1 |
+| M2 | **仅 Lead** ReAct 流式中转：默认关闭的 `stream_sink` 旁路（`thinking_delta` 折叠 + `text_delta` 打字机）；子 Agent 不流式（文本回灌）。 | M1 |
 | M3 | 后端对话通道：`session_id` 多轮回灌、心跳、`message.stop` 摘要 | M2 |
 | M4 | 前端对话页重构（布局/打字机/工具折叠/报告面板/停止/新会话） | M3 |
-| M5 | `report.section` 逐维流式 + 端到端体验打磨（节流/滚底/光标） | M4 |
+| M5 | `report.section` 逐维流式 + 端到端体验打磨（节流/滚底/光标） —— **未实现（TODO）** | M4 |
 
 优先级：M1→M4 为 P0（对话 + 流式核心）；M5 为 P1（报告段流式增强，可选）。
 
@@ -313,3 +319,26 @@ let assistantBuf = new Map(); // message_id -> {element, text, thinkingOpen, too
 - **原始 token 含 JSON/中间态**：`text_delta` 只用于「思考/叙述」呈现，报告正文走 `report`（渲染后），避免把半成品 JSON 直接怼给用户。
 - **高频 `text_delta`**：`marked+DOMPurify` 全量重渲昂贵 → 必须 80ms 节流；长报告可退化为 `report.section` 或仅正文 `text`，表/JSON 块 `text_delta` 外。
 - **回调替更**：fallback 换模型会重头产出，契约用「新 message.start + 旧 text.stop(final=false)」表达，前端不强制回滚，避免实现负担。
+
+---
+
+## 13. 待办事项 / 实现状态（修订记录 2026-08-26）
+
+> 会话实测后按用户主旨收窄：流式范围 **Lead-only**（子 Agent 思考不展示）。下方为当前实现状态清单；`[x]` 已完成、`[ ]` 待办。
+
+| 项 | 状态 | 说明 / 落点 |
+|---|---|---|
+| M1 事件协议（`message.*/text_delta/thinking_delta/tool_use/tool_result`）+ `StreamEvent` | [x] | `domain_types/events.py` |
+| M1 `LLMClient.stream()` + `StreamDelta` + 单测 | [x] | `llm/client.py`、`tests/unit/llm/test_stream.py` |
+| M4 前端对话页（气泡流/打字机/工具折叠/报告面板/停止/新会话） | [x] | `static/index.html`+`app.js`+`style.css` |
+| 消息信封：Web 层 `message.start`→`text_delta`→`text.stop`→`message.stop` | [x] | `web_app.py::_event_generator` |
+| **M2 仅 Lead 流式中转（默认关闭 `stream_sink` 旁路：`thinking_delta` 折叠 + `text_delta` 打字机，`sub.<dim>` 不入流）** | [x] | `llm/client.py` 流式重构 `ToolCallReply` + `react_agent._run_native` 旁路 + 五层透传（默认关闭，54 调用方不变）；`app.js` 补 `thinking_delta` 折叠；`tests/unit/web/test_web_m2_streaming.py` |
+| 子 Agent 思考过滤（主旨2：子 Agent `phase_*` 不入 lead 气泡） | [x] | `facade/api.py::_subagent_event_sink`（模块级 helper，丢 phase_start/phase_complete/progress，透传 error/cancelled） |
+| §4.3 心跳 `: keep-alive` | [x] | `web_app.py::_event_generator` 挂起空闲分支（`_HEARTBEAT_INTERVAL` 节流） |
+| §4.2 多轮 `summary` 回灌下一轮上下文 | [x] | 复用既有记忆召回：Lead `memory_context_fn=_react_memory_context` → `recent_context`（`_format_entry` 渲染 key_conclusions/pending_gaps 注入下一轮 prompt）；每轮报告经 `_archive_report`+`summarize_session` 提取结构化结论供召回 |
+| §5.4 流式计价：`stream()` 收尾调 `_log_call` 记 `llm.call` | [x] | `llm/client.py::_StreamMeter` 收尾记 `llm.call`；`tests/unit/llm/test_stream.py::TestStreamMetering` |
+| M5 `report.section` 逐维流式 | [ ] 评估为**不做（按设计降级）** | `react_report.assemble` 一次性组装（单份 Final Answer JSON → 全维度 → `builder.build()` 一次成型）；维度数据仅落点在末尾，split 后发 `report.section` 零首字延迟收益，且 Lead 推理已实时以 `text_delta`/`thinking_delta` 流式呈现。P1 可选，暂缓实现 |
+| §10 端点不支持流式的降级复核（`stream` 400 → 一次性 delta） | [ ] | 真实 LLM E2E 时验证 |
+| 真实 LLM E2E（lead 打字机 + 折叠思考 + 报告面板 + 心跳保活） | [ ] | `python -m competitor_agent.web_app` 手动验证 |
+
+> 里程碑优先级不变：M1→M4 P0；M5 P1。修订后 **M2 降为「仅 Lead」且实现上必须默认关闭、54 调用方行为不变**。

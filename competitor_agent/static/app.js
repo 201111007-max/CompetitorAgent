@@ -59,11 +59,20 @@ function ensureStream(mid, source) {
   if (!s) {
     s = {
       mid, source: source || 'lead', el: addMessage('assistant', source || 'lead'),
-      text: '', toolsEl: null, streaming: false, dirty: false,
+      text: '', think: '', toolsEl: null, streaming: false, dirty: false,
     };
     streams.set(mid, s);
   }
   return s;
+}
+
+function renderThinkHTML(s) {
+  // Lead 推理链（thinking_delta）→ 折叠"已思考"块（设计文档 63 §6.3）：不打断正文字流
+  if (!s.think) return '';
+  return '<details class="thinking" open>' +
+    '<summary>已思考</summary>' +
+    '<div class="thinking-body">' + escapeHtml(s.think) + '</div>' +
+    '</details>';
 }
 
 function scheduleRender(s) {
@@ -73,7 +82,8 @@ function scheduleRender(s) {
 function renderStreamHTML(s) {
   // 内存累积的 markdown → marked → DOMPurify → 注入；尾部光标随 streaming 状态
   let html = '';
-  if (s.text) html = marked.parse(s.text);
+  html += renderThinkHTML(s);          // 思考折叠块（溜在前，正文在其下）
+  if (s.text) html += ' ' + marked.parse(s.text);
   if (s.streaming) html += '<span class="cursor">▊</span>';
   s.el.innerHTML = '<span class="src-tag">' + escapeHtml(sourceLabel(s.source)) + '</span>' + html;
   scrollBottom();
@@ -207,6 +217,15 @@ function handleEvent(data) {
       activeMid = payload.message_id || null;
       ensureStream(activeMid, payload.source || 'lead');
       break;
+    case 'thinking_delta': {
+      // Lead 推理链增量（设计文档 63 §6.3）→ 折叠"已思考"块，与正文打字机分离
+      const mid = payload.message_id || activeMid;
+      const s = ensureStream(mid, (streams.has(mid) ? streams.get(mid).source : 'lead'));
+      s.streaming = true;
+      s.think += (payload.delta || data.message || '');
+      scheduleRender(s);
+      break;
+    }
     case 'text_delta': {
       const mid = payload.message_id || activeMid;
       const s = ensureStream(mid, (streams.has(mid) ? streams.get(mid).source : 'lead'));

@@ -98,6 +98,24 @@ class StreamDelta:
     message_id: str = ""  # 事件桥回填归属（M2+ 使用）
 
 
+class _StreamMeter:
+    """流式调用的收尾计量盒（设计文档 63 §5.4）：随 generator 透传到产出侧记录 usage/模型，
+    由消费方在收尾时经 ``_log_stream`` 记 ``llm.call``。跨线程单次调用内使用，无需加锁。"""
+
+    __slots__ = ("usage", "final_model", "delivered", "text_parts")
+
+    def __init__(self) -> None:
+        self.usage: Any = None
+        self.final_model: str = ""
+        self.delivered: bool = False
+        self.text_parts: list[str] = []
+
+    def add(self, delta: "StreamDelta") -> None:
+        """仅累加正文字增量（thinking 不计入 completion 文本估算；SDK 有真实 usage 时以其为准）。"""
+        if delta.kind == "text":
+            self.text_parts.append(delta.text)
+
+
 def _estimate_tokens(texts: list[str]) -> int:
     return sum(len(t) // 4 for t in texts)
 
@@ -233,16 +251,44 @@ class LLMClient:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
         tool_choice: Any = None,
+        *,
+        stream_sink: Callable[[StreamDelta], None] | None = None,
+        message_id: str = "",
     ) -> ToolCallReply:
-        """原生 function calling 通道（设计文档 53 M1）。
+        """原生 function calling 通道（设计文档 53 M1 / 63 §5.5）。
 
-        - SDK 路径传 ``tools``/``tool_choice``，复用 ``_attempt_models``
-          重试/多模型 fallback/计价/埋点；
-        - 注入 ``call_func`` 路径透传 kwargs（mock 双形态入口，设计文档 53 Q3）：
-          mock 返回 ``ToolCallReply`` 原样采用，返回 str 包装为纯 content 回复；
-        - 端点/模型不支持 tools（400 特征报错）→ 抛 ``LLMUnavailableError``（Q4：
-          不自动降级文本协议，报错给出可操作指引——更换支持工具调用的模型）。
+        ``stream_sink`` 缺省（None）→ 走非流式 ``_complete_with_tools``，行为逐字节不变
+        （54 个既有调用方不传 stream_sink）。传入时 → 流式旁路：逐增量产出
+        ``thinking_delta``/``text_delta`` 到 ``stream_sink``，并从流式增量重构出与
+        非流式等价的 ``ToolCallReply``（仅 Lead 走此旁路，子 Agent 不流式，主旨2）。
+
+        非流式路径语义（沿用）：SDK 传 ``tools``/``tool_choice`` 复用 ``_attempt_models``
+        重试/多模型 fallback/计价/埋点；注入 ``call_func`` 透传 kwargs（mock 双形态）。
         """
+        if stream_sink is None:
+            return self._complete_with_tools(messages, tools, tool_choice)
+        started = time.monotonic()
+        meter = _StreamMeter()
+        reply = ToolCallReply()
+        tool_acc: list[dict[str, Any]] = []
+        producer = lambda model, meter: self._stream_tool_call(
+            messages, model, tools, tool_choice, meter, reply, tool_acc
+        )
+        try:
+            for delta in self._stream_with_retry(messages, producer, meter):
+                self._sink_delta(stream_sink, delta, message_id)
+        finally:
+            self._log_stream(messages, started, meter)
+        self._finalize_stream_calls(tool_acc, reply)
+        return reply
+
+    def _complete_with_tools(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        tool_choice: Any = None,
+    ) -> ToolCallReply:
+        """非流式 function calling（complete_with_tools 的默认路径，语义见文档注释）。"""
         started = time.monotonic()
         if self._call is not None:
             call = self._call
@@ -302,13 +348,33 @@ class LLMClient:
         可靠性（§5.3）：流式是 generator，重试语义改为「**首个增量到达前**判定 +
         必要时切换 fallback 模型」。首个增量一经产出交给调用方，后续异常直接向调用方
         上抛（不强制回滚已下发文本）；多模型 × max_retries 全灭抛 ``LLMUnavailableError``。
+
+        计价（§5.4）：流式收尾按 SDK 返回的 ``usage``（无则正文估算）记 ``llm.call``，
+        成本核算与 ``complete()`` 一致；调用方提前中断也记已产出部分。
         """
+        started = time.monotonic()
+        meter = _StreamMeter()
+        producer = lambda model, meter: self._stream_once(messages, model, json_mode, meter)
+        try:
+            for delta in self._stream_with_retry(messages, producer, meter):
+                yield delta
+        finally:
+            self._log_stream(messages, started, meter)
+
+    def _stream_with_retry(
+        self,
+        messages: list[dict[str, str]],
+        producer: Callable[[str, _StreamMeter], Iterator[StreamDelta]],
+        meter: _StreamMeter,
+    ) -> Iterator[StreamDelta]:
+        """流式重试驱动：逐模型 × max_retries，首个增量到达前重试/fallback，
+        首个增量产出后直通调用方（不在流中重试，避免回滚已显示文本）。"""
         models = [self._model, *self._fallback_models]
         last_cause: Exception | None = None
         for model in models:
             for _attempt in range(1, self._max_retries + 1):
                 try:
-                    gen = self._stream_once(messages, model, json_mode)
+                    gen = producer(model, meter)
                     first = next(gen)
                 except StopIteration:
                     # 空流：模型返回 0 增量，视为正常完成（无可输出文本）
@@ -318,27 +384,46 @@ class LLMClient:
                     if self._should_retry(exc):
                         continue  # 重试同一模型下一次
                     raise LLMUnavailableError(f"流式调用失败（模型 {model}）: {exc}") from exc
-                # 首个增量已产出：剩余增量直通调用方（不在流中重试，避免回滚已显示文本）
+                meter.final_model = model
+                meter.delivered = True
+                meter.add(first)
                 yield first
-                yield from gen
+                for delta in gen:
+                    meter.add(delta)
+                    yield delta
                 return
         raise LLMUnavailableError(
             f"流式失败：{len(models)} 个模型 × {self._max_retries} 次重试全部耗尽"
         ) from last_cause
+
+    def _log_stream(self, messages: list[dict[str, str]], started: float, meter: _StreamMeter) -> None:
+        """流式收尾记账：仅当确有增量产出（delivered）时报 ``llm.call``。"""
+        if not meter.delivered:
+            return
+        self._log_call(
+            messages,
+            started,
+            "".join(meter.text_parts),
+            usage=meter.usage,
+            final_model=meter.final_model,
+        )
 
     def _stream_once(
         self,
         messages: list[dict[str, str]],
         model: str,
         json_mode: bool,
+        meter: _StreamMeter | None = None,
     ) -> Iterator[StreamDelta]:
         """单次流式产出的生产器：注入 call_func 或 openai SDK 两种路径。
 
         注入 call_func 为生成器函数 → 逐条透传（把 str 统一为 ``text`` delta）；
         非生成器 → 一次性包装为单个 ``text`` delta（兼容既有注入 mock）。
         SDK 路径 ``create(stream=True)``：逐 chunk 抽取 ``reasoning_content``（thinking）
-        与 ``content``（text）。
+        与 ``content``（text），并把末 chunk 的 ``usage`` 记入 ``meter``（§5.4 计价）。
         """
+        if meter is None:
+            meter = _StreamMeter()
         if self._call is not None:
             if inspect.isgeneratorfunction(self._call):
                 for rec in self._call(messages=messages, model=model):
@@ -372,6 +457,9 @@ class LLMClient:
             create_kwargs["timeout"] = self._timeout
         resp = client.chat.completions.create(**create_kwargs)
         for chunk in resp:
+            usage = getattr(chunk, "usage", None)
+            if usage is not None:
+                meter.usage = usage
             choice = chunk.choices[0] if getattr(chunk, "choices", None) else None
             if not choice or not getattr(choice, "delta", None):
                 continue
@@ -382,6 +470,122 @@ class LLMClient:
             content = getattr(delta, "content", None)
             if content:
                 yield StreamDelta(kind="text", text=content, model=model)
+
+    def _stream_tool_call(
+        self,
+        messages: list[dict[str, Any]],
+        model: str,
+        tools: list[dict[str, Any]],
+        tool_choice: Any,
+        meter: _StreamMeter,
+        reply: ToolCallReply,
+        tool_acc: list[dict[str, Any]],
+    ) -> Iterator[StreamDelta]:
+        """流式 function calling 生产器（M2 仅 Lead 旁路，设计文档 63 §5.5）。
+
+        逐 chunk 抽取 ``reasoning_content``（thinking）/``content``（text）产出增量，
+        并把 ``delta.tool_calls`` 片段归并进 ``tool_acc``（供收尾重构 ToolCallReply）。
+        """
+        try:
+            from openai import OpenAI  # 惰性导入，避免无 key 环境失败
+        except ImportError as exc:
+            raise LLMUnavailableError("openai SDK 未安装") from exc
+        if not self._api_key:
+            raise LLMUnavailableError(
+                "缺少 LLM API Key，请设置环境变量 OPENAI_API_KEY（或 DEEPSEEK_API_KEY / LLM_API_KEY）"
+            )
+
+        kwargs: dict[str, Any] = {"api_key": self._api_key}
+        if self._base_url:
+            kwargs["base_url"] = self._base_url
+        client = OpenAI(**kwargs)
+        create_kwargs: dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "tools": tools,
+            "stream": True,
+        }
+        if tool_choice is not None:
+            create_kwargs["tool_choice"] = tool_choice
+        if self._timeout is not None:
+            create_kwargs["timeout"] = self._timeout
+        try:
+            resp = client.chat.completions.create(**create_kwargs)
+        except Exception as exc:
+            if self._is_tools_unsupported(exc):
+                raise LLMUnavailableError(
+                    f"模型 {model} 不支持 tool_calls（原生 function calling），"
+                    "请更换支持工具调用的模型（设计文档 60：单协议，无文本降级）"
+                ) from exc
+            raise
+        for chunk in resp:
+            usage = getattr(chunk, "usage", None)
+            if usage is not None:
+                meter.usage = usage
+            choice = chunk.choices[0] if getattr(chunk, "choices", None) else None
+            if not choice or not getattr(choice, "delta", None):
+                continue
+            delta = choice.delta
+            reasoning = getattr(delta, "reasoning_content", None)
+            if reasoning:
+                yield StreamDelta(kind="thinking", text=reasoning, model=model)
+            content = getattr(delta, "content", None)
+            if content:
+                reply.content += content
+                yield StreamDelta(kind="text", text=content, model=model)
+            delta_calls = getattr(delta, "tool_calls", None)
+            if delta_calls:
+                self._accum_tool_fragments(delta_calls, tool_acc)
+
+    @staticmethod
+    def _accum_tool_fragments(delta_calls: Any, tool_acc: list[dict[str, Any]]) -> None:
+        """把流式 ``delta.tool_calls`` 片段按 index 归并进累积器（id/name 出现即写、
+        arguments 为跨 chunk 追加的 JSON 字符串片段）。"""
+        for frag in delta_calls:
+            index = getattr(frag, "index", None)
+            if index is None:
+                index = len(tool_acc)
+            while len(tool_acc) <= index:
+                tool_acc.append({"id": "", "name": "", "arguments": ""})
+            entry = tool_acc[index]
+            frag_id = getattr(frag, "id", None)
+            if frag_id:
+                entry["id"] = str(frag_id)
+            func = getattr(frag, "function", None)
+            if func is not None:
+                frag_name = getattr(func, "name", None)
+                if frag_name:
+                    entry["name"] = str(frag_name)
+                frag_args = getattr(func, "arguments", None)
+                if frag_args:
+                    entry["arguments"] += str(frag_args)
+
+    def _finalize_stream_calls(
+        self, tool_acc: list[dict[str, Any]], reply: ToolCallReply
+    ) -> None:
+        """收尾把累积的工具片段重构为 ``ToolCall``（arguments JSON 解析失败走 args_error）。"""
+        for idx, entry in enumerate(tool_acc):
+            reply.tool_calls.append(
+                ToolCall(
+                    id=entry["id"] or f"call_stream_{idx}",
+                    name=entry["name"],
+                    **_parse_arguments(entry["arguments"]),
+                )
+            )
+
+    @staticmethod
+    def _sink_delta(
+        sink: Callable[[StreamDelta], None], delta: StreamDelta, message_id: str
+    ) -> None:
+        """把增量交给调用方 sink；``message_id`` 非空时重寄归属（事件桥回填）。"""
+        if not message_id:
+            sink(delta)
+            return
+        sink(
+            StreamDelta(
+                kind=delta.kind, text=delta.text, model=delta.model, message_id=message_id
+            )
+        )
 
     def _coerce_delta(self, rec: Any, model: str) -> StreamDelta:
         """把注入生成器产出的条目规整为 ``StreamDelta``：已含 kind 的原样补 model，

@@ -15,6 +15,7 @@ from typing import Any, Callable
 
 from competitor_agent.agent.react_agent import ReactAgent
 from competitor_agent.core.budget import IterationBudget
+from competitor_agent.llm.client import StreamDelta
 from competitor_agent.core.checkpoint import is_cancelled
 from competitor_agent.domain_types.events import ProgressEvent
 from competitor_agent.interfaces.exceptions import LLMUnavailableError
@@ -66,6 +67,7 @@ class ReactLoop:
         max_history_steps: int | None = None,  # 设计文档 56 Q4：配置化注入；None 用 ReactAgent 默认
         pinned_facts: list[str] | None = None,  # 设计文档 56 M2：已核验事实共享列表（压缩时重建 pinned 段）
         on_step: Callable[[dict], None] | None = None,  # transcript 捕获外的附加回调（pinned 收集等）
+        stream_sink: Callable[[StreamDelta], None] | None = None,  # 设计文档 63 §5.5：仅 Lead 流式旁路
     ) -> None:
         self._agent = agent
         self._max_steps = max_steps
@@ -82,6 +84,7 @@ class ReactLoop:
         self._max_history_steps = max_history_steps
         self._pinned_facts = pinned_facts
         self._on_step = on_step
+        self._stream_sink = stream_sink
         self.plan: dict | None = None  # make_plan 结果（供报告组装/记忆写侧）
         # 设计文档 62 §3.5：facade 装配侧挂载（非构造参数）——delegate 线程池与候选结果收集器
         self._delegate_runner: Any = None
@@ -116,6 +119,7 @@ class ReactLoop:
                 first_tool_sink=self._on_plan,
                 on_step=self._transcript_sink(result),
                 pinned_facts=self._pinned_facts,
+                stream_sink=self._stream_sink,
             )
             # 取消/预算中断时 ReactAgent 返回"已达最大步数"，此处覆盖为准确终止文案
             if result.cancelled:
