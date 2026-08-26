@@ -7,35 +7,25 @@
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<div class="app">
+<div class="chat">
   <header class="topbar">
     <h1>竞品分析 Agent</h1>
-    <div class="controls">
-      <input id="task" type="text"
-             placeholder="输入竞品名称，如 Cursor（多竞品用逗号分隔，普查任务如“所有 AI coding agent”将自动发现）"
-             value="Cursor" />
-      <button id="start-btn">开始分析</button>
-      <button id="cancel-btn" disabled>取消</button>
+    <div class="top-actions">
+      <button id="new-btn" class="ghost">新会话</button>
+      <button id="stop-btn" class="danger" disabled>停止</button>
     </div>
-    <div class="badges" id="phase-badges"></div>
   </header>
 
-  <div id="candidates" hidden><strong>发现候选:</strong> <span id="candidate-list"></span></div>
+  <main id="messages" class="messages" role="log"></main>
 
-  <main class="main">
-    <section class="col-left">
-      <div id="log">等待输入...</div>
-    </section>
-    <section class="col-right">
-      <div id="report-notice" class="report-notice" hidden></div>
-      <div id="report-meta" class="report-meta" hidden></div>
-      <div id="report-toolbar" class="report-toolbar" hidden>
-        <button onclick="copyReport()">复制 Markdown</button>
-        <button id="download-btn" onclick="downloadReport()" disabled>下载 .md</button>
-      </div>
-      <div id="report" class="report" hidden></div>
-    </section>
-  </main>
+  <footer class="composer">
+    <textarea id="input" rows="2"
+              placeholder="输入任务，如：分析 Cursor / 对比 Cursor 和 Cline / 普查所有 AI coding agent&#10;Enter 发送，Shift+Enter 换行"></textarea>
+    <div class="composer-actions">
+      <span id="status" class="status" hidden></span>
+      <button id="send-btn">发送</button>
+    </div>
+  </footer>
 </div>
 <script src="/static/vendor/marked.min.js"></script>
 <script src="/static/vendor/dompurify.min.js"></script>

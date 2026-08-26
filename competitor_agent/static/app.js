@@ -1,88 +1,49 @@
 'use strict';
 
-/* 竞品分析 Agent — 前端逻辑（设计文档 50：事件消费 + markdown 渲染 + 进度可视化） */
+/* 竞品分析 Agent — 对话式前端（设计文档 63：消息流 + text_delta 打字机 + 工具折叠 + 报告面板） */
 
-let eventSource = null;
 let sessionId = null;
-let discoveredCandidates = [];
-let lastReport = null;
+let eventSource = null;
+let reportData = null;      // 最近一次 report 事件 payload（复制/下载用）
+let busy = false;
 
-function addLog(event, message) {
-  const log = document.getElementById('log');
-  const div = document.createElement('div');
-  div.className = 'event ' + (event || '');
-  div.textContent = '[' + new Date().toLocaleTimeString() + '] ' + message;
-  log.appendChild(div);
-  log.scrollTop = log.scrollHeight;
+// activeLeadMid：当前正在流式展开 Lead 消息的 message_id
+let activeMid = null;
+
+// message_id → 流式消息状态
+const streams = new Map();
+
+function $id(x) { return document.getElementById(x); }
+
+function sourceLabel(source) {
+  if (!source) return 'Lead';
+  if (source === 'lead') return 'Lead';
+  if (source.startsWith('sub.')) return '子任务';
+  return source;
 }
 
-function addPhaseBadge(name) {
-  if (!name) return;
-  const box = document.getElementById('phase-badges');
-  for (const chip of box.querySelectorAll('.phase-badge')) {
-    if (chip.dataset.phase === name) return;
+/* ── 消息区 DOM ─────────────────────────────────────────────── */
+
+function addMessage(role, source) {
+  const row = document.createElement('div');
+  row.className = 'msg ' + role;
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  row.appendChild(bubble);
+  if (role === 'assistant' && source) {
+    const tag = document.createElement('span');
+    tag.className = 'src-tag';
+    tag.textContent = sourceLabel(source);
+    bubble.appendChild(tag);
   }
-  const chip = document.createElement('span');
-  chip.className = 'phase-badge';
-  chip.dataset.phase = name;
-  chip.textContent = name;
-  box.appendChild(chip);
+  $id('messages').appendChild(row);
+  scrollBottom();
+  return bubble;
 }
 
-function clearPhaseBadges() {
-  document.getElementById('phase-badges').textContent = '';
-}
-
-function startAnalysis() {
-  const task = document.getElementById('task').value.trim();
-  if (!task) return;
-  sessionId = 'sess_' + Date.now();
-  const log = document.getElementById('log');
-  log.innerHTML = '';
-  log.textContent = '等待分析...';
-  clearCandidates();
-  clearReport();
-  clearPhaseBadges();
-  document.getElementById('start-btn').disabled = true;
-  document.getElementById('cancel-btn').disabled = false;
-
-  eventSource = new EventSource('/api/analyze?task=' + encodeURIComponent(task) + '&session_id=' + sessionId);
-  eventSource.onmessage = function (e) {
-    const data = JSON.parse(e.data);
-    addLog(data.event, data.message || (data.phase || '') + ' [' + (data.progress * 100).toFixed(0) + '%]');
-    if (data.phase) addPhaseBadge(data.phase);
-    if (data.event === 'discovery.candidate' && data.payload && data.payload.candidate) {
-      addCandidate(data.payload.candidate);
-    }
-    if (data.event === 'report') renderReport(data.payload);
-    if (data.event === 'report' || data.event === 'error' || data.event === 'cancelled') {
-      eventSource.close();
-      document.getElementById('start-btn').disabled = false;
-      document.getElementById('cancel-btn').disabled = true;
-      if (data.event !== 'report') clearReport();
-    }
-  };
-  eventSource.onerror = function () {
-    addLog('error', '连接断开');
-    eventSource.close();
-    document.getElementById('start-btn').disabled = false;
-    document.getElementById('cancel-btn').disabled = true;
-    clearReport();
-  };
-}
-
-function addCandidate(name) {
-  if (discoveredCandidates.indexOf(name) === -1) {
-    discoveredCandidates.push(name);
-    document.getElementById('candidates').hidden = false;
-    document.getElementById('candidate-list').textContent = discoveredCandidates.join(', ');
-  }
-}
-
-function clearCandidates() {
-  discoveredCandidates = [];
-  document.getElementById('candidates').hidden = true;
-  document.getElementById('candidate-list').textContent = '';
+function scrollBottom() {
+  const m = $id('messages');
+  m.scrollTop = m.scrollHeight;
 }
 
 function escapeHtml(s) {
@@ -91,57 +52,124 @@ function escapeHtml(s) {
   return div.innerHTML;
 }
 
-function renderMeta(payload) {
-  const meta = document.getElementById('report-meta');
+/* ── 流式 Lead 气泡（text_delta 打字机）────────────────────── */
+
+function ensureStream(mid, source) {
+  let s = streams.get(mid);
+  if (!s) {
+    s = {
+      mid, source: source || 'lead', el: addMessage('assistant', source || 'lead'),
+      text: '', toolsEl: null, streaming: false, dirty: false,
+    };
+    streams.set(mid, s);
+  }
+  return s;
+}
+
+function scheduleRender(s) {
+  s.dirty = true;
+}
+
+function renderStreamHTML(s) {
+  // 内存累积的 markdown → marked → DOMPurify → 注入；尾部光标随 streaming 状态
+  let html = '';
+  if (s.text) html = marked.parse(s.text);
+  if (s.streaming) html += '<span class="cursor">▊</span>';
+  s.el.innerHTML = '<span class="src-tag">' + escapeHtml(sourceLabel(s.source)) + '</span>' + html;
+  scrollBottom();
+}
+
+// 80ms 节流重渲：避免每个 text_delta 触发一次全量 marked+DOMPurify 重 CPU 抖动（设计文档 63 §7.3）
+setInterval(function () {
+  for (const s of streams.values()) {
+    if (s.dirty) { s.dirty = false; renderStreamHTML(s); }
+  }
+}, 80);
+
+function ensureTools(s) {
+  if (!s.toolsEl) {
+    const tools = document.createElement('div');
+    tools.className = 'tools';
+    s.el.appendChild(tools);
+    s.toolsEl = tools;
+  }
+  return s.toolsEl;
+}
+
+function addToolLine(s, kind, text) {
+  const box = ensureTools(s);
+  const line = document.createElement('div');
+  line.className = 'tool ' + kind;
+  line.textContent = text;
+  box.appendChild(line);
+  scrollBottom();
+}
+
+/* ── 报告面板（report 事件一次性渲染 + 地址/复制/下载）──────── */
+
+function renderMeta(payload, container) {
   const dims = payload.dimensions || [];
   const conf = payload.overall_confidence || 0;
   let html = '';
   if (payload.is_comparison) html += '<span class="chip chip-compare">对比</span>';
   html += dims.map(function (d) { return '<span class="chip">' + escapeHtml(d) + '</span>'; }).join('');
   html += '<span class="chip chip-conf">置信度 ' + (conf * 100).toFixed(0) + '%</span>';
-  meta.innerHTML = html;  // 全部来自 escapeHtml 与固定字符串，无 SSE 原文注入
-  meta.hidden = false;
+  const meta = document.createElement('div');
+  meta.className = 'report-meta';
+  meta.innerHTML = html;
+  container.appendChild(meta);
 }
 
 function renderReport(payload) {
   if (!payload || !payload.markdown_report) return;
-  lastReport = payload;
-  // markdown → HTML（marked），再经 DOMPurify 净化后注入（防 XSS，SSE 原文不直接 innerHTML）
-  const html = marked.parse(payload.markdown_report);
-  const clean = DOMPurify.sanitize(html);
-  const container = document.getElementById('report');
-  container.innerHTML = clean;
-  container.hidden = false;
-  document.getElementById('report-toolbar').hidden = false;
-  renderMeta(payload);
-  showReportAddress();
-}
+  reportData = payload;
+  const bubble = addMessage('assistant', 'report');
 
-function showReportAddress() {
-  const notice = document.getElementById('report-notice');
-  if (!lastReport) return;
+  // 报告地址
+  const notice = document.createElement('div');
+  notice.className = 'report-notice';
   const parts = [];
-  const url = lastReport.report_url;
-  if (url) parts.push('地址: ' + url);
-  if (lastReport.report_path) parts.push('已保存到: ' + lastReport.report_path);
-  if (!parts.length) return;
-  notice.textContent = '报告已生成 · ' + parts.join(' · ');
-  notice.hidden = false;
+  if (payload.report_url) parts.push('地址: ' + payload.report_url);
+  if (payload.report_path) parts.push('已保存到: ' + payload.report_path);
+  if (parts.length) {
+    notice.textContent = '报告已生成 · ' + parts.join(' · ');
+    bubble.appendChild(notice);
+  }
+
+  const content = document.createElement('div');
+  const clean = DOMPurify.sanitize(marked.parse(payload.markdown_report));
+  content.className = 'report';
+  content.innerHTML = clean;
+  bubble.appendChild(content);
+  renderMeta(payload, bubble);
+
+  // 工具条：复制 Markdown / 下载 .md
+  const toolbar = document.createElement('div');
+  toolbar.className = 'report-toolbar';
+  const copyBtn = document.createElement('button');
+  copyBtn.className = 'ghost';
+  copyBtn.textContent = '复制 Markdown';
+  copyBtn.addEventListener('click', copyReport);
+  const dlBtn = document.createElement('button');
+  dlBtn.className = 'ghost';
+  dlBtn.textContent = '下载 .md';
+  dlBtn.addEventListener('click', downloadReport);
+  toolbar.appendChild(copyBtn);
+  toolbar.appendChild(dlBtn);
+  bubble.appendChild(toolbar);
+  scrollBottom();
 }
 
 function copyReport() {
-  if (!lastReport || !lastReport.markdown_report) return;
-  const text = lastReport.markdown_report;
-  const done = function () { addLog('report', '已复制 Markdown'); };
-  const fail = function () { addLog('error', '复制失败'); };
+  if (!reportData || !reportData.markdown_report) return;
+  const text = reportData.markdown_report;
+  const done = function () { setStatus('已复制 Markdown'); };
+  const fail = function () { setStatus('复制失败', true); };
   const fallback = function () {
-    // 非安全上下文（http / 非 localhost）下 navigator.clipboard 不可用：textarea + execCommand 兜底
     const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.setAttribute('readonly', '');
+    ta.value = text; ta.setAttribute('readonly', '');
     ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
-    document.body.appendChild(ta);
-    ta.select();
+    document.body.appendChild(ta); ta.select();
     ta.setSelectionRange(0, text.length);
     let ok = false;
     try { ok = document.execCommand('copy'); } catch (err) { ok = false; }
@@ -150,45 +178,161 @@ function copyReport() {
   };
   if (navigator.clipboard && window.isSecureContext) {
     navigator.clipboard.writeText(text).then(done).catch(fallback);
-  } else {
-    fallback();
-  }
+  } else { fallback(); }
 }
 
 function downloadReport() {
-  if (!lastReport || !lastReport.markdown_report) return;
-  const name = (lastReport.competitor || 'report').replace(/[/\\ ]+/g, '_');
-  // 直接用内存中的 markdown 生成 Blob 下载，不依赖服务端落盘路径/竞态，单竞品与对比报告通用
-  const blob = new Blob([lastReport.markdown_report], { type: 'text/markdown;charset=utf-8' });
+  if (!reportData || !reportData.markdown_report) return;
+  const name = (reportData.competitor || 'report').replace(/[/\\ ]+/g, '_');
+  const blob = new Blob([reportData.markdown_report], { type: 'text/markdown;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = url;
-  a.download = name + '.md';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-  addLog('report', '已下载 ' + name + '.md');
+  a.href = url; a.download = name + '.md';
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
+  setStatus('已下载 ' + name + '.md');
 }
 
-function clearReport() {
-  lastReport = null;
-  const report = document.getElementById('report');
-  report.innerHTML = '';
-  report.hidden = true;
-  document.getElementById('report-toolbar').hidden = true;
-  document.getElementById('report-meta').hidden = true;
-  document.getElementById('report-notice').hidden = true;
-  clearCandidates();
+function addInfo(text, cls) {
+  const bubble = addMessage('assistant', 'notice');
+  bubble.innerHTML = '<span class="src-tag">系统</span><span class="' + (cls || 'info') + '">' + escapeHtml(text) + '</span>';
 }
 
-function cancelAnalysis() {
-  if (sessionId) {
-    fetch('/api/cancel/' + sessionId, { method: 'POST' });
-    addLog('cancelled', '正在取消...');
+/* ── 事件处理 ───────────────────────────────────────────────── */
+
+function handleEvent(data) {
+  const payload = data.payload || {};
+  switch (data.event) {
+    case 'message.start':
+      activeMid = payload.message_id || null;
+      ensureStream(activeMid, payload.source || 'lead');
+      break;
+    case 'text_delta': {
+      const mid = payload.message_id || activeMid;
+      const s = ensureStream(mid, (streams.has(mid) ? streams.get(mid).source : 'lead'));
+      s.streaming = true;
+      s.text += (payload.delta || data.message || '');
+      scheduleRender(s);
+      break;
+    }
+    case 'text.stop': {
+      const mid = payload.message_id || activeMid;
+      const s = streams.get(mid);
+      if (s) { s.streaming = false; renderStreamHTML(s); }
+      break;
+    }
+    case 'message.stop':
+      setBusy(false);
+      break;
+    case 'discovery.candidate':
+      if (activeMid) addToolLine(streams.get(activeMid), 'discovery', '发现候选: ' + (payload.candidate || ''));
+      break;
+    case 'discovery': {
+      const names = (payload.candidates || []).join(', ');
+      if (activeMid) addToolLine(streams.get(activeMid), 'discovery', '发现候选清单: ' + (names || data.message));
+      break;
+    }
+    case 'report':
+      renderReport(data.payload);
+      setBusy(false);
+      break;
+    case 'error':
+      addInfo(data.message || '发生错误', 'error');
+      setBusy(false);
+      closeEventSource();
+      break;
+    case 'cancelled':
+      addInfo(data.message || '分析已取消', 'info');
+      setBusy(false);
+      closeEventSource();
+      break;
+    default:
+      break; // session_started / phase 事件（后端已收敛为 text_delta）不单独呈现
   }
 }
 
-/* 绑定按钮事件（index.html 依赖 JS 绑定，非内联 onclick） */
-document.getElementById('start-btn').addEventListener('click', startAnalysis);
-document.getElementById('cancel-btn').addEventListener('click', cancelAnalysis);
+/* ── 会话控制 ───────────────────────────────────────────────── */
+
+function startAnalysis(task) {
+  if (!task) return;
+  if (!sessionId) sessionId = 'sess_' + Date.now();
+  closeEventSource();
+  // 用户气泡
+  const ub = addMessage('user');
+  ub.innerHTML = escapeHtml(task);
+  setStatus('分析中…');
+  setBusy(true);
+
+  eventSource = new EventSource(
+    '/api/analyze?task=' + encodeURIComponent(task) + '&session_id=' + encodeURIComponent(sessionId)
+  );
+  eventSource.onmessage = function (e) {
+    let data;
+    try { data = JSON.parse(e.data); } catch (err) { return; }
+    handleEvent(data);
+  };
+  eventSource.onerror = function () {
+    addInfo('连接中断', 'error');
+    setBusy(false);
+    closeEventSource();
+  };
+}
+
+function closeEventSource() {
+  if (eventSource) { eventSource.close(); eventSource = null; }
+}
+
+function stopAnalysis() {
+  if (sessionId) {
+    fetch('/api/cancel/' + sessionId, { method: 'POST' }).catch(function () {});
+    setStatus('正在停止…');
+  }
+  closeEventSource();
+}
+
+function newSession() {
+  closeEventSource();
+  streams.clear();
+  activeMid = null;
+  reportData = null;
+  sessionId = 'sess_' + Date.now();
+  $id('messages').innerHTML = '';
+  setBusy(false);
+  setStatus('', false);
+}
+
+function setBusy(on) {
+  busy = on;
+  $id('send-btn').disabled = on;
+  $id('stop-btn').disabled = !on;
+  if (on) {
+    $id('input').setAttribute('disabled', 'disabled');
+  } else {
+    $id('input').removeAttribute('disabled');
+    $id('input').focus();
+  }
+}
+
+function setStatus(text, isError) {
+  const el = $id('status');
+  if (!text) { el.hidden = true; el.textContent = ''; return; }
+  el.hidden = false;
+  el.textContent = text;
+  el.className = 'status ' + (isError ? 'err' : '');
+}
+
+/* ── 绑定 ───────────────────────────────────────────────────── */
+
+$id('send-btn').addEventListener('click', function () {
+  const val = $id('input').value.trim();
+  if (val) { startAnalysis(val); $id('input').value = ''; }
+});
+$id('stop-btn').addEventListener('click', stopAnalysis);
+$id('new-btn').addEventListener('click', newSession);
+$id('input').addEventListener('keydown', function (e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    const val = $id('input').value.trim();
+    if (val) { startAnalysis(val); $id('input').value = ''; }
+  }
+});

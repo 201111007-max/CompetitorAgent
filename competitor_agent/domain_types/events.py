@@ -6,6 +6,23 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
+class StreamEvent:
+    """流式对话事件名（设计文档 63 §3）：对话页前端据此归位气泡与增量。
+
+    复用 ``ProgressEvent`` 的既有字段（event/phase/progress/message/payload），
+    不新增字段：靠 ``event`` 取值区分，payload 上以 ``message_id`` 关联单条消息。
+    """
+
+    MESSAGE_START = "message.start"
+    TEXT_DELTA = "text_delta"
+    THINKING_DELTA = "thinking_delta"
+    TEXT_STOP = "text.stop"
+    MESSAGE_STOP = "message.stop"
+    TOOL_USE = "tool_use"
+    TOOL_RESULT = "tool_result"
+    REPORT_SECTION = "report.section"
+
+
 @dataclass
 class ProgressEvent:
     """分析进度事件
