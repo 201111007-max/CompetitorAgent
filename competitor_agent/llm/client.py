@@ -16,6 +16,7 @@ M1 提供：
 """
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 import os
@@ -23,7 +24,7 @@ import random
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 from competitor_agent.interfaces.exceptions import LLMUnavailableError
 from competitor_agent.observability.logger import emit_session_event
@@ -80,6 +81,21 @@ class ToolCallReply:
     content: str = ""
     tool_calls: list[ToolCall] = field(default_factory=list)
     usage: Any = None
+
+
+@dataclass
+class StreamDelta:
+    """流式增量（设计文档 63 §5）：``LLMClient.stream()`` 的产出单元。
+
+    ``kind``：``"text"`` 实时叙述/回答正文，``"thinking"`` 模型暴露的推理链
+    （deepseek 系 ``reasoning_content``）。模型不暴露推理链则只有 ``text``。
+    ``model`` 记录实际产出该增量的模型（多模型 fallback 时区分）。
+    """
+
+    kind: str
+    text: str
+    model: str = ""
+    message_id: str = ""  # 事件桥回填归属（M2+ 使用）
 
 
 def _estimate_tokens(texts: list[str]) -> int:
@@ -271,6 +287,109 @@ class LLMClient:
                 raise
 
         return self._attempt_models(messages, started, attempt, extract=self._extract_tool_reply)
+
+    def stream(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        json_mode: bool = False,
+    ) -> Iterator[StreamDelta]:
+        """流式分词（设计文档 63 §5，Option C 核心）：逐增量 yield ``StreamDelta``。
+
+        顺序即下游 ``text_delta``/``thinking_delta`` 的投递顺序；**不返回完整字符串**，
+        完整文本由调用方消费时自行累加。
+
+        可靠性（§5.3）：流式是 generator，重试语义改为「**首个增量到达前**判定 +
+        必要时切换 fallback 模型」。首个增量一经产出交给调用方，后续异常直接向调用方
+        上抛（不强制回滚已下发文本）；多模型 × max_retries 全灭抛 ``LLMUnavailableError``。
+        """
+        models = [self._model, *self._fallback_models]
+        last_cause: Exception | None = None
+        for model in models:
+            for _attempt in range(1, self._max_retries + 1):
+                try:
+                    gen = self._stream_once(messages, model, json_mode)
+                    first = next(gen)
+                except StopIteration:
+                    # 空流：模型返回 0 增量，视为正常完成（无可输出文本）
+                    return
+                except Exception as exc:
+                    last_cause = exc
+                    if self._should_retry(exc):
+                        continue  # 重试同一模型下一次
+                    raise LLMUnavailableError(f"流式调用失败（模型 {model}）: {exc}") from exc
+                # 首个增量已产出：剩余增量直通调用方（不在流中重试，避免回滚已显示文本）
+                yield first
+                yield from gen
+                return
+        raise LLMUnavailableError(
+            f"流式失败：{len(models)} 个模型 × {self._max_retries} 次重试全部耗尽"
+        ) from last_cause
+
+    def _stream_once(
+        self,
+        messages: list[dict[str, str]],
+        model: str,
+        json_mode: bool,
+    ) -> Iterator[StreamDelta]:
+        """单次流式产出的生产器：注入 call_func 或 openai SDK 两种路径。
+
+        注入 call_func 为生成器函数 → 逐条透传（把 str 统一为 ``text`` delta）；
+        非生成器 → 一次性包装为单个 ``text`` delta（兼容既有注入 mock）。
+        SDK 路径 ``create(stream=True)``：逐 chunk 抽取 ``reasoning_content``（thinking）
+        与 ``content``（text）。
+        """
+        if self._call is not None:
+            if inspect.isgeneratorfunction(self._call):
+                for rec in self._call(messages=messages, model=model):
+                    yield self._coerce_delta(rec, model)
+            else:
+                text = self._call(messages=messages, model=model)
+                yield StreamDelta(kind="text", text=str(text), model=model)
+            return
+
+        try:
+            from openai import OpenAI  # 惰性导入，避免无 key 环境失败
+        except ImportError as exc:
+            raise LLMUnavailableError("openai SDK 未安装") from exc
+        if not self._api_key:
+            raise LLMUnavailableError(
+                "缺少 LLM API Key，请设置环境变量 OPENAI_API_KEY（或 DEEPSEEK_API_KEY / LLM_API_KEY）"
+            )
+
+        kwargs: dict[str, Any] = {"api_key": self._api_key}
+        if self._base_url:
+            kwargs["base_url"] = self._base_url
+        client = OpenAI(**kwargs)
+        create_kwargs: dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "stream": True,
+        }
+        if json_mode:
+            create_kwargs["response_format"] = {"type": "json_object"}
+        if self._timeout is not None:
+            create_kwargs["timeout"] = self._timeout
+        resp = client.chat.completions.create(**create_kwargs)
+        for chunk in resp:
+            choice = chunk.choices[0] if getattr(chunk, "choices", None) else None
+            if not choice or not getattr(choice, "delta", None):
+                continue
+            delta = choice.delta
+            reasoning = getattr(delta, "reasoning_content", None)
+            if reasoning:
+                yield StreamDelta(kind="thinking", text=reasoning, model=model)
+            content = getattr(delta, "content", None)
+            if content:
+                yield StreamDelta(kind="text", text=content, model=model)
+
+    def _coerce_delta(self, rec: Any, model: str) -> StreamDelta:
+        """把注入生成器产出的条目规整为 ``StreamDelta``：已含 kind 的原样补 model，
+        裸字符串视作 ``text`` 增量。"""
+        if isinstance(rec, StreamDelta):
+            rec.model = rec.model or model
+            return rec
+        return StreamDelta(kind="text", text=str(rec), model=model)
 
     def _attempt_models(
         self,

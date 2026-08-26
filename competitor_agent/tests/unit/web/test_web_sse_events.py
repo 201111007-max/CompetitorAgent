@@ -137,6 +137,53 @@ def test_midrun_events_are_present_in_sse_stream(
     assert messages.index("中途事件2") < messages.index("报告生成完成，0 个维度")
 
 
+def test_message_envelope_orders_text_delta(
+    monkeypatch: pytest.MonkeyPatch, mock_llm, tmp_path
+) -> None:
+    """④ 设计文档 63 §3 消息信封：message.start → text_delta* → text.stop → message.stop。
+
+    叙述事件（phase_start/progress）收敛为 Lead 的 ``text_delta``，message_id 贯穿一致；
+    报告完成时 ``text.stop(final=True)`` + ``message.stop(summary)`` 收口（不发 '\n 分号'）。
+    """
+    from competitor_agent.memory import FourLayerMemory
+
+    _patch_env(monkeypatch, mock_llm, EmitAPI, FourLayerMemory(tmp_path / "memory"))
+    sid = "sess_sse_envelope"
+    web_app._sessions[sid] = {"task": "分析 Cursor", "cancelled": False}
+    EmitAPI.started.clear()
+
+    async def _run() -> list[str]:
+        sse_lines: list[str] = []
+        async for line in web_app._event_generator(sid, "分析 Cursor"):
+            sse_lines.append(line)
+        return sse_lines
+
+    try:
+        sse_lines = asyncio.run(_run())
+    finally:
+        web_app._sessions.pop(sid, None)
+
+    events = _collect(sse_lines)
+    kinds = [e["event"] for e in events]
+
+    starts = [e for e in events if e["event"] == "message.start"]
+    assert starts, "缺 message.start"
+    lead_id = starts[0]["payload"]["message_id"]
+    assert starts[0]["payload"]["source"] == "lead"
+
+    # 叙述事件被收敛为 text_delta，且 message_id 贯穿
+    deltas = [e for e in events if e["event"] == "text_delta"]
+    assert [d["payload"]["message_id"] for d in deltas] == [lead_id] * len(deltas)
+    assert "中途事件0" in [d["payload"]["delta"] for d in deltas]
+
+    # 顺序：message.start 最早 → text_delta → text.stop → message.stop
+    assert kinds.index("message.start") < kinds.index("text_delta")
+    text_stops = [e for e in events if e["event"] == "text.stop"]
+    assert text_stops and text_stops[-1]["payload"]["final"] is True
+    assert kinds.index("text.stop") < kinds.index("message.stop")
+    assert "message.stop" in kinds
+
+
 def test_drain_does_not_lose_events_at_completion(
     monkeypatch: pytest.MonkeyPatch, mock_llm, tmp_path
 ) -> None:
@@ -230,7 +277,11 @@ class TestStaticServing:
         import asyncio
 
         html = asyncio.run(web_app.index())
-        assert '<div id="log">' in html
+        # 设计文档 63：对话页（消息区 + 底部发送框），无开始分析按钮/进度条
+        assert 'id="messages"' in html
+        assert 'id="send-btn"' in html
+        assert 'id="input"' in html
+        assert 'id="new-btn"' in html
         assert '/static/style.css' in html
         assert '/static/app.js' in html
         assert '/static/vendor/marked.min.js' in html

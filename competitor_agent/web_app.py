@@ -61,6 +61,11 @@ _config: AppConfig = load_config()
 # 取消响应延迟 ≤ 2×此值（原 50ms 忙轮询的折衷，避免队列空转 CPU）。
 _EVENT_WAIT_TIMEOUT = 0.2
 
+# 设计文档 63 §3：叙述型事件 —— 其 message 属于 Lead 的实时叙述，收敛为 ``text_delta``
+# 供对话页 Lead 气泡打字机逐段展开（而非独立原始事件行）。其余事件（discovery.candidate /
+# report / error / cancelled / session_started）原样透传，保持既有契约与测试语义。
+_NARRATIVE_EVENTS = frozenset({"phase_start", "phase_complete", "progress"})
+
 # 设计文档 50 P2：前端静态资源（index.html/app.js/style.css/vendor）抽离自包内
 # `static/`，经 package-data 纳入 wheel；`importlib.resources` 定位保证打包/源码一致。
 _STATIC_DIR = resources.files("competitor_agent").joinpath("static")
@@ -135,13 +140,39 @@ async def _event_generator(
 
     analysis_task = asyncio.create_task(_run_analysis())
 
+    # 设计文档 63 §5.5：单条 Lead 助手消息的归属 message_id——后续 text_delta / text.stop /
+    # message.stop 全部复用；前端按它把增量归位到 Lead 气泡。
+    lead_id = f"lead_{uuid.uuid4().hex[:6]}"
+
+    def _text_delta(delta: str) -> str:
+        """叙述增量 → ``text_delta`` SSE（message 复用 delta，保持日志/测试可 grep）。"""
+        return ProgressEvent(
+            event="text_delta",
+            phase="lead",
+            message=delta,
+            payload={"message_id": lead_id, "delta": delta},
+        ).to_sse()
+
+    def _text_stop(final: bool) -> str:
+        return ProgressEvent(
+            event="text.stop",
+            phase="lead",
+            payload={"message_id": lead_id, "final": final},
+        ).to_sse()
+
     try:
-        # 先发送 session_started 事件
+        # 先发送 session_started + Lead 消息开始
         yield ProgressEvent(
             event="session_started",
             phase="init",
             message=f"会话 {session_id} 已启动",
             payload={"session_id": session_id},
+        ).to_sse()
+        yield ProgressEvent(
+            event="message.start",
+            phase="lead",
+            message="开始分析",
+            payload={"message_id": lead_id, "source": "lead", "task": task},
         ).to_sse()
 
         # 挂起等待事件而非 50ms 忙轮询（设计文档 50 §2.2）：队列空时 await 挂起，
@@ -166,15 +197,36 @@ async def _event_generator(
                 )
             except asyncio.TimeoutError:
                 continue
-            yield event.to_sse()
+            # 叙述型事件收敛为 Lead 的 text_delta（设计文档 63 §3）；其余事件原样透传
+            if event.event in _NARRATIVE_EVENTS and event.message:
+                yield _text_delta(event.message)
+            else:
+                yield event.to_sse()
 
         # 分析完成：排空残余事件，防"完成瞬间队列中事件丢失"（设计文档 50 §3.3 ②）
         while not events_queue.empty():
-            yield events_queue.get_nowait().to_sse()
+            event = events_queue.get_nowait()
+            if event.event in _NARRATIVE_EVENTS and event.message:
+                yield _text_delta(event.message)
+            else:
+                yield event.to_sse()
 
         # 分析完成，获取报告
         report = analysis_task.result()
+        # 收敛 Lead 消息的正文流：text.stop(final) → 前端收光标、停打字机（设计文档 63 §7.3）。
+        # 延迟到终态确定后发，保证它排在所有 text_delta 之后。
+        yield _text_stop(True)
         if isinstance(report, CancelledResult):
+            yield ProgressEvent(
+                event="message.stop",
+                phase="report",
+                message="分析已取消，返回部分结果",
+                payload={
+                    "message_id": lead_id,
+                    "source": "lead",
+                    "summary": f"分析已取消，返回 {len(report.dimension_results)} 个已完成维度",
+                },
+            ).to_sse()
             yield ProgressEvent(
                 event="cancelled",
                 phase="report",
@@ -213,6 +265,17 @@ async def _event_generator(
                     "report_path": str(saved_path),
                 },
             ).to_sse()
+            # 收敛 Lead 消息为 `message.stop`（summary 供多轮回灌/前端状态）
+            yield ProgressEvent(
+                event="message.stop",
+                phase="report",
+                message="分析完成",
+                payload={
+                    "message_id": lead_id,
+                    "source": "lead",
+                    "summary": f"对比报告完成，{len(report.reports)} 个竞品",
+                },
+            ).to_sse()
             # 归档会话
             _get_memory().archive_session(
                 AnalysisSession(
@@ -246,6 +309,17 @@ async def _event_generator(
                 "session_id": session_id,
                 "report_url": f"/api/reports/{_safe_filename(report.competitor.name)}/download",
                 "report_path": str(saved_path),
+            },
+        ).to_sse()
+        # 收敛 Lead 消息为 `message.stop`（summary 供多轮回灌/前端状态）
+        yield ProgressEvent(
+            event="message.stop",
+            phase="report",
+            message="分析完成",
+            payload={
+                "message_id": lead_id,
+                "source": "lead",
+                "summary": f"{report.competitor.name} 报告完成，{len(report.dimension_results)} 个维度",
             },
         ).to_sse()
 
