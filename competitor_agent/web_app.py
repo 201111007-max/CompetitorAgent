@@ -33,7 +33,7 @@ from fastapi.staticfiles import StaticFiles
 from competitor_agent import CompetitorAnalysisAPI
 from competitor_agent.config.loader import AppConfig, load_config
 from competitor_agent.core.checkpoint import set_cancel
-from competitor_agent.core.report_archiver import report_file_path, save_report_markdown
+from competitor_agent.core.report_archiver import _safe_filename, report_file_path, save_report_markdown
 from competitor_agent.domain_types.events import ProgressEvent
 from competitor_agent.domain_types.report import (
     CancelledResult,
@@ -191,13 +191,16 @@ async def _event_generator(
             all_dims = [
                 r.dimension for rep in report.reports for r in rep.dimension_results
             ]
+            name = " / ".join(c.name for c in report.competitors) or "compare"
+            # 自动落盘对比报告（先落盘，地址随事件下发；幂等 safe 名与 report_file_path 命名一致）
+            saved_path = save_report_markdown(report)
             yield ProgressEvent(
                 event="report",
                 phase="report",
                 progress=1.0,
                 message=f"对比报告生成完成，{len(report.reports)} 个竞品 / {len(set(all_dims))} 个维度",
                 payload={
-                    "competitor": " / ".join(c.name for c in report.competitors),
+                    "competitor": name,
                     "terminal_state": "compare",
                     "overall_confidence": max(
                         (r.overall_confidence for r in report.reports), default=0.0
@@ -206,10 +209,10 @@ async def _event_generator(
                     "markdown_report": report.markdown_report,
                     "session_id": session_id,
                     "is_comparison": True,
+                    "report_url": f"/api/reports/{_safe_filename(name)}/download",
+                    "report_path": str(saved_path),
                 },
             ).to_sse()
-            # 自动落盘对比报告
-            save_report_markdown(report)
             # 归档会话
             _get_memory().archive_session(
                 AnalysisSession(
@@ -227,6 +230,8 @@ async def _event_generator(
             )
             return
 
+        # 自动落盘 <data_dir>/reports/competitor/<竞品>.md（导出/下载用），先落盘再下发地址
+        saved_path = save_report_markdown(report)
         yield ProgressEvent(
             event="report",
             phase="report",
@@ -239,11 +244,10 @@ async def _event_generator(
                 "dimensions": [r.dimension for r in report.dimension_results],
                 "markdown_report": report.markdown_report,
                 "session_id": session_id,
+                "report_url": f"/api/reports/{_safe_filename(report.competitor.name)}/download",
+                "report_path": str(saved_path),
             },
         ).to_sse()
-
-        # 自动落盘 <data_dir>/reports/competitor/<竞品>.md（导出/下载用）
-        save_report_markdown(report)
 
         # 归档会话（统一 raw schema + freshness 元数据）
         _get_memory().archive_session(

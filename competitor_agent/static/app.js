@@ -3,7 +3,6 @@
 /* 竞品分析 Agent — 前端逻辑（设计文档 50：事件消费 + markdown 渲染 + 进度可视化） */
 
 let eventSource = null;
-let logSource = null;
 let sessionId = null;
 let discoveredCandidates = [];
 let lastReport = null;
@@ -15,16 +14,6 @@ function addLog(event, message) {
   div.textContent = '[' + new Date().toLocaleTimeString() + '] ' + message;
   log.appendChild(div);
   log.scrollTop = log.scrollHeight;
-}
-
-function setProgress(value) {
-  const wrap = document.getElementById('progress-wrap');
-  const bar = document.getElementById('progress-bar');
-  const label = document.getElementById('progress-label');
-  const pct = Math.max(0, Math.min(1, value || 0)) * 100;
-  bar.style.width = pct.toFixed(0) + '%';
-  label.textContent = pct.toFixed(0) + '%';
-  wrap.hidden = false;
 }
 
 function addPhaseBadge(name) {
@@ -44,25 +33,6 @@ function clearPhaseBadges() {
   document.getElementById('phase-badges').textContent = '';
 }
 
-function openLogStream() {
-  if (!sessionId) return;
-  document.getElementById('session-log').textContent = '';
-  logSource = new EventSource('/api/logs/stream/' + sessionId);
-  logSource.onmessage = function (e) {
-    const data = JSON.parse(e.data);
-    if (data.event === 'log_end') { logSource.close(); return; }
-    const line = '[' + (data.ts || '') + '] ' + (data.event || '') + ' ' + (data.message || JSON.stringify(data));
-    const box = document.getElementById('session-log');
-    box.textContent += line + '\n';
-    box.scrollTop = box.scrollHeight;
-  };
-  logSource.onerror = function () { if (logSource) logSource.close(); };
-}
-
-function closeLogStream() {
-  if (logSource) { logSource.close(); logSource = null; }
-}
-
 function startAnalysis() {
   const task = document.getElementById('task').value.trim();
   if (!task) return;
@@ -72,17 +42,14 @@ function startAnalysis() {
   log.textContent = '等待分析...';
   clearCandidates();
   clearReport();
-  setProgress(0);
   clearPhaseBadges();
   document.getElementById('start-btn').disabled = true;
   document.getElementById('cancel-btn').disabled = false;
-  openLogStream();
 
   eventSource = new EventSource('/api/analyze?task=' + encodeURIComponent(task) + '&session_id=' + sessionId);
   eventSource.onmessage = function (e) {
     const data = JSON.parse(e.data);
     addLog(data.event, data.message || (data.phase || '') + ' [' + (data.progress * 100).toFixed(0) + '%]');
-    if (data.progress !== undefined) setProgress(data.progress);
     if (data.phase) addPhaseBadge(data.phase);
     if (data.event === 'discovery.candidate' && data.payload && data.payload.candidate) {
       addCandidate(data.payload.candidate);
@@ -90,7 +57,6 @@ function startAnalysis() {
     if (data.event === 'report') renderReport(data.payload);
     if (data.event === 'report' || data.event === 'error' || data.event === 'cancelled') {
       eventSource.close();
-      closeLogStream();
       document.getElementById('start-btn').disabled = false;
       document.getElementById('cancel-btn').disabled = true;
       if (data.event !== 'report') clearReport();
@@ -99,7 +65,6 @@ function startAnalysis() {
   eventSource.onerror = function () {
     addLog('error', '连接断开');
     eventSource.close();
-    closeLogStream();
     document.getElementById('start-btn').disabled = false;
     document.getElementById('cancel-btn').disabled = true;
     clearReport();
@@ -148,22 +113,62 @@ function renderReport(payload) {
   container.innerHTML = clean;
   container.hidden = false;
   document.getElementById('report-toolbar').hidden = false;
-  const dl = document.getElementById('download-btn');
-  dl.disabled = !payload.competitor;
   renderMeta(payload);
-  setProgress(1);
+  showReportAddress();
+}
+
+function showReportAddress() {
+  const notice = document.getElementById('report-notice');
+  if (!lastReport) return;
+  const parts = [];
+  const url = lastReport.report_url;
+  if (url) parts.push('地址: ' + url);
+  if (lastReport.report_path) parts.push('已保存到: ' + lastReport.report_path);
+  if (!parts.length) return;
+  notice.textContent = '报告已生成 · ' + parts.join(' · ');
+  notice.hidden = false;
 }
 
 function copyReport() {
   if (!lastReport || !lastReport.markdown_report) return;
-  navigator.clipboard.writeText(lastReport.markdown_report)
-    .then(function () { addLog('report', '已复制 Markdown'); })
-    .catch(function () { addLog('error', '复制失败'); });
+  const text = lastReport.markdown_report;
+  const done = function () { addLog('report', '已复制 Markdown'); };
+  const fail = function () { addLog('error', '复制失败'); };
+  const fallback = function () {
+    // 非安全上下文（http / 非 localhost）下 navigator.clipboard 不可用：textarea + execCommand 兜底
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, text.length);
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (err) { ok = false; }
+    document.body.removeChild(ta);
+    ok ? done() : fail();
+  };
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(done).catch(fallback);
+  } else {
+    fallback();
+  }
 }
 
 function downloadReport() {
-  if (!lastReport || !lastReport.competitor) return;
-  window.location.href = '/api/reports/' + encodeURIComponent(lastReport.competitor) + '/download';
+  if (!lastReport || !lastReport.markdown_report) return;
+  const name = (lastReport.competitor || 'report').replace(/[/\\ ]+/g, '_');
+  // 直接用内存中的 markdown 生成 Blob 下载，不依赖服务端落盘路径/竞态，单竞品与对比报告通用
+  const blob = new Blob([lastReport.markdown_report], { type: 'text/markdown;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name + '.md';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  addLog('report', '已下载 ' + name + '.md');
 }
 
 function clearReport() {
@@ -173,6 +178,7 @@ function clearReport() {
   report.hidden = true;
   document.getElementById('report-toolbar').hidden = true;
   document.getElementById('report-meta').hidden = true;
+  document.getElementById('report-notice').hidden = true;
   clearCandidates();
 }
 

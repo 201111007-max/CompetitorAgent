@@ -17,10 +17,6 @@
       <button id="start-btn">开始分析</button>
       <button id="cancel-btn" disabled>取消</button>
     </div>
-    <div class="progress-wrap" id="progress-wrap" hidden>
-      <div class="progress-track"><div class="progress-bar" id="progress-bar"></div></div>
-      <div class="progress-label" id="progress-label">0%</div>
-    </div>
     <div class="badges" id="phase-badges"></div>
   </header>
 
@@ -29,12 +25,9 @@
   <main class="main">
     <section class="col-left">
       <div id="log">等待输入...</div>
-      <details class="session-details">
-        <summary>会话日志</summary>
-        <div id="session-log">（分析开始后实时显示）</div>
-      </details>
     </section>
     <section class="col-right">
+      <div id="report-notice" class="report-notice" hidden></div>
       <div id="report-meta" class="report-meta" hidden></div>
       <div id="report-toolbar" class="report-toolbar" hidden>
         <button onclick="copyReport()">复制 Markdown</button>
