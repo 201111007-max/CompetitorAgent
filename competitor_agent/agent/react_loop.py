@@ -15,10 +15,10 @@ from typing import Any, Callable
 
 from competitor_agent.agent.react_agent import ReactAgent
 from competitor_agent.core.budget import IterationBudget
-from competitor_agent.llm.client import StreamDelta
 from competitor_agent.core.checkpoint import is_cancelled
 from competitor_agent.domain_types.events import ProgressEvent
 from competitor_agent.interfaces.exceptions import LLMUnavailableError
+from competitor_agent.llm.client import StreamDelta
 from competitor_agent.observability.logger import get_logger
 
 logger = get_logger("agent.react_loop")
