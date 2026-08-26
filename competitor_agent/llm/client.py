@@ -23,8 +23,9 @@ import os
 import random
 import threading
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterator
+from typing import Any, Callable
 
 from competitor_agent.interfaces.exceptions import LLMUnavailableError
 from competitor_agent.observability.logger import emit_session_event
@@ -102,7 +103,7 @@ class _StreamMeter:
     """流式调用的收尾计量盒（设计文档 63 §5.4）：随 generator 透传到产出侧记录 usage/模型，
     由消费方在收尾时经 ``_log_stream`` 记 ``llm.call``。跨线程单次调用内使用，无需加锁。"""
 
-    __slots__ = ("usage", "final_model", "delivered", "text_parts")
+    __slots__ = ("delivered", "final_model", "text_parts", "usage")
 
     def __init__(self) -> None:
         self.usage: Any = None
@@ -110,7 +111,7 @@ class _StreamMeter:
         self.delivered: bool = False
         self.text_parts: list[str] = []
 
-    def add(self, delta: "StreamDelta") -> None:
+    def add(self, delta: StreamDelta) -> None:
         """仅累加正文字增量（thinking 不计入 completion 文本估算；SDK 有真实 usage 时以其为准）。"""
         if delta.kind == "text":
             self.text_parts.append(delta.text)
@@ -356,8 +357,7 @@ class LLMClient:
         meter = _StreamMeter()
         producer = lambda model, meter: self._stream_once(messages, model, json_mode, meter)
         try:
-            for delta in self._stream_with_retry(messages, producer, meter):
-                yield delta
+            yield from self._stream_with_retry(messages, producer, meter)
         finally:
             self._log_stream(messages, started, meter)
 

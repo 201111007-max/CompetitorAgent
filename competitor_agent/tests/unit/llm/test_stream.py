@@ -10,7 +10,6 @@ import sys
 import types
 
 import pytest
-
 from competitor_agent.interfaces.exceptions import LLMUnavailableError
 from competitor_agent.llm.client import LLMClient, StreamDelta
 
@@ -316,8 +315,9 @@ class TestStreamMetering:
                 return it()
 
         class FakeUsageChunk:
-            choices = [FakeChoice(FakeDelta())]
-            usage = u
+            def __init__(self) -> None:
+                self.choices = [FakeChoice(FakeDelta())]
+                self.usage = u
 
         class _Chat:
             @property
