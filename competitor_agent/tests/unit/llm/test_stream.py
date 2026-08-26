@@ -39,10 +39,31 @@ def _texts(deltas: list[StreamDelta]) -> str:
     return "".join(d.text for d in deltas if d.kind == "text")
 
 
+def _consumed(client: LLMClient, messages: list[dict] | None = None) -> str:
+    return "".join(
+        d.text for d in client.stream(messages or [{"role": "user", "content": "hi"}])
+        if d.kind == "text"
+    )
+
+
 class FakeDelta:
-    def __init__(self, content="", reasoning="") -> None:
+    def __init__(self, content="", reasoning="", tool_calls=None) -> None:
         self.content = content
         self.reasoning_content = reasoning
+        self.tool_calls = tool_calls
+
+
+class FakeFunc:
+    def __init__(self, name=None, arguments="") -> None:
+        self.name = name
+        self.arguments = arguments
+
+
+class FakeToolDelta:
+    def __init__(self, index, id=None, function=None) -> None:
+        self.index = index
+        self.id = id
+        self.function = function
 
 
 class FakeChoice:
@@ -207,3 +228,226 @@ class TestSdkStream:
 
         client = LLMClient(call_func=gen)
         assert _deltas(client) == []
+
+
+class TestStreamMetering:
+    """设计文档 63 §5.4：流式收尾记 ``llm.call`` 计价（成本核算与 complete() 一致）。"""
+
+    def test_full_consumption_logs_llm_call(self, monkeypatch) -> None:
+        def gen(messages, model=None):
+            yield "你"
+            yield "好"
+
+        emitted = []
+
+        def fake_emit(*args, **kwargs):
+            emitted.append(kwargs)
+
+        monkeypatch.setattr(
+            "competitor_agent.llm.client.emit_session_event", fake_emit
+        )
+        long_msgs = [{"role": "system", "content": "你好世界你好世界你好"}]  # 9 字符 → 2 token
+        client = LLMClient(call_func=gen)
+        assert "".join(d.text for d in client.stream(long_msgs)) == "你好"
+        assert client.total_cost_usd > 0, "流式完成后应累计成本"
+        assert emitted, "流式完成后应发 llm.call 会话事件"
+        assert emitted[0]["model"] == client._model
+        assert emitted[0]["prompt_tokens"] > 0
+
+    def test_empty_stream_does_not_log(self, monkeypatch) -> None:
+        emitted = []
+
+        def fake_emit(*args, **kwargs):
+            emitted.append(kwargs)
+
+        monkeypatch.setattr(
+            "competitor_agent.llm.client.emit_session_event", fake_emit
+        )
+
+        def gen(messages, model=None):
+            return
+            yield  # pragma: no cover
+
+        client = LLMClient(call_func=gen)
+        assert "".join(d.text for d in client.stream([{"role": "user", "content": "hi"}])) == ""
+        assert not emitted, "空流（无增量产出）不应记账"
+        assert client.total_cost_usd == 0.0
+
+    def test_early_break_still_logs_partial(self, monkeypatch) -> None:
+        emitted = []
+
+        def fake_emit(*args, **kwargs):
+            emitted.append(kwargs)
+
+        monkeypatch.setattr(
+            "competitor_agent.llm.client.emit_session_event", fake_emit
+        )
+
+        def gen(messages, model=None):
+            yield "思"
+            yield "考"
+            yield "中"
+
+        client = LLMClient(call_func=gen)
+        for d in client.stream([{"role": "user", "content": "hi"}]):
+            break  # 消费首个增量即中断
+        assert emitted, "提前中断也应记已产出部分"
+
+    def test_sdk_usage_captured_for_metering(self, monkeypatch) -> None:
+        class _U:
+            pass
+
+        u = _U()
+        u.prompt_tokens = 10
+        u.completion_tokens = 7
+
+        created = {}
+
+        class FakeCompletions:
+            def create(self, *, model=None, messages=None, stream=False, **kw):
+                created["stream"] = stream
+
+                def it():
+                    yield FakeChunk([FakeDelta(content="a")])
+                    yield FakeChunk([FakeDelta(content="b")])
+                    # 末 chunk 带 usage → 被 meter 捕获
+                    yield FakeUsageChunk()
+
+                return it()
+
+        class FakeUsageChunk:
+            choices = [FakeChoice(FakeDelta())]
+            usage = u
+
+        class _Chat:
+            @property
+            def completions(self):
+                return FakeCompletions()
+
+        class FakeOpenAI:
+            def __init__(self, **kwargs) -> None:
+                pass
+
+            @property
+            def chat(self):
+                return _Chat()
+
+        monkeypatch.setitem(sys.modules, "openai", _fake_openai_module(FakeOpenAI))
+        client = LLMClient(model="m", api_key="k")
+        _consumed(client)
+        assert created["stream"] is True
+
+
+def _ToolChunk(chunk_dicts):
+    class _R:
+        pass
+
+    r = _R()
+    r.choices = []
+    for c in chunk_dicts:
+        m = c["message"]
+        ch = _R()
+        ch.message = _R()
+        ch.message.content = m["content"]
+        ch.message.tool_calls = m["tool_calls"]
+        r.choices.append(ch)
+    r.usage = None
+    return r
+
+
+class TestStreamToolCalling:
+    """设计文档 63 M2：complete_with_tools 流式旁路——增量投递到 sink + 重构 ToolCallReply。"""
+
+    def _fake_client(self, monkeypatch, chunks_iter, model="m", api_key="k", **kw) -> LLMClient:
+        created = {}
+
+        class FakeCompletions:
+            def create(self, *, model=None, messages=None, stream=False, tools=None, **kk):
+                created["stream"] = stream
+                created["tools"] = tools
+                return iter(chunks_iter)
+
+        class _Chat:
+            completions = FakeCompletions()
+
+        class FakeOpenAI:
+            def __init__(self, **kwargs) -> None:
+                pass
+
+            @property
+            def chat(self) -> _Chat:
+                return _Chat()
+
+        monkeypatch.setitem(sys.modules, "openai", _fake_openai_module(FakeOpenAI))
+        self._created = created
+        return LLMClient(model=model, api_key=api_key, **kw)
+
+    def test_streaming_reconstructs_tool_reply_and_emits_deltas(self, monkeypatch) -> None:
+        chunk1 = FakeChunk([FakeDelta(reasoning="先做计划…")])
+        chunk2 = FakeChunk([
+            FakeDelta(tool_calls=[FakeToolDelta(index=0, id="call_abc", function=FakeFunc(name="make_plan", arguments='{"competitor":'))])
+        ])
+        chunk3 = FakeChunk([
+            FakeDelta(tool_calls=[FakeToolDelta(index=0, function=FakeFunc(arguments='"cursor","resolution":"registry"}'))])
+        ])
+        client = self._fake_client(monkeypatch, [chunk1, chunk2, chunk3])
+
+        sinks: list[StreamDelta] = []
+        reply = client.complete_with_tools(
+            [{"role": "user", "content": "hi"}],
+            [{"type": "function", "function": {"name": "make_plan"}}],
+            stream_sink=lambda d: sinks.append(d),
+            message_id="lead_x",
+        )
+        # sink 收到 thinking 增量且归位 message_id
+        assert [(d.kind, d.text, d.message_id) for d in sinks] == [
+            ("thinking", "先做计划…", "lead_x"),
+        ]
+        # 重构出等价 ToolCallReply（工具名/id/参数 JSON 跨 chunk 拼接）
+        assert reply.content == ""
+        assert len(reply.tool_calls) == 1
+        tc = reply.tool_calls[0]
+        assert tc.id == "call_abc"
+        assert tc.name == "make_plan"
+        assert tc.arguments == {"competitor": "cursor", "resolution": "registry"}
+        assert self._created["stream"] is True
+        assert self._created["tools"] == [{"type": "function", "function": {"name": "make_plan"}}]
+
+    def test_streaming_final_content_reply(self, monkeypatch) -> None:
+        client = self._fake_client(
+            monkeypatch,
+            [FakeChunk([FakeDelta(content="最终")]), FakeChunk([FakeDelta(content="结论")])],
+        )
+        sinks: list[StreamDelta] = []
+        reply = client.complete_with_tools(
+            [{"role": "user", "content": "hi"}], [], stream_sink=lambda d: sinks.append(d)
+        )
+        assert reply.content == "最终结论"
+        assert reply.tool_calls == []
+        assert [(d.kind, d.text) for d in sinks] == [("text", "最终"), ("text", "结论")]
+
+    def test_default_path_stays_non_streaming(self, monkeypatch) -> None:
+        """无 stream_sink → 默认非流式（既有 54 调用方行为不变）。"""
+        created = {}
+
+        class FakeCompletions:
+            def create(self, **kw):
+                created.update(kw)
+                return _ToolChunk([{"message": {"content": "ok", "tool_calls": []}}])
+
+        class _Chat:
+            completions = FakeCompletions()
+
+        class FakeOpenAI:
+            def __init__(self, **kwargs) -> None:
+                pass
+
+            @property
+            def chat(self) -> _Chat:
+                return _Chat()
+
+        monkeypatch.setitem(sys.modules, "openai", _fake_openai_module(FakeOpenAI))
+        client = LLMClient(model="m", api_key="k")
+        reply = client.complete_with_tools([{"role": "user", "content": "hi"}], [{"type": "function", "function": {"name": "f"}}])
+        assert reply.content == "ok"
+        assert created.get("stream") is not True

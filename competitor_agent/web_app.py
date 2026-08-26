@@ -41,7 +41,7 @@ from competitor_agent.domain_types.report import (
     CompetitorReport,
 )
 from competitor_agent.interfaces.context import AnalysisSession
-from competitor_agent.llm.client import LLMClient
+from competitor_agent.llm.client import LLMClient, StreamDelta
 from competitor_agent.memory.four_layer_memory import FourLayerMemory
 from competitor_agent.memory.timeline_memory import TimelineMemory
 from competitor_agent.observability.logger import (
@@ -60,6 +60,9 @@ _config: AppConfig = load_config()
 # 设计文档 50 P0/P1：事件队列挂起等待的超时（秒）——取消检查挂在该超时分支上，
 # 取消响应延迟 ≤ 2×此值（原 50ms 忙轮询的折衷，避免队列空转 CPU）。
 _EVENT_WAIT_TIMEOUT = 0.2
+# 设计文档 63 §4.3：空闲期 SSE 心跳节流间隔（秒）——队列空挂起超时到点却无事件时，
+# 每满一个间隔发一条 `: keep-alive\\n\\n` 注释保活，防 EventSource 超时断连。
+_HEARTBEAT_INTERVAL = 10.0
 
 # 设计文档 63 §3：叙述型事件 —— 其 message 属于 Lead 的实时叙述，收敛为 ``text_delta``
 # 供对话页 Lead 气泡打字机逐段展开（而非独立原始事件行）。其余事件（discovery.candidate /
@@ -119,11 +122,35 @@ async def _event_generator(
         max_retries=_config.llm.max_retries,
         pricing_per_1k=_config.llm.pricing_per_1k,
     )
+    # 设计文档 63 §5.5：单条 Lead 助手消息的归属 message_id——后续 text_delta / text.stop /
+    # message.stop 全部复用；前端按它把增量归位到 Lead 气泡。
+    lead_id = f"lead_{uuid.uuid4().hex[:6]}"
+
+    def _stream_sink(delta: StreamDelta) -> None:
+        """仅 Lead 流式旁路（默认关闭，仅本 Web 触发）：流式增量 → 对话事件投递。
+
+        ``thinking`` → ``thinking_delta``（前端折叠"已思考"）；``text`` → ``text_delta``
+        （打字机），统一归位到 lead_id 气泡，跨线程经 ``_on_event`` 安全入队。
+        """
+        kind = "thinking_delta" if delta.kind == "thinking" else "text_delta"
+        try:
+            _on_event(
+                ProgressEvent(
+                    event=kind,
+                    phase="lead",
+                    message=delta.text,
+                    payload={"message_id": lead_id, "delta": delta.text},
+                )
+            )
+        except Exception:
+            logger.warning("Lead 流式增量投递失败", exc_info=True)
+
     api_with_sink = CompetitorAnalysisAPI(
         llm=llm_client,
         use_llm=True,
         memory=_get_memory(),
         event_sink=_on_event,
+        stream_sink=_stream_sink,
         config=load_config(),
     )
 
@@ -139,10 +166,6 @@ async def _event_generator(
             raise RuntimeError(f"需要配置 LLM API Key 才能分析（LLM 不可用: {exc}）") from exc
 
     analysis_task = asyncio.create_task(_run_analysis())
-
-    # 设计文档 63 §5.5：单条 Lead 助手消息的归属 message_id——后续 text_delta / text.stop /
-    # message.stop 全部复用；前端按它把增量归位到 Lead 气泡。
-    lead_id = f"lead_{uuid.uuid4().hex[:6]}"
 
     def _text_delta(delta: str) -> str:
         """叙述增量 → ``text_delta`` SSE（message 复用 delta，保持日志/测试可 grep）。"""
@@ -177,6 +200,7 @@ async def _event_generator(
 
         # 挂起等待事件而非 50ms 忙轮询（设计文档 50 §2.2）：队列空时 await 挂起，
         # 取消检查挂在 wait_for 超时分支，保持取消响应 ≤200ms（原 50ms 的折衷）。
+        last_heartbeat = time.monotonic()  # 设计文档 63 §4.3：空闲心跳节流时间戳
         while not analysis_task.done():
             if _sessions.get(session_id, {}).get("cancelled", False):
                 logger.info("会话 %s 被取消", session_id)
@@ -196,6 +220,10 @@ async def _event_generator(
                     events_queue.get(), timeout=_EVENT_WAIT_TIMEOUT
                 )
             except asyncio.TimeoutError:
+                # 空闲挂起超时（队列空）：按节流间隔发心跳保活（SSE 注释，不触发事件）
+                if time.monotonic() - last_heartbeat >= _HEARTBEAT_INTERVAL:
+                    yield ": keep-alive\n\n"
+                    last_heartbeat = time.monotonic()
                 continue
             # 叙述型事件收敛为 Lead 的 text_delta（设计文档 63 §3）；其余事件原样透传
             if event.event in _NARRATIVE_EVENTS and event.message:

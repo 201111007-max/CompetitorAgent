@@ -97,6 +97,29 @@ from competitor_agent.observability.logger import (
 
 logger = logging.getLogger("competitor_agent.facade.api")
 
+# 设计文档 63 §13 主旨2：子 Agent 思考/进度事件不入 Lead 气泡（Web 层会把这几类收敛为
+# text_delta，若子 Agent 透传会污染 Lead 流）。error/cancelled 等诊断事件仍透传。
+_SUBAGENT_HIDDEN_EVENTS = frozenset({"phase_start", "phase_complete", "progress"})
+
+
+def _subagent_event_sink(
+    event_sink: Callable[[Any], None] | None,
+) -> Callable[[Any], None] | None:
+    """为子 Agent 构造事件过滤器（设计文档 63 §13 主旨2）：思考/进度事件丢弃不入 Lead 流。
+
+    子 Agent 后台执行，其 phase_start/phase_complete/progress 属"思考过程"，按主旨2 不展示；
+    非叙述型事件（error/cancelled 等诊断）仍透传。``event_sink`` 为 None 时返回 None。
+    """
+    if event_sink is None:
+        return None
+
+    def _sink(event: Any) -> None:
+        if getattr(event, "event", None) in _SUBAGENT_HIDDEN_EVENTS:
+            return
+        event_sink(event)
+
+    return _sink
+
 
 def _delegate_section_url(result: str, dimension: str) -> str:
     """delegate 批量回填文本中该维度子结果块的首个 URL（按结果头切分）。"""
@@ -122,6 +145,7 @@ class CompetitorAnalysisAPI:
         use_llm: bool = True,
         max_iterations: int | None = None,
         event_sink: Callable[[ProgressEvent], None] | None = None,
+        stream_sink: Callable[[Any], None] | None = None,  # 设计文档 63 §5.5：仅 Lead 流式旁路（默认关闭）
         extractor: WebExtractor | None = None,
         memory: IFourLayerMemory | None = None,
         config: AppConfig | None = None,
@@ -151,6 +175,7 @@ class CompetitorAnalysisAPI:
         self._llm = llm
         self._use_llm = use_llm
         self._event_sink = event_sink
+        self._stream_sink = stream_sink  # 设计文档 63 §5.5：仅 Lead 流式旁路，缺省 None=关闭
         # enable_memory=False：门控全部记忆副作用（set_success_rates / _apply_memory_boost /
         # record_skill / record_outcome / archive_session），下游均判 `self._memory is None`
         self._memory = memory if enable_memory else None
@@ -764,6 +789,8 @@ class CompetitorAnalysisAPI:
             bind_competitor = lead_competitor.name if is_dimension else name
             # 子 Agent 迭代限制已移除（max_steps=None 无限循环，靠 LLM 自然收敛
             # Final Answer；取消经共享 session_id 协作）
+            # 主旨2：子 Agent 思考/进度事件过滤（不入 Lead 气泡），诊断事件仍透传
+            subagent_sink = _subagent_event_sink(self._event_sink)
             return build_subagent(
                 name,
                 self._llm or LLMClient(tracer=self._tracer),
@@ -776,7 +803,7 @@ class CompetitorAnalysisAPI:
                 session_id=session_id,
                 memory_context_fn=lambda t: self._memory_ctx_for(bind_competitor, t),
                 rag_fn=lambda t: self._rag_ctx_for(bind_competitor, t),
-                event_sink=self._event_sink,
+                event_sink=subagent_sink,
                 obs_max_chars=self._config.collector.max_content_chars,
                 max_steps=None,
                 tracer=self._tracer,  # 设计文档 54：子 Agent tool.call span
@@ -846,6 +873,7 @@ class CompetitorAnalysisAPI:
             max_history_steps=lead_max_history_steps,
             pinned_facts=pinned_facts,
             on_step=_collect_pinned,
+            stream_sink=self._stream_sink,  # 设计文档 63 §5.5：仅 Lead（子 Agent 不传）
         )
         # 收尾 shutdown 用（挂 loop 实例而非 self，避免并行 analyze 互相误杀线程池）
         loop._delegate_runner = runner

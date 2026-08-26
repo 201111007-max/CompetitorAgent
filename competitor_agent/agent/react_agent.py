@@ -16,7 +16,7 @@ from competitor_agent.agent.prompts.react_system import enrich_prompt
 from competitor_agent.agent.prompts.trust_boundary import wrap_untrusted
 from competitor_agent.agent.tool_dispatcher import ToolArgumentError, ToolDispatcher
 from competitor_agent.interfaces.context import Skill
-from competitor_agent.llm.client import LLMClient
+from competitor_agent.llm.client import LLMClient, StreamDelta
 from competitor_agent.observability.logger import get_logger
 
 logger = get_logger("agent.react_agent")
@@ -88,6 +88,7 @@ class ReactAgent:
         on_step: Callable[[dict], None] | None = None,
         extra_system_messages: list[dict[str, str]] | None = None,
         pinned_facts: list[str] | None = None,
+        stream_sink: Callable[[StreamDelta], None] | None = None,
     ) -> str:
         """执行 ReAct 循环直到 Final Answer 或步数耗尽
 
@@ -103,6 +104,9 @@ class ReactAgent:
         extra_system_messages: 附加 system 消息（skill 块注入，设计文档 48）。
         pinned_facts: 已核验事实清单（设计文档 56 M2，共享可变列表，由 on_step 收集侧
             追加）；压缩时重建为 pinned 段固定在摘要块之后，永不折叠/滚出。
+        stream_sink: 仅 Lead 的流式旁路（设计文档 63 §5.5，默认关闭）：非 None 时每次
+            ``complete_with_tools`` 走流式，逐增量（thinking/text）投递到 sink；子 Agent 不传
+            保持默认行为逐字节不变。
 
         历史压缩（设计文档 46 §3.2）：超过 ``max_history_steps`` 步后，把最旧的
         assistant+Observation 成对消息折叠为一行规则摘要（工具名/URL/结果前 N 字，
@@ -124,6 +128,7 @@ class ReactAgent:
             on_step=on_step,
             extra_system_messages=extra_system_messages,
             pinned_facts=pinned_facts,
+            stream_sink=stream_sink,
         )
 
     def _run_native(
@@ -140,6 +145,7 @@ class ReactAgent:
         on_step: Callable[[dict], None] | None,
         extra_system_messages: list[dict[str, str]] | None,
         pinned_facts: list[str] | None,
+        stream_sink: Callable[[StreamDelta], None] | None,
     ) -> str:
         """原生 function calling 循环（设计文档 53 §2.1，唯一循环，设计文档 60）。
 
@@ -176,7 +182,7 @@ class ReactAgent:
                 break
             tool_choice: Any = None if first_tool_done else forced_choice
             reply = self._llm.complete_with_tools(
-                messages, tools, tool_choice=tool_choice
+                messages, tools, tool_choice=tool_choice, stream_sink=stream_sink
             )
             assistant: dict[str, Any] = {"role": "assistant"}
             if reply.content:
