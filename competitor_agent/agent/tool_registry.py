@@ -12,7 +12,7 @@ tools 请求参数格式（原生 function calling 下发用），与文本协�
 from __future__ import annotations
 
 import inspect
-from typing import Any, Callable, List, get_origin
+from typing import Any, Callable, get_origin
 
 from competitor_agent.agent.tool_dispatcher import ToolDispatcher, ToolSpec
 from competitor_agent.config.loader import AppConfig
@@ -59,7 +59,7 @@ def _is_list_annotation(ann: Any) -> bool:
         canonical = ann.strip().replace("typing.", "").lower()
         return canonical.startswith("list[")
     try:
-        return get_origin(ann) in (list, List) or ann in (list, List)
+        return get_origin(ann) in (list,) or ann in (list,)
     except TypeError:  # 某些 forward-ref 对象 get_origin 抛错
         return False
 
