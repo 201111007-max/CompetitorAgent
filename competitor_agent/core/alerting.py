@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.mime.text import MIMEText
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol, cast
 
 import httpx
 
@@ -263,7 +263,10 @@ def report_diff(prev: object, cur: object) -> list[Alert]:
     """
     from competitor_agent.memory.timeline_memory import TimelineMemory
 
-    events = TimelineMemory.diff(prev, cur)
+    # prev/cur 为 duck-type（不限于 CompetitorReport）；cast Any 兼容 TimelineMemory.diff
+    # 的严格签名（孤立文件跑 mypy 时 follow_imports=skip 会让 ignore 判定为"未使用"，
+    # 全仓跑时又会报 arg-type——cast 在两种上下文都稳定）。
+    events = TimelineMemory.diff(cast(Any, prev), cast(Any, cur))
     return [_alert_from_event(e) for e in events]
 
 
