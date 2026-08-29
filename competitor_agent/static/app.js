@@ -7,6 +7,11 @@ let eventSource = null;
 let reportData = null;      // 最近一次 report 事件 payload（复制/下载用）
 let busy = false;
 
+// 设计文档 63 修复：正常收尾标志——收到 message.stop / report / cancelled / error
+// 任一终态事件后置位；EventSource.onerror 在连接正常关闭时也会触发（浏览器行为），
+// 据此抑制"系统 连接中断"误报，仅真正异常断连才提示。
+let sessionDone = false;
+
 // activeLeadMid：当前正在流式展开 Lead 消息的 message_id
 let activeMid = null;
 
@@ -301,6 +306,7 @@ function handleEvent(data) {
       const s = streams.get(mid);
       if (s) { finishStream(s); }
       setBusy(false);
+      sessionDone = true;
       break;
     }
     case 'discovery.candidate':
@@ -314,15 +320,18 @@ function handleEvent(data) {
     case 'report':
       renderReport(data.payload);
       setBusy(false);
+      sessionDone = true;
       break;
     case 'error':
       addInfo(data.message || '发生错误', 'error');
       setBusy(false);
+      sessionDone = true;
       closeEventSource();
       break;
     case 'cancelled':
       addInfo(data.message || '分析已取消', 'info');
       setBusy(false);
+      sessionDone = true;
       closeEventSource();
       break;
     default:
@@ -345,12 +354,19 @@ function startAnalysis(task) {
   eventSource = new EventSource(
     '/api/analyze?task=' + encodeURIComponent(task) + '&session_id=' + encodeURIComponent(sessionId)
   );
+  sessionDone = false;
   eventSource.onmessage = function (e) {
     let data;
     try { data = JSON.parse(e.data); } catch (err) { return; }
     handleEvent(data);
   };
   eventSource.onerror = function () {
+    // 正常收尾（后端已发终态事件后关闭连接）也会触发 onerror —— 已置 sessionDone
+    // 则静默关闭，不再误报"连接中断"；否则视为真实异常断连。
+    if (sessionDone) {
+      closeEventSource();
+      return;
+    }
     addInfo('连接中断', 'error');
     setBusy(false);
     closeEventSource();
