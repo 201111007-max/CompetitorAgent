@@ -51,9 +51,13 @@ class TestRunSingleLoopUnified:
         calls: list[str] = []
         orig = api._run_react_loop
 
-        def _wrapped(task: str, session_id: str | None = None):
+        def _wrapped(
+            task: str,
+            session_id: str | None = None,
+            history_messages: list[dict[str, str]] | None = None,
+        ):
             calls.append(task)
-            return orig(task, session_id)
+            return orig(task, session_id, history_messages)
 
         monkeypatch.setattr(api, "_run_react_loop", _wrapped)
         r1 = api.run("分析 Cursor")

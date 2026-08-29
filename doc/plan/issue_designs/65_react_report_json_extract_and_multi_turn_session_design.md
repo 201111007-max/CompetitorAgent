@@ -197,10 +197,32 @@ SessionHistory（落盘，刷新后仍可续）
 
 | 项 | 内容 | 涉及 | 状态 |
 |---|---|---|---|
-| §2.1 | `_extract_json_block` 括号配平 + 字符串感知提取 | `facade/react_report.py` | [ ] 未实现 |
-| §2.2 | `_parse_report` 用提取器 + 兜底净化 | `facade/react_report.py` | [ ] 未实现 |
-| §2.3 | `_extract_conclusion` 复用 + `_plan_resolution` 多候选推断 | `facade/comparison_report.py`、`facade/api.py` | [ ] 未实现 |
-| §3.2 | `SessionHistory`（JsonStore 持久化） | `memory/session_history.py`（新） | [ ] 未实现 |
-| §3.3 | `history_messages` 注入链路（run→_run_chat→_react_loop→ReactAgent） | `facade/api.py`、`agent/react_loop.py`、`agent/react_agent.py`、`web_app.py` | [ ] 未实现 |
-| §3.4 | 长期会话压缩（窗口/折叠/上限/LRU） | `memory/session_history.py`、`config/loader.py` | [ ] 未实现 |
-| §5 | 四类验收单测 | `tests/unit/facade/test_react_report.py`、`tests/unit/memory/test_session_history.py` | [ ] 未实现 |
+| §2.1 | `_extract_json_block` 括号配平 + 字符串感知提取 | `facade/react_report.py` | ✅ 已实现（2026-08-29） |
+| §2.2 | `_parse_report` 用提取器 + 兜底净化 | `facade/react_report.py` | ✅ 已实现（2026-08-29） |
+| §2.3 | `_extract_conclusion` 复用 + `_plan_resolution` 多候选推断 | `facade/comparison_report.py`、`facade/api.py` | ✅ 已实现（2026-08-29） |
+| §3.2 | `SessionHistory`（JsonStore 持久化） | `memory/session_history.py`（新） | ✅ 已实现（2026-08-29） |
+| §3.3 | `history_messages` 注入链路（run→_run_chat→_react_loop→ReactAgent） | `facade/api.py`、`agent/react_loop.py`、`agent/react_agent.py`、`web_app.py` | ✅ 已实现（2026-08-29） |
+| §3.4 | 长期会话压缩（窗口/折叠/上限/LRU） | `memory/session_history.py` | ✅ 已实现（2026-08-29） |
+| §5 | 验收单测（JSON 提取/兜底净化/多轮回灌/长期会话/注入链路） | `tests/unit/facade/test_react_report_65.py`、`tests/unit/memory/test_session_history_65.py`、`tests/unit/web/test_web_m2_streaming.py` | ✅ 已实现（2026-08-29，40 新用例 + 全量回归：836 passed，仅 4 个既有 chroma 文件锁环境性失败） |
+
+> **设计文档 65 修复说明（2026-08-29）**：
+> ① **§2 JSON 提取健壮化**（`facade/react_report.py`）：新增 `_extract_json_block`（快路径 `startswith("{")` 直解；
+> 慢路径定位首个 `{` 逐字符括号配平 + 字符串字面量感知跳过 `\"` 转义，深度归零截候选 `json.loads`；失败再
+> `re.search(r"\{.*\}")` 懒提取兜底；非空 dict 才算有效块，空 `{}` 占位不误伤散文）。`_parse_report` 改调提取器，
+> 缺 `dimensions` 时取 `conclusion/summary/answer` 可溯源单 react 维度；`_fallback_single_dimension` 新增
+> `_strip_json_blocks` 兜底净化（剔除 JSON 块只留散文，`### [PARTIAL] react` 不再跟一坨 JSON dump）。
+> `comparison_report._extract_conclusion` 复用提取器（兼容"散文前缀 + conclusion"）。`_plan_resolution` 新增
+> `candidate_count` 参数（`run()` 传 `len(loop._delegate_collector)`）——多候选 DISCOVERY 即使 plan 缺
+> resolution/competitors 也不误判 registry 走单报告路径。
+> ② **§3 多轮会话历史**（新 `memory/session_history.py`）：`SessionHistory` 基于 `JsonStore`（
+> `data_dir/memory/chat_history.json`），按 `session_id` 追加式持久化 `{role, content, ts}`；`messages()` 压缩后
+> 供注入（近端 `max_verbatim_turns` 轮原文 + 远端 `[摘要]` 折叠 + `max_history_chars` 总量封顶 + 角色交替校验
+> ——单条 user 保留、有前文的悬空 user 丢弃；`max_sessions` LRU 淘汰）。注入链路：
+> `api.run(history_messages=...)` → `_run_chat`/`_run_react_loop` → `_react_loop` → `ReactLoop` →
+> `ReactAgent.run` → `_run_native` 消息 `[system, *history, user]`；`history=None` 逐字节不变（回归全绿）。
+> `web_app._event_generator` 开头读历史注入 + append 本轮 user，收尾按结果类型 append assistant（chat→answer
+> 原文 / 分析→紧凑摘要，不存整份 markdown/JSON）；落盘失败仅告警不阻塞。
+> ③ **测试**：`test_react_report_65.py`（四类输入解析/兜底净化/结论提取/plan 推断）+ `test_session_history_65.py`
+> （窗口折叠/总量上限/角色交替/LRU/持久化/注入链路/两轮回灌）+ `test_web_m2_streaming.py` 增
+> `test_event_generator_reads_and_appends_session_history`（同 sid 两轮历史读写）。全量 836 unit passed
+> （4 个 chroma 文件锁环境性失败除外，与本次改动无关）；ruff 0 error、mypy 改动文件 0 error。

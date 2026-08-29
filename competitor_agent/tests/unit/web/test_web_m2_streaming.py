@@ -25,7 +25,13 @@ class StreamingLeadAPI:
         self.event_sink = kwargs.get("event_sink")
         self.stream_sink = kwargs.get("stream_sink")
 
-    def run(self, task: str, *, session_id: str | None = None) -> CompetitorReport:
+    def run(
+        self,
+        task: str,
+        *,
+        session_id: str | None = None,
+        history_messages: list[dict[str, str]] | None = None,
+    ) -> CompetitorReport:
         from competitor_agent.llm.client import StreamDelta
 
         # 与生产一致：Lead 在 run_in_executor 工作线程内经 stream_sink 投递流式增量
@@ -114,7 +120,13 @@ class IdleAPI:
     def __init__(self, *args, **kwargs) -> None:
         pass
 
-    def run(self, task: str, *, session_id: str | None = None) -> CompetitorReport:
+    def run(
+        self,
+        task: str,
+        *,
+        session_id: str | None = None,
+        history_messages: list[dict[str, str]] | None = None,
+    ) -> CompetitorReport:
         import time
 
         time.sleep(0.6)  # 空转无事件 → 队列持续为空，触发心跳
@@ -189,7 +201,13 @@ class ChatAPI:
         self.event_sink = kwargs.get("event_sink")
         self.stream_sink = kwargs.get("stream_sink")
 
-    def run(self, task: str, *, session_id: str | None = None):
+    def run(
+        self,
+        task: str,
+        *,
+        session_id: str | None = None,
+        history_messages: list[dict[str, str]] | None = None,
+    ):
         from competitor_agent.domain_types.report import ChatResult
         from competitor_agent.llm.client import StreamDelta
 
@@ -235,3 +253,39 @@ def test_chat_result_no_report_panel(
     assert kinds.index("message.stop") == len(kinds) - 1
     stop = next(e for e in events if e["event"] == "message.stop")
     assert stop["payload"]["summary"]
+
+
+def test_event_generator_reads_and_appends_session_history(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """设计文档 65 §3.3：_event_generator 按 session_id 读历史注入 + 收尾 append assistant。
+
+    同 sid 两轮：第二轮注入历史应含第一轮的 user/assistant（chat→answer，分析→紧凑摘要）；
+    历史写入失败不阻塞分析（降级）。
+    """
+    from competitor_agent.memory import FourLayerMemory
+    from competitor_agent.memory.session_history import SessionHistory
+
+    _patch_env(monkeypatch, StreamingLeadAPI, FourLayerMemory(tmp_path / "memory"))
+    history = SessionHistory(data_dir=tmp_path / "hist", max_verbatim_turns=10)
+    monkeypatch.setattr(web_app, "_get_history", lambda: history)
+
+    sid = "sess_hist_65"
+    web_app._sessions[sid] = {"task": "分析 Cursor", "cancelled": False}
+
+    async def _run(task: str) -> None:
+        async for _line in web_app._event_generator(sid, task):
+            pass
+
+    try:
+        asyncio.run(_run("第一轮：为什么维度结论是 JSON"))
+        assert [m["role"] for m in history.messages(sid)] == ["user", "assistant"]
+        assert history.messages(sid)[0]["content"] == "第一轮：为什么维度结论是 JSON"
+        asyncio.run(_run("第二轮：用代码分析我刚才提到的问题"))
+        msgs = history.messages(sid)
+        assert len(msgs) == 4  # 两轮 user/assistant 对
+        assert msgs[0]["content"] == "第一轮：为什么维度结论是 JSON"
+        assert "分析完成" in msgs[1]["content"]
+        assert msgs[2]["content"] == "第二轮：用代码分析我刚才提到的问题"
+    finally:
+        web_app._sessions.pop(sid, None)

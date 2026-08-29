@@ -9,10 +9,12 @@
 职责：每候选 ``dimensions[]`` → 最小 CompetitorReport → ``build_comparison`` 渲染
 "维度 × 竞品"矩阵（执行层，不经 LLM）；Lead 结论段拼入。候选缺失/结论缺失时
 矩阵与结论段各自兜底不报错。
+
+设计文档 65 §2.3：``_extract_conclusion`` 复用 ``_extract_json_block``（括号配平），
+兼容"散文前缀 + JSON"形态的 Lead Final Answer（不再要求整体以 ``{`` 开头）。
 """
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from competitor_agent.domain_types.competitor import Competitor
@@ -82,10 +84,13 @@ def assemble_comparison(
 def _extract_conclusion(lead_answer: str) -> str:
     """从 Lead Final Answer 提取市场格局核心结论段。
 
-    - comparison JSON（含 ``conclusion`` 字段）→ 取字段值；
+    - comparison JSON（含 ``conclusion`` 字段）→ 取字段值（设计文档 65 §2.3：
+      复用 ``_extract_json_block`` 括号配平提取，兼容散文前缀形态）；
     - 文本含【市场格局核心结论】标记 → 取标记后内容；
     - 其余文本 → 整段作为结论；JSON 无 conclusion 字段 → 空（矩阵兜底）。
     """
+    from competitor_agent.facade.react_report import _extract_json_block
+
     text = (lead_answer or "").strip()
     if not text:
         return ""
@@ -95,12 +100,9 @@ def _extract_conclusion(lead_answer: str) -> str:
             break
     if _MARKER in text:
         return text.split(_MARKER, 1)[1].strip()
-    if text.startswith("{"):
-        try:
-            payload = json.loads(text)
-        except (json.JSONDecodeError, TypeError):
-            return text
-        if isinstance(payload, dict) and payload.get("conclusion"):
+    payload = _extract_json_block(text)
+    if isinstance(payload, dict):
+        if payload.get("conclusion"):
             return str(payload["conclusion"])
         return ""
     return text

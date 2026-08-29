@@ -44,6 +44,7 @@ from competitor_agent.domain_types.report import (
 from competitor_agent.interfaces.context import AnalysisSession
 from competitor_agent.llm.client import LLMClient, StreamDelta
 from competitor_agent.memory.four_layer_memory import FourLayerMemory
+from competitor_agent.memory.session_history import SessionHistory
 from competitor_agent.memory.timeline_memory import TimelineMemory
 from competitor_agent.observability.logger import (
     read_session_log,
@@ -57,6 +58,7 @@ logger = logging.getLogger("competitor_agent.web_app")
 _sessions: dict[str, dict[str, Any]] = {}  # session_id → {task, cancel_flag, ...}
 _memory: FourLayerMemory | None = None
 _config: AppConfig = load_config()
+_history: SessionHistory | None = None
 
 # 设计文档 50 P0/P1：事件队列挂起等待的超时（秒）——取消检查挂在该超时分支上，
 # 取消响应延迟 ≤ 2×此值（原 50ms 忙轮询的折衷，避免队列空转 CPU）。
@@ -91,6 +93,14 @@ def _get_timeline() -> TimelineMemory:
     if _timeline is None:
         _timeline = TimelineMemory(data_dir=get_data_dir())
     return _timeline
+
+
+def _get_history() -> SessionHistory:
+    """会话级多轮历史（设计文档 65 §3.2）：按 session_id 持久化对话上下文。"""
+    global _history
+    if _history is None:
+        _history = SessionHistory(data_dir=get_data_dir())
+    return _history
 
 
 # ── SSE 辅助 ──────────────────────────────────────────────────────────────
@@ -156,6 +166,15 @@ async def _event_generator(
         config=load_config(),
     )
 
+    # 设计文档 65 §3.3：多轮会话历史——读该 session_id 历史 + 追加本轮 user task；
+    # 历史写入失败仅告警不阻塞分析（边界与回退，§3.5）。
+    history_store = _get_history()
+    history_messages = history_store.messages(session_id) if session_id else []
+    try:
+        history_store.append(session_id, "user", task)
+    except Exception:
+        logger.warning("会话历史 user 落盘失败（不影响分析）", exc_info=True)
+
     # 统一入口 run()（设计文档 62 §3.7）：解析/分派收敛到库内，HTTP 层不再写 DISCOVERY/COMPARE
     # 分支；LLM 不可用 → 抛可读错误由外层转 SSE error。
     # 设计文档 64 §5：run() 意图门控可返回 ChatResult（普通提问 → 无报告面板）。
@@ -163,7 +182,10 @@ async def _event_generator(
         loop = asyncio.get_running_loop()
         try:
             return await loop.run_in_executor(
-                None, lambda: api_with_sink.run(task, session_id=session_id)
+                None,
+                lambda: api_with_sink.run(
+                    task, session_id=session_id, history_messages=history_messages
+                ),
             )
         except Exception as exc:  # LLM 不可用 → 可读错误，Web 普查不崩溃
             raise RuntimeError(f"需要配置 LLM API Key 才能分析（LLM 不可用: {exc}）") from exc
@@ -244,6 +266,26 @@ async def _event_generator(
 
         # 分析完成，获取报告
         report = analysis_task.result()
+        # 设计文档 65 §3.2：收尾把本轮结果追加进会话历史（chat→answer 原文；分析→紧凑摘要，
+        # 不存整份 markdown/JSON，避免历史膨胀与污染）。失败仅告警不阻塞。
+        try:
+            if isinstance(report, ChatResult):
+                history_store.append(session_id, "assistant", report.answer or "对话完成")
+            elif isinstance(report, ComparisonReport):
+                names = " / ".join(c.name for c in report.competitors) or "compare"
+                history_store.append(
+                    session_id,
+                    "assistant",
+                    f"对比报告完成：{names}（{len(report.reports)} 个竞品）",
+                )
+            elif isinstance(report, CompetitorReport):
+                history_store.append(
+                    session_id,
+                    "assistant",
+                    f"分析完成：{report.competitor.name}（{len(report.dimension_results)} 个维度）",
+                )
+        except Exception:
+            logger.warning("会话历史 assistant 落盘失败（不影响分析）", exc_info=True)
         # 收敛 Lead 消息的正文流：text.stop(final) → 前端收光标、停打字机（设计文档 63 §7.3）。
         # 延迟到终态确定后发，保证它排在所有 text_delta 之后。
         yield _text_stop(True)

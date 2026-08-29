@@ -119,7 +119,13 @@ class TestStreamSinkTurn:
             def __init__(self, *args, **kwargs) -> None:
                 self.stream_sink = kwargs.get("stream_sink")
 
-            def run(self, task: str, *, session_id: str | None = None) -> CompetitorReport:
+            def run(
+                self,
+                task: str,
+                *,
+                session_id: str | None = None,
+                history_messages: list[dict[str, str]] | None = None,
+            ) -> CompetitorReport:
                 self.stream_sink(StreamDelta(kind="thinking", text="思考段0", turn=0))
                 self.stream_sink(StreamDelta(kind="text", text="正文段0", turn=0))
                 self.stream_sink(StreamDelta(kind="thinking", text="思考段1", turn=1))

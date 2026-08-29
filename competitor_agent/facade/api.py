@@ -427,15 +427,23 @@ class CompetitorAnalysisAPI:
         return report
 
     @staticmethod
-    def _plan_resolution(plan: dict[str, Any] | None, parsed: Any) -> str:
+    def _plan_resolution(
+        plan: dict[str, Any] | None,
+        parsed: Any,
+        candidate_count: int = 0,
+    ) -> str:
         """组装分型的 resolution：优先 plan.resolution（Lead 声明），缺失按 plan/解析推断。
 
         registry（单竞品）→ CompetitorReport；compare/discovery → ComparisonReport。
+
+        设计文档 65 §2.3：plan 缺 resolution/competitors 时，若 Lead 实际做了候选枚举/委派
+        （``candidate_count`` > 0）→ 归 discovery/compare，避免多竞品任务误判 registry
+        走单报告路径（真实 LLM 复现：make_plan 只声明 competitor，但 DISCOVERY 已委派多个候选）。
         """
         resolution = str((plan or {}).get("resolution") or "").lower()
         if resolution:
             return resolution
-        if (plan or {}).get("competitors"):
+        if (plan or {}).get("competitors") or candidate_count > 0:
             return "discovery" if parsed.resolution == ResolutionDecision.DISCOVERY else "compare"
         return "registry"
 
@@ -678,13 +686,18 @@ class CompetitorAnalysisAPI:
             terminal_state=terminal,
         )
 
-    def _run_react_loop(self, task: str, session_id: str | None) -> tuple[ReactLoop, ReactRunResult]:
+    def _run_react_loop(
+        self,
+        task: str,
+        session_id: str | None,
+        history_messages: list[dict[str, str]] | None = None,  # 设计文档 65 §3.3
+    ) -> tuple[ReactLoop, ReactRunResult]:
         """构建 Lead ReactLoop 并运行；会话收尾统一回收子 Agent 线程池。
 
         DelegateRunner 挂在 loop 实例（而非 self），避免并行 analyze()（compare
         并发）共享 self._delegate_runner 时互相 shutdown 彼此的线程池。
         """
-        loop = self._react_loop(task, session_id)
+        loop = self._react_loop(task, session_id, history_messages=history_messages)
         try:
             result = loop.run_with_result(task)
         finally:
@@ -766,6 +779,7 @@ class CompetitorAnalysisAPI:
         system_prompt: str | None = None,
         plan_first: bool = True,
         final_as_payload: bool = True,
+        history_messages: list[dict[str, str]] | None = None,  # 设计文档 65 §3.3：多轮会话历史
     ) -> ReactLoop:
         """组装 Lead ReactLoop（设计文档 49 §3.5/3.6）：plan-first + delegate + 复核工具。
 
@@ -898,6 +912,7 @@ class CompetitorAnalysisAPI:
             on_step=_collect_pinned,
             stream_sink=self._stream_sink,  # 设计文档 63 §5.5：仅 Lead（子 Agent 不传）
             final_as_payload=final_as_payload,  # 设计文档 64 §5.2：对话式分支 False
+            history_messages=history_messages,  # 设计文档 65 §3.3：多轮会话历史
         )
         # 收尾 shutdown 用（挂 loop 实例而非 self，避免并行 analyze 互相误杀线程池）
         loop._delegate_runner = runner
@@ -1533,6 +1548,7 @@ class CompetitorAnalysisAPI:
         task: str,
         *,
         session_id: str | None = None,
+        history_messages: list[dict[str, str]] | None = None,  # 设计文档 65 §3.3：多轮会话历史
     ) -> CompetitorReport | ComparisonReport | ChatResult:
         """统一入口（设计文档 62 §3.5）：全部 resolution 同走一条单 Lead loop。
 
@@ -1549,7 +1565,7 @@ class CompetitorAnalysisAPI:
         task = sanitize_task(task)
         parsed = parse_task(task, llm=self._llm, use_llm=self._use_llm)
         if parsed.is_chat:
-            return self._run_chat(task, session_id)
+            return self._run_chat(task, session_id, history_messages)
         sid = session_id or f"sess_{uuid.uuid4().hex[:8]}"
         set_current_session(sid)
         self._tracer.start_trace("run", trace_id=sid, input_brief=task)
@@ -1563,7 +1579,7 @@ class CompetitorAnalysisAPI:
                     message=f"Lead 编排: {task}",
                 )
             )
-            loop, result = self._run_react_loop(task, sid)
+            loop, result = self._run_react_loop(task, sid, history_messages)
             plan = loop.plan or {}
             terminal = (
                 "cancelled"
@@ -1571,7 +1587,11 @@ class CompetitorAnalysisAPI:
                 else ("partial" if result.budget_exhausted else "success")
             )
             # 组装按 plan.resolution 统一分型（同一单 Lead loop 产物）
-            if self._plan_resolution(plan, parsed) in ("compare", "discovery"):
+            # 设计文档 65 §2.3：candidate_count 让多候选 DISCOVERY 即使 plan 缺
+            # resolution/competitors 也不误判 registry（走单报告路径）
+            if self._plan_resolution(plan, parsed, candidate_count=len(
+                getattr(loop, "_delegate_collector", {}) or {}
+            )) in ("compare", "discovery"):
                 return self._finalize_comparison_report(loop, result, plan, sid, terminal)
             report = react_report.assemble(
                 lead_answer=result.answer,
@@ -1591,7 +1611,12 @@ class CompetitorAnalysisAPI:
         logger.warning("discover() 已废弃（历史兼容）：请改用 run() 统一入口")
         return cast(ComparisonReport, self.run(task))
 
-    def _run_chat(self, task: str, session_id: str | None) -> ChatResult:
+    def _run_chat(
+        self,
+        task: str,
+        session_id: str | None,
+        history_messages: list[dict[str, str]] | None = None,  # 设计文档 65 §3.3
+    ) -> ChatResult:
         """对话式分支（设计文档 64 §5.2）：普通提问/闲聊 → 自由 prose 回答，不产报告面板。
 
         与 ``run()`` 的分析链路相对：不再强制 make_plan（``plan_first=False``）、改用
@@ -1614,6 +1639,7 @@ class CompetitorAnalysisAPI:
                 system_prompt=build_chat_system_prompt(),
                 plan_first=False,
                 final_as_payload=False,
+                history_messages=history_messages,
             )
             try:
                 result = loop.run_with_result(task)
