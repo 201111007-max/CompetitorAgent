@@ -4,6 +4,11 @@
 details, confidence, evidence_urls}]）→ 多维度 ``DimensionResult`` → CompetitorReport
 （复用 ``ReportBuilder`` 渲染/freshness）。
 
+设计文档 65 §2：JSON 提取健壮化——Lead Final Answer 可能带散文前缀
+（"数据已齐备。以下是最终竞品分析报告。\\n\\n{...json...}"），``_parse_report`` 不再要求
+整体以 ``{`` 开头，改用 ``_extract_json_block`` 括号配平提取首个平衡 JSON 对象；
+提取失败时兜底净化（剔除 JSON 块，只留纯散文）。
+
 兜底：
 - 非 JSON / 缺 dimensions → 单 ``react`` 维度 PARTIAL（解析健壮性，非规则决策）；
 - 数值真值核对：details 非空但无证据 URL 的维度 → 置信度封顶 0.5 并标注；
@@ -14,6 +19,7 @@ details, confidence, evidence_urls}]）→ 多维度 ``DimensionResult`` → Com
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -92,18 +98,156 @@ def assemble(
 
 
 def _parse_report(answer: str) -> dict[str, Any] | None:
-    """解析 REPORT_SCHEMA JSON；非 JSON/缺 dimensions → None。"""
+    """解析 REPORT_SCHEMA JSON；非 JSON/缺 dimensions → None。
+
+    设计文档 65 §2：改用 ``_extract_json_block`` 从"散文前缀 + JSON"中提取首个平衡
+    JSON 对象（不再要求整体以 ``{`` 开头）。提取成功且含 ``dimensions`` 列表 →
+    返回 payload；提取成功但缺 ``dimensions`` → 尝试取 ``conclusion``/``summary``/
+    ``answer`` 字段作为单 react 维度正文（可溯源），否则 None。
+    """
     text = (answer or "").strip()
     if not text:
         return None
-    if text.startswith("{"):
+    payload = _extract_json_block(text)
+    if payload is None:
+        return None
+    if isinstance(payload.get("dimensions"), list):
+        return payload
+    # 取出 dict 但缺 dimensions → 可溯源的单 react 维度正文（设计文档 65 §2.2）
+    for key in ("conclusion", "summary", "answer"):
+        val = payload.get(key)
+        if val:
+            return {
+                "dimensions": [
+                    {
+                        "dimension": "react",
+                        "summary": str(val),
+                        "details": {},
+                        "confidence": 0.4,
+                        "evidence_urls": [],
+                    }
+                ]
+            }
+    return None
+
+
+def _extract_json_block(text: str) -> dict[str, Any] | None:
+    """从文本中提取首个平衡 JSON 对象（设计文档 65 §2.1 括号配平 + 字符串感知）。
+
+    快路径：文本整体以 ``{`` 开头 → 直接 ``json.loads``（覆盖绝大多数场景，行为不变）。
+    慢路径：定位首个 ``{`` 后逐字符扫描，维护深度；字符串字面量感知——命中 ``"`` 时
+    进入字符串态并跳过 ``\\"`` 转义，防止 JSON 字符串内部的 ``{``/``}`` 干扰配平；
+    深度归零处截取候选块 ``json.loads``，成功且为 dict → 返回。首个候选失败时再尝试
+    ``re.search`` 懒提取兜底。未闭合/无 JSON → None。
+    """
+    if not text:
+        return None
+    stripped = text.strip()
+    if stripped.startswith("{"):
         try:
-            payload = json.loads(text)
-        except json.JSONDecodeError:
+            payload = json.loads(stripped)
+            if isinstance(payload, dict) and payload:
+                return payload
+        except (json.JSONDecodeError, TypeError):
+            pass
+    start = stripped.find("{")
+    if start == -1:
+        return None
+    depth = 0
+    in_string = False
+    escaped = False
+    for i in range(start, len(stripped)):
+        ch = stripped[i]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                candidate = stripped[start : i + 1]
+                try:
+                    payload = json.loads(candidate)
+                except (json.JSONDecodeError, TypeError):
+                    break
+                if isinstance(payload, dict) and payload:
+                    return payload
+                break
+    # 慢路径候选失败/未闭合 → 懒提取兜底（贪婪到最后一个 }，容忍尾部散文）
+    match = re.search(r"\{.*\}", stripped, re.DOTALL)
+    if match:
+        try:
+            payload = json.loads(match.group(0))
+        except (json.JSONDecodeError, TypeError):
             return None
-        if isinstance(payload, dict) and isinstance(payload.get("dimensions"), list):
+        if isinstance(payload, dict) and payload:
             return payload
     return None
+
+
+def _strip_json_blocks(text: str) -> str:
+    """剔除文本中的 JSON 块，只保留纯散文（设计文档 65 §2.2 兜底净化）。
+
+    括号配平定位每个顶层 JSON 对象（与 ``_extract_json_block`` 同算法），命中即移除；
+    残留非 JSON 的 ``{...}``（如花括号文本）不会被误删（``json.loads`` 失败的跳过）。
+    """
+    if not text:
+        return ""
+    out: list[str] = []
+    pos = 0
+    n = len(text)
+    while pos < n:
+        start = text.find("{", pos)
+        if start == -1:
+            out.append(text[pos:])
+            break
+        depth = 0
+        in_string = False
+        escaped = False
+        end = -1
+        for i in range(start, n):
+            ch = text[i]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif ch == "\\":
+                    escaped = True
+                elif ch == '"':
+                    in_string = False
+                continue
+            if ch == '"':
+                in_string = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    end = i
+                    break
+        candidate = text[start : end + 1] if end != -1 else text[start:]
+        try:
+            parsed = json.loads(candidate)
+        except (json.JSONDecodeError, TypeError):
+            parsed = None
+        # 仅剔除非空 dict（Lead 真实 JSON dump 必含字段；空 {} 是散文占位不误删）
+        if isinstance(parsed, dict) and parsed:
+            out.append(text[pos:start])
+            pos = end + 1 if end != -1 else n
+        else:
+            # 非 JSON 的 {…}：保留单个字符继续扫描（避免死循环）
+            out.append(text[pos : start + 1])
+            pos = start + 1
+    cleaned = "".join(out)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    return cleaned
 
 
 def _dimension_from_item(item: dict[str, Any]) -> DimensionResult | None:
@@ -163,10 +307,15 @@ def _fallback_single_dimension(
 ) -> CompetitorReport:
     """非 JSON / 无 dimensions：单 react 维度 PARTIAL（LLM 不可用/超步数文案）。
 
+    设计文档 65 §2.2 兜底净化：即使无有效 JSON，赋给 react 维度 summary 前先剔除文中
+    的 JSON 块（复用括号配平定位），只保留纯散文——用户不再看到一坨 JSON dump。
+
     plan 已声明但未产出的维度 → gaps_pending（供 resume/预算判定），与
     assemble() 正常路径一致。
     """
     text = (answer or "").strip()
+    if text:
+        text = _strip_json_blocks(text)
     is_unavailable = "LLM 服务不可用" in text or "已达最大" in text or "推理已停止" in text
     status = ResultStatus.PARTIAL
     confidence = 0.1 if is_unavailable else 0.4

@@ -63,9 +63,13 @@ class TestRunRouting:
         seen: dict[str, object] = {}
         orig = api._run_react_loop
 
-        def _wrapped(task: str, session_id: str | None = None):
+        def _wrapped(
+            task: str,
+            session_id: str | None = None,
+            history_messages: list[dict[str, str]] | None = None,
+        ):
             seen["sid"] = session_id
-            return orig(task, session_id)
+            return orig(task, session_id, history_messages)
 
         monkeypatch.setattr(api, "_run_react_loop", _wrapped)
         api.run("对比 Cursor 和 Windsurf", session_id="sess_abc")

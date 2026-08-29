@@ -90,6 +90,7 @@ class ReactAgent:
         pinned_facts: list[str] | None = None,
         stream_sink: Callable[[StreamDelta], None] | None = None,
         final_as_payload: bool = True,  # 设计文档 64 §5.2：对话式分支 False → 最终文本走 Stream 通道
+        history_messages: list[dict[str, str]] | None = None,  # 设计文档 65 §3.3：多轮会话历史
     ) -> str:
         """执行 ReAct 循环直到 Final Answer 或步数耗尽
 
@@ -134,6 +135,7 @@ class ReactAgent:
             pinned_facts=pinned_facts,
             stream_sink=stream_sink,
             final_as_payload=final_as_payload,
+            history_messages=history_messages,
         )
 
     def _run_native(
@@ -152,6 +154,7 @@ class ReactAgent:
         pinned_facts: list[str] | None,
         stream_sink: Callable[[StreamDelta], None] | None,
         final_as_payload: bool = True,
+        history_messages: list[dict[str, str]] | None = None,  # 设计文档 65 §3.3
     ) -> str:
         """原生 function calling 循环（设计文档 53 §2.1，唯一循环，设计文档 60）。
 
@@ -174,6 +177,9 @@ class ReactAgent:
         messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
         if extra_system_messages:
             messages.extend(extra_system_messages)
+        # 设计文档 65 §3.3：多轮会话历史注入（history 在 user 之前，role 已由调用方保证交替）
+        if history_messages:
+            messages.extend(history_messages)
         messages.append({"role": "user", "content": user_message})
         tools = _openai_tools()
         # plan-first：首轮用 tool_choice 强制（设计文档 53 §2.1），命中后解除

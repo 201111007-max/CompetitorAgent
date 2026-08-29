@@ -60,7 +60,13 @@ class EmitAPI:
             markdown_report="# Cursor 报告\n测试内容",
         )
 
-    def run(self, task: str, *, session_id: str | None = None) -> CompetitorReport:
+    def run(
+        self,
+        task: str,
+        *,
+        session_id: str | None = None,
+        history_messages: list[dict[str, str]] | None = None,
+    ) -> CompetitorReport:
         """统一入口 stub（设计文档 62 §3.7）：单竞品任务委托给 analyze。"""
         return self.analyze(task, session_id=session_id)
 
