@@ -1,4 +1,5 @@
 """core/report_builder.py + markdown_renderer.py 单测"""
+from competitor_agent.core.markdown_renderer import MarkdownRenderer
 from competitor_agent.core.report_builder import ReportBuilder
 from competitor_agent.domain_types import (
     ComparisonReport,
@@ -60,11 +61,12 @@ class TestMarkdownRenderer:
 
         assert "# cursor 竞品分析报告" in md
         assert "## 维度结论" in md
-        assert "## 未关闭缺口" in md
         assert "Pro $20/mo" in md
-        assert "roadmap" in md
+        # 设计文档 66 §3.4：默认不渲染"未关闭缺口"段（gaps_pending 数据仍在报告对象）
+        assert "## 未关闭缺口" not in md
+        assert report.gaps_pending[0].field == "roadmap"
 
-    def test_render_with_gaps(self):
+    def test_render_show_gaps_renders_section(self):
         b = ReportBuilder()
         report = b.build(
             Competitor(name="x"),
@@ -72,13 +74,19 @@ class TestMarkdownRenderer:
             [InfoGap(field="sentiment", priority=5, status=GapStatus.OPEN)],
             "partial",
         )
-        assert "sentiment" in report.markdown_report
+        # 默认不渲染；show_gaps=True 渲染（CLI/导出侧显式开启）
+        assert "## 未关闭缺口" not in report.markdown_report
+        md = MarkdownRenderer().render(report, show_gaps=True)
+        assert "## 未关闭缺口" in md
+        assert "sentiment" in md
         assert "partial" in report.markdown_report
 
     def test_render_no_pending(self):
         b = ReportBuilder()
         report = b.build(Competitor(name="x"), [_result("pricing", 0.8)], [], "success")
-        assert "全部缺口已关闭" in report.markdown_report
+        assert "全部缺口已关闭" not in report.markdown_report
+        md = MarkdownRenderer().render(report, show_gaps=True)
+        assert "全部缺口已关闭" in md
 
 
 class TestBuildComparison:

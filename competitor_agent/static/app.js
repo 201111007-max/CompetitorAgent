@@ -176,6 +176,17 @@ function addToolLine(s, kind, text) {
   scrollBottom();
 }
 
+// 设计文档 66 §3.5：Lead 推进动作 → todo 清单行（[✓]/[…] 任务文案）
+function addTaskLine(s, text, status) {
+  const box = ensureTools(s);
+  const line = document.createElement('div');
+  const done = status === 'done';
+  line.className = 'task ' + (done ? 'done' : 'running');
+  line.textContent = (done ? '[✓] ' : '[…] ') + text;
+  box.appendChild(line);
+  scrollBottom();
+}
+
 /* ── 报告面板（report 事件一次性渲染 + 地址/复制/下载）──────── */
 
 function renderMeta(payload, container) {
@@ -312,6 +323,13 @@ function handleEvent(data) {
     case 'discovery.candidate':
       if (activeMid) addToolLine(streams.get(activeMid), 'discovery', '发现候选: ' + (payload.candidate || ''));
       break;
+    case 'task': {
+      // 设计文档 66 §3.5：Lead 推进动作 → todo 清单行（[✓]/[…] 任务文案）
+      const mid = payload.message_id || activeMid;
+      const s = streams.get(mid) || ensureStream(mid, 'lead');
+      addTaskLine(s, payload.task || payload.message || '', payload.status);
+      break;
+    }
     case 'discovery': {
       const names = (payload.candidates || []).join(', ');
       if (activeMid) addToolLine(streams.get(activeMid), 'discovery', '发现候选清单: ' + (names || data.message));

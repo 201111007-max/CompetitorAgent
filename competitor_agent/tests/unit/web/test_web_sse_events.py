@@ -26,12 +26,13 @@ _CANCEL_RESPONSE_BOUND = 0.5
 
 
 class EmitAPI:
-    """模拟分析：在工作线程内经 event_sink 发中途事件后返回正常报告。"""
+    """模拟分析：在工作线程内经 event_sink/stream_sink 发中途事件后返回正常报告。"""
 
     started = threading.Event()
 
     def __init__(self, *args, **kwargs) -> None:
         self.event_sink = kwargs.get("event_sink")
+        self.stream_sink = kwargs.get("stream_sink")
 
     def analyze(
         self,
@@ -40,16 +41,18 @@ class EmitAPI:
         mode: str = "team",
         session_id: str | None = None,
     ) -> CompetitorReport:
+        from competitor_agent.llm.client import StreamDelta
+
         type(self).started.set()
-        # 与生产一致：分析在 run_in_executor 工作线程执行，event_sink 回调发生在该线程。
-        # 修复前在此调用会触发 get_event_loop() 的 RuntimeError → 事件全丢。
+        # 与生产一致：分析在 run_in_executor 工作线程执行，event_sink/stream_sink 回调
+        # 发生在该线程。修复前在此调用会触发 get_event_loop() 的 RuntimeError → 事件全丢。
+        self.stream_sink(StreamDelta(kind="text", text="正在分析"))
         for i in range(3):
             self.event_sink(
                 ProgressEvent(
                     event="phase_start",
-                    phase=f"tactical.{i}",
-                    progress=0.3 + i * 0.2,
-                    message=f"中途事件{i}",
+                    phase="react",
+                    message=f"Lead 编排: 中途任务{i}",
                 )
             )
         return CompetitorReport(
@@ -113,7 +116,10 @@ def _collect(sse_lines: list[str]) -> list[dict]:
 def test_midrun_events_are_present_in_sse_stream(
     monkeypatch: pytest.MonkeyPatch, mock_llm, tmp_path
 ) -> None:
-    """① 中途事件回归：工作线程发的事件必须按序出现在 SSE 流（修复前必红）。"""
+    """① 中途事件回归：工作线程发的事件必须按序出现在 SSE 流（修复前必红）。
+
+    设计文档 66 §3.5：Lead 推进动作（phase_start "Lead 编排: ..."）经事件桥转 task 事件。
+    """
     from competitor_agent.memory import FourLayerMemory
 
     _patch_env(monkeypatch, mock_llm, EmitAPI, FourLayerMemory(tmp_path / "memory"))
@@ -137,10 +143,11 @@ def test_midrun_events_are_present_in_sse_stream(
     messages = [e["message"] for e in events]
     assert "session_started" in kinds
     assert "report" in kinds, "正常报告完成事件缺失"
-    mid = [m for m in messages if m.startswith("中途事件")]
-    assert mid == ["中途事件0", "中途事件1", "中途事件2"], f"中途事件丢失: {mid}"
-    # 顺序：中途事件须在 report 完成事件之前出现
-    assert messages.index("中途事件2") < messages.index("报告生成完成，0 个维度")
+    # 中途 worker 线程发出的 Lead 推进动作 → task 事件按序到达 SSE
+    mid = [m for m in messages if m.startswith("Lead 编排: 中途任务")]
+    assert mid == ["Lead 编排: 中途任务0", "Lead 编排: 中途任务1", "Lead 编排: 中途任务2"], f"中途事件丢失: {mid}"
+    # 顺序：中途任务须在 report 完成事件之前出现
+    assert messages.index("Lead 编排: 中途任务2") < messages.index("报告生成完成，0 个维度")
 
 
 def test_message_envelope_orders_text_delta(
@@ -148,8 +155,8 @@ def test_message_envelope_orders_text_delta(
 ) -> None:
     """④ 设计文档 63 §3 消息信封：message.start → text_delta* → text.stop → message.stop。
 
-    叙述事件（phase_start/progress）收敛为 Lead 的 ``text_delta``，message_id 贯穿一致；
-    报告完成时 ``text.stop(final=True)`` + ``message.stop(summary)`` 收口（不发 '\n 分号'）。
+    真实 LLM 叙述（stream_sink text_delta）归位 lead_id 气泡；Lead 推进动作转 task 事件
+    （message_id 贯穿）；引擎内部 phase 不再收敛为正文（设计文档 66 §3.5）。
     """
     from competitor_agent.memory import FourLayerMemory
 
@@ -177,10 +184,12 @@ def test_message_envelope_orders_text_delta(
     lead_id = starts[0]["payload"]["message_id"]
     assert starts[0]["payload"]["source"] == "lead"
 
-    # 叙述事件被收敛为 text_delta，且 message_id 贯穿
+    # 真实 LLM 叙述 text_delta + task 事件 message_id 贯穿
     deltas = [e for e in events if e["event"] == "text_delta"]
     assert [d["payload"]["message_id"] for d in deltas] == [lead_id] * len(deltas)
-    assert "中途事件0" in [d["payload"]["delta"] for d in deltas]
+    assert "正在分析" in [d["payload"]["delta"] for d in deltas]
+    tasks = [e for e in events if e["event"] == "task"]
+    assert tasks and tasks[0]["payload"]["message_id"] == lead_id
 
     # 顺序：message.start 最早 → text_delta → text.stop → message.stop
     assert kinds.index("message.start") < kinds.index("text_delta")
@@ -201,7 +210,12 @@ def test_drain_does_not_lose_events_at_completion(
             type(self).started.set()
             for i in range(5):
                 self.event_sink(
-                    ProgressEvent(event="progress", phase="strategic", progress=0.1 * (i + 1), message=f"批量事件{i}")
+                    ProgressEvent(
+                        event="discovery.candidate",
+                        phase="strategic",
+                        message=f"发现候选: c{i}",
+                        payload={"candidate": f"c{i}"},
+                    )
                 )
             return CompetitorReport(
                 competitor=Competitor(name="cursor"),
@@ -227,8 +241,8 @@ def test_drain_does_not_lose_events_at_completion(
 
     events = _collect(sse_lines)
     messages = [e["message"] for e in events]
-    batch = [m for m in messages if m.startswith("批量事件")]
-    assert batch == [f"批量事件{i}" for i in range(5)], f"完成瞬间事件丢失: {batch}"
+    batch = [m for m in messages if m.startswith("发现候选:")]
+    assert batch == [f"发现候选: c{i}" for i in range(5)], f"完成瞬间事件丢失: {batch}"
     assert "report" in [e["event"] for e in events]
 
 

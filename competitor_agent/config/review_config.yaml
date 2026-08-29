@@ -53,6 +53,10 @@ collector:
   enable_marketplace: true
   enable_community: true
   enable_benchmark: true
+  # 搜索引擎接入（设计文档 66 §3.1）：真实 Tavily 搜索。Key 只读环境变量 TAVILY_API_KEY
+  # 不落盘；未配 Key/未启用 → 降级不编造。配合 enable_external_sources 主开关门控。
+  search_provider: "tavily"
+  search_max_results: 8
 
 # ===== 记忆 =====
 memory:

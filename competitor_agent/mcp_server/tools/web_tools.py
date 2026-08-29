@@ -6,6 +6,7 @@ import urllib.parse
 
 import httpx
 
+from competitor_agent.collector.search import SearchError, build_search_provider
 from competitor_agent.config.loader import load_config
 from competitor_agent.core.url_guard import URLError, guard_http_url
 
@@ -81,10 +82,31 @@ def web_extract(url: str, selector: str = "") -> str:
 
 
 def web_search(query: str, max_results: int = 5) -> str:
-    """搜索竞品相关信息（模拟搜索，实际可接入搜索引擎 API）"""
-    # 简化实现：返回提示信息
-    return (
-        f"搜索功能需要接入搜索引擎 API（如 SerpAPI / Bing Search）。\n"
-        f"查询: {query}\n"
-        f"建议: 使用 web_extract 直接采集已知竞品官网。"
-    )
+    """搜索竞品相关信息（真实 Tavily 搜索；无 Key/未启用/失败 → 可读提示，不编造）。
+
+    - 经 ``build_search_provider(load_config().collector)`` 取 provider（无 Key/未启用 → None）；
+    - provider 为空 → 返回可读提示（与现状一致，不抛，不编造结果）；
+    - 有 provider → ``provider.search`` → 逐条格式化为 `标题\\nURL\\n摘要` 文本返回
+      （供 Lead/子 Agent 读取，对齐 ``web_extract`` 的 str 契约）；
+    - 搜索失败（网络/超时/非 2xx）→ 返回可读错误文案（降级，不编造，守 doc 47）。
+    """
+    try:
+        provider = build_search_provider(load_config().collector)
+    except Exception:
+        logger.warning("build_search_provider 失败", exc_info=True)
+        provider = None
+    if provider is None:
+        return (
+            f"搜索功能未启用：需要配置 TAVILY_API_KEY 且 collector.search_provider=tavily。\n"
+            f"查询: {query}\n"
+            f"建议: 使用 web_extract 直接采集已知竞品官网。"
+        )
+    try:
+        hits = provider.search(query, max_results=max_results)
+    except SearchError as exc:
+        logger.warning("web_search(%s) 失败: %s", query, exc)
+        return f"搜索失败: {exc}"
+    if not hits:
+        return f"未搜索到与 {query!r} 相关的结果。"
+    blocks = [f"{h.title}\n{h.url}\n{h.snippet}" for h in hits]
+    return "\n\n".join(blocks)

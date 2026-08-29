@@ -132,6 +132,45 @@ class TestComparisonConclusion:
         assert _extract_conclusion("没有结构化结论的散文。") == "没有结构化结论的散文。"
 
 
+class TestMalformedJsonLightFix:
+    """设计文档 66 §3.3 — 模型手滑畸形 JSON 轻修复 + "像报告 JSON 就剔除"判定。"""
+
+    def test_empty_value_fixed_to_null(self):
+        block = '{"competitor": "A", "dimensions": [{"dimension": "m", "details": , "confidence": 0.8}]}'
+        payload = _extract_json_block(block)
+        assert payload is not None
+        assert payload["dimensions"][0]["details"] is None
+
+    def test_empty_array_items_fixed(self):
+        block = '{"competitor": "A", "dimensions": [ , , , ]}'
+        payload = _extract_json_block(block)
+        assert payload is not None
+        assert payload["dimensions"] == []
+
+    def test_prose_prefix_malformed_fixed(self):
+        block = '以下是报告。\n\n{"competitor": "A", "dimensions": [{"dimension": "m", "details": , }]}'
+        payload = _extract_json_block(block)
+        assert payload is not None
+        assert payload["competitor"] == "A"
+
+    def test_parse_report_recovers_malformed(self):
+        block = '{"competitor": "A", "dimensions": [{"dimension": "m", "summary": "s", "details": , "confidence": 0.9}]}'
+        payload = _parse_report(block)
+        assert payload is not None
+        assert payload["dimensions"][0]["dimension"] == "m"
+
+    def test_strip_removes_malformed_report_block(self):
+        text = 'Lead 输出。\n\n{"competitor": "A", "dimensions": [, , ,]} 结束。'
+        cleaned = _strip_json_blocks(text)
+        assert '"competitor"' not in cleaned
+        assert "Lead 输出" in cleaned
+
+    def test_strip_preserves_prose_braces(self):
+        text = "结果（含花括号 {请忽略} 的散文）"
+        cleaned = _strip_json_blocks(text)
+        assert "{请忽略}" in cleaned
+
+
 class TestPlanResolution:
     def test_multi_candidate_inferred_discovery(self):
         from competitor_agent.core.task_parser import ResolutionDecision
@@ -143,10 +182,17 @@ class TestPlanResolution:
         class C:
             resolution = ResolutionDecision.COMPARE
 
+        class R:
+            resolution = ResolutionDecision.REGISTRY
+
         # plan 缺 resolution/competitors，但 candidate_count>0 → discovery
         assert CompetitorAnalysisAPI._plan_resolution({"competitor": "A"}, P(), candidate_count=3) == "discovery"
-        # candidate_count=0 → registry（保持原行为）
-        assert CompetitorAnalysisAPI._plan_resolution({"competitor": "A"}, P()) == "registry"
+        # 设计文档 66 §3.2：parse_task（LLM）判 COMPARE/DISCOVERY 且 plan 缺字段
+        # （零候选）→ 尊重主 Agent 意图 → 走 comparison 组装（不落 registry 单报告路径）
+        assert CompetitorAnalysisAPI._plan_resolution({"competitor": "A"}, P()) == "discovery"
+        assert CompetitorAnalysisAPI._plan_resolution({"competitor": "A"}, C()) == "compare"
+        # registry + 单值仍归 registry（回归）
+        assert CompetitorAnalysisAPI._plan_resolution({"competitor": "A"}, R()) == "registry"
         # plan.competitors 存在 + COMPARE → compare
         assert CompetitorAnalysisAPI._plan_resolution({"competitors": ["A", "B"]}, C()) == "compare"
         # plan.resolution 优先

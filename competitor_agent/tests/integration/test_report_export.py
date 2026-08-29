@@ -30,7 +30,7 @@ class _ReportAPI:
     def analyze(self, task, conversation_history=None, mode="team", session_id=None):
         return self._inner.analyze(task, mode=mode, session_id=session_id)
 
-    def run(self, task: str, *, session_id: str | None = None):
+    def run(self, task: str, *, session_id: str | None = None, history_messages=None):
         # 设计文档 62 §3.7：统一入口；单竞品任务委托给真实 analyze
         return self._inner.analyze(task, session_id=session_id)
 
