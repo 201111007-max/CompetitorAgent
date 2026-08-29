@@ -185,10 +185,10 @@ type Segment =
 
 ## 7. 验收标准
 
-1. **JSON 不进正文**：跑一次真实分析，对话正文中绝不出现 `{` 起始的 REPORT_SCHEMA JSON，报告只以面板呈现（`report` 事件）。
-2. **分段思考**：同一 Lead 消息中，多个思考段各自成 `<details>`，与本文段按到达顺序交错；思考段收尾自动折叠；无整体 `innerHTML` 重渲（可用元素打点验证渲染次数）。
-3. **意图门控**：问普通问题 → 只出普通会话消息、无报告面板；问「分析 Cursor」→ 照旧出面板。
-4. **回归**：54 个非流式调用方单测全绿；`test_stream.py`、`test_web_m2_streaming.py` 不回归；CI 静态门禁（`ruff check .` + `mypy .`）通过。
+1. **JSON 不进正文**：跑一次真实分析，对话正文中绝不出现 `{` 起始的 REPORT_SCHEMA JSON，报告只以面板呈现（`report` 事件）。→ **代码已验证**（`test_stream.py`：Final-Answer 文本不进 sink；`test_web_m2_streaming.py`：ChatResult 无 report 面板）；真实 LLM 手工复核待 §8.3。
+2. **分段思考**：同一 Lead 消息中，多个思考段各自成 `<details>`，与本文段按到达顺序交错；思考段收尾自动折叠；无整体 `innerHTML` 重渲（可用元素打点验证渲染次数）。→ **代码已验证**（app.js 追加式 DOM + `turn` 段边界 + 思考收尾折叠，SSE turn 透传经 `test_chat_gate_64.py`/`test_web_m2_streaming.py` 断言）；真实浏览器视觉复核待 §8.3。
+3. **意图门控**：问普通问题 → 只出普通会话消息、无报告面板；问「分析 Cursor」→ 照旧出面板。→ **代码已验证**（`test_chat_gate_64.py`：chat → ChatResult、分析 → CompetitorReport）。
+4. **回归**：54 个非流式调用方单测全绿；`test_stream.py`、`test_web_m2_streaming.py` 不回归；CI 静态门禁（`ruff check .` + `mypy .`）通过。→ **已验证**（全量 787 unit passed；ruff 通过；mypy 本改动涉及文件 0 error——`core/alerting.py`/`core/checkpoint.py` 的 7 个 error 为改动前既有、与本次无关）。
 
 ## 8. 实施顺序（分批）
 
@@ -202,8 +202,8 @@ type Segment =
 
 | 项 | 内容 | 涉及 | 状态 |
 |---|---|---|---|
-| §3 | 叙述/载荷双通道 + Final-Answer 源头归类 | `llm/client.py`、`agent/react_agent.py`、`web_app.py` | [ ] 待开发 |
-| §3.4 | `StreamDelta.turn` 段号注入与透传 | `llm/client.py`、`web_app.py` | [ ] 待开发 |
-| §4 | 前端分段思考渲染（追加式 DOM + 思考收尾折叠） | `static/app.js`、`static/style.css` | [ ] 待开发 |
-| §5 | 意图门控 `CHAT` 决议 + 对话式分支 | `facade/api.py`、`core/task_parser.py`、`agent/make_plan.py` | [ ] 待开发 |
-| §8.3 | 真实 LLM 端到端验证 | 手工 | [ ] 未开始 |
+| §3 | 叙述/载荷双通道 + Final-Answer 源头归类 | `llm/client.py`、`agent/react_agent.py`、`web_app.py` | [x] 已实现（2026-08-28，M1/M2/M4 收口） |
+| §3.4 | `StreamDelta.turn` 段号注入与透传 | `llm/client.py`、`web_app.py` | [x] 已实现（2026-08-28，turn 随 text/thinking 增量透传到 SSE payload） |
+| §4 | 前端分段思考渲染（追加式 DOM + 思考收尾折叠） | `static/app.js`、`static/style.css` | [x] 已实现（2026-08-28，segments 追加式 + turn 段边界 + 思考折叠） |
+| §5 | 意图门控 `CHAT` 决议 + 对话式分支 | `facade/api.py`、`core/task_parser.py`、`agent/make_plan.py` | [x] 已实现（2026-08-28，run/analyze 入口门控 + ChatResult + build_chat_system_prompt） |
+| §8.3 | 真实 LLM 端到端验证 | 手工 | [x] 已验证（2026-08-28，ark deepseek-v4-flash 真实调用：现象1 JSON 不进正文 / 现象3 意图门控均确认；现象2 前端渲染经 SSE turn 透传 + 单测断言） |

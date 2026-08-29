@@ -25,7 +25,10 @@ from competitor_agent.agent.delegate_tool import (
     make_delegate_tool,
 )
 from competitor_agent.agent.make_plan import build_make_plan_tool
-from competitor_agent.agent.prompts.react_system import build_lead_system_prompt
+from competitor_agent.agent.prompts.react_system import (
+    build_chat_system_prompt,
+    build_lead_system_prompt,
+)
 from competitor_agent.agent.react_agent import ReactAgent
 from competitor_agent.agent.react_loop import ReactLoop, ReactRunResult
 from competitor_agent.agent.review_tools import (
@@ -73,6 +76,7 @@ from competitor_agent.domain_types.observation import SourceEvidence
 from competitor_agent.domain_types.pricing import profile_from_details
 from competitor_agent.domain_types.report import (
     CancelledResult,
+    ChatResult,
     ComparisonReport,
     CompetitorReport,
     DimensionResult,
@@ -257,7 +261,7 @@ class CompetitorAnalysisAPI:
         conversation_history: list[ChatMessage] | None = None,
         mode: str = "team",
         session_id: str | None = None,
-    ) -> CompetitorReport:
+    ) -> CompetitorReport | ChatResult:
         """单竞品分析（设计文档 49）：Lead ReAct 编排 → CompetitorReport。
 
         Args:
@@ -267,11 +271,17 @@ class CompetitorAnalysisAPI:
             mode: 已废弃（历史兼容，仅告警）；统一走 Lead ReAct 编排。
             session_id: 外部会话 ID（如 Web 端 sid）。传入时复用，使内部取消标志
                 与外部一致（解决 Web 取消断链）；留空则自动生成。
+
+        设计文档 64 §5：入口意图门控——``parse_task`` 判定 ``CHAT`` 时走对话式分支
+        （返回 ``ChatResult``，无报告面板）。
         """
         if mode != "team":
             logger.warning("mode 参数已废弃（历史兼容），统一走 Lead ReAct 编排，忽略 mode=%s", mode)
         task = sanitize_task(task)
         task = self._disambiguate_with_history(task, conversation_history)
+        parsed = parse_task(task, llm=self._llm, use_llm=self._use_llm)
+        if parsed.is_chat:
+            return self._run_chat(task, session_id)
         sid = session_id or f"sess_{uuid.uuid4().hex[:8]}"
         set_current_session(sid)
         # 设计文档 54：trace 生命周期——trace_id 即 session_id，覆盖本次分析
@@ -596,6 +606,8 @@ class CompetitorAnalysisAPI:
                 )
             )
             report = self.analyze(name, session_id=f"schedule_{uuid.uuid4().hex[:8]}")
+            # 定时重爬只处理竞品名（分析类请求），不会走到对话式分支
+            assert not isinstance(report, ChatResult)
             refreshed.append(report)
             if prev is not None:
                 for alert in self.report_diff(prev, report):
@@ -746,12 +758,23 @@ class CompetitorAnalysisAPI:
             self._budget.record_iteration()
         return plan, answer, transcript
 
-    def _react_loop(self, task: str, session_id: str | None) -> ReactLoop:
+    def _react_loop(
+        self,
+        task: str,
+        session_id: str | None,
+        *,
+        system_prompt: str | None = None,
+        plan_first: bool = True,
+        final_as_payload: bool = True,
+    ) -> ReactLoop:
         """组装 Lead ReactLoop（设计文档 49 §3.5/3.6）：plan-first + delegate + 复核工具。
 
         - ``exclude=("analyze_competitor",)``：防递归调用 analyze()；
         - ``extra_tools``：make_plan（首步强制）+ delegate（后台并发委派）+ 复核工具；
-        - 子 Agent 运行时经 ``DelegateRunner`` 后台线程池执行，共享取消/记忆/RAG。
+        - 子 Agent 运行时经 ``DelegateRunner`` 后台线程池执行，共享取消/记忆/RAG；
+        - ``system_prompt``/``plan_first``/``final_as_payload``：设计文档 64 §5.2 对话式
+          分支复用——普通提问传 ``build_chat_system_prompt()`` + ``plan_first=False`` +
+          ``final_as_payload=False``（不强制 make_plan、最终文本走 Stream 通道）。
         """
         if not self._config.subagents.enabled:
             from competitor_agent.interfaces.exceptions import CompetitorAgentError
@@ -868,12 +891,13 @@ class CompetitorAnalysisAPI:
             memory_context_fn=self._react_memory_context,
             rag_fn=self._react_rag_context,
             obs_max_chars=self._config.collector.max_content_chars,
-            system_prompt_override=build_lead_system_prompt(),
-            plan_first=True,
+            system_prompt_override=system_prompt or build_lead_system_prompt(),
+            plan_first=plan_first,
             max_history_steps=lead_max_history_steps,
             pinned_facts=pinned_facts,
             on_step=_collect_pinned,
             stream_sink=self._stream_sink,  # 设计文档 63 §5.5：仅 Lead（子 Agent 不传）
+            final_as_payload=final_as_payload,  # 设计文档 64 §5.2：对话式分支 False
         )
         # 收尾 shutdown 用（挂 loop 实例而非 self，避免并行 analyze 互相误杀线程池）
         loop._delegate_runner = runner
@@ -1214,8 +1238,11 @@ class CompetitorAnalysisAPI:
         task: str,
         session_id: str | None = None,
         max_retries: int = 1,
-    ) -> CompetitorReport:
-        """历史兼容入口：委托 analyze()（Lead ReAct 编排，设计文档 49）。"""
+    ) -> CompetitorReport | ChatResult:
+        """历史兼容入口：委托 analyze()（Lead ReAct 编排，设计文档 49）。
+
+        设计文档 64 §5：普通提问经入口意图门控走对话式分支（返回 ChatResult）。
+        """
         if max_retries != 1:
             logger.warning("analyze_team 的 max_retries 参数已废弃，忽略")
         return self.analyze(task, session_id=session_id)
@@ -1226,7 +1253,7 @@ class CompetitorAnalysisAPI:
         session_id: str | None = None,
         max_retries: int = 1,
         max_parallel: int = 4,
-    ) -> CompetitorReport:
+    ) -> CompetitorReport | ChatResult:
         """历史兼容异步入口：线程池包装 analyze()（签名不变，设计文档 49）。"""
         if max_retries != 1 or max_parallel != 4:
             logger.warning("analyze_team_async 的 max_retries/max_parallel 参数已废弃，忽略")
@@ -1252,6 +1279,16 @@ class CompetitorAnalysisAPI:
 
         loop = asyncio.get_running_loop()
         report = await loop.run_in_executor(None, self.analyze, task, None, "team", sid)
+
+        # 设计文档 64 §5：对话式分支 → 无报告面板，答案经消息事件呈现
+        if isinstance(report, ChatResult):
+            yield ProgressEvent(
+                event="message.stop",
+                phase="lead",
+                message="对话完成",
+                payload={"session_id": sid, "summary": report.answer or "对话完成"},
+            )
+            return
 
         yield ProgressEvent(
             event="report",
@@ -1349,6 +1386,8 @@ class CompetitorAnalysisAPI:
         if open_gaps:
             task = self._resume_task(cp.task, [g.field for g in open_gaps])
             resumed = self.analyze(task, session_id=session_id)
+            # resume 从 checkpoint 续跑（竞品分析任务），不会走到对话式分支
+            assert not isinstance(resumed, ChatResult)
             by_dim = {r.dimension: r for r in completed}
             for r in resumed.dimension_results:
                 by_dim[r.dimension] = r
@@ -1494,7 +1533,7 @@ class CompetitorAnalysisAPI:
         task: str,
         *,
         session_id: str | None = None,
-    ) -> CompetitorReport | ComparisonReport:
+    ) -> CompetitorReport | ComparisonReport | ChatResult:
         """统一入口（设计文档 62 §3.5）：全部 resolution 同走一条单 Lead loop。
 
         parse_task（LLM）→ 构建单个 Lead ReactLoop（resolution 仅作 querySource 标注、
@@ -1503,9 +1542,14 @@ class CompetitorAnalysisAPI:
 
         run() 内无 resolution 分派 if-else——DISCOVERY/COMPARE 的候选枚举、并行、聚合
         由 Lead 回合内自调 web_tool/delegate/aggregate_report 完成，代码只守硬上限。
+
+        设计文档 64 §5：入口意图门控——``parse_task`` 判定 ``CHAT``（普通提问/闲聊）时
+        走对话式分支（``_run_chat``，返回 ``ChatResult``，无报告面板）。
         """
         task = sanitize_task(task)
         parsed = parse_task(task, llm=self._llm, use_llm=self._use_llm)
+        if parsed.is_chat:
+            return self._run_chat(task, session_id)
         sid = session_id or f"sess_{uuid.uuid4().hex[:8]}"
         set_current_session(sid)
         self._tracer.start_trace("run", trace_id=sid, input_brief=task)
@@ -1546,6 +1590,56 @@ class CompetitorAnalysisAPI:
         """兼容保留（设计文档 62 §3.5）：= run(task) 的 DISCOVERY 语义路径（deprecated 告警）。"""
         logger.warning("discover() 已废弃（历史兼容）：请改用 run() 统一入口")
         return cast(ComparisonReport, self.run(task))
+
+    def _run_chat(self, task: str, session_id: str | None) -> ChatResult:
+        """对话式分支（设计文档 64 §5.2）：普通提问/闲聊 → 自由 prose 回答，不产报告面板。
+
+        与 ``run()`` 的分析链路相对：不再强制 make_plan（``plan_first=False``）、改用
+        对话形态 Lead system prompt（无 PLAN/REPORT schema 约束）、不调用
+        ``react_report.assemble`` 与 ``report`` 事件——答案经 Stream 通道
+        （``text_delta``/``thinking_delta``）以普通会话消息呈现（无面板/无维度/无置信度）。
+        """
+        sid = session_id or f"sess_{uuid.uuid4().hex[:8]}"
+        set_current_session(sid)
+        self._tracer.start_trace("chat", trace_id=sid, input_brief=task)
+        try:
+            slog = get_session_logger(sid)
+            log_event(slog, "session_started", "init", f"会话 {sid} 启动", task=task)
+            self._emit(
+                ProgressEvent(event="phase_start", phase="react", message=f"对话: {task}")
+            )
+            loop = self._react_loop(
+                task,
+                sid,
+                system_prompt=build_chat_system_prompt(),
+                plan_first=False,
+                final_as_payload=False,
+            )
+            try:
+                result = loop.run_with_result(task)
+            finally:
+                runner = getattr(loop, "_delegate_runner", None)
+                if runner is not None:
+                    runner.shutdown()
+            if result.steps:
+                self._budget.record_iteration()
+            terminal = (
+                "cancelled"
+                if result.cancelled
+                else ("partial" if result.budget_exhausted else "success")
+            )
+            close_session_log(sid)
+            self._tracer.end_trace(sid, status=terminal, output_brief=result.answer)
+            return ChatResult(
+                answer=result.answer,
+                transcript=result.transcript,
+                terminal_state=terminal,
+                cancelled=result.cancelled,
+                session_id=sid,
+            )
+        except Exception:
+            self._tracer.end_trace(sid, status="error", output_brief="")
+            raise
 
     def compare(self, *competitors: str) -> ComparisonReport:
         """兼容保留（设计文档 62 §3.5）：= run(task) 的 COMPARE 语义路径（deprecated 告警）。
@@ -1626,6 +1720,8 @@ class CompetitorAnalysisAPI:
             if not recompute_all and not stale:
                 continue
             report = self.analyze(comp, session_id=f"refresh_{uuid.uuid4().hex[:8]}")
+            # 定时刷新只处理竞品名（分析类请求），不会走到对话式分支
+            assert not isinstance(report, ChatResult)
             refreshed.append(report)
             self._emit(
                 ProgressEvent(

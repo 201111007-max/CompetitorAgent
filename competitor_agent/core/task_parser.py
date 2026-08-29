@@ -27,22 +27,25 @@ _VALID_DIMENSIONS = frozenset(
 
 _LLM_PARSE_PROMPT = (
     "你是竞品分析任务的语义解析器。从用户任务中提取结构化信息，只输出 JSON，不要其他文字。"
-    'JSON 格式：{"resolution": "registry" 或 "discovery" 或 "compare", '
+    'JSON 格式：{"resolution": "registry" 或 "discovery" 或 "compare" 或 "chat", '
     '"competitors": ["竞品规范名1", "竞品规范名2（对比才有）"], '
     '"dimensions": ["维度名"] 或 null（null 表示全部维度，'
     '["pricing","performance","feature","ecosystem","sentiment","roadmap"] 之一），'
     '"custom_sources": {"home或pricing或docs": "用户提供的URL"}}。'
     "resolution 判定：任务点名具体竞品=registry；任务是市场普查/发现（如"
-    "'所有 AI coding agent''有哪些''盘点'）=discovery；任务点名 ≥2 个竞品做对比=compare。"
+    "'所有 AI coding agent''有哪些''盘点'）=discovery；任务点名 ≥2 个竞品做对比=compare；"
+    "任务与竞品分析无关、只是普通提问/闲聊/寒暄（如“今天天气”“你好”“介绍一下你自己”）=chat"
+    "（chat 时 competitors 为空数组）。"
 )
 
 
 class ResolutionDecision(str, Enum):
-    """解析决策：走注册表匹配 / 联网发现 / N 向对比（设计文档 20，由 LLM 决定）"""
+    """解析决策：走注册表匹配 / 联网发现 / N 向对比 / 普通对话（设计文档 20 + 64 §5）"""
 
     REGISTRY = "registry"
     DISCOVERY = "discovery"
     COMPARE = "compare"
+    CHAT = "chat"  # 设计文档 64 §5：意图门控——普通提问/闲聊，走对话式分支不产报告
 
 
 @dataclass
@@ -62,6 +65,11 @@ class TaskParseResult:
     @property
     def is_discovery(self) -> bool:
         return self.resolution == ResolutionDecision.DISCOVERY
+
+    @property
+    def is_chat(self) -> bool:
+        """意图门控（设计文档 64 §5）：普通提问/闲聊 → 对话式分支，不产报告。"""
+        return self.resolution == ResolutionDecision.CHAT
 
     @property
     def primary_competitor(self) -> str:
@@ -95,17 +103,22 @@ def _parse_task_llm(task: str, llm: LLMClient) -> TaskParseResult:
         ]
     )
     data = json.loads(raw)
-    competitors = [str(c) for c in data.get("competitors", [])]
+    if not isinstance(data, dict):
+        raise LLMUnavailableError(f"LLM 任务解析返回非 JSON 对象: {type(data).__name__}")
+    competitors = [str(c) for c in data.get("competitors", []) if c]
     dimensions_raw = data.get("dimensions")
     dimensions: list[str] | None = None
     if isinstance(dimensions_raw, list) and dimensions_raw:
         valid = {d for d in dimensions_raw if d in _VALID_DIMENSIONS}
         dimensions = sorted(valid) if valid else None
-    custom_sources = {
-        str(k): str(v) for k, v in data.get("custom_sources", {}).items()
-    }
-    # LLM 决策 resolution；畸形/缺失回退默认 REGISTRY（不做规则推断）
-    resolution = ResolutionDecision.REGISTRY
+    # custom_sources 可为 null（真实 LLM 常见）；空对象/非 dict 均视为无用户指定来源
+    cs_raw = data.get("custom_sources")
+    custom_sources: dict[str, str] = {}
+    if isinstance(cs_raw, dict):
+        custom_sources = {str(k): str(v) for k, v in cs_raw.items() if k and v}
+    # LLM 决策 resolution；畸形/缺失回退默认 CHAT（设计文档 64 §5.4：分类失败缺省落在
+    # 对话式分支——宁可普通回答，也不强造一份空报告；与 §2.3 现状相反方向）
+    resolution = ResolutionDecision.CHAT
     res_raw = str(data.get("resolution", "")).strip().lower()
     for candidate in ResolutionDecision:
         if candidate.value == res_raw:

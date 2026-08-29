@@ -89,6 +89,7 @@ class ReactAgent:
         extra_system_messages: list[dict[str, str]] | None = None,
         pinned_facts: list[str] | None = None,
         stream_sink: Callable[[StreamDelta], None] | None = None,
+        final_as_payload: bool = True,  # 设计文档 64 §5.2：对话式分支 False → 最终文本走 Stream 通道
     ) -> str:
         """执行 ReAct 循环直到 Final Answer 或步数耗尽
 
@@ -107,6 +108,9 @@ class ReactAgent:
         stream_sink: 仅 Lead 的流式旁路（设计文档 63 §5.5，默认关闭）：非 None 时每次
             ``complete_with_tools`` 走流式，逐增量（thinking/text）投递到 sink；子 Agent 不传
             保持默认行为逐字节不变。
+        final_as_payload: 设计文档 64 §3.2/§5.2——分析模式（默认 True）：无 tool_calls 的
+            最终文本是报告 JSON，归 Payload 通道不进正文；对话式分支传 False：最终文本仍
+            属叙述、经 Stream 通道呈现。
 
         历史压缩（设计文档 46 §3.2）：超过 ``max_history_steps`` 步后，把最旧的
         assistant+Observation 成对消息折叠为一行规则摘要（工具名/URL/结果前 N 字，
@@ -129,6 +133,7 @@ class ReactAgent:
             extra_system_messages=extra_system_messages,
             pinned_facts=pinned_facts,
             stream_sink=stream_sink,
+            final_as_payload=final_as_payload,
         )
 
     def _run_native(
@@ -146,6 +151,7 @@ class ReactAgent:
         extra_system_messages: list[dict[str, str]] | None,
         pinned_facts: list[str] | None,
         stream_sink: Callable[[StreamDelta], None] | None,
+        final_as_payload: bool = True,
     ) -> str:
         """原生 function calling 循环（设计文档 53 §2.1，唯一循环，设计文档 60）。
 
@@ -181,8 +187,15 @@ class ReactAgent:
             if step_guard is not None and not step_guard():
                 break
             tool_choice: Any = None if first_tool_done else forced_choice
+            # 设计文档 64 §3.4/§5.2：assistant 步序号（turn）随本轮注入供分段渲染；
+            # final_as_payload 决定最终文本归 Payload（报告 JSON）还是 Stream（对话答案）
             reply = self._llm.complete_with_tools(
-                messages, tools, tool_choice=tool_choice, stream_sink=stream_sink
+                messages,
+                tools,
+                tool_choice=tool_choice,
+                stream_sink=stream_sink,
+                turn=step,
+                final_as_payload=final_as_payload,
             )
             assistant: dict[str, Any] = {"role": "assistant"}
             if reply.content:

@@ -180,3 +180,58 @@ def test_subagent_narrative_filtered_not_text_delta(
     sink(ProgressEvent(event="cancelled", phase="react", message="取消"))
 
     assert [e.event for e in seen] == ["error", "cancelled"], "子 Agent 思考事件应被过滤"
+
+
+class ChatAPI:
+    """模拟对话式分支（设计文档 64 §5）：run() 返回 ChatResult（无报告面板）。"""
+
+    def __init__(self, *args, **kwargs) -> None:
+        self.event_sink = kwargs.get("event_sink")
+        self.stream_sink = kwargs.get("stream_sink")
+
+    def run(self, task: str, *, session_id: str | None = None):
+        from competitor_agent.domain_types.report import ChatResult
+        from competitor_agent.llm.client import StreamDelta
+
+        # 对话答案经 Stream 通道（text_delta/thinking_delta）呈现
+        self.stream_sink(StreamDelta(kind="text", text="你好！我是竞品情报助手。", turn=0))
+        self.event_sink(ProgressEvent(event="phase_start", phase="react", message="对话"))
+        return ChatResult(answer="你好！我是竞品情报助手。")
+
+    def cancel(self, session_id: str) -> None:
+        pass
+
+
+def test_chat_result_no_report_panel(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """设计文档 64 §5：对话式分支只出会话消息，不发 report 事件、无报告面板。"""
+    from competitor_agent.memory import FourLayerMemory
+
+    _patch_env(monkeypatch, ChatAPI, FourLayerMemory(tmp_path / "memory"))
+    sid = "sess_chat_64"
+    web_app._sessions[sid] = {"task": "你好", "cancelled": False}
+
+    async def _run() -> list[str]:
+        sse_lines: list[str] = []
+        async for line in web_app._event_generator(sid, "你好"):
+            sse_lines.append(line)
+        return sse_lines
+
+    try:
+        sse_lines = asyncio.run(_run())
+    finally:
+        web_app._sessions.pop(sid, None)
+
+    events = _collect(sse_lines)
+    kinds = [e["event"] for e in events]
+
+    # 对话答案经 text_delta 呈现（含 turn），无 report / 无 message.start 面板信封之外的收敛
+    assert "text_delta" in kinds
+    assert any(e["payload"].get("turn") == 0 for e in events if e["event"] == "text_delta")
+    # 无报告面板事件
+    assert "report" not in kinds
+    # 消息信封收口：message.stop 排在最后
+    assert kinds.index("message.stop") == len(kinds) - 1
+    stop = next(e for e in events if e["event"] == "message.stop")
+    assert stop["payload"]["summary"]

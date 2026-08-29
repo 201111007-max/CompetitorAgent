@@ -91,12 +91,15 @@ class StreamDelta:
     ``kind``：``"text"`` 实时叙述/回答正文，``"thinking"`` 模型暴露的推理链
     （deepseek 系 ``reasoning_content``）。模型不暴露推理链则只有 ``text``。
     ``model`` 记录实际产出该增量的模型（多模型 fallback 时区分）。
+    ``turn``：当前 assistant 步序号（设计文档 64 §3.4，ReactAgent 迭代计数注入，
+    缺省 None → 前端退回「单框/整块」行为，向后兼容）。
     """
 
     kind: str
     text: str
     model: str = ""
     message_id: str = ""  # 事件桥回填归属（M2+ 使用）
+    turn: int | None = None  # 设计文档 64 §3.4：分段思考的段号（assistant 步序）
 
 
 class _StreamMeter:
@@ -255,6 +258,8 @@ class LLMClient:
         *,
         stream_sink: Callable[[StreamDelta], None] | None = None,
         message_id: str = "",
+        turn: int | None = None,  # 设计文档 64 §3.4：assistant 步序号（分段思考段号）
+        final_as_payload: bool = True,  # 设计文档 64 §5.2：对话式分支 False → 最终文本仍走 Stream 通道
     ) -> ToolCallReply:
         """原生 function calling 通道（设计文档 53 M1 / 63 §5.5）。
 
@@ -262,6 +267,13 @@ class LLMClient:
         （54 个既有调用方不传 stream_sink）。传入时 → 流式旁路：逐增量产出
         ``thinking_delta``/``text_delta`` 到 ``stream_sink``，并从流式增量重构出与
         非流式等价的 ``ToolCallReply``（仅 Lead 走此旁路，子 Agent 不流式，主旨2）。
+
+        设计文档 64 §3.2（双通道）：``text`` 增量先缓冲到轮末，据本轮是否有 ``tool_calls``
+        做 Final-Answer 源头归类——有 tool_calls ⇒ 叙述轮（正文递进 Stream 通道）；
+        无 tool_calls 且 ``final_as_payload`` ⇒ Final Answer 轮（报告 JSON 归 Payload
+        通道、随 ``reply.content`` 回调用方，绝不进正文）。``thinking`` 永不可能是报告
+        JSON，实时递进。对话式分支（§5.2）传 ``final_as_payload=False``：最终文本仍
+        属叙述、递进 Stream 通道（普通会话消息，无面板）。
 
         非流式路径语义（沿用）：SDK 传 ``tools``/``tool_choice`` 复用 ``_attempt_models``
         重试/多模型 fallback/计价/埋点；注入 ``call_func`` 透传 kwargs（mock 双形态）。
@@ -272,15 +284,25 @@ class LLMClient:
         meter = _StreamMeter()
         reply = ToolCallReply()
         tool_acc: list[dict[str, Any]] = []
+        text_buf: list[StreamDelta] = []  # 设计文档 64 §3.2：text 增量缓冲，轮末按 Final-Answer 归类
         producer = lambda model, meter: self._stream_tool_call(
             messages, model, tools, tool_choice, meter, reply, tool_acc
         )
         try:
             for delta in self._stream_with_retry(messages, producer, meter):
-                self._sink_delta(stream_sink, delta, message_id)
+                if delta.kind == "thinking":
+                    # thinking 永不可能是报告 JSON，实时递进 Stream 通道
+                    self._sink_delta(stream_sink, delta, message_id, turn)
+                else:
+                    text_buf.append(delta)
         finally:
             self._log_stream(messages, started, meter)
         self._finalize_stream_calls(tool_acc, reply)
+        # 设计文档 64 §3.2/§5.2：有 tool_calls 或对话式分支 → 文本递进 Stream 通道；
+        # 否则（Final Answer 报告 JSON）归 Payload 通道、随 reply.content 回调用方。
+        if tool_acc or not final_as_payload:
+            for delta in text_buf:
+                self._sink_delta(stream_sink, delta, message_id, turn)
         return reply
 
     def _complete_with_tools(
@@ -575,15 +597,22 @@ class LLMClient:
 
     @staticmethod
     def _sink_delta(
-        sink: Callable[[StreamDelta], None], delta: StreamDelta, message_id: str
+        sink: Callable[[StreamDelta], None],
+        delta: StreamDelta,
+        message_id: str,
+        turn: int | None = None,
     ) -> None:
-        """把增量交给调用方 sink；``message_id`` 非空时重寄归属（事件桥回填）。"""
-        if not message_id:
+        """把增量交给调用方 sink；``message_id``/``turn`` 非空时重寄归属（事件桥回填/分段段号）。"""
+        if not message_id and turn is None:
             sink(delta)
             return
         sink(
             StreamDelta(
-                kind=delta.kind, text=delta.text, model=delta.model, message_id=message_id
+                kind=delta.kind,
+                text=delta.text,
+                model=delta.model,
+                message_id=message_id,
+                turn=turn,
             )
         )
 

@@ -414,6 +414,11 @@ class TestStreamToolCalling:
         assert self._created["tools"] == [{"type": "function", "function": {"name": "make_plan"}}]
 
     def test_streaming_final_content_reply(self, monkeypatch) -> None:
+        """设计文档 64 §3.2：Final-Answer（无 tool_calls）文本归 Payload 通道，不进正文。
+
+        文本经 reply.content 回调用方（→ assemble → report 事件），而非递进 Stream 通道
+        （sink）——报告 JSON 绝不进对话正文（与 doc 63 旧行为相反，即本设计的目标）。
+        """
         client = self._fake_client(
             monkeypatch,
             [FakeChunk([FakeDelta(content="最终")]), FakeChunk([FakeDelta(content="结论")])],
@@ -424,7 +429,47 @@ class TestStreamToolCalling:
         )
         assert reply.content == "最终结论"
         assert reply.tool_calls == []
-        assert [(d.kind, d.text) for d in sinks] == [("text", "最终"), ("text", "结论")]
+        # Final Answer 文本不再进 Stream 通道（sink 收到 0 条 text_delta）
+        assert sinks == []
+
+    def test_streaming_tool_round_text_still_sinked(self, monkeypatch) -> None:
+        """设计文档 64 §3.2：叙述轮（有 tool_calls）的 text 仍递进 Stream 通道（正文打字机）。"""
+        chunk1 = FakeChunk([FakeDelta(content="正在分析…")])
+        chunk2 = FakeChunk([
+            FakeDelta(tool_calls=[FakeToolDelta(index=0, id="call_1", function=FakeFunc(name="web_extract", arguments='{"url": "https://x.com"}'))])
+        ])
+        client = self._fake_client(monkeypatch, [chunk1, chunk2])
+        sinks: list[StreamDelta] = []
+        reply = client.complete_with_tools(
+            [{"role": "user", "content": "hi"}],
+            [{"type": "function", "function": {"name": "web_extract"}}],
+            stream_sink=lambda d: sinks.append(d),
+            turn=3,
+        )
+        # 叙述轮文本归正文，且携带 turn 段号
+        assert [(d.kind, d.text, d.turn) for d in sinks] == [("text", "正在分析…", 3)]
+        assert len(reply.tool_calls) == 1
+
+    def test_streaming_final_content_chat_mode_still_sinked(self, monkeypatch) -> None:
+        """设计文档 64 §5.2：对话式分支（final_as_payload=False）最终文本仍走 Stream 通道。"""
+        client = self._fake_client(
+            monkeypatch,
+            [FakeChunk([FakeDelta(content="你好")]), FakeChunk([FakeDelta(content="，欢迎提问！")])],
+        )
+        sinks: list[StreamDelta] = []
+        reply = client.complete_with_tools(
+            [{"role": "user", "content": "hi"}],
+            [],
+            stream_sink=lambda d: sinks.append(d),
+            turn=0,
+            final_as_payload=False,
+        )
+        assert reply.content == "你好，欢迎提问！"
+        # 对话答案经正文呈现（含 turn 段号）
+        assert [(d.kind, d.text, d.turn) for d in sinks] == [
+            ("text", "你好", 0),
+            ("text", "，欢迎提问！", 0),
+        ]
 
     def test_default_path_stays_non_streaming(self, monkeypatch) -> None:
         """无 stream_sink → 默认非流式（既有 54 调用方行为不变）。"""

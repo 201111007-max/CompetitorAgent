@@ -21,7 +21,7 @@ from competitor_agent.config.loader import AppConfig, load_config
 from competitor_agent.core.command_registry import command_dispatch
 from competitor_agent.core.input_sanitizer import sanitize_task
 from competitor_agent.core.task_parser import parse_task
-from competitor_agent.domain_types.report import ComparisonReport, CompetitorReport
+from competitor_agent.domain_types.report import ChatResult, ComparisonReport, CompetitorReport
 from competitor_agent.facade.api import CompetitorAnalysisAPI
 from competitor_agent.interfaces.exceptions import LLMUnavailableError
 from competitor_agent.llm.client import LLMClient
@@ -83,8 +83,13 @@ def _run_analyze(
         print(f"需要配置 LLM API Key 才能分析（LLM 不可用: {exc}）")
         return 2
     # 设计文档 62 §3.7：分派收敛到统一 run()（DISCOVERY/COMPARE/单竞品由库内路由）
+    # 设计文档 64 §5：run() 意图门控可返回 ChatResult（普通提问 → 直接打印对话答案）
     report = api.run(args)
-    if isinstance(report, ComparisonReport):
+    if isinstance(report, ChatResult):
+        markdown = report.answer or ""
+        print(markdown or "（无回答）")
+        name = "chat"
+    elif isinstance(report, ComparisonReport):
         markdown = report.markdown_report
         print(markdown)
         name = "compare"
@@ -338,7 +343,11 @@ def _run_compare_repl(api: CompetitorAnalysisAPI, args: str) -> None:
         print("用法: /compare A 和 B")
         return
     # 设计文档 62 §3.7：统一入口 run()（COMPARE 语义由库内路由）
+    # 设计文档 64 §5：普通提问 → ChatResult（直接打印对话答案）
     report = api.run(f"对比 {parts[0]} 和 {parts[1]}")
+    if isinstance(report, ChatResult):
+        print(report.answer or "")
+        return
     print(report.markdown_report)
 
 

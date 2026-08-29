@@ -37,6 +37,7 @@ from competitor_agent.core.report_archiver import _safe_filename, report_file_pa
 from competitor_agent.domain_types.events import ProgressEvent
 from competitor_agent.domain_types.report import (
     CancelledResult,
+    ChatResult,
     ComparisonReport,
     CompetitorReport,
 )
@@ -131,6 +132,7 @@ async def _event_generator(
 
         ``thinking`` → ``thinking_delta``（前端折叠"已思考"）；``text`` → ``text_delta``
         （打字机），统一归位到 lead_id 气泡，跨线程经 ``_on_event`` 安全入队。
+        设计文档 64 §3.4：payload 透传 ``turn``（assistant 步序）供前端分段渲染。
         """
         kind = "thinking_delta" if delta.kind == "thinking" else "text_delta"
         try:
@@ -139,7 +141,7 @@ async def _event_generator(
                     event=kind,
                     phase="lead",
                     message=delta.text,
-                    payload={"message_id": lead_id, "delta": delta.text},
+                    payload={"message_id": lead_id, "delta": delta.text, "turn": delta.turn},
                 )
             )
         except Exception:
@@ -156,7 +158,8 @@ async def _event_generator(
 
     # 统一入口 run()（设计文档 62 §3.7）：解析/分派收敛到库内，HTTP 层不再写 DISCOVERY/COMPARE
     # 分支；LLM 不可用 → 抛可读错误由外层转 SSE error。
-    async def _run_analysis() -> CompetitorReport | ComparisonReport:
+    # 设计文档 64 §5：run() 意图门控可返回 ChatResult（普通提问 → 无报告面板）。
+    async def _run_analysis() -> CompetitorReport | ComparisonReport | ChatResult:
         loop = asyncio.get_running_loop()
         try:
             return await loop.run_in_executor(
@@ -244,6 +247,20 @@ async def _event_generator(
         # 收敛 Lead 消息的正文流：text.stop(final) → 前端收光标、停打字机（设计文档 63 §7.3）。
         # 延迟到终态确定后发，保证它排在所有 text_delta 之后。
         yield _text_stop(True)
+        # 设计文档 64 §5：对话式分支——答案已经 Stream 通道（text_delta/thinking_delta）呈现，
+        # 无 report 面板/无维度/无置信度，仅收敛 message.stop。
+        if isinstance(report, ChatResult):
+            yield ProgressEvent(
+                event="message.stop",
+                phase="lead",
+                message="对话完成",
+                payload={
+                    "message_id": lead_id,
+                    "source": "lead",
+                    "summary": report.answer or "对话完成",
+                },
+            ).to_sse()
+            return
         if isinstance(report, CancelledResult):
             yield ProgressEvent(
                 event="message.stop",
