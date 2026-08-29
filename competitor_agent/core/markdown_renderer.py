@@ -27,7 +27,7 @@ _STATUS_RANK = {
 class MarkdownRenderer:
     """渲染单竞品报告为 Markdown"""
 
-    def render(self, report: CompetitorReport) -> str:
+    def render(self, report: CompetitorReport, *, show_gaps: bool = False) -> str:
         lines: list[str] = []
         lines.append(f"# {report.competitor.name} 竞品分析报告")
         lines.append("")
@@ -46,17 +46,20 @@ class MarkdownRenderer:
         for result in report.dimension_results:
             self._render_dimension(lines, result)
 
-        lines.append("## 未关闭缺口")
-        lines.append("")
-        if report.gaps_pending:
-            for gap in report.gaps_pending:
-                tried = ", ".join(gap.sources_tried) or "无"
-                lines.append(f"- **{gap.field}** (priority={gap.priority}, confidence={gap.confidence:.2f})")
-                lines.append(f"  - 已尝试源: {tried}")
-                lines.append(f"  - 状态: {gap.status.value}")
-        else:
-            lines.append("_全部缺口已关闭或无待处理缺口。_")
-        lines.append("")
+        # 设计文档 66 §3.4：前端默认不再展示"未关闭缺口"段（gaps_pending 数据保留在
+        # 报告对象/JSON 导出/归档，resume/预算照旧消费）；CLI 侧已有独立提示不依赖本段。
+        if show_gaps:
+            lines.append("## 未关闭缺口")
+            lines.append("")
+            if report.gaps_pending:
+                for gap in report.gaps_pending:
+                    tried = ", ".join(gap.sources_tried) or "无"
+                    lines.append(f"- **{gap.field}** (priority={gap.priority}, confidence={gap.confidence:.2f})")
+                    lines.append(f"  - 已尝试源: {tried}")
+                    lines.append(f"  - 状态: {gap.status.value}")
+            else:
+                lines.append("_全部缺口已关闭或无待处理缺口。_")
+            lines.append("")
         lines.append("---")
         lines.append("")
         lines.append("_本报告由 competitor_agent 自动生成。_")

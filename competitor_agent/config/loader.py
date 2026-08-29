@@ -57,6 +57,10 @@ class CollectorConfig:
     enable_marketplace: bool = True
     enable_community: bool = True
     enable_benchmark: bool = True
+    # 搜索引擎接入（设计文档 66 §3.1）："tavily" / ""；Key 只读环境变量
+    # TAVILY_API_KEY（不落盘）。空 = 不启用（web_search 走可读提示 / DISCOVERY 空候选）。
+    search_provider: str = ""
+    search_max_results: int = 8
 
 
 @dataclass

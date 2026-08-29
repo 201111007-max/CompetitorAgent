@@ -137,19 +137,19 @@ def _extract_json_block(text: str) -> dict[str, Any] | None:
     快路径：文本整体以 ``{`` 开头 → 直接 ``json.loads``（覆盖绝大多数场景，行为不变）。
     慢路径：定位首个 ``{`` 后逐字符扫描，维护深度；字符串字面量感知——命中 ``"`` 时
     进入字符串态并跳过 ``\\"`` 转义，防止 JSON 字符串内部的 ``{``/``}`` 干扰配平；
-    深度归零处截取候选块 ``json.loads``，成功且为 dict → 返回。首个候选失败时再尝试
-    ``re.search`` 懒提取兜底。未闭合/无 JSON → None。
+    深度归零处截取候选块 ``_parse_json_candidate``（失败先轻修复再解析），成功且为
+    dict → 返回。首个候选失败时再尝试 ``re.search`` 懒提取兜底。未闭合/无 JSON → None。
+
+    设计文档 66 §3.3：候选块 ``json.loads`` 失败时先做两条轻修复（``"key": ,`` 空值 →
+    null、``, ,``/``,]`` 空数组项）再试，兜住模型手滑畸形（``"details": ,`` 等）。
     """
     if not text:
         return None
     stripped = text.strip()
     if stripped.startswith("{"):
-        try:
-            payload = json.loads(stripped)
-            if isinstance(payload, dict) and payload:
-                return payload
-        except (json.JSONDecodeError, TypeError):
-            pass
+        payload = _parse_json_candidate(stripped)
+        if payload is not None:
+            return payload
     start = stripped.find("{")
     if start == -1:
         return None
@@ -174,30 +174,71 @@ def _extract_json_block(text: str) -> dict[str, Any] | None:
             depth -= 1
             if depth == 0:
                 candidate = stripped[start : i + 1]
-                try:
-                    payload = json.loads(candidate)
-                except (json.JSONDecodeError, TypeError):
-                    break
-                if isinstance(payload, dict) and payload:
+                payload = _parse_json_candidate(candidate)
+                if payload is not None:
                     return payload
                 break
     # 慢路径候选失败/未闭合 → 懒提取兜底（贪婪到最后一个 }，容忍尾部散文）
     match = re.search(r"\{.*\}", stripped, re.DOTALL)
     if match:
-        try:
-            payload = json.loads(match.group(0))
-        except (json.JSONDecodeError, TypeError):
-            return None
-        if isinstance(payload, dict) and payload:
+        payload = _parse_json_candidate(match.group(0))
+        if payload is not None:
             return payload
     return None
+
+
+def _light_fix_json(candidate: str) -> str:
+    """轻修复模型手滑畸形 JSON（设计文档 66 §3.3）：
+
+    - ``"key": ,``（空值）→ ``"key": null,``；
+    - ``, ,``（空数组项）/ `,]`` / `,}`` → 去除多余逗号；
+    - ``[,``（数组开头多余逗号）→ 去除（如 ``[ , , ]`` 叠代后残留）。
+    修复后由调用方再次 ``json.loads``；仍失败才放弃（保守语义不变）。
+    """
+    fixed = re.sub(r'"([A-Za-z_][A-Za-z0-9_]*)":\s*,', r'"\1": null,', candidate)
+    fixed = re.sub(r',\s*,', ",", fixed)
+    fixed = re.sub(r',\s*\]', "]", fixed)
+    fixed = re.sub(r',\s*\}', "}", fixed)
+    fixed = re.sub(r"\[\s*,", "[", fixed)
+    return fixed
+
+
+def _parse_json_candidate(candidate: str) -> dict[str, Any] | None:
+    """解析候选 JSON 块；``json.loads`` 失败先 ``_light_fix_json`` 轻修复再试一次。"""
+    payload: Any = None
+    try:
+        payload = json.loads(candidate)
+    except (json.JSONDecodeError, TypeError):
+        try:
+            payload = json.loads(_light_fix_json(candidate))
+        except (json.JSONDecodeError, TypeError):
+            return None
+    if isinstance(payload, dict) and payload:
+        return payload
+    return None
+
+
+def _looks_like_json_block(candidate: str) -> bool:
+    """判定一块 ``{...}`` 是否"像报告 JSON dump"（设计文档 66 §3.3）。
+
+    仅对含 ``"competitor"`` 或 ``"dimensions"`` 报告键的平衡块强制剔除——即使
+    ``json.loads`` 失败（模型手滑畸形）也按 dump 处理；普通散文花括号不受影响。
+    """
+    if not candidate.startswith("{"):
+        return False
+    for key in ("competitor", "dimensions"):
+        if f'"{key}"' in candidate:
+            return True
+    return False
 
 
 def _strip_json_blocks(text: str) -> str:
     """剔除文本中的 JSON 块，只保留纯散文（设计文档 65 §2.2 兜底净化）。
 
     括号配平定位每个顶层 JSON 对象（与 ``_extract_json_block`` 同算法），命中即移除；
-    残留非 JSON 的 ``{...}``（如花括号文本）不会被误删（``json.loads`` 失败的跳过）。
+    设计文档 66 §3.3：判定收敛到 ``_looks_like_json_block``——对"像报告 JSON 的块"
+    （含 competitor/dimensions 键）即使 ``json.loads`` 失败也强制剔除，普通散文花括号
+    不被误删。
     """
     if not text:
         return ""
@@ -233,12 +274,9 @@ def _strip_json_blocks(text: str) -> str:
                     end = i
                     break
         candidate = text[start : end + 1] if end != -1 else text[start:]
-        try:
-            parsed = json.loads(candidate)
-        except (json.JSONDecodeError, TypeError):
-            parsed = None
-        # 仅剔除非空 dict（Lead 真实 JSON dump 必含字段；空 {} 是散文占位不误删）
-        if isinstance(parsed, dict) and parsed:
+        # 仅剔除"像报告 JSON dump 的块"（含 competitor/dimensions 键）；空 {} 与
+        # 纯散文花括号保留（Lead 真实 JSON dump 必含报告键）
+        if _looks_like_json_block(candidate):
             out.append(text[pos:start])
             pos = end + 1 if end != -1 else n
         else:

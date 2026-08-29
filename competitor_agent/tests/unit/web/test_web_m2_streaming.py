@@ -37,9 +37,13 @@ class StreamingLeadAPI:
         # 与生产一致：Lead 在 run_in_executor 工作线程内经 stream_sink 投递流式增量
         self.stream_sink(StreamDelta(kind="thinking", text="先制定采集路线…"))
         self.stream_sink(StreamDelta(kind="text", text="分析 Cursor"))
-        # 事件桥：Lead 循环仍有粗粒度叙述事件（会收敛为 text_delta）
+        # 事件桥：Lead 推进动作 → task 事件（设计文档 66 §3.5）
         self.event_sink(
-            ProgressEvent(event="progress", phase="react", progress=0.5, message="工具步推进")
+            ProgressEvent(event="phase_start", phase="react", message="Lead 编排: 分析 Cursor")
+        )
+        # 引擎内部自证 phase → 丢弃（不再收敛为 text_delta）
+        self.event_sink(
+            ProgressEvent(event="phase_start", phase="react", message="开始 ReAct 推理")
         )
         return CompetitorReport(
             competitor=Competitor(name="cursor"),
@@ -97,16 +101,23 @@ def test_lead_streaming_deltas_reach_sse(
     assert len(starts) == 1
     lead_id = starts[0]["payload"]["message_id"]
 
-    # 流式增量：thinking_delta / text_delta 原样透传（不落入 _NARRATIVE 收敛分支）
+    # 流式增量：thinking_delta / text_delta 原样透传（不落入叙述收敛分支）
     think = [e for e in events if e["event"] == "thinking_delta"]
     text = [e for e in events if e["event"] == "text_delta"]
     assert [t["payload"]["delta"] for t in think] == ["先制定采集路线…"]
-    assert [t["payload"]["delta"] for t in text] == ["分析 Cursor", "工具步推进"]
+    assert [t["payload"]["delta"] for t in text] == ["分析 Cursor"]
     # message_id 贯穿一致
     for e in think + text:
         assert e["payload"]["message_id"] == lead_id
-    # 叙述型工具步消息也被收敛为 text_delta 归位同一气泡
-    assert "tool_step" not in kinds  # 无独立事件行，统一进 text_delta
+    # 设计文档 66 §3.5：Lead 推进动作 → task 事件（含 message_id/task/status）
+    tasks = [e for e in events if e["event"] == "task"]
+    assert len(tasks) == 1
+    assert tasks[0]["payload"]["message_id"] == lead_id
+    assert tasks[0]["payload"]["task"] == "Lead 编排: 分析 Cursor"
+    assert tasks[0]["payload"]["status"] == "running"
+    # 引擎内部自证 phase 被丢弃，不进正文 text_delta
+    assert "开始 ReAct 推理" not in [d["payload"].get("delta", "") for d in text]
+    assert "工具步推进" not in [e["event"] for e in events]
 
     # 消息信封收口
     assert kinds.index("message.start") < kinds.index("thinking_delta")

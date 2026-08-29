@@ -137,8 +137,8 @@ class TestMultiToolReact:
         )
         assert answer == "定价 $20/月"
         assert calls == ["https://cursor.com/pricing"]
-        # web_search 结果回灌（tool 消息含工具输出）
-        assert any("搜索功能需要接入搜索引擎 API" in m for m in tool_msgs)
+        # web_search 结果回灌（tool 消息含工具输出——未配 Key 时返回可读提示）
+        assert any("搜索功能未启用" in m for m in tool_msgs)
 
     def test_recovers_from_unknown_tool(self):
         d = build_react_dispatcher(config=_config())
@@ -153,7 +153,7 @@ class TestMultiToolReact:
         assert answer == "完成"
         assert any("工具不可用" in m for m in tool_msgs)
         # 自恢复后合法工具结果也回灌
-        assert any("搜索功能需要接入搜索引擎 API" in m for m in tool_msgs)
+        assert any("搜索功能未启用" in m for m in tool_msgs)
 
     def test_openai_tools_cover_dispatcher(self):
         """native 单协议：工具经 build_openai_tools 下发，system prompt 不含工具描述。"""
@@ -163,6 +163,56 @@ class TestMultiToolReact:
         assert "web_search" not in prompt and "github_stars" not in prompt
         names = {t["function"]["name"] for t in build_openai_tools(d)}
         assert {"web_search", "github_stars", "analyze_pricing"} <= names
+
+
+class TestWebSearchRealProvider:
+    """设计文档 66 §3.1 — web_search 工具接真实 Tavily provider 的契约测试。
+
+    schema/描述零改动（TOOL_SPECS 不动）；实现替换后 mock provider 返回固定 hits →
+    工具输出「标题/URL/摘要」文本；无 provider → 可读提示；provider 抛异常 → 返回错误
+    文案不冒泡（MCP 工具契约 str→str 保持）。
+    """
+
+    def test_spec_description_and_schema_unchanged(self):
+        spec = TOOL_SPECS["web_search"]
+        assert spec.description  # 描述仍在
+        assert set(spec.params_schema["properties"]) == {"query", "max_results"}
+        assert "query" in spec.params_schema["required"]
+
+    def test_provider_hits_formatted_as_text(self, monkeypatch):
+        from competitor_agent.collector.search import SearchHit
+        from competitor_agent.mcp_server.tools import web_tools
+
+        class FakeProvider:
+            def search(self, query, max_results=5):
+                return [
+                    SearchHit("Cursor", "https://cursor.com", "AI code editor"),
+                    SearchHit("Windsurf", "https://windsurf.com", "agentic IDE"),
+                ]
+
+        monkeypatch.setattr(web_tools, "build_search_provider", lambda cfg: FakeProvider())
+        out = web_tools.web_search("coding agent", max_results=3)
+        assert "Cursor" in out and "https://cursor.com" in out and "AI code editor" in out
+        assert "Windsurf" in out
+
+    def test_no_provider_returns_readable_hint(self, monkeypatch):
+        from competitor_agent.mcp_server.tools import web_tools
+
+        monkeypatch.setattr(web_tools, "build_search_provider", lambda cfg: None)
+        out = web_tools.web_search("coding agent")
+        assert "未启用" in out
+
+    def test_provider_error_returns_error_text_not_raise(self, monkeypatch):
+        from competitor_agent.collector.search import SearchError
+        from competitor_agent.mcp_server.tools import web_tools
+
+        class Boom:
+            def search(self, query, max_results=5):
+                raise SearchError("boom")
+
+        monkeypatch.setattr(web_tools, "build_search_provider", lambda cfg: Boom())
+        out = web_tools.web_search("coding agent")
+        assert "搜索失败" in out and "boom" in out
 
 
 class TestDelegateSchemaDerivation:

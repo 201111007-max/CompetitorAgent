@@ -67,10 +67,20 @@ _EVENT_WAIT_TIMEOUT = 0.2
 # 每满一个间隔发一条 `: keep-alive\\n\\n` 注释保活，防 EventSource 超时断连。
 _HEARTBEAT_INTERVAL = 10.0
 
-# 设计文档 63 §3：叙述型事件 —— 其 message 属于 Lead 的实时叙述，收敛为 ``text_delta``
-# 供对话页 Lead 气泡打字机逐段展开（而非独立原始事件行）。其余事件（discovery.candidate /
-# report / error / cancelled / session_started）原样透传，保持既有契约与测试语义。
+# 设计文档 63 §3：叙述型事件 —— 其 message 属于 Lead 的实时叙述，曾收敛为 ``text_delta``。
+# 设计文档 66 §3.5：叙述流与引擎内部标记分层——引擎内部无价值 phase（"开始 ReAct 推理"等
+# 固定自证文案 / 子 Agent phase / 无 payload 语义的 progress）直接丢弃；Lead 有价值推进动作
+# （"Lead 编排: {task}"）转独立 ``task`` 事件（前端 todo 清单行）。真实 LLM 叙述
+# （thinking_delta/text_delta，带 turn）由 ``_stream_sink`` 原样投递，不受此收敛影响。
 _NARRATIVE_EVENTS = frozenset({"phase_start", "phase_complete", "progress"})
+
+# 引擎内部固定自证 phase 文案（对用户无信息价值，丢弃）
+_ENGINE_BOILERPLATE = frozenset(
+    {"开始 ReAct 推理", "ReAct 推理完成", "LangGraph 引擎启动", "LangGraph 引擎完成"}
+)
+
+# Lead 编排/对话推进动作前缀（→ task 事件）
+_LEAD_ACTION_PREFIXES = ("Lead 编排:", "对话:")
 
 # 设计文档 50 P2：前端静态资源（index.html/app.js/style.css/vendor）抽离自包内
 # `static/`，经 package-data 纳入 wheel；`importlib.resources` 定位保证打包/源码一致。
@@ -104,6 +114,42 @@ def _get_history() -> SessionHistory:
 
 
 # ── SSE 辅助 ──────────────────────────────────────────────────────────────
+
+
+def _lead_action_task(message: str) -> str | None:
+    """Lead 编排/对话推进动作 → task 文案（前端 todo 清单行）；其他 → None。
+
+    仅识别 ``phase_start "Lead 编排: {task}"`` / ``"对话: {task}"`` 这类 Lead 真实
+    推进动作；引擎自证文案（"开始 ReAct 推理"等）与子 Agent phase 不在此列。
+    """
+    stripped = (message or "").strip()
+    for prefix in _LEAD_ACTION_PREFIXES:
+        if stripped.startswith(prefix):
+            return stripped
+    return None
+
+
+def _narrative_sse(event: ProgressEvent, lead_id: str) -> str | None:
+    """叙述型事件分层（设计文档 66 §3.5）→ SSE 串或 None（丢弃）。
+
+    - 引擎内部无价值 phase（固定自证文案）→ 丢弃；
+    - Lead 有价值推进动作（"Lead 编排: {task}" / "对话: {task}"）→ 独立 ``task``
+      事件（payload: {message_id, task, status}）供前端渲染为清单行；
+    - 其余引擎 phase/progress（无 payload 语义的纯推进）→ 丢弃，不再进正文 text_delta
+      （挤行根因：多条引擎 phase 因 turn 全为 null 被前端合并到同一段）。
+    """
+    message = (event.message or "").strip()
+    if not message or message in _ENGINE_BOILERPLATE:
+        return None
+    task_text = _lead_action_task(message)
+    if task_text is not None:
+        return ProgressEvent(
+            event="task",
+            phase="lead",
+            message=task_text,
+            payload={"message_id": lead_id, "task": task_text, "status": "running"},
+        ).to_sse()
+    return None
 
 
 async def _event_generator(
@@ -192,15 +238,6 @@ async def _event_generator(
 
     analysis_task = asyncio.create_task(_run_analysis())
 
-    def _text_delta(delta: str) -> str:
-        """叙述增量 → ``text_delta`` SSE（message 复用 delta，保持日志/测试可 grep）。"""
-        return ProgressEvent(
-            event="text_delta",
-            phase="lead",
-            message=delta,
-            payload={"message_id": lead_id, "delta": delta},
-        ).to_sse()
-
     def _text_stop(final: bool) -> str:
         return ProgressEvent(
             event="text.stop",
@@ -250,17 +287,21 @@ async def _event_generator(
                     yield ": keep-alive\n\n"
                     last_heartbeat = time.monotonic()
                 continue
-            # 叙述型事件收敛为 Lead 的 text_delta（设计文档 63 §3）；其余事件原样透传
-            if event.event in _NARRATIVE_EVENTS and event.message:
-                yield _text_delta(event.message)
+            # 叙述型事件分层（设计文档 66 §3.5：丢弃引擎自证/转 task 清单行）；其余事件原样透传
+            if event.event in _NARRATIVE_EVENTS:
+                sse = _narrative_sse(event, lead_id)
+                if sse is not None:
+                    yield sse
             else:
                 yield event.to_sse()
 
         # 分析完成：排空残余事件，防"完成瞬间队列中事件丢失"（设计文档 50 §3.3 ②）
         while not events_queue.empty():
             event = events_queue.get_nowait()
-            if event.event in _NARRATIVE_EVENTS and event.message:
-                yield _text_delta(event.message)
+            if event.event in _NARRATIVE_EVENTS:
+                sse = _narrative_sse(event, lead_id)
+                if sse is not None:
+                    yield sse
             else:
                 yield event.to_sse()
 

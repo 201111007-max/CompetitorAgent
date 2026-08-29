@@ -239,8 +239,33 @@ class CompetitorAnalysisAPI:
             self._retriever = None
             self._vector_store = None
 
-        # 竞品发现器（设计文档 20）：仅 DISCOVERY 意图时被调用，web_tool 可注入
-        self._discoverer = CompetitorDiscoverer(llm=llm, use_llm=use_llm, web_tool=web_tool)
+        # 竞品发现器（设计文档 20）：仅 DISCOVERY 意图时被调用，web_tool 可注入。
+        # 设计文档 66 §3.1：未显式注入 web_tool 时，装配层零入口注入 Tavily 真实搜索
+        # （enable_external_sources 主开关门控 + TAVILY_API_KEY；无 Key/未启用 → 保持 None
+        # 空候选降级，不编造）。Web/CLI/MCP 三入口都经本构造，自动受益。
+        search_web_tool = web_tool
+        if (
+            search_web_tool is None
+            and use_llm
+            and llm is not None
+            and cfg.collector.enable_external_sources
+        ):
+            from competitor_agent.collector.search import (
+                build_search_provider,
+                web_search_candidates,
+            )
+
+            search_provider = build_search_provider(cfg.collector)
+            if search_provider is not None:
+                search_web_tool = lambda task: web_search_candidates(
+                    task,
+                    search_provider,
+                    llm,
+                    max_results=cfg.collector.search_max_results,
+                )
+        self._discoverer = CompetitorDiscoverer(
+            llm=llm, use_llm=use_llm, web_tool=search_web_tool
+        )
 
         # 设计文档 54：链路追踪底座。显式注入优先（测试隔离）；否则模块单例。
         # 可选 Langfuse exporter：ObservabilityConfig.langfuse_enabled 派生属性为真时才
@@ -439,12 +464,18 @@ class CompetitorAnalysisAPI:
         设计文档 65 §2.3：plan 缺 resolution/competitors 时，若 Lead 实际做了候选枚举/委派
         （``candidate_count`` > 0）→ 归 discovery/compare，避免多竞品任务误判 registry
         走单报告路径（真实 LLM 复现：make_plan 只声明 competitor，但 DISCOVERY 已委派多个候选）。
+
+        设计文档 66 §3.2：parse_task（LLM）明确判为 COMPARE/DISCOVERY 时，即使 plan 缺
+        resolution/competitors 且候选为零，也尊重主 Agent（Lead）意图 → 走 comparison 组装
+        （空候选矩阵 + Lead 市场格局核心结论段优雅降级），不把市场普查误判为单竞品 registry。
         """
         resolution = str((plan or {}).get("resolution") or "").lower()
         if resolution:
             return resolution
         if (plan or {}).get("competitors") or candidate_count > 0:
             return "discovery" if parsed.resolution == ResolutionDecision.DISCOVERY else "compare"
+        if parsed.resolution in (ResolutionDecision.COMPARE, ResolutionDecision.DISCOVERY):
+            return parsed.resolution.value
         return "registry"
 
     def _web_search_candidates(self, scope: str) -> str:
