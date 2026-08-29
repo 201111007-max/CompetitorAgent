@@ -61,6 +61,10 @@ class CollectorConfig:
     # TAVILY_API_KEY（不落盘）。空 = 不启用（web_search 走可读提示 / DISCOVERY 空候选）。
     search_provider: str = ""
     search_max_results: int = 8
+    # 榜单结构化直连（设计文档 67 §2.1）："swebench" | "terminalbench" | "aider" / ""
+    benchmark_provider: str = ""
+    # 舆情采样源（设计文档 67 §2.2）："hackernews" | "reddit" / ""
+    sentiment_provider: str = ""
 
 
 @dataclass
@@ -79,6 +83,23 @@ class ReportConfig:
     output_dir: str = "~/.competitor_agent/reports/competitor"  # 仓库外，避免写入工作树
     export_json: bool = True  # 结构化 JSON 导出开关（设计文档 28）
     comparison_dir: str = "~/.competitor_agent/reports/comparison"  # 比较报告矩阵 JSON 目录
+    # 产品化闭环（设计文档 67 §3）
+    export_html: bool = False  # 报告落盘后自动导出单文件自包含 HTML（§3.1）
+    approval_enabled: bool = True  # human-in-the-loop 审批门（§3.2）
+    approval_low_confidence_threshold: float = 0.4  # 低置信触发阈值
+    alert_webhooks: list[str] = field(default_factory=list)  # 告警推送 webhook 列表（§3.3）
+    alert_email: dict[str, object] = field(default_factory=dict)  # 邮件推送（host/port/from/to）
+
+
+@dataclass
+class ScheduleConfig:
+    """内置调度器 + 周报（设计文档 67 §2.3）"""
+
+    enabled: bool = False  # Web 启动时是否自动 start() 内置调度器
+    interval_hours: float = 24.0  # interval 模式唤醒间隔
+    cron_expr: str = ""  # cron 模式（minute hour day month weekday）；优先于 interval
+    weekly_window_days: int = 7  # 周报聚合窗口（天）
+    weekly_report: bool = False  # run_scheduled 末尾是否触发周报聚合
 
 
 @dataclass
@@ -201,6 +222,7 @@ class AppConfig:
     tools: ToolsConfig = field(default_factory=ToolsConfig)
     agent: AgentConfig = field(default_factory=AgentConfig)
     lead: LeadConfig = field(default_factory=LeadConfig)
+    schedule: ScheduleConfig = field(default_factory=ScheduleConfig)
 
 
 def _build_section(cls: type[Any], data: dict[str, Any] | None) -> Any:
@@ -244,6 +266,7 @@ def load_config(path: str | os.PathLike | None = None) -> AppConfig:
         tools=_build_section(ToolsConfig, raw.get("tools")),
         agent=_build_section(AgentConfig, raw.get("agent")),
         lead=_build_section(LeadConfig, raw.get("lead")),
+        schedule=_build_section(ScheduleConfig, raw.get("schedule")),
     )
 
 

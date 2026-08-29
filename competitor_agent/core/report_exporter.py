@@ -72,12 +72,13 @@ def _benchmark_scores(report: CompetitorReport) -> list[dict[str, Any]]:
     return []
 
 
-def report_to_dict(report: CompetitorReport) -> dict[str, Any]:
+def report_to_dict(report: CompetitorReport, approval_status: str = "approved") -> dict[str, Any]:
     """稳定导出 schema：competitor / dimensions / freshness / pricing.profile /
-    benchmark_scores / created_at / terminal_state。
+    benchmark_scores / created_at / terminal_state / status（设计文档 67 §3.2）。
 
     schema 版本号随 REPORT_SCHEMA_VERSION（语义同 HARNESS_VERSION），
-    供下游工具做字段兼容判定。
+    供下游工具做字段兼容判定。``approval_status`` 由审批门决定
+    （approved / pending_review / rejected），缺省 approved（无审批 → 直通发布）。
     """
     freshness = report.freshness
     return {
@@ -92,21 +93,30 @@ def report_to_dict(report: CompetitorReport) -> dict[str, Any]:
         "pricing": _pricing_profile(report),
         "benchmark_scores": _benchmark_scores(report),
         "gaps_pending": [str(g.field) for g in report.gaps_pending],
+        "status": approval_status,
+        "reviewed_at": None,
+        "reviewer_note": "",
     }
 
 
 def export_competitor_json(
     report: CompetitorReport,
     output_dir: str | Path | None = None,
+    approval_status: str = "approved",
 ) -> Path:
     """原子写 <data_dir>/reports/competitor/<竞品>.json，返回落盘路径。
 
-    ``output_dir`` 缺省取 config.report.output_dir（与 .md 同名同目录）。
+    ``output_dir`` 缺省取 config.report.output_dir（与 .md 同名同目录）；
+    ``approval_status`` 为审批门决定的状态（设计文档 67 §3.2）。
     """
     out_dir = resolve_output_dir(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / (_safe_filename(report.competitor.name) + ".json")
-    data = json.dumps(report_to_dict(report), ensure_ascii=False, indent=2).encode("utf-8")
+    data = json.dumps(
+        report_to_dict(report, approval_status=approval_status),
+        ensure_ascii=False,
+        indent=2,
+    ).encode("utf-8")
     _write_bytes_atomic(path, data)
     return path
 

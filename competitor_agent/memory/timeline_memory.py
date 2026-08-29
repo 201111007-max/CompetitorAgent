@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Any
 
 from competitor_agent.domain_types.report import CompetitorReport
@@ -141,6 +142,14 @@ class TimelineMemory:
 
     def __init__(self, data_dir: Any = None) -> None:
         self._store = JsonStore("timeline", data_dir)
+
+    @property
+    def data_dir(self) -> Path:
+        """数据根目录（<data_dir>，timeline.json 位于 <data_dir>/memory/ 下）。
+
+        供周报聚合（设计文档 67 §2.3.2）读取同一时间线数据源。
+        """
+        return self._store._path.parent.parent
 
     def append(self, event: TimelineEvent) -> None:
         """直接追加一条事件（外部事件，如手动记录）。"""

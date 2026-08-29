@@ -178,6 +178,181 @@ def _run_schedule(api: CompetitorAnalysisAPI, args: str) -> None:
         print(f"- {r.competitor.name} | 终态={r.terminal_state} | {len(r.dimension_results)} 维度")
 
 
+def _run_weekly(api: CompetitorAnalysisAPI, args: str) -> None:
+    """weekly：跨竞品周报聚合（设计文档 67 §2.3.2），打印落盘路径。"""
+    try:
+        md_path, json_path = api.build_weekly_report()
+    except Exception as exc:  # noqa: BLE001
+        print(f"周报生成失败: {exc}")
+        return
+    print(f"周报已生成（Markdown）: {md_path}")
+    print(f"周报已生成（JSON）: {json_path}")
+    if md_path.exists():
+        print("\n".join(md_path.read_text(encoding="utf-8").splitlines()[:40]))
+
+
+def _run_report(api: CompetitorAnalysisAPI, args: str) -> None:
+    """report：审批（--status/--approve/--reject）+ 可视化导出（--html/--visual）。
+
+    用法:
+        report --status <name>
+        report --approve <name> [--note "..."]
+        report --reject <name> --note "..."
+        report --html <name>
+        report --visual <name>       # 需对比报告（多竞品）
+    """
+    import json as _json
+
+    from competitor_agent.core.approval_gate import (
+        report_json_path,
+        report_status,
+        set_report_status,
+    )
+    from competitor_agent.core.report_archiver import report_file_path
+
+    tokens = args.split()
+    if not tokens:
+        print("用法: report --status/--approve/--reject/--html/--visual <name> [--note ...]")
+        return
+    if "--approve" in tokens or "--reject" in tokens:
+        is_approve = "--approve" in tokens
+        marker = "--approve" if is_approve else "--reject"
+        idx = tokens.index(marker)
+        if idx + 1 >= len(tokens):
+            print(f"用法: report {marker} <name>")
+            return
+        name = tokens[idx + 1]
+        note = ""
+        if "--note" in tokens:
+            ni = tokens.index("--note")
+            note = " ".join(tokens[ni + 1 :])
+        path = report_json_path(name)
+        if not path.exists():
+            print(f"报告 JSON 不存在: {path}（需先 export_json 且已分析过 {name}）")
+            return
+        set_report_status(path, "approved" if is_approve else "rejected", reviewer_note=note)
+        print(f"[{'已审批通过' if is_approve else '已驳回'}] {name} → {path}")
+        return
+    if "--status" in tokens:
+        idx = tokens.index("--status")
+        if idx + 1 >= len(tokens):
+            print("用法: report --status <name>")
+            return
+        name = tokens[idx + 1]
+        path = report_json_path(name)
+        print(f"{name}: {report_status(path)}（{path}）")
+        return
+    if "--html" in tokens:
+        from competitor_agent.core.report_visuals import render_html_doc
+
+        idx = tokens.index("--html")
+        if idx + 1 >= len(tokens):
+            print("用法: report --html <name>")
+            return
+        name = tokens[idx + 1]
+        md_path = report_file_path(name)
+        json_path = report_json_path(name)
+        if not md_path.exists() or not json_path.exists():
+            print(f"报告缺失（需 .md 与 .json 均在落盘目录）: {name}")
+            return
+        structured = _json.loads(json_path.read_text(encoding="utf-8"))
+        created = str(structured.get("created_at") or "")
+        html_path = render_html_doc(
+            md_path.read_text(encoding="utf-8"),
+            structured,
+            title=name,
+            created_at=created,
+            out_path=str(md_path.with_suffix(".html")),
+        )
+        print(f"HTML 已导出: {html_path}")
+        return
+    if "--visual" in tokens:
+        from competitor_agent.core.report_visuals import render_radar
+
+        idx = tokens.index("--visual")
+        if idx + 1 >= len(tokens):
+            print("用法: report --visual <name>")
+            return
+        name = tokens[idx + 1]
+        json_path = report_json_path(name)
+        if not json_path.exists():
+            print(f"报告 JSON 不存在: {json_path}")
+            return
+        data = _json.loads(json_path.read_text(encoding="utf-8"))
+        if "competitors" not in data or not data.get("competitors"):
+            print("雷达图仅支持对比报告（多竞品）；单竞品请用 --html 导出。")
+            return
+        comparison = _comparison_from_json(data)
+        radar_path = render_radar(comparison)
+        print(f"雷达图已导出: {radar_path}" if radar_path else "雷达图跳过（matplotlib 未安装，可用 pip install \".[visuals]\"）")
+        return
+    print("未知 report 操作（可选 --status/--approve/--reject/--html/--visual）")
+
+
+def _comparison_from_json(data: dict) -> object:
+    """从对比报告 JSON 重建 ComparisonReport（供雷达图渲染，数据来自 matrix）。"""
+    from competitor_agent.domain_types.competitor import Competitor
+    from competitor_agent.domain_types.enums import ResultStatus
+    from competitor_agent.domain_types.report import (
+        ComparisonReport,
+        CompetitorReport,
+        DimensionResult,
+    )
+
+    names = [str(n) for n in data.get("competitors") or []]
+    dims_by_comp: dict[str, dict[str, float]] = {n: {} for n in names}
+    for row in data.get("matrix") or []:
+        dim = str(row.get("dimension") or "")
+        values = row.get("values") or {}
+        for n in names:
+            conf = values.get(n)
+            if conf is not None:
+                dims_by_comp[n][dim] = float(conf)
+    reports = [
+        CompetitorReport(
+            competitor=Competitor(name=n),
+            dimension_results=[
+                DimensionResult(
+                    dimension=d,
+                    confidence=c,
+                    summary="",
+                    status=ResultStatus.COMPLETE if c else ResultStatus.UNAVAILABLE,
+                )
+                for d, c in dims.items()
+            ],
+        )
+        for n, dims in dims_by_comp.items()
+    ]
+    return ComparisonReport(competitors=[Competitor(name=n) for n in names], reports=reports)
+
+
+def _run_schedule_daemon(api: CompetitorAnalysisAPI) -> int:
+    """schedule --daemon：前台运行内置调度器（设计文档 67 §2.3.1）。"""
+    from competitor_agent.core.scheduler import WeeklyScheduler
+
+    cfg = load_config().schedule
+    scheduler = WeeklyScheduler(
+        lambda: api.run_scheduled(),
+        interval_hours=cfg.interval_hours,
+        cron_expr=cfg.cron_expr,
+    )
+    print(
+        "调度器启动（Ctrl+C 退出）: "
+        + (f"cron={cfg.cron_expr!r}" if cfg.cron_expr else f"interval={cfg.interval_hours:g}h")
+    )
+    scheduler.start()
+    try:
+        import time as _time
+
+        while True:
+            _time.sleep(1)
+    except KeyboardInterrupt:
+        print("\n调度器已停止。")
+        return 0
+    finally:
+        scheduler.stop()
+
+
 def _run_resume(api: CompetitorAnalysisAPI, args: str) -> None:
     session_id = args.strip()
     if not session_id:
@@ -313,6 +488,8 @@ def _repl(api: CompetitorAnalysisAPI, llm: LLMClient | None = None, use_llm: boo
         "refresh": lambda a: _run_refresh(api, a),
         "timeline": lambda a: _run_timeline(api, a),
         "schedule": lambda a: _run_schedule(api, a),
+        "weekly": lambda a: _run_weekly(api, a),
+        "report": lambda a: _run_report(api, a),
         "benchmark": lambda a: _run_benchmark(a),
         "help": lambda a: _run_help(a),
     }
@@ -376,8 +553,19 @@ def build_parser() -> argparse.ArgumentParser:
     timeline_p = sub.add_parser("timeline", help="查看竞品时间线事件（版本/功能/价格/榜单变化）")
     timeline_p.add_argument("competitor", nargs="?", default=None, help="竞品名称")
 
-    schedule_p = sub.add_parser("schedule", help="定时调度轮：重爬过期竞品 + 结构化导出 + 异动告警（设计文档 28）")
+    schedule_p = sub.add_parser("schedule", help="定时调度轮：重爬过期竞品 + 结构化导出 + 异动告警（设计文档 28；--daemon 前台跑内置调度器，设计文档 67 §2.3.1）")
     schedule_p.add_argument("--competitors", default=None, help="目标竞品（逗号分隔）；缺省用跟踪竞品")
+    schedule_p.add_argument("--daemon", action="store_true", help="前台运行内置调度器（interval/cron 由 schedule 配置决定）")
+
+    sub.add_parser("weekly", help="跨竞品周报聚合：本周价格/版本/榜单变化 + 置信度对比表（设计文档 67 §2.3.2）")
+
+    report_p = sub.add_parser("report", help="报告审批（--status/--approve/--reject）+ 可视化导出（--html/--visual，设计文档 67 §3）")
+    report_p.add_argument("--status", metavar="NAME", help="查询报告审批状态")
+    report_p.add_argument("--approve", metavar="NAME", help="审批通过报告（JSON status → approved）")
+    report_p.add_argument("--reject", metavar="NAME", help="驳回报告（status → rejected）")
+    report_p.add_argument("--html", metavar="NAME", help="导出单文件自包含 HTML")
+    report_p.add_argument("--visual", metavar="NAME", help="导出雷达图（对比报告，需 matplotlib optional）")
+    report_p.add_argument("--note", default="", help="审批备注（配合 --approve/--reject）")
 
     benchmark_p = sub.add_parser("benchmark", help="运行评测基准（--ablate 追加消融对比，设计文档 30；--llm real 真实质量评测，设计文档 37）")
     benchmark_p.add_argument("--ablate", action="store_true", help="追加 4 组消融变体（full/no-rag/no-memory/no-rag+no-memory）并落盘 <data_dir>/reports/ablation/")
@@ -438,7 +626,22 @@ def main(argv: list[str] | None = None) -> int:
         _run_timeline(api, args.competitor or "")
         return 0
     if args.command == "schedule":
+        if getattr(args, "daemon", False):
+            return _run_schedule_daemon(api)
         _run_schedule(api, args.competitors or "")
+        return 0
+    if args.command == "weekly":
+        _run_weekly(api, args.command)
+        return 0
+    if args.command == "report":
+        parts = []
+        for flag in ("--status", "--approve", "--reject", "--html", "--visual"):
+            value = getattr(args, flag.lstrip("-"), None)
+            if value:
+                parts += [flag, value]
+        if args.note:
+            parts += ["--note", args.note]
+        _run_report(api, " ".join(parts))
         return 0
     if args.command == "benchmark":
         parts = ["--ablate"] if args.ablate else []

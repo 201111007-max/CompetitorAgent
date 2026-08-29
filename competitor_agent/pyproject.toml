@@ -63,6 +63,9 @@ langgraph = [
 langfuse = [
     "langfuse>=2,<3",
 ]
+visuals = [
+    "matplotlib>=3.7",
+]
 all = [
     "mcp>=1.0",
     "python-dotenv>=1.0",

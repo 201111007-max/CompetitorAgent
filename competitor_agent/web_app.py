@@ -491,8 +491,43 @@ async def _event_generator(
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("竞品分析 Web 服务启动")
+    # 设计文档 67 §2.3.1：schedule.enabled 时启动内置调度器（可选补充，与外部 cron 二选一）
+    _scheduler = None
+    if getattr(_config.schedule, "enabled", False):
+        try:
+            from competitor_agent.core.scheduler import WeeklyScheduler
+
+            api = _build_api_for_scheduler()
+            _scheduler = WeeklyScheduler(
+                lambda: api.run_scheduled(),
+                interval_hours=_config.schedule.interval_hours,
+                cron_expr=getattr(_config.schedule, "cron_expr", ""),
+            )
+            _scheduler.start()
+        except Exception:
+            logger.warning("内置调度器启动失败（不影响 Web）", exc_info=True)
     yield
+    if _scheduler is not None:
+        _scheduler.stop()
     logger.info("竞品分析 Web 服务关闭")
+
+
+def _build_api_for_scheduler() -> CompetitorAnalysisAPI:
+    """构造调度轮专用 API（复用 web 的 llm/记忆装配，事件走模块级记录）。"""
+    llm_client = LLMClient(
+        model=_config.llm.model,
+        base_url=_config.llm.api_base_url,
+        fallback_models=_config.llm.fallback_models,
+        timeout=_config.llm.timeout,
+        max_retries=_config.llm.max_retries,
+        pricing_per_1k=_config.llm.pricing_per_1k,
+    )
+    return CompetitorAnalysisAPI(
+        llm=llm_client,
+        use_llm=True,
+        memory=_get_memory(),
+        config=load_config(),
+    )
 
 
 app = FastAPI(title="Competitor Intelligence Agent", version="0.1.0", lifespan=lifespan)
@@ -697,6 +732,62 @@ async def report_download(
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"报告不存在: {competitor}")
     return FileResponse(path, media_type="text/markdown; charset=utf-8", filename=f"{competitor}.md")
+
+
+@app.get("/api/reports/{competitor}/status")
+async def report_status_endpoint(
+    competitor: str,
+    _: None = Depends(require_auth),
+) -> JSONResponse:
+    """查询报告审批状态（设计文档 67 §3.2：pending_review 前端标"待人工确认"徽章）。"""
+    from competitor_agent.core.approval_gate import report_json_path, report_status
+
+    path = report_json_path(competitor)
+    status = report_status(path) if path.exists() else "approved"
+    return JSONResponse(
+        {
+            "competitor": competitor,
+            "status": status,
+            "path": str(path),
+        }
+    )
+
+
+@app.post("/api/reports/{competitor}/review")
+async def report_review(
+    competitor: str,
+    request: Request,
+    _: None = Depends(require_auth),
+) -> JSONResponse:
+    """人工审批：POST {"action": "approve"|"reject", "note": "..."}（设计文档 67 §3.2）。
+
+    approve → status=approved；reject → status=rejected + reviewer_note 回灌注释。
+    """
+    from competitor_agent.core.approval_gate import report_json_path, set_report_status
+
+    path = report_json_path(competitor)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"报告 JSON 不存在: {competitor}")
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="请求体需为 JSON: {\"action\": \"approve|reject\", \"note\": \"...\"}")
+    action = str(body.get("action") or "").lower()
+    if action not in ("approve", "reject"):
+        raise HTTPException(status_code=400, detail="action 需为 approve | reject")
+    note = str(body.get("note") or "")
+    try:
+        data = set_report_status(path, "approved" if action == "approve" else "rejected", reviewer_note=note)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return JSONResponse(
+        {
+            "competitor": competitor,
+            "status": data.get("status"),
+            "reviewed_at": data.get("reviewed_at"),
+            "reviewer_note": data.get("reviewer_note"),
+        }
+    )
 
 
 def main() -> None:
