@@ -289,7 +289,7 @@ def _run_report(api: CompetitorAnalysisAPI, args: str) -> None:
     print("未知 report 操作（可选 --status/--approve/--reject/--html/--visual）")
 
 
-def _comparison_from_json(data: dict) -> object:
+def _comparison_from_json(data: dict) -> ComparisonReport:
     """从对比报告 JSON 重建 ComparisonReport（供雷达图渲染，数据来自 matrix）。"""
     from competitor_agent.domain_types.competitor import Competitor
     from competitor_agent.domain_types.enums import ResultStatus
