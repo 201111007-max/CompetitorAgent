@@ -3,29 +3,67 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>竞品分析 Agent</title>
+<title>竞品分析 Agent · 情报档案台</title>
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<div class="chat">
-  <header class="topbar">
-    <h1>竞品分析 Agent</h1>
-    <div class="top-actions">
-      <button id="new-btn" class="ghost">新会话</button>
-      <button id="stop-btn" class="danger" disabled>停止</button>
-    </div>
-  </header>
+<div class="shell">
 
-  <main id="messages" class="messages" role="log"></main>
-
-  <footer class="composer">
-    <textarea id="input" rows="2"
-              placeholder="输入任务，如：分析 Cursor / 对比 Cursor 和 Cline / 普查所有 AI coding agent&#10;Enter 发送，Shift+Enter 换行"></textarea>
-    <div class="composer-actions">
-      <span id="status" class="status" hidden></span>
-      <button id="send-btn">发送</button>
+  <!-- 左栏：案例文件柜（报告库 / 历史 / 审批状态） -->
+  <aside id="rail" class="rail" aria-label="报告库">
+    <div class="rail-head">
+      <div class="rail-brand">
+        <svg class="rail-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+          <circle cx="12" cy="12" r="9"></circle>
+          <circle cx="12" cy="12" r="4.5"></circle>
+          <path d="M12 12l6-3M12 3v3M12 21v-3"></path>
+        </svg>
+        <span class="rail-title">INTEL · CASE FILE</span>
+      </div>
+      <button id="rail-close" class="icon-btn" aria-label="收起报告库">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg>
+      </button>
     </div>
-  </footer>
+
+    <div class="rail-actions">
+      <button id="new-btn" class="btn primary block">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+        新建分析
+      </button>
+    </div>
+
+    <nav class="rail-section">
+      <div class="rail-section-title">报告库 <span id="lib-count" class="count"></span></div>
+      <ul id="library" class="library"></ul>
+      <div id="lib-empty" class="empty" hidden>暂无历史报告<br>完成一次分析后归档于此</div>
+    </nav>
+  </aside>
+
+  <div id="rail-scrim" class="rail-scrim" hidden></div>
+
+  <!-- 右栏：对话工作区 -->
+  <div class="workspace">
+    <header class="topbar">
+      <button id="rail-toggle" class="icon-btn" aria-label="打开报告库">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"></path></svg>
+      </button>
+      <h1 class="topbar-title">竞品分析<span class="topbar-sub">COMPETITOR INTELLIGENCE</span></h1>
+      <div class="top-actions">
+        <button id="stop-btn" class="btn danger" disabled>停止</button>
+      </div>
+    </header>
+
+    <main id="messages" class="messages" role="log"></main>
+
+    <footer class="composer">
+      <textarea id="input" rows="2"
+                placeholder="输入任务，如：分析 Cursor / 对比 Cursor 和 Cline / 普查所有 AI coding agent&#10;Enter 发送，Shift+Enter 换行"></textarea>
+      <div class="composer-actions">
+        <span id="status" class="status" hidden></span>
+        <button id="send-btn" class="btn primary">发送</button>
+      </div>
+    </footer>
+  </div>
 </div>
 <script src="/static/vendor/marked.min.js"></script>
 <script src="/static/vendor/dompurify.min.js"></script>
