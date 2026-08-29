@@ -29,18 +29,25 @@ def assemble_comparison(
     candidate_results: dict[str, dict[str, Any]],
     builder: Any | None = None,
     terminal_state: str = "success",
+    use_lead_body: bool | None = None,
 ) -> ComparisonReport:
     """把候选 ``dimensions[]`` + Lead 结论组装为 ComparisonReport。
 
     - 每候选 ``dimensions[]`` 组装为最小 CompetitorReport（复用什么 ``_dimension_from_item``
       的维度条目解析与置信度封顶兜底）；
     - 矩阵按 ``plan.competitors`` 顺序渲染（缺 plan 时按收集顺序）；
-    - Lead Final Answer 的结论段拼入 ``## 市场格局核心结论`` 区。
+    - 设计文档 70 M1：Lead Final Answer 正文（剔除 JSON 块后的纯散文，含结论段）在前、
+      代码矩阵附录在后（信息不丢）；正文为空（mock 纯 JSON）→ 保留矩阵 + 提取
+      ``## 市场格局核心结论`` 段（现状行为，确定性不变）。
     """
     from competitor_agent.core.report_builder import ReportBuilder
     from competitor_agent.facade.react_report import _dimension_from_item
 
     builder = builder or ReportBuilder()
+    if use_lead_body is None:
+        from competitor_agent.config.loader import load_config
+
+        use_lead_body = load_config().report.lead_formatted_body
     per_candidate: dict[str, CompetitorReport] = {}
     for name, payload in candidate_results.items():
         dims = [d for d in (payload.get("dimensions") or []) if isinstance(d, dict)]
@@ -71,6 +78,17 @@ def assemble_comparison(
         comparison = ComparisonReport(competitors=[], reports=[], markdown_report="")
 
     conclusion = _extract_conclusion(lead_answer)
+    if use_lead_body:
+        lead_body = _lead_body_text(lead_answer)
+        if lead_body:
+            # 设计文档 70 M1：Lead 正文在前、代码矩阵附录在后（信息不丢、前端零改动）
+            comparison.markdown_report = (
+                lead_body
+                + "\n\n"
+                + (comparison.markdown_report or "").strip()
+                + "\n"
+            )
+            return comparison
     if conclusion:
         comparison.markdown_report = (
             comparison.markdown_report.rstrip()
@@ -79,6 +97,21 @@ def assemble_comparison(
             + "\n"
         )
     return comparison
+
+
+def _lead_body_text(lead_answer: str) -> str:
+    """提取 Lead Final Answer 的正文（设计文档 70 M1）：剔除对比 JSON 块 + 去 Final Answer 前缀。
+
+    正文为空（mock 纯 JSON）→ 空串 → 调用方回退矩阵 + 结论段（确定性不变）。
+    """
+    from competitor_agent.facade.react_report import _strip_json_blocks
+
+    text = _strip_json_blocks(lead_answer or "").strip()
+    for prefix in ("Final Answer: ", "Final Answer:"):
+        if text.startswith(prefix):
+            text = text[len(prefix):].lstrip()
+            break
+    return text
 
 
 def _extract_conclusion(lead_answer: str) -> str:

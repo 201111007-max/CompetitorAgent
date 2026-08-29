@@ -22,6 +22,7 @@ import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from importlib import resources
+from pathlib import Path
 from typing import Any
 
 import uvicorn
@@ -33,7 +34,16 @@ from fastapi.staticfiles import StaticFiles
 from competitor_agent import CompetitorAnalysisAPI
 from competitor_agent.config.loader import AppConfig, load_config
 from competitor_agent.core.checkpoint import set_cancel
-from competitor_agent.core.report_archiver import _safe_filename, report_file_path, save_report_markdown
+from competitor_agent.core.report_archiver import (
+    _safe_filename,
+    download_file_path,
+    report_file_path,
+    resolve_download_dir,
+    resolve_output_dir,
+    save_report_download,
+    save_report_markdown,
+)
+from competitor_agent.core.report_settings import get_setting
 from competitor_agent.domain_types.events import ProgressEvent
 from competitor_agent.domain_types.report import (
     CancelledResult,
@@ -374,6 +384,11 @@ async def _event_generator(
             name = " / ".join(c.name for c in report.competitors) or "compare"
             # 自动落盘对比报告（先落盘，地址随事件下发；幂等 safe 名与 report_file_path 命名一致）
             saved_path = save_report_markdown(report)
+            try:
+                # 设计文档 70：分析完成写下载副本（<download>/<name>.md，失败不影响主流程）
+                save_report_download(report)
+            except Exception:
+                logger.warning("对比报告下载副本落盘失败（不影响主流程）", exc_info=True)
             yield ProgressEvent(
                 event="report",
                 phase="report",
@@ -421,8 +436,13 @@ async def _event_generator(
             )
             return
 
-        # 自动落盘 <data_dir>/reports/competitor/<竞品>.md（导出/下载用），先落盘再下发地址
+        # 自动落盘 <output>/<竞品>.md（导出/下载用），先落盘再下发地址
         saved_path = save_report_markdown(report)
+        try:
+            # 设计文档 70：分析完成写下载副本（<download>/<竞品>.md，失败不影响主流程）
+            save_report_download(report)
+        except Exception:
+            logger.warning("报告下载副本落盘失败（不影响主流程）", exc_info=True)
         yield ProgressEvent(
             event="report",
             phase="report",
@@ -727,11 +747,95 @@ async def report_download(
     competitor: str,
     _: None = Depends(require_auth),
 ) -> FileResponse:
-    """以 Content-Disposition: attachment 下载报告（触发浏览器下载）。"""
-    path = report_file_path(competitor)
+    """以 Content-Disposition: attachment 下载报告（触发浏览器下载）。
+
+    设计文档 70：下载目录（download/）优先 → 归档目录（output/，含旧归档回退）。
+    """
+    path = download_file_path(competitor)
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"报告不存在: {competitor}")
     return FileResponse(path, media_type="text/markdown; charset=utf-8", filename=f"{competitor}.md")
+
+
+@app.get("/api/settings")
+async def settings_get(
+    _: None = Depends(require_auth),
+) -> JSONResponse:
+    """读取报告目录设置（设计文档 70）：当前生效值 + data_dir + 默认值。
+
+    ``report_output_dir``/``report_download_dir`` 为当前生效路径（settings 覆盖后）；
+    ``data_dir`` 为 settings.json 所在目录；``defaults`` 为代码默认（项目 output/download）。
+    """
+    return JSONResponse(_settings_payload())
+
+
+@app.put("/api/settings")
+async def settings_put(
+    request: Request,
+    _: None = Depends(require_auth),
+) -> JSONResponse:
+    """写入报告目录设置（设计文档 70）：PUT {"report_output_dir": "...", "report_download_dir": "..."}。
+
+    传 ``""`` 即重置为默认；**值等于项目默认目录时也存空串**（保持"空 = 派生默认"，
+    避免把绝对路径固化进 settings.json，项目迁移后失效）；原子写 settings.json；返回更新后结果。
+    """
+    from competitor_agent.core.report_settings import (
+        default_download_dir,
+        default_output_dir,
+        write_settings,
+    )
+
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="请求体需为 JSON 对象")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="请求体需为 JSON 对象")
+    updates = {
+        "report_output_dir": _normalize_dir_setting(body.get("report_output_dir", ""), default_output_dir()),
+        "report_download_dir": _normalize_dir_setting(body.get("report_download_dir", ""), default_download_dir()),
+    }
+    try:
+        write_settings(updates)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"设置写入失败: {exc}")
+    return JSONResponse(_settings_payload())
+
+
+def _normalize_dir_setting(value: str, default: Path) -> str:
+    """设置值规范化：等于项目默认目录 → 存空串（保持派生，不固化绝对路径）；否则原样。
+
+    ``~`` 展开、相对路径按 CWD 解析后与默认做大小写/分隔符无关比较；空串即默认原样返回。
+    """
+    v = str(value or "").strip()
+    if not v:
+        return ""
+    p = Path(v).expanduser()
+    if not p.is_absolute():
+        p = Path.cwd() / p
+    norm = lambda path: str(path).replace("\\", "/").lower()
+    if norm(p) == norm(default):
+        return ""
+    return v
+
+
+def _settings_payload() -> dict[str, object]:
+    """设置响应载荷（GET/PUT 共用）。"""
+    from competitor_agent.core.report_settings import (
+        default_download_dir,
+        default_output_dir,
+        settings_path,
+    )
+
+    return {
+        "report_output_dir": get_setting("report_output_dir") or str(resolve_output_dir()),
+        "report_download_dir": get_setting("report_download_dir") or str(resolve_download_dir()),
+        "data_dir": str(settings_path().parent),
+        "defaults": {
+            "report_output_dir": str(default_output_dir()),
+            "report_download_dir": str(default_download_dir()),
+        },
+    }
 
 
 @app.get("/api/reports/{competitor}/status")

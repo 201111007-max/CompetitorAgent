@@ -115,6 +115,9 @@ dota_helper/reports/
 competitor_agent/reports/
 # 仓库根目录测试产物 reports/（测试运行时的落盘输出）
 reports/
+# 设计文档 70：报告落盘默认目录（<项目根>/output）与下载默认目录（<项目根>/download）
+output/
+download/
 # web_app 运行时错误日志（临时产物）
 competitor_agent/web.err
 

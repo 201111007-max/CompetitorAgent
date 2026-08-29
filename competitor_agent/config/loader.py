@@ -81,6 +81,9 @@ class ReportConfig:
     include_confidence: bool = True
     include_evidence_urls: bool = True
     output_dir: str = "~/.competitor_agent/reports/competitor"  # 仓库外，避免写入工作树
+    # 设计文档 70 M1：Lead 两段式 Final Answer（正文 + JSON）默认开；false 全回退模板。
+    # 配合 review_config.yaml 的 output_dir: ""（空 = 项目 output/，见 core/report_settings）。
+    lead_formatted_body: bool = True
     export_json: bool = True  # 结构化 JSON 导出开关（设计文档 28）
     comparison_dir: str = "~/.competitor_agent/reports/comparison"  # 比较报告矩阵 JSON 目录
     # 产品化闭环（设计文档 67 §3）

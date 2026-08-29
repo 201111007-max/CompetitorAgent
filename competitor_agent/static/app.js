@@ -749,6 +749,74 @@ function setStatus(text, isError) {
   el.className = 'status ' + (isError ? 'err' : '');
 }
 
+/* ── 报告目录设置（设计文档 70：rail 齿轮 → GET/PUT /api/settings） ───── */
+
+function openSettings() {
+  $id('settings-modal').hidden = false;
+  $id('settings-hint').textContent = '';
+  fetchJSON('/api/settings')
+    .then(function (s) {
+      $id('set-output').value = s.report_output_dir || '';
+      $id('set-download').value = s.report_download_dir || '';
+    })
+    .catch(function (e) {
+      $id('settings-hint').textContent = '读取设置失败: ' + e.message;
+    });
+}
+
+function closeSettings() {
+  $id('settings-modal').hidden = true;
+  $id('settings-hint').textContent = '';
+}
+
+function resetSettings() {
+  $id('set-output').value = '';
+  $id('set-download').value = '';
+  $id('settings-hint').textContent = '已清空，保存后将使用默认目录（项目 output/ 与 download/）。';
+}
+
+function pickDir(input) {
+  if (window.showDirectoryPicker) {
+    window.showDirectoryPicker()
+      .then(function () {
+        // 浏览器出于安全不暴露目录完整路径——提示手动填写服务端可用的绝对路径
+        $id('settings-hint').textContent = '已打开目录选择器；浏览器不提供完整路径，请在输入框手动填写（如 D:\\reports）。';
+        input.focus();
+      })
+      .catch(function (e) { if (!e || e.name !== 'AbortError') $id('settings-hint').textContent = '目录选择未完成。'; });
+  } else {
+    $id('settings-hint').textContent = '当前浏览器不支持目录选择器，请在输入框手动填写目录路径。';
+    input.focus();
+  }
+}
+
+function saveSettings() {
+  const body = {
+    report_output_dir: $id('set-output').value.trim(),
+    report_download_dir: $id('set-download').value.trim(),
+  };
+  setStatus('正在保存设置…');
+  fetch('/api/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+    .then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (d) { return { ok: r.ok, status: r.status, data: d }; });
+    })
+    .then(function (res) {
+      if (!res.ok) {
+        setStatus('设置保存失败: ' + (res.data.detail || ('HTTP ' + res.status)), true);
+        return;
+      }
+      closeSettings();
+      setStatus('报告目录设置已保存');
+    })
+    .catch(function (e) {
+      setStatus('设置保存失败: ' + e.message, true);
+    });
+}
+
 /* ── 响应式抽屉 ────────────────────────────────────────────── */
 
 function closeRailOnMobile() {
@@ -780,5 +848,16 @@ $id('rail-toggle').addEventListener('click', function () {
 });
 $id('rail-close').addEventListener('click', closeRailOnMobile);
 $id('rail-scrim').addEventListener('click', closeRailOnMobile);
+
+$id('settings-btn').addEventListener('click', openSettings);
+$id('settings-close').addEventListener('click', closeSettings);
+$id('settings-cancel').addEventListener('click', closeSettings);
+$id('settings-save').addEventListener('click', saveSettings);
+$id('settings-reset').addEventListener('click', resetSettings);
+$id('set-output-pick').addEventListener('click', function () { pickDir($id('set-output')); });
+$id('set-download-pick').addEventListener('click', function () { pickDir($id('set-download')); });
+$id('settings-modal').addEventListener('click', function (e) {
+  if (e.target === $id('settings-modal')) closeSettings();
+});
 
 loadLibrary();
