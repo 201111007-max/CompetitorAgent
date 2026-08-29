@@ -52,49 +52,105 @@ function escapeHtml(s) {
   return div.innerHTML;
 }
 
-/* ── 流式 Lead 气泡（text_delta 打字机）────────────────────── */
+/* ── 流式 Lead 气泡（text_delta 打字机 + 分段思考渲染，设计文档 63/64）────── */
 
+// 设计文档 64 §4：消息 = 一段有序的 typed segment 列表（追加式 DOM，不做整体 innerHTML 重建）：
+//   { kind: 'think', node: <details>, body: <div>, raw, open, turn }
+//   { kind: 'text',  node: <div>, body: <div>, raw, done, turn }
+// turn 为 assistant 步序号（payload.turn）；kind 或 turn 变化 → 关闭当前段、push 新兄弟节点。
 function ensureStream(mid, source) {
   let s = streams.get(mid);
   if (!s) {
     s = {
       mid, source: source || 'lead', el: addMessage('assistant', source || 'lead'),
-      text: '', think: '', toolsEl: null, streaming: false, dirty: false,
+      segments: [], cur: null, toolsEl: null, streaming: false,
     };
     streams.set(mid, s);
   }
   return s;
 }
 
-function renderThinkHTML(s) {
-  // Lead 推理链（thinking_delta）→ 折叠"已思考"块（设计文档 63 §6.3）：不打断正文字流
-  if (!s.think) return '';
-  return '<details class="thinking" open>' +
-    '<summary>已思考</summary>' +
-    '<div class="thinking-body">' + escapeHtml(s.think) + '</div>' +
-    '</details>';
+function currentSegment(s) {
+  return s.segments.length ? s.segments[s.segments.length - 1] : null;
 }
 
-function scheduleRender(s) {
-  s.dirty = true;
+function closeSegment(s, seg) {
+  if (!seg || seg.done) return;
+  seg.done = true;
+  if (seg.kind === 'think') {
+    // 思考段收尾默认折叠（设计文档 64 §4.2）
+    seg.open = false;
+    seg.node.open = false;
+  } else {
+    // 正文段收尾：marked 只渲染一次（避免每次 delta 全量重渲）
+    if (!seg.rendered) {
+      seg.node.innerHTML = DOMPurify.sanitize(marked.parse(seg.raw));
+      seg.rendered = true;
+    }
+  }
 }
 
-function renderStreamHTML(s) {
-  // 内存累积的 markdown → marked → DOMPurify → 注入；尾部光标随 streaming 状态
-  let html = '';
-  html += renderThinkHTML(s);          // 思考折叠块（溜在前，正文在其下）
-  if (s.text) html += ' ' + marked.parse(s.text);
-  if (s.streaming) html += '<span class="cursor">▊</span>';
-  s.el.innerHTML = '<span class="src-tag">' + escapeHtml(sourceLabel(s.source)) + '</span>' + html;
+// turn 归一化：缺省（undefined/null）视为 null → 同一 kind 且同为 null 时合并为单块（向后兼容）
+function normTurn(turn) {
+  return (turn === undefined || turn === null) ? null : turn;
+}
+
+function appendSegment(s, kind, text, turn) {
+  const t = normTurn(turn);
+  let seg = currentSegment(s);
+  if (!seg || seg.done || seg.kind !== kind || seg.turn !== t) {
+    if (seg) closeSegment(s, seg);
+    if (kind === 'think') {
+      const details = document.createElement('details');
+      details.className = 'thinking';
+      details.open = true;
+      const summary = document.createElement('summary');
+      summary.textContent = '已思考';
+      const body = document.createElement('div');
+      body.className = 'thinking-body';
+      details.appendChild(summary);
+      details.appendChild(body);
+      s.el.appendChild(details);
+      seg = { kind, turn: t, node: details, body, raw: '', open: true, done: false, rendered: true };
+    } else {
+      const div = document.createElement('div');
+      div.className = 'text-seg';
+      div.textContent = ''; // 打字机纯文本；收尾时 marked 一次
+      s.el.appendChild(div);
+      seg = { kind, turn: t, node: div, body: div, raw: '', done: false, rendered: false };
+    }
+    s.segments.push(seg);
+  }
+  seg.raw += text;
+  if (kind === 'think') {
+    seg.body.textContent += text;
+  } else {
+    seg.body.textContent += text;
+  }
   scrollBottom();
 }
 
-// 80ms 节流重渲：避免每个 text_delta 触发一次全量 marked+DOMPurify 重 CPU 抖动（设计文档 63 §7.3）
-setInterval(function () {
-  for (const s of streams.values()) {
-    if (s.dirty) { s.dirty = false; renderStreamHTML(s); }
+function ensureCursor(s) {
+  if (!s.cursorEl) {
+    const c = document.createElement('span');
+    c.className = 'cursor';
+    c.textContent = '▊';
+    s.el.appendChild(c);
+    s.cursorEl = c;
   }
-}, 80);
+}
+
+function removeCursor(s) {
+  if (s.cursorEl) { s.cursorEl.remove(); s.cursorEl = null; }
+}
+
+function finishStream(s) {
+  // text.stop / message.stop：关闭当前段并收光标
+  const seg = currentSegment(s);
+  if (seg) { closeSegment(s, seg); s.cur = seg; }
+  removeCursor(s);
+  s.streaming = false;
+}
 
 function ensureTools(s) {
   if (!s.toolsEl) {
@@ -218,31 +274,35 @@ function handleEvent(data) {
       ensureStream(activeMid, payload.source || 'lead');
       break;
     case 'thinking_delta': {
-      // Lead 推理链增量（设计文档 63 §6.3）→ 折叠"已思考"块，与正文打字机分离
+      // Lead 推理链增量（设计文档 63 §6.3）→ 折叠"已思考"块（设计文档 64 §4 分段）
       const mid = payload.message_id || activeMid;
       const s = ensureStream(mid, (streams.has(mid) ? streams.get(mid).source : 'lead'));
       s.streaming = true;
-      s.think += (payload.delta || data.message || '');
-      scheduleRender(s);
+      appendSegment(s, 'think', (payload.delta || data.message || ''), payload.turn);
+      ensureCursor(s);
       break;
     }
     case 'text_delta': {
       const mid = payload.message_id || activeMid;
       const s = ensureStream(mid, (streams.has(mid) ? streams.get(mid).source : 'lead'));
       s.streaming = true;
-      s.text += (payload.delta || data.message || '');
-      scheduleRender(s);
+      appendSegment(s, 'text', (payload.delta || data.message || ''), payload.turn);
+      ensureCursor(s);
       break;
     }
     case 'text.stop': {
       const mid = payload.message_id || activeMid;
       const s = streams.get(mid);
-      if (s) { s.streaming = false; renderStreamHTML(s); }
+      if (s) { finishStream(s); }
       break;
     }
-    case 'message.stop':
+    case 'message.stop': {
+      const mid = payload.message_id || activeMid;
+      const s = streams.get(mid);
+      if (s) { finishStream(s); }
       setBusy(false);
       break;
+    }
     case 'discovery.candidate':
       if (activeMid) addToolLine(streams.get(activeMid), 'discovery', '发现候选: ' + (payload.candidate || ''));
       break;

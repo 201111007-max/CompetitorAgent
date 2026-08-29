@@ -67,6 +67,21 @@ def build_lead_system_prompt() -> str:
     return _with_skills(header, ["planning", "fact_verification", "confidence_disclosure"])
 
 
+def build_chat_system_prompt() -> str:
+    """对话式分支系统提示（设计文档 64 §5.2）：普通提问/闲聊，无 PLAN/REPORT schema 约束。
+
+    与 ``build_lead_system_prompt`` 相对：不强制 make_plan、不要求 REPORT_SCHEMA JSON，
+    模型以自由 prose 直接回答；仍可携带 Thinking 折叠块仅供决策透明（§5.4）。
+    """
+    return (
+        "你是竞品情报 Agent 的对话助手。用户没有要求竞品分析报告，请用自然、简洁的"
+        "中文直接回答用户的问题。\n"
+        "不要输出 JSON、不要声明维度/置信度、不要生成结构化报告面板。\n"
+        "只有当你确实需要最新事实（如最新价格、最近版本）时，才调用 web 工具查证；"
+        "否则直接基于你的知识回答即可。回答完成后直接结束。"
+    )
+
+
 def build_subagent_system_prompt(name: str) -> str:
     """子 Agent 系统提示：维度子 Agent（设计文档 49 §3.7）或候选竞品子 Agent（设计文档 62 §3.2）。
 

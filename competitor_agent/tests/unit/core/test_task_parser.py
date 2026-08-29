@@ -100,11 +100,42 @@ class TestResolutionDecision:
         assert len(result.competitors) == 3
         assert result.is_compare
 
-    def test_llm_bad_resolution_defaults_registry(self):
-        """畸形 resolution → 默认 REGISTRY（不做规则推断）。"""
+    def test_llm_bad_resolution_defaults_chat(self):
+        """设计文档 64 §5.4：畸形 resolution → 默认 CHAT（分类失败缺省落在对话式分支，
+        宁可普通回答也不强造空报告；与 doc 20 的 REGISTRY 默认方向相反）。"""
         result = parse_task(
             "分析 Cursor",
             llm=self._llm({"resolution": "totally-wrong", "competitors": ["cursor"], "dimensions": None, "custom_sources": {}}),
             use_llm=True,
         )
+        assert result.resolution == ResolutionDecision.CHAT
+
+    def test_llm_chat_sets_is_chat(self):
+        result = parse_task(
+            "今天天气怎么样",
+            llm=self._llm({"resolution": "chat", "competitors": [], "dimensions": None, "custom_sources": {}}),
+            use_llm=True,
+        )
+        assert result.resolution == ResolutionDecision.CHAT
+        assert result.is_chat
+        assert result.competitors == []
+
+    def test_llm_null_custom_sources_no_crash(self):
+        """真实 LLM 常返回 custom_sources: null → 不应崩溃（解析为无用户指定来源）。"""
+        result = parse_task(
+            "分析 Cursor",
+            llm=self._llm({"resolution": "registry", "competitors": ["cursor"], "dimensions": None, "custom_sources": None}),
+            use_llm=True,
+        )
+        assert result.custom_sources == {}
         assert result.resolution == ResolutionDecision.REGISTRY
+
+    def test_llm_custom_sources_filters_empty(self):
+        """custom_sources 含空键/空值 → 过滤，不产出空串条目。"""
+        result = parse_task(
+            "分析 Cursor",
+            llm=self._llm({"resolution": "registry", "competitors": ["cursor"], "dimensions": None,
+                           "custom_sources": {"home": "https://cursor.com", "": "https://x.com", "pricing": ""}}),
+            use_llm=True,
+        )
+        assert result.custom_sources == {"home": "https://cursor.com"}

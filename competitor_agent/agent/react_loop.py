@@ -68,6 +68,7 @@ class ReactLoop:
         pinned_facts: list[str] | None = None,  # 设计文档 56 M2：已核验事实共享列表（压缩时重建 pinned 段）
         on_step: Callable[[dict], None] | None = None,  # transcript 捕获外的附加回调（pinned 收集等）
         stream_sink: Callable[[StreamDelta], None] | None = None,  # 设计文档 63 §5.5：仅 Lead 流式旁路
+        final_as_payload: bool = True,  # 设计文档 64 §5.2：对话式分支 False → 最终文本走 Stream 通道
     ) -> None:
         self._agent = agent
         self._max_steps = max_steps
@@ -85,6 +86,7 @@ class ReactLoop:
         self._pinned_facts = pinned_facts
         self._on_step = on_step
         self._stream_sink = stream_sink
+        self._final_as_payload = final_as_payload  # 设计文档 64 §5.2：对话式分支 False
         self.plan: dict | None = None  # make_plan 结果（供报告组装/记忆写侧）
         # 设计文档 62 §3.5：facade 装配侧挂载（非构造参数）——delegate 线程池与候选结果收集器
         self._delegate_runner: Any = None
@@ -120,6 +122,7 @@ class ReactLoop:
                 on_step=self._transcript_sink(result),
                 pinned_facts=self._pinned_facts,
                 stream_sink=self._stream_sink,
+                final_as_payload=self._final_as_payload,
             )
             # 取消/预算中断时 ReactAgent 返回"已达最大步数"，此处覆盖为准确终止文案
             if result.cancelled:

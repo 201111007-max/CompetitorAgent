@@ -59,3 +59,18 @@ class ComparisonReport:
     reports: list[CompetitorReport] = field(default_factory=list)
     markdown_report: str = ""
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
+@dataclass
+class ChatResult:
+    """对话式分支产物（设计文档 64 §5）：无报告面板，答案经 Stream 通道（text_delta）呈现。
+
+    ``answer`` 为 Lead 对话式 Final Answer（自由 prose，非 REPORT_SCHEMA JSON）。
+    ``transcript``/``terminal_state``/``cancelled`` 沿用 ReAct 运行结果语义。
+    """
+
+    answer: str = ""
+    transcript: list[dict] = field(default_factory=list)
+    terminal_state: str = "success"
+    cancelled: bool = False
+    session_id: str = ""

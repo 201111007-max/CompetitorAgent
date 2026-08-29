@@ -134,8 +134,7 @@ button.danger { background: var(--err); }
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--surface-2);
-}
-.thinking summary {
+}.thinking summary {
   padding: 4px 10px;
   cursor: pointer;
   font-size: 12px;
@@ -147,13 +146,14 @@ button.danger { background: var(--err); }
   font-size: 12px;
   line-height: 1.6;
   color: var(--text-dim);
-  white-space: pre-wrap;
-  word-break: break-word;
+  white-space: pre-wrap;  word-break: break-word;
 }
 
+/* 正文分段（设计文档 64 §4：text 段各自成块，与思考段按到达顺序交错） */
+.text-seg { margin: 4px 0; }
+
 /* 工具折叠行（发现候选等） */
-.tools { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
-.tool {
+.tools { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }.tool {
   font-size: 12px;
   padding: 3px 8px;
   border-radius: 6px;
