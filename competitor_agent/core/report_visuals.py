@@ -268,7 +268,6 @@ def render_radar(
         logger.warning("雷达图渲染跳过（matplotlib 不可用）: %s", exc)
         return None
 
-    confidences = {r.dimension: float(r.confidence or 0.0) for r in report.reports}
     dims = _RADAR_DIMENSIONS
     # 六维角度用纯标准库计算（避免 numpy 局部导入触发 mypy 内部崩溃；matplotlib 仍可选依赖）
     angles = [2 * math.pi * i / len(dims) for i in range(len(dims))]
@@ -278,6 +277,8 @@ def render_radar(
     ax: Any = None
     fig, ax = plt.subplots(figsize=(6, 6), subplot_kw={"polar": True})
     for r in report.reports:
+        # 每个竞品：维度结果 → 六维置信度
+        confidences = {dr.dimension: float(dr.confidence or 0.0) for dr in r.dimension_results}
         values = [confidences.get(d, 0.0) for d in dims]
         values += values[:1]
         ax.plot(angles, values, label=r.competitor.name)
