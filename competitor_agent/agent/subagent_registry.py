@@ -23,9 +23,11 @@ logger = get_logger("agent.subagent_registry")
 _SUBAGENT_TOOLS: dict[str, list[str]] = {
     "pricing": ["web_extract", "web_search", "analyze_pricing"],
     "feature": ["web_extract", "web_search"],
-    "performance": ["web_extract", "web_search"],
+    # 设计文档 67 §2.1：performance 加结构化榜单直连工具（替代 LLM 读网页）
+    "performance": ["web_extract", "web_search", "benchmark_scores"],
     "ecosystem": ["web_extract", "web_search", "github_stars", "github_releases", "github_commits"],
-    "sentiment": ["web_extract", "web_search"],
+    # 设计文档 67 §2.2：sentiment 加结构化采样工具（带样本量/时间窗）
+    "sentiment": ["web_extract", "web_search", "sentiment_sampling"],
     "roadmap": ["web_extract", "web_search", "github_releases", "github_commits"],
 }
 

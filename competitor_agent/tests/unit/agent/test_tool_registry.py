@@ -29,7 +29,7 @@ class TestRegistryConsistency:
 
     def test_tool_count_matches_tools(self):
         d = build_react_dispatcher(config=_config())
-        assert d.tool_count == len(TOOLS) == len(TOOL_SPECS) == 8
+        assert d.tool_count == len(TOOLS) == len(TOOL_SPECS) == 10
 
     def test_all_tool_names_registered(self):
         d = build_react_dispatcher(config=_config())

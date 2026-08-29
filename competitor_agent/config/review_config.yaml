@@ -57,6 +57,12 @@ collector:
   # 不落盘；未配 Key/未启用 → 降级不编造。配合 enable_external_sources 主开关门控。
   search_provider: "tavily"
   search_max_results: 8
+  # 榜单结构化直连（设计文档 67 §2.1）：swebench | terminalbench | aider / 空=不启用。
+  # 配合 enable_external_sources 主开关；performance 维度子 Agent 工具面自动加 benchmark_scores。
+  benchmark_provider: ""
+  # 舆情采样源（设计文档 67 §2.2）：hackernews | reddit / 空=不启用。
+  # sentiment 维度子 Agent 工具面自动加 sentiment_sampling（带样本量/时间窗）。
+  sentiment_provider: ""
 
 # ===== 记忆 =====
 memory:
@@ -73,6 +79,12 @@ report:
   output_dir: "~/.competitor_agent/reports/competitor"   # 仓库外，避免写入工作树
   export_json: true          # 结构化 JSON 导出（设计文档 28），与 .md 同目录同名
   comparison_dir: "~/.competitor_agent/reports/comparison"   # 比较报告品类矩阵 JSON 目录
+  # 产品化闭环（设计文档 67 §3）：HTML 自包含分享 + 审批门 + 告警推送
+  export_html: false         # 报告落盘后自动导出单文件自包含 HTML（§3.1，可选触发）
+  approval_enabled: true     # human-in-the-loop 审批门（§3.2）：触发规则 → pending_review
+  approval_low_confidence_threshold: 0.4   # 任一维度 PARTIAL / 整体低置信触发阈值
+  alert_webhooks: []         # 告警推送 webhook 列表（§3.3，企业微信/钉钉/飞书机器人 URL）
+  alert_email: {}            # 邮件推送（host/port/from/to；空 = 不启用）
 
 # ===== 新鲜度 / 陈旧度（设计文档 26）=====
 freshness:
@@ -105,6 +117,15 @@ agent:
 # 迭代次数限制已移除（Lead max_steps=None 无限循环，靠 LLM 自然收敛 Final Answer）
 lead:
   max_history_steps: 12         # Lead 上下文压缩保留步数（透传 ReactAgent._compress_history）
+
+# ===== 内置调度器 + 周报（设计文档 67 §2.3）=====
+# 外部 cron 仍可用（cli schedule 已是 cron 入口）；内置调度器为可选补充，二者互斥由配置决定。
+schedule:
+  enabled: false               # Web 启动时自动 start() 内置调度器
+  interval_hours: 24           # interval 模式唤醒间隔（小时）
+  cron_expr: ""                # cron 模式（minute hour day month weekday），优先于 interval
+  weekly_window_days: 7        # 周报聚合窗口（天）
+  weekly_report: false         # run_scheduled 末尾是否触发周报聚合（<data_dir>/reports/weekly/）
 
 # ===== 可观测性 =====
 observability:

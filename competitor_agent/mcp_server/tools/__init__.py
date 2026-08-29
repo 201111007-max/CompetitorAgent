@@ -17,6 +17,7 @@ from typing import Any, Callable
 
 from competitor_agent.agent.tool_dispatcher import ToolSpec
 from competitor_agent.mcp_server.tools.benchmark_tools import (
+    benchmark_scores,
     run_benchmark,
 )
 from competitor_agent.mcp_server.tools.github_tools import (
@@ -29,6 +30,9 @@ from competitor_agent.mcp_server.tools.pricing_tools import (
 )
 from competitor_agent.mcp_server.tools.review_tools import (
     analyze_competitor,
+)
+from competitor_agent.mcp_server.tools.sentiment_tools import (
+    sentiment_sampling,
 )
 from competitor_agent.mcp_server.tools.web_tools import (
     web_extract,
@@ -43,6 +47,8 @@ TOOLS: dict[str, Callable[..., str]] = {
     "github_releases": github_releases,
     "github_commits": github_commits,
     "run_benchmark": run_benchmark,
+    "benchmark_scores": benchmark_scores,
+    "sentiment_sampling": sentiment_sampling,
     "analyze_competitor": analyze_competitor,
 }
 
@@ -92,6 +98,16 @@ TOOL_SPECS: dict[str, ToolSpec] = {
         description="运行竞品分析评测基准（字段准确率/幻觉率/工具选择准确率）",
         params_schema={"type": "object", "properties": {}},
     ),
+    "benchmark_scores": ToolSpec(
+        "benchmark_scores", benchmark_scores,
+        description="查询结构化榜单分数（SWE-bench / Terminal-Bench / Aider 官方榜单直连，替代 LLM 读网页）",
+        params_schema=_schema({}, {"benchmark": "string"}),
+    ),
+    "sentiment_sampling": ToolSpec(
+        "sentiment_sampling", sentiment_sampling,
+        description="采样竞品相关舆情（HackerNews/Reddit 结构化源，带样本量与时间窗）",
+        params_schema=_schema({"competitor": "string"}, {"platform": "string"}),
+    ),
     "analyze_competitor": ToolSpec(
         "analyze_competitor", analyze_competitor,
         description="综合分析一个竞品（采集→分析→报告全流程）",
@@ -104,10 +120,12 @@ __all__ = [
     "TOOL_SPECS",
     "analyze_competitor",
     "analyze_pricing",
+    "benchmark_scores",
     "github_commits",
     "github_releases",
     "github_stars",
     "run_benchmark",
+    "sentiment_sampling",
     "web_extract",
     "web_search",
 ]

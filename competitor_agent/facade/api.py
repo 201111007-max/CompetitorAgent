@@ -46,8 +46,13 @@ from competitor_agent.agent.tool_dispatcher import ToolSpec
 from competitor_agent.agent.tool_registry import build_react_dispatcher
 from competitor_agent.collector.web_extractor import WebExtractor
 from competitor_agent.config.loader import AppConfig, load_config
-from competitor_agent.core.alerting import Alert, AlertSink, ConsoleAlertSink
+from competitor_agent.core.alerting import (
+    Alert,
+    AlertSink,
+    build_composite_sink,
+)
 from competitor_agent.core.alerting import report_diff as _diff_to_alerts
+from competitor_agent.core.approval_gate import ApprovalPolicy, decide_approval
 from competitor_agent.core.budget_controller import BudgetController
 from competitor_agent.core.checkpoint import (
     checkpoint_to_report,
@@ -192,6 +197,11 @@ class CompetitorAnalysisAPI:
         self._budget = BudgetController(max_iterations=max_iterations)
         # 竞品时间线记忆（设计文档 26 §3.4）：跨分析 diff，独立于四层记忆
         self._timeline = timeline or TimelineMemory()
+        # human-in-the-loop 审批门（设计文档 67 §3.2）：触发规则 → 报告 JSON 标 pending_review
+        self._approval_enabled = bool(cfg.report.approval_enabled)
+        self._approval_policy = ApprovalPolicy(
+            low_confidence_threshold=cfg.report.approval_low_confidence_threshold
+        )
 
         # RAG 知识库：分析后摄入 + Lead/子 Agent 检索注入（外部事实依据，降低幻觉）
         # enable_rag=False：不组装知识库，Lead/子 Agent 对 None 走"跳过检索"路径
@@ -400,9 +410,16 @@ class CompetitorAnalysisAPI:
                 cancelled=True,
             )
         # 分析正常完成：记录时间线 diff + 归档带新鲜度的会话（设计文档 26）
-        self._record_timeline(report)
+        # 设计文档 67 §3.2：diff 事件 + 新增竞品判定喂审批门 → 报告 JSON status 字段
+        is_new_competitor = self._timeline.report_for(report.competitor.name) is None
+        timeline_events = self._record_timeline(report)
         self._archive_report(report, task, sid)
-        self._export_competitor_json(report, sid)
+        self._export_competitor_json(
+            report,
+            sid,
+            timeline_events=timeline_events,
+            is_new_competitor=is_new_competitor,
+        )
         delete_checkpoint(sid)
         close_session_log(sid)
         self._emit(
@@ -523,17 +540,21 @@ class CompetitorAnalysisAPI:
         """竞品时间线记忆（设计文档 26）：跨分析 diff 的事件仓库。"""
         return self._timeline
 
-    def _record_timeline(self, report: CompetitorReport) -> None:
-        """记录竞品时间线 diff（设计文档 26 §3.4），并把事件段落追加进 Markdown。"""
+    def _record_timeline(self, report: CompetitorReport) -> list[Any]:
+        """记录竞品时间线 diff（设计文档 26 §3.4），并把事件段落追加进 Markdown。
+
+        返回本次 diff 事件列表（设计文档 67 §3.2 审批门消费）；失败仅告警返回空。
+        """
         try:
             events = self._timeline.update(report)
         except Exception:  # 时间线记录失败不影响主流程，仅告警
             logger.warning("时间线记录失败: %s", report.competitor.name, exc_info=True)
-            return
+            return []
         if events:
             section = self._builder.render_timeline(events)
             if section:
                 report.markdown_report = report.markdown_report.rstrip() + "\n\n" + section + "\n"
+        return events
 
     def _archive_report(self, report: CompetitorReport, task: str, session_id: str) -> None:
         """归档会话（统一 raw schema + freshness 元数据 + 定价画像），
@@ -570,16 +591,35 @@ class CompetitorAnalysisAPI:
             )
         )
 
-    def _export_competitor_json(self, report: CompetitorReport, session_id: str) -> Path | None:
+    def _export_competitor_json(
+        self,
+        report: CompetitorReport,
+        session_id: str,
+        *,
+        timeline_events: list[object] | None = None,
+        is_new_competitor: bool = False,
+    ) -> Path | None:
         """设计文档 28：config.report.export_json 开启时导出 <data_dir>/reports/competitor/<竞品>.json。
 
         结构化副本与 .md 同目录同名；成功后在报告正文末尾追加"已导出 JSON 路径"提示。
+        设计文档 67 §3.1/§3.2：审批门决定 JSON ``status``（触发规则 → pending_review）；
+        ``report.export_html`` 开启时追加导出单文件自包含 HTML。
         失败仅告警不影响主流程；成功返回落盘路径。
         """
         if not self._config.report.export_json:
             return None
         try:
-            path = export_competitor_json(report, self._config.report.output_dir)
+            approval_status = (
+                decide_approval(
+                    report,
+                    timeline_events=timeline_events,
+                    is_new_competitor=is_new_competitor,
+                    policy=self._approval_policy,
+                )
+                if self._approval_enabled
+                else "approved"
+            )
+            path = export_competitor_json(report, self._config.report.output_dir, approval_status=approval_status)
         except Exception:
             logger.warning("JSON 导出失败（竞品: %s）: ", report.competitor.name, exc_info=True)
             return None
@@ -589,6 +629,25 @@ class CompetitorAnalysisAPI:
                 report.markdown_report = report.markdown_report.rstrip() + "\n" + note
         except Exception:
             logger.warning("竞品 JSON 导出提示追加失败: %s", report.competitor.name, exc_info=True)
+        if self._config.report.export_html:
+            self._export_competitor_html(report)
+        return path
+
+    def _export_competitor_html(self, report: CompetitorReport) -> Path | None:
+        """设计文档 67 §3.1：报告落盘后导出单文件自包含 HTML（report.export_html 开启）。"""
+        try:
+            from competitor_agent.core.report_visuals import render_html
+
+            path = render_html(report)
+        except Exception:
+            logger.warning("HTML 导出失败（竞品: %s）: ", report.competitor.name, exc_info=True)
+            return None
+        try:
+            note = f"\n> 可分享 HTML 已导出: `{path}`\n"
+            if report.markdown_report and note.strip() not in report.markdown_report:
+                report.markdown_report = report.markdown_report.rstrip() + "\n" + note
+        except Exception:
+            logger.warning("竞品 HTML 导出提示追加失败: %s", report.competitor.name, exc_info=True)
         return path
 
     def _export_comparison_json(self, report: ComparisonReport) -> Path | None:
@@ -625,8 +684,12 @@ class CompetitorAnalysisAPI:
         - 单竞品失败不回滚整体。
 
         调用时机由外部调度器（cron）控制，本方法只保证"过期才重爬"语义。
+
+        设计文档 67 §2.3.2/§3.3：未显式传 ``alert_sink`` 时按配置组装复合 sink
+        （FileAlertSink + webhook 推送 + 可选邮件）；末尾按 ``schedule.weekly_report``
+        触发周报聚合（本周变化跨竞品产物）。
         """
-        sink = alert_sink or ConsoleAlertSink()
+        sink = alert_sink or self._build_alert_sink()
         names = list(competitors) if competitors else self._tracked_competitors()
         if not names:
             return []
@@ -659,7 +722,41 @@ class CompetitorAnalysisAPI:
                     payload={"competitor": name},
                 )
             )
+        if refreshed and self._config.schedule.weekly_report:
+            try:
+                self.build_weekly_report()
+            except Exception:
+                logger.warning("定时轮末尾周报聚合失败（不影响主流程）", exc_info=True)
         return refreshed
+
+    def _build_alert_sink(self) -> AlertSink:
+        """按配置组装复合告警 sink（设计文档 67 §3.3）：文件 + webhook + 可选邮件。"""
+        return build_composite_sink(
+            webhook_urls=self._config.report.alert_webhooks,
+            email=dict(self._config.report.alert_email or {}),
+        )
+
+    def build_weekly_report(self) -> tuple[Path, Path]:
+        """设计文档 67 §2.3.2：跨竞品周报聚合（本周变化），返回 (md, json) 落盘路径。
+
+        数据源：<data_dir>/reports/competitor/*.json + TimelineMemory + 时间窗过滤；
+        审批门（§3.2）：含 high-impact 项（价格/榜单/新增竞品）→ 周报 JSON 标
+        ``pending_review``，否则 ``approved``。
+        """
+        from competitor_agent.core.approval_gate import decide_weekly_approval
+        from competitor_agent.core.weekly_report import WeeklyReportBuilder
+
+        builder = WeeklyReportBuilder(
+            reports_dir=self._config.report.output_dir,
+            window_days=self._config.schedule.weekly_window_days,
+        )
+        data = builder.build()
+        data["status"] = (
+            decide_weekly_approval(data, self._approval_policy)
+            if self._approval_enabled
+            else "approved"
+        )
+        return builder.write(data)
 
     def _tracked_competitors(self) -> list[str]:
         """归档里的跟踪竞品（每个竞品取最新会话，跳过 " / " 的聚合/对比会话）。"""
