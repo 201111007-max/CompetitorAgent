@@ -31,6 +31,8 @@ class TestSaveReportMarkdown:
         cfg = AppConfig()
         cfg.report.output_dir = str(tmp_path / "reports" / "competitor")
         monkeypatch.setattr(ra, "load_config", lambda: cfg)
+        # 设计文档 70：resolve_output_dir 优先级 settings > yaml；隔离真实 settings.json
+        monkeypatch.setattr(ra, "get_setting", lambda *a, **k: "")
         path = ra.save_report_markdown(_report())
         assert path.exists()
         assert path.parent == tmp_path / "reports" / "competitor"

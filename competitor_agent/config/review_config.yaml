@@ -48,7 +48,7 @@ collector:
   user_agent: "competitor-agent/0.1"
   # 外部源多源路由（设计文档 23）：默认关闭，保证无网络/无 Key 测试与 benchmark 不触发真实网络。
   # 有网络/Key 的真实运行环境打开 enable_external_sources 即可启用 GitHub/插件市场等外部源。
-  enable_external_sources: false
+  enable_external_sources: true
   enable_github: true
   enable_marketplace: true
   enable_community: true
@@ -76,7 +76,10 @@ memory:
 report:
   include_confidence: true
   include_evidence_urls: true
-  output_dir: "~/.competitor_agent/reports/competitor"   # 仓库外，避免写入工作树
+  # 设计文档 70：output_dir 置空 = 项目默认 <项目根>/output（Web /api/settings 可改，
+  # 持久化 <data_dir>/settings.json；优先级 显式 > settings > yaml > 项目默认）。
+  output_dir: ""   # 空 = 项目 output/（旧值 ~/.competitor_agent/reports/competitor 读侧回退不迁移）
+  lead_formatted_body: true   # 设计文档 70 M1：Lead 两段式 Final Answer（正文+JSON），关则全回退模板
   export_json: true          # 结构化 JSON 导出（设计文档 28），与 .md 同目录同名
   comparison_dir: "~/.competitor_agent/reports/comparison"   # 比较报告品类矩阵 JSON 目录
   # 产品化闭环（设计文档 67 §3）：HTML 自包含分享 + 审批门 + 告警推送

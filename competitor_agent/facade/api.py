@@ -70,6 +70,7 @@ from competitor_agent.core.report_exporter import (
     export_comparison_json,
     export_competitor_json,
 )
+from competitor_agent.core.reuse_dimensions import reuse_dimension_results
 from competitor_agent.core.task_parser import ResolutionDecision, parse_task
 from competitor_agent.core.url_guard import URLError, guard_http_url
 from competitor_agent.domain_types.competitor import Competitor
@@ -999,6 +1000,8 @@ class CompetitorAnalysisAPI:
             "aggregate_report": make_aggregate_tool(),
             # 设计文档 56 M1①：Lead kb_recall（competitor 懒绑定，plan 落地前全局检索）
             "kb_recall": self._build_kb_recall(_lead_competitor_now),
+            # 设计文档 70 M3：复用未过期历史维度结果（need_history/补缺维度时 Lead 自调）
+            "reuse_dimension_results": reuse_dimension_results,
         }
         if self._config.tools.validate_facts:
             extra_tools["validate_facts"] = build_validate_facts_tool()

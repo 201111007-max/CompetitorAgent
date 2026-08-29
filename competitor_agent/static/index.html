@@ -20,9 +20,14 @@
         </svg>
         <span class="rail-title">INTEL · CASE FILE</span>
       </div>
-      <button id="rail-close" class="icon-btn" aria-label="收起报告库">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg>
-      </button>
+      <div class="rail-head-actions">
+        <button id="settings-btn" class="icon-btn" aria-label="报告目录设置" title="报告目录设置">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+        </button>
+        <button id="rail-close" class="icon-btn" aria-label="收起报告库">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg>
+        </button>
+      </div>
     </div>
 
     <div class="rail-actions">
@@ -63,6 +68,40 @@
         <button id="send-btn" class="btn primary">发送</button>
       </div>
     </footer>
+  </div>
+
+  <!-- 设置面板（设计文档 70：报告保存/下载目录运行时配置） -->
+  <div id="settings-modal" class="modal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <div class="modal-head">
+        <h2 id="settings-title" class="modal-title">报告目录设置</h2>
+        <button id="settings-close" class="icon-btn" aria-label="关闭设置">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg>
+        </button>
+      </div>
+      <p class="settings-note">报告保存默认到项目 <code>output/</code>，下载默认到项目 <code>download/</code>。留空 = 默认。</p>
+      <div class="settings-row">
+        <label class="settings-label" for="set-output">报告保存目录</label>
+        <div class="settings-field">
+          <input id="set-output" class="settings-input" placeholder="项目 output/" autocomplete="off" spellcheck="false">
+          <button id="set-output-pick" class="btn ghost sm" type="button">选择…</button>
+        </div>
+      </div>
+      <div class="settings-row">
+        <label class="settings-label" for="set-download">下载目录</label>
+        <div class="settings-field">
+          <input id="set-download" class="settings-input" placeholder="项目 download/" autocomplete="off" spellcheck="false">
+          <button id="set-download-pick" class="btn ghost sm" type="button">选择…</button>
+        </div>
+      </div>
+      <p id="settings-hint" class="settings-hint"></p>
+      <div class="modal-actions">
+        <button id="settings-reset" class="btn ghost" type="button">重置为默认</button>
+        <span class="spacer"></span>
+        <button id="settings-cancel" class="btn ghost" type="button">取消</button>
+        <button id="settings-save" class="btn primary" type="button">保存</button>
+      </div>
+    </div>
   </div>
 </div>
 <script src="/static/vendor/marked.min.js"></script>

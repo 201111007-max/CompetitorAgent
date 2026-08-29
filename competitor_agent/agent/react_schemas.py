@@ -44,6 +44,12 @@ PLAN_SCHEMA: dict[str, Any] = {
                 "reason": {"type": "string"},
             },
         },
+        # 设计文档 70 M2 规划层意图/格式决策（全可选，只定调不强制）：
+        # output_intent = 给谁看/目的（CTO 选型/投资人/自己备忘…）；format_hint = 问题类型定调
+        # （对比型/深度单体型/变化追踪型/开放型）；need_history = 是否需要检索历史（"和上次比变化"类）。
+        "output_intent": {"type": "string"},
+        "format_hint": {"type": "string"},
+        "need_history": {"type": "boolean"},
     },
 }
 

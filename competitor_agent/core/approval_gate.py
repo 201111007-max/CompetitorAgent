@@ -134,11 +134,24 @@ def set_report_status(
 
 
 def report_json_path(competitor: str, output_dir: str | Path | None = None) -> Path:
-    """解析竞品报告 JSON 落盘路径（与 export_competitor_json 命名一致）。"""
+    """解析竞品报告 JSON 落盘路径（与 export_competitor_json 命名一致）。
+
+    设计文档 70：新目录优先；未显式指定目录时旧归档
+    （~/.competitor_agent/reports/competitor）读侧回退（历史报告 JSON 审批状态不丢）。
+    显式 output_dir → 精确路径，不回退。均不存在 → 返回新目录路径（由调用方 404/缺省）。
+    """
     from competitor_agent.core.report_archiver import _safe_filename, resolve_output_dir
 
-    out_dir = resolve_output_dir(output_dir)
-    return out_dir / (_safe_filename(competitor) + ".json")
+    primary = resolve_output_dir(output_dir) / (_safe_filename(competitor) + ".json")
+    if primary.exists():
+        return primary
+    if output_dir is None:
+        legacy = Path("~/.competitor_agent/reports/competitor").expanduser() / (
+            _safe_filename(competitor) + ".json"
+        )
+        if legacy.exists():
+            return legacy
+    return primary
 
 
 __all__ = [

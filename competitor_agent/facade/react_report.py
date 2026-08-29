@@ -43,12 +43,25 @@ def assemble(
     transcript: list[dict] | None = None,
     builder: Any | None = None,
     terminal_state: str = "success",
+    use_lead_body: bool | None = None,
 ) -> CompetitorReport:
-    """把 Lead Final Answer 组装为 CompetitorReport。"""
+    """把 Lead Final Answer 组装为 CompetitorReport。
+
+    设计文档 70 M1：Final Answer 两段式——①报告正文（Markdown，给人读）②结构化
+    REPORT_SCHEMA JSON（给机器用）。``_split_body_and_payload`` 把两者拆开：
+    ``markdown_report = body or 模板``（body 为空 → ``MarkdownRenderer`` 模板保底，
+    mock 纯 JSON 输出确定性不变、既有模板断言零改动）；``dimension_results`` 仍从
+    payload 解析（现状不变）。``use_lead_body=None`` 时取
+    ``config.report.lead_formatted_body``（默认开，见设计文档 70 §7 #1）。
+    """
     from competitor_agent.core.report_builder import ReportBuilder
 
     builder = builder or ReportBuilder()
-    payload = _parse_report(lead_answer)
+    if use_lead_body is None:
+        from competitor_agent.config.loader import load_config
+
+        use_lead_body = load_config().report.lead_formatted_body
+    body, payload = _split_body_and_payload(lead_answer)
     if payload is None:
         return _fallback_single_dimension(lead_answer, competitor, builder, terminal_state, loop_plan)
 
@@ -92,9 +105,25 @@ def assemble(
         gaps_pending=gaps_pending,
         terminal_state=terminal_state,
     )
+    # 设计文档 70 M1：正文优先（body 非空 → 用 Lead 生成正文，模板仅保底）
+    if use_lead_body and body:
+        report.markdown_report = body
     if conflict_note and report.markdown_report:
         report.markdown_report = report.markdown_report.rstrip() + "\n\n" + conflict_note
     return report
+
+
+def _split_body_and_payload(lead_answer: str) -> tuple[str, dict[str, Any] | None]:
+    """把 Lead Final Answer 拆成 (正文 body, 结构化 payload)（设计文档 70 M1）。
+
+    - ``body``：剔除 JSON 块后的纯散文（复用 doc 65 ``_strip_json_blocks`` 防残留）；
+    - ``payload``：REPORT_SCHEMA JSON（复用 ``_parse_report`` 括号配平提取 + 无 dimensions
+      的兜底单 react 维度）。
+    mock LLM 无正文（纯 JSON）→ body 空 → 模板保底（既有断言零改动）。
+    """
+    body = _strip_json_blocks(lead_answer or "")
+    payload = _parse_report(lead_answer)
+    return body, payload
 
 
 def _parse_report(answer: str) -> dict[str, Any] | None:
@@ -221,12 +250,14 @@ def _parse_json_candidate(candidate: str) -> dict[str, Any] | None:
 def _looks_like_json_block(candidate: str) -> bool:
     """判定一块 ``{...}`` 是否"像报告 JSON dump"（设计文档 66 §3.3）。
 
-    仅对含 ``"competitor"`` 或 ``"dimensions"`` 报告键的平衡块强制剔除——即使
-    ``json.loads`` 失败（模型手滑畸形）也按 dump 处理；普通散文花括号不受影响。
+    仅对含报告/对比 JSON 关键键（``competitor``/``competitors``/``dimensions``/
+    ``conclusion``/``kind``）的平衡块强制剔除——即使 ``json.loads`` 失败（模型手滑畸形）
+    也按 dump 处理；普通散文花括号不受影响。``conclusion``/``kind``/``competitors``
+    为设计文档 70 M1 对比 JSON（aggregate_report 聚合结论）的键。
     """
     if not candidate.startswith("{"):
         return False
-    for key in ("competitor", "dimensions"):
+    for key in ("competitor", "competitors", "dimensions", "conclusion", "kind"):
         if f'"{key}"' in candidate:
             return True
     return False
