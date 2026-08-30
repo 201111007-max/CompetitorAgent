@@ -5,8 +5,17 @@ enrich_prompt()：把记忆片段（技能 + 历史教训 + 检索到的知识�
 """
 from __future__ import annotations
 
+import logging
+
 from competitor_agent.agent.prompts.trust_boundary import wrap_untrusted
 from competitor_agent.interfaces.context import Skill
+
+logger = logging.getLogger(__name__)
+
+# 设计文档 72：Agent.md（类 CLAUDE.md 项目级常驻指令）有界约束
+_MAX_AGENT_MD_LINES = 40  # 建议行数上限，超出 Warning（防膨胀稀释注意力）
+_MAX_AGENT_MD_CHARS = 4000  # 硬字符上限（截断）
+_DEFAULT_AGENT_MD_VERSION = "1.0.0"  # 内置资产版本，覆盖层版本漂移时 Warning
 
 _TWO_STEP_WEB_PROMPT = """\
 ## 联网工具用法（两次调用原则）
@@ -37,6 +46,7 @@ _PURE_SEARCH_WEB_PROMPT = """\
 def _web_tool_section(fetch_enabled: bool) -> str:
     """联网工具用法段（设计文档 71 §8）：按 fetch_enabled 选版（版本一/版本二）。"""
     return _TWO_STEP_WEB_PROMPT if fetch_enabled else _PURE_SEARCH_WEB_PROMPT
+
 
 # 设计文档 71 §8.4：各 format_hint 型的"报告结构脚手架"，两阶段任务适配阶段二注入。
 # format_hint 已经 normalize_format_hint 归一为枚举（compare/deep_single/trend_tracking/open），
@@ -97,6 +107,7 @@ def build_report_phase2_section(plan: object | None) -> str | None:
         parts.append(_comparison_reasoning_section())
     return "\n\n".join(parts) if parts else None
 
+
 def _fetch_enabled_from_config() -> bool:
     """读取抓取层开关（纯搜索模式判定）；配置异常按启用处理（提示词不因缺配置塌）。"""
     try:
@@ -105,6 +116,39 @@ def _fetch_enabled_from_config() -> bool:
         return bool(load_config().collector.fetch_enabled)
     except Exception:  # noqa: BLE001 - 无配置环境按启用处理
         return True
+
+
+def _agent_md_section() -> str:
+    """Agent.md 项目级常驻指令段（设计文档 72 §4/§5）。
+
+    从 ``assets/Agent.md``（PROMPTS_DIR 可覆盖）渲染，缺失/坏/渲染异常 → 空串（不炸，
+    现状逐字节不变 → 黄金回归安全）；有界（行数上限 Warning + 字符硬截断）。
+    """
+    try:
+        from competitor_agent.agent.prompts.loader import get_prompt_asset
+
+        asset = get_prompt_asset()
+        body = asset.render("Agent")
+    except Exception:  # noqa: BLE001 - 缺/坏资产按空串降级
+        return ""
+    if not body:
+        return ""
+    version = asset.version("Agent")
+    if version and version != _DEFAULT_AGENT_MD_VERSION:
+        logger.warning(
+            "Agent.md 版本漂移：内置 %s，当前覆盖 %s（项目级指令可能已变化）",
+            _DEFAULT_AGENT_MD_VERSION,
+            version,
+        )
+    if len(body.splitlines()) > _MAX_AGENT_MD_LINES:
+        logger.warning("Agent.md 超出建议行数上限 %s 行", _MAX_AGENT_MD_LINES)
+    return body[:_MAX_AGENT_MD_CHARS]
+
+
+def _with_agent_md(prompt: str) -> str:
+    """把 Agent.md 段追加在角色引导尾部（空段时原样返回，黄金回归安全）。"""
+    md = _agent_md_section()
+    return f"{prompt}\n\n{md}" if md else prompt
 
 
 def build_react_system_prompt(instructions: str = "") -> str:
@@ -143,7 +187,7 @@ def build_lead_system_prompt() -> str:
         "你是竞品情报分析的 Lead Agent，负责规划并编排一次竞品分析。\n"
         "第一步必须调用 make_plan 工具规划分析策略（competitor/dimensions/budget/custom_sources），"
         "并在规划里按需填写：output_intent（给谁看/目的：CTO 选型/投资人/自己备忘…）、"
-        "format_hint（问题类型定调：对比型/深度单体型/变化追踪型/开放型）、"
+        "format_hint（问题类型定调，用枚举值：compare / deep_single / trend_tracking / open）、"
         "need_history（是否需要检索历史——「和上次比变化」类问题置 true）；"
         "不得先调用其他工具或直接给出 Final Answer。\n"
         "规划完成后你可自主：\n"
@@ -177,7 +221,9 @@ def build_lead_system_prompt() -> str:
         "roadmap→events。正文与 JSON 都要给全，两者缺一不可。"
     )
     header += "\n\n" + _web_tool_section(_fetch_enabled_from_config())
-    return _with_skills(header, ["planning", "fact_verification", "confidence_disclosure"])
+    return _with_agent_md(
+        _with_skills(header, ["planning", "fact_verification", "confidence_disclosure"])
+    )
 
 
 def build_chat_system_prompt() -> str:
@@ -186,7 +232,7 @@ def build_chat_system_prompt() -> str:
     与 ``build_lead_system_prompt`` 相对：不强制 make_plan、不要求 REPORT_SCHEMA JSON，
     模型以自由 prose 直接回答；仍可携带 Thinking 折叠块仅供决策透明（§5.4）。
     """
-    return (
+    return _with_agent_md(
         "你是竞品情报 Agent 的对话助手。用户没有要求竞品分析报告，请用自然、简洁的"
         "中文直接回答用户的问题。\n"
         "不要输出 JSON、不要声明维度/置信度、不要生成结构化报告面板。\n"
@@ -207,19 +253,19 @@ def build_subagent_system_prompt(name: str) -> str:
     cfg = registry.get(name)
     if cfg is not None and cfg.name == "competitor":
         # 显式委派通用 competitor 命名空间：按候选竞品名出整竞品 schema
-        return _build_competitor_prompt(name, cfg)
+        return _with_agent_md(_build_competitor_prompt(name, cfg))
     if cfg is None:
         cfg = registry.resolve(name)  # 候选竞品名 → competitor 配置
         if cfg is not None and cfg.name == "competitor":
-            return _build_competitor_prompt(name, cfg)
+            return _with_agent_md(_build_competitor_prompt(name, cfg))
         desc = f"分析竞品的 {name} 维度。"
         skills = [f"{name}_analysis"]
         header = _dimension_header(name, desc)
-        return _with_skills(header, skills)
+        return _with_agent_md(_with_skills(header, skills))
     desc = cfg.system_prompt
     skills = list(cfg.skills)
     header = _dimension_header(name, desc)
-    return _with_skills(header, skills)
+    return _with_agent_md(_with_skills(header, skills))
 
 
 def _dimension_header(name: str, desc: str) -> str:
