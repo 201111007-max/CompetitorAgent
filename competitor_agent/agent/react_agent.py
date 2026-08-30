@@ -84,7 +84,7 @@ class ReactAgent:
         obs_max_chars: int | None = None,
         max_history_steps: int | None = None,
         mandatory_first_tool: str | None = None,
-        first_tool_sink: Callable[[str], None] | None = None,
+        first_tool_sink: Callable[[str], list[dict[str, str]] | None] | None = None,
         on_step: Callable[[dict], None] | None = None,
         extra_system_messages: list[dict[str, str]] | None = None,
         pinned_facts: list[str] | None = None,
@@ -101,6 +101,9 @@ class ReactAgent:
         step_guard: 每步开始前调用（设计文档 43 取消/预算协作），返回 False 提前终止。
         mandatory_first_tool: 首步强制工具（设计文档 49 plan-first）——第一步必须调用该
             工具，否则回灌"必须先调用 <tool>"；命中后把结果传给 ``first_tool_sink`` 并解除强制。
+        first_tool_sink: 强制工具命中后回调，接收其结果文本；可返回注入消息
+            （list[{"role","content"}]）或 None（设计文档 71 §8.4：make_plan 命中后按 plan
+            注入 report 结构段，回传的注入消息在本工具回合末拼接进消息流）。
         on_step: 每次工具分发后回调（transcript 捕获，设计文档 49 §3.5），携带
             {"tool","args","result_brief","url"} 供记忆写侧。
         extra_system_messages: 附加 system 消息（skill 块注入，设计文档 48）。
@@ -148,7 +151,7 @@ class ReactAgent:
         obs_max_chars: int,
         max_history_steps: int,
         mandatory_first_tool: str | None,
-        first_tool_sink: Callable[[str], None] | None,
+        first_tool_sink: Callable[[str], list[dict[str, str]] | None] | None,
         on_step: Callable[[dict], None] | None,
         extra_system_messages: list[dict[str, str]] | None,
         pinned_facts: list[str] | None,
@@ -226,10 +229,21 @@ class ReactAgent:
 
             results = self._dispatch_in_parallel(reply.tool_calls)
             # 后续 first_tool_sink / on_step / tool 回灌 / 压缩全部遍历 results（原序），逐字节不变
+            phase2_messages: list[dict[str, Any]] = []
             for call, result in results:
                 if call.name == mandatory_first_tool and not first_tool_done:
+                    # first_tool_sink 可返回注入消息（设计文档 71 §8.4 两阶段任务适配：
+                    # make_plan 命中后按 plan 注入 report 结构段），本工具回合末拼接进消息流
                     if first_tool_sink is not None:
-                        first_tool_sink(str(result))
+                        try:
+                            phase2 = first_tool_sink(str(result))
+                        except Exception:
+                            logger.warning(
+                                "native 协议阶段二注入失败（first_tool_sink）", exc_info=True
+                            )
+                            phase2 = None
+                        if phase2:
+                            phase2_messages.extend(phase2)
                     first_tool_done = True
                 if on_step is not None:
                     try:
@@ -242,6 +256,8 @@ class ReactAgent:
                     "tool_call_id": call.id,
                     "content": wrap_untrusted(self._truncate(str(result), obs_max_chars)),
                 })
+            if phase2_messages:
+                messages.extend(phase2_messages)
             messages, summary_lines = self._compress_history(
                 messages, max_history_steps, summary_lines, pinned_facts
             )

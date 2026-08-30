@@ -38,6 +38,64 @@ def _web_tool_section(fetch_enabled: bool) -> str:
     """联网工具用法段（设计文档 71 §8）：按 fetch_enabled 选版（版本一/版本二）。"""
     return _TWO_STEP_WEB_PROMPT if fetch_enabled else _PURE_SEARCH_WEB_PROMPT
 
+# 设计文档 71 §8.4：各 format_hint 型的"报告结构脚手架"，两阶段任务适配阶段二注入。
+# format_hint 已经 normalize_format_hint 归一为枚举（compare/deep_single/trend_tracking/open），
+# 由 build_report_phase2_section(plan) 在 make_plan 之后动态选取。
+_FORMAT_SCAFFOLD: dict[str, str] = {
+    "compare": (
+        "按「维度 × 竞品」横向组织：先给市场格局核心结论（谁在何维度最优/整体胜负/"
+        "替代关系），再逐维度横向并列各竞品并给 best-per-dimension；明确 trade-off 与"
+        "覆盖缺口，不逐家写小传。"
+    ),
+    "deep_single": (
+        "聚焦单一竞品深挖：结论先行 → 分维度展开（含 details 关键数值与证据链接）"
+        "→ 取舍与局限。"
+    ),
+    "trend_tracking": (
+        "以历史为基线：先标 as_of 基线结论 → 列出本次变化（新数据/新动作）"
+        "→ 归因与影响；引用历史时标 as_of 日期，冲突以新为准并显式指出。"
+    ),
+    "open": "",
+}
+
+# 设计文档 71 §8.5：对比推理原则（resolution∈{compare,discovery} 阶段二注入；
+# 同名 skill 正文缺省兜底）。对齐 _comparison_matrix/best_per_dimension 的语义。
+_COMPARISON_REASONING_SECTION = (
+    "## 对比推理原则\n"
+    "同一维度需横向并列各竞品、不逐家写小传；给 best-per-dimension（状态+置信度排序）"
+    "与整体排名/最优最差；暴露 trade-off/取舍，不交流水账；指出覆盖缺口"
+    "（缺失维度标『待核验/无数据』），不假装都有数据。"
+)
+
+
+def _comparison_reasoning_section() -> str:
+    """§8.5 对比推理原则：优先取同名 skill 正文（SKILLS_DIR 可覆写/测试注入），缺省内联。"""
+    from competitor_agent.skills import get_skill_loader
+
+    body = get_skill_loader().get("comparison_reasoning")
+    return body if body else _COMPARISON_REASONING_SECTION
+
+
+def build_report_phase2_section(plan: object | None) -> str | None:
+    """两阶段任务适配（设计文档 71 §8.4/8.5）：由 plan 选「报告结构 + 对比推理」段。
+
+    供循环在 make_plan 之后注入为一条 system 消息（ReactLoop._on_plan / LangGraph
+    report 节点）。``plan`` 缺失、format_hint 归一为 ``open``、非对比 resolution →
+    返回 None（保持现状两段式，不注入）。
+    """
+    from competitor_agent.agent.react_schemas import normalize_format_hint
+
+    if not plan or not isinstance(plan, dict):
+        return None
+    fmt = normalize_format_hint(plan.get("format_hint"))
+    scaffold = _FORMAT_SCAFFOLD.get(fmt, "")
+    resolution = str(plan.get("resolution") or "")
+    parts: list[str] = []
+    if scaffold:
+        parts.append(f"## 报告结构（本任务类型：{fmt}）\n{scaffold}")
+    if resolution in ("compare", "discovery"):
+        parts.append(_comparison_reasoning_section())
+    return "\n\n".join(parts) if parts else None
 
 def _fetch_enabled_from_config() -> bool:
     """读取抓取层开关（纯搜索模式判定）；配置异常按启用处理（提示词不因缺配置塌）。"""

@@ -169,19 +169,23 @@ class ReactLoop:
 
         return _sink
 
-    def _on_plan(self, plan_text: str) -> None:
-        """make_plan 结果接收器：尝试解析为 dict 存入 self.plan（供报告组装/记忆写侧）。
+    def _on_plan(self, plan_text: str) -> list[dict[str, str]] | None:
+        """make_plan 结果接收器：解析为 dict 存入 self.plan，并按 plan 构造两阶段注入段。
 
-        解析失败/非 dict 时 self.plan 保持 None（report 侧按无有效 plan → partial）。
+        解析失败/非 dict 时 self.plan 保持 None（report 侧按无有效 plan → partial）、
+        返回 None（不注入）。命中时返回二阶段任务适配段（设计文档 71 §8.4，按
+        plan.format_hint/resolution 选"报告结构 + 对比推理"），由 ReactAgent 拼接进消息流。
         """
         import json
+
+        from competitor_agent.agent.prompts.react_system import build_report_phase2_section
 
         try:
             parsed = json.loads(plan_text)
         except (json.JSONDecodeError, TypeError):
             logger.warning("make_plan 结果非 JSON，plan 未记录: %s", plan_text[:80])
             self.plan = None
-            return
+            return None
         # 设计文档 62 §3.1：单竞品 plan 用 competitor，多竞品 plan 用 competitors；
         # discovery 候选枚举前可仅带 resolution（候选后 web_tool 枚举，组装侧据此分型）
         if isinstance(parsed, dict) and (
@@ -191,6 +195,12 @@ class ReactLoop:
         else:
             logger.warning("make_plan 结果缺 competitor/competitors/resolution，plan 未记录")
             self.plan = None
+            return None
+        section = build_report_phase2_section(self.plan)
+        if not section:
+            return None
+        logger.info("两阶段任务适配(§8.4)：按 plan 注入 report 结构/对比推理段")
+        return [{"role": "system", "content": section}]
 
     def _step_guard(self, result: ReactRunResult) -> Callable[[], bool] | None:
         """每步前置检查：先取消、后预算。返回 False 提前终止循环。

@@ -79,9 +79,9 @@ class TestSkillLoader:
         assert loader.skills_dir == tmp_path
         assert loader.get("planning") == "env body"
 
-    def test_default_package_dir_has_9_skills(self):
+    def test_default_package_dir_has_10_skills(self):
         loader = SkillLoader()
-        assert len(loader.skills) == 9
+        assert len(loader.skills) == 10
         assert {
             "planning",
             "pricing_analysis",
@@ -92,6 +92,7 @@ class TestSkillLoader:
             "roadmap_analysis",
             "fact_verification",
             "confidence_disclosure",
+            "comparison_reasoning",  # 设计文档 71 §8.5：对比推理 skill（doc 71 漏提交，本轮随附）
         } <= set(loader.skills)
 
     def test_get_skill_loader_explicit_dir_bypasses_cache(self, tmp_path):

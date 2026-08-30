@@ -467,7 +467,12 @@ collector:
 ## 8. Agent 行为规范
 
 > 写入 `agent/prompts/react_system.py`（Lead/子 Agent 共用段），按 `fetch_enabled` 选版。
-> §8.1/8.2 是"工具纪律层"的两个版本；§8.3–8.5 定义这套提示词如何分层、如何按 plan 做两阶段任务适配（进度状态：§8.3/8.4/8.5 为设计草案，尚未落地 react_system.py）。
+> §8.1/8.2 是"工具纪律层"的两个版本；§8.3–8.5 定义这套提示词如何分层、如何按 plan 做两阶段任务适配。
+> **实现状态（2026-08-30 落地）**：§8.3–8.5 已实现——`normalize_format_hint`/`build_report_phase2_section`
+> 在 `react_system.py`；`make_plan` 侧 format_hint lenient 归一（`make_plan.py`）；注入接线在
+> `ReactAgent`（`first_tool_sink` 返回注入段拼接）→ `ReactLoop._on_plan` 返回 phase2 段 + LangGraph
+> `report` 节点按 `state.plan` 注入；新增 `skills/comparison_reasoning.md`。单测 `test_phase2_task_adaptation_71.py`。
+> 顺带：`make_plan` 会把 `format_hint` 规范化为枚举（如「对比型」→ `compare`），覆盖 doc 70 的 `对比型` 断言已同步。
 
 ### 8.1 版本一：正常模式（懒触发两步法）
 
@@ -616,4 +621,4 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 - **懒触发收敛成本**：摘要充足不抓、事实/核验/冲突才抓、单跑上限 `FETCH_MAX_PER_RUN=6`、同 URL 只抓一次。
 - **可观测可统计**：搜索/正文分级缓存（24h/7d）、限流与网络错误可区分（`SearchError.kind`）、`via:` 层标注、降级率/命中率/缓存命中率聚合。
 - **构建纪律**：本地库无 Key；crawl4ai 的 Chromium 通过可选 extra + `crawl4ai-setup` 纳入部署（Docker target）。
-- **提示词五层 + 两阶段任务适配（§8.3–8.5，设计草案）**：宪章/工具纪律/任务适配/记忆/输出 schema 五层分层（宪章恒定、适配后置）；make_plan 后按 `plan.format_hint` 选报告结构、按 `resolution` 注入 `comparison_reasoning` 对比推理原则——治好"按用户问题灵活定调"只停在静态文案的天花板（doc 70 M2 的 plan 字段真正接进构建器）。
+- **提示词五层 + 两阶段任务适配（§8.3–8.5，已落地）**：宪章/工具纪律/任务适配/记忆/输出 schema 五层分层（宪章恒定、适配后置）；make_plan 后按 `plan.format_hint` 选报告结构（`build_report_phase2_section` + `normalize_format_hint` 枚举，非法回退 open）、按 `resolution` 注入 `comparison_reasoning` 对比推理原则（`skills/comparison_reasoning.md`）——`ReactLoop._on_plan` / LangGraph report 节点注入，治好了"按用户问题灵活定调"只停在静态文案的天花板（doc 70 M2 的 plan 字段真正接进构建器）。
