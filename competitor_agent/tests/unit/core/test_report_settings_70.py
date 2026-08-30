@@ -74,13 +74,16 @@ class TestResolveOutputDir:
         _patch_output(monkeypatch, "D:/yaml/out", settings="D:/settings/out")
         assert ra.resolve_output_dir(tmp_path) == tmp_path
 
-    def test_settings_over_yaml(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        _patch_output(monkeypatch, "D:/yaml/out", settings="D:/settings/out")
-        assert ra.resolve_output_dir() == Path("D:/settings/out")
+    def test_settings_over_yaml(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        # 用 tmp_path 派生绝对路径（CI/Linux 上 D:/... 是相对路径，会拼到 CWD）
+        settings = tmp_path / "settings" / "out"
+        _patch_output(monkeypatch, str(tmp_path / "yaml" / "out"), settings=str(settings))
+        assert ra.resolve_output_dir() == settings
 
-    def test_yaml_used_when_settings_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        _patch_output(monkeypatch, "D:/yaml/out")
-        assert ra.resolve_output_dir() == Path("D:/yaml/out")
+    def test_yaml_used_when_settings_empty(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        yaml_out = tmp_path / "yaml" / "out"
+        _patch_output(monkeypatch, str(yaml_out))
+        assert ra.resolve_output_dir() == yaml_out
 
     def test_yaml_empty_falls_back_to_project_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
         cfg = AppConfig()
@@ -95,9 +98,10 @@ class TestResolveDownloadDir:
         monkeypatch.setattr(ra, "get_setting", lambda k: "")
         assert ra.resolve_download_dir() == rs.default_download_dir()
 
-    def test_settings_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(ra, "get_setting", lambda k: "D:/dl" if k == "report_download_dir" else "")
-        assert ra.resolve_download_dir() == Path("D:/dl")
+    def test_settings_override(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        dl = tmp_path / "dl"
+        monkeypatch.setattr(ra, "get_setting", lambda k: str(dl) if k == "report_download_dir" else "")
+        assert ra.resolve_download_dir() == dl
 
 
 class TestDownloadWriteAndFallback:

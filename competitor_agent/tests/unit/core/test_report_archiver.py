@@ -73,3 +73,21 @@ class TestReportFilePath:
     def test_missing_returns_path_without_file(self, tmp_path: Path) -> None:
         p = ra.report_file_path("cursor", output_dir=tmp_path)
         assert not p.exists()
+
+
+class TestResolveComparisonDir:
+    """设计文档 70 §8.2 D2a：对比目录恒派生自 resolve_output_dir 的 /comparison。"""
+
+    def test_derives_from_default_output(self, tmp_path: Path, monkeypatch) -> None:
+        monkeypatch.setattr(ra, "get_setting", lambda *a, **k: "")
+        # 默认 output_dir → <项目根>/output，comparison 为其子目录
+        base = ra.resolve_output_dir(None)
+        assert ra.resolve_comparison_dir() == base / "comparison"
+
+    def test_derives_from_explicit_dir(self, tmp_path: Path) -> None:
+        assert ra.resolve_comparison_dir(tmp_path) == tmp_path / "comparison"
+
+    def test_parent_dir_net_added_endswith_comparison(self, tmp_path: Path) -> None:
+        d = ra.resolve_comparison_dir(tmp_path)
+        assert d.name == "comparison"
+        assert d.parent == tmp_path

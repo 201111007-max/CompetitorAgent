@@ -251,9 +251,10 @@ class CompetitorAnalysisAPI:
             self._vector_store = None
 
         # 竞品发现器（设计文档 20）：仅 DISCOVERY 意图时被调用，web_tool 可注入。
-        # 设计文档 66 §3.1：未显式注入 web_tool 时，装配层零入口注入 Tavily 真实搜索
-        # （enable_external_sources 主开关门控 + TAVILY_API_KEY；无 Key/未启用 → 保持 None
-        # 空候选降级，不编造）。Web/CLI/MCP 三入口都经本构造，自动受益。
+        # 设计文档 66 §3.1 + 71 §2.2：未显式注入 web_tool 时，装配层零入口注入搜索路由
+        # （build_search_router——DDG 免费主力恒可用，Tavily 配 Key 才注册为增强降级；
+        # enable_external_sources 主开关门控。无 provider → 保持 None 空候选降级，不编造）。
+        # Web/CLI/MCP 三入口都经本构造，自动受益。
         search_web_tool = web_tool
         if (
             search_web_tool is None
@@ -262,11 +263,11 @@ class CompetitorAnalysisAPI:
             and cfg.collector.enable_external_sources
         ):
             from competitor_agent.collector.search import (
-                build_search_provider,
+                build_search_router,
                 web_search_candidates,
             )
 
-            search_provider = build_search_provider(cfg.collector)
+            search_provider = build_search_router(cfg.collector)
             if search_provider is not None:
                 search_web_tool = lambda task: web_search_candidates(
                     task,
@@ -652,11 +653,12 @@ class CompetitorAnalysisAPI:
         return path
 
     def _export_comparison_json(self, report: ComparisonReport) -> Path | None:
-        """设计文档 28：比较报告导出 <data_dir>/reports/comparison/<names>.json（品类矩阵）。"""
+        """设计文档 28 §8.2 D2a：比较报告导出 output/comparison/<names>.json（品类矩阵）。"""
         if not self._config.report.export_json:
             return None
         try:
-            path = export_comparison_json(report, self._config.report.comparison_dir)
+            # 设计文档 70 §8.2：默认 → resolve_comparison_dir()（output/comparison），不再用 comparison_dir
+            path = export_comparison_json(report)
         except Exception:
             logger.warning("对比矩阵 JSON 导出失败: ", exc_info=True)
             return None
@@ -854,13 +856,14 @@ class CompetitorAnalysisAPI:
         lead_competitor = self._react_competitor(task)
 
         def _subagent_run(name: str, sub_task: str) -> ReactRunResult:
-            # 子 Agent 运行时与自研路径同工厂（共享取消/记忆/RAG/事件）；
-            # 迭代限制已移除（max_steps=None 无限循环，靠 LLM 自然收敛 Final Answer）
+            # �?Agent 运行时与自研路径同工厂（共享取消/记忆/RAG/事件）；
+            # 迭代限制已移除（max_steps=None 无限循环，靠 LLM 自然收敛 Final Answer）。
+            # 设计文档 71 §5.3：LangGraph 子 Agent 与 Lead 共享同一 per-run 抓取护栏
             return build_subagent(
                 name,
                 llm,
                 config=self._config,
-                web_extract=self._web_extract_for(lead_competitor.name, name),
+                web_extract=self._web_extract_for(lead_competitor.name, name, lg_fetch_policy),
                 session_id=session_id,
                 memory_context_fn=lambda t: self._memory_ctx_for(lead_competitor.name, t),
                 rag_fn=lambda t: self._rag_ctx_for(lead_competitor.name, t),
@@ -872,9 +875,13 @@ class CompetitorAnalysisAPI:
             ).run_subagent(sub_task)
 
         # Lead 系统提示与自研路径同（设计文档 60：单协议，无工具描述/格式说明）
+        # 设计文档 71 §5.3：LangGraph 路径同样装配 per-run 抓取护栏
+        from competitor_agent.collector.fetch_policy import FetchPolicy
+
+        lg_fetch_policy = FetchPolicy(max_per_run=self._config.collector.fetch_max_per_run)
         prompt_dispatcher = build_react_dispatcher(
             config=self._config,
-            web_extract=self._react_web_extract,
+            web_extract=lambda url: self._web_extract_checked(url, lg_fetch_policy),
             exclude=("analyze_competitor",),
             extra_tools={"make_plan": build_make_plan_tool()},
             tracer=self._tracer,
@@ -934,6 +941,11 @@ class CompetitorAnalysisAPI:
         # Lead 编排会话用独立 lead.max_history_steps（候选委派回填更长）
         agent_max_history_steps = self._config.agent.max_history_steps
         lead_max_history_steps = self._config.lead.max_history_steps
+        # 设计文档 71 §5.3/§6.1：per-run 抓取策略（单跑上限 + 同 URL 去重），跨 Lead/
+        # 子 Agent web_extract 闭包共享（闭包捕获，不挂 self，避免并行 analyze 互相污染）。
+        from competitor_agent.collector.fetch_policy import FetchPolicy
+
+        fetch_policy = FetchPolicy(max_per_run=self._config.collector.fetch_max_per_run)
         # 设计文档 56 M1/M2：Lead 级共享状态——plan 懒绑定 cell + 已核验事实 pinned 清单
         plan_box: dict[str, ReactLoop | None] = {"loop": None}
         pinned_facts: list[str] = []
@@ -961,7 +973,7 @@ class CompetitorAnalysisAPI:
                 name,
                 self._llm or LLMClient(tracer=self._tracer),
                 config=self._config,
-                web_extract=self._web_extract_for(bind_competitor, name),
+                web_extract=self._web_extract_for(bind_competitor, name, fetch_policy),
                 extra_tools={
                     # 设计文档 56 M1①：子 Agent kb_recall 按（竞品×维度）绑定
                     "kb_recall": self._build_kb_recall(lambda: bind_competitor, name),
@@ -1014,7 +1026,7 @@ class CompetitorAnalysisAPI:
 
         dispatcher = build_react_dispatcher(
             config=self._config,
-            web_extract=self._lead_web_extract(_lead_competitor_now),
+            web_extract=self._lead_web_extract(_lead_competitor_now, fetch_policy),
             exclude=("analyze_competitor",),
             extra_tools=extra_tools,
             tracer=self._tracer,  # 设计文档 54：Lead tool.call span
@@ -1157,7 +1169,34 @@ class CompetitorAnalysisAPI:
         max_chars = self._config.collector.max_content_chars
         return (obs.raw_text or "").strip()[:max_chars] or "（页面无文本内容）"
 
-    def _web_extract_for(self, competitor: str, dimension: str) -> Callable[[str], str]:
+    def _web_extract_checked(self, url: str, fetch_policy: Any = None) -> str:
+        """per-run 抓取护栏（设计文档 71 §5.3/§6.1）：单跑上限 + 同 URL 去重 + 纯搜索短路。
+
+        - ``fetch_enabled=false``（纯搜索模式）→ 返回固定禁用提示（§2.3/§5.4：ReAct 路径
+          同样禁抓，与 MCP web_extract 一致，子 Agent/Lead 均不触网络）；
+        - ``fetch_policy`` 为 per-run ``FetchPolicy``（_react_loop 构造，跨 Lead/子 Agent
+          共享）：超上限返回「已达上限」提示；同 URL 命中去重回读（不重抓、不计上限）；
+        - None → 不设护栏（直接调用，保持现状）。
+        """
+        if not self._config.collector.fetch_enabled:
+            return "抓取层已禁用（FETCH_ENABLED=false）。仅可依赖搜索摘要。"
+        if fetch_policy is not None:
+            kind, note = fetch_policy.get(url)
+            if kind == "limit":
+                return note
+            if kind == "cached":
+                return note
+        text = self._react_web_extract(url)
+        if fetch_policy is not None:
+            fetch_policy.record(url, text)
+        return text
+
+    def _web_extract_for(
+        self,
+        competitor: str,
+        dimension: str,
+        fetch_policy: Any = None,
+    ) -> Callable[[str], str]:
         """子 Agent 专用 web_extract：抓取后按（竞品×维度）摄入知识库（RAG 写侧）。
 
         设计文档 30：分析中采集到的原文即知识库增量，后续分析与追问可检索复用。
@@ -1165,13 +1204,17 @@ class CompetitorAnalysisAPI:
         """
 
         def _extract(url: str) -> str:
-            text = self._react_web_extract(url)
+            text = self._web_extract_checked(url, fetch_policy)
             self._ingest_fetched(competitor, dimension, url, text)
             return text
 
         return _extract
 
-    def _lead_web_extract(self, competitor_fn: Callable[[], str]) -> Callable[[str], str]:
+    def _lead_web_extract(
+        self,
+        competitor_fn: Callable[[], str],
+        fetch_policy: Any = None,
+    ) -> Callable[[str], str]:
         """Lead 专用 web_extract（设计文档 56 M1②）：抓取成功后摄入知识库通用域。
 
         补齐 Lead 摄入缺口（此前只有子 Agent 摄入，Lead 抓的内容取回工具够不到）。
@@ -1182,7 +1225,7 @@ class CompetitorAnalysisAPI:
         """
 
         def _extract(url: str) -> str:
-            text = self._react_web_extract(url)
+            text = self._web_extract_checked(url, fetch_policy)
             self._ingest_fetched(competitor_fn(), "web", url, text)
             return text
 
@@ -1234,11 +1277,14 @@ class CompetitorAnalysisAPI:
         """采集原文 → 知识库摄入（幂等：chunk_id 由内容哈希决定）。"""
         if self._ingester is None:
             return
-        if not text or text.startswith(("URL 被安全守卫拦截", "抓取失败", "（页面无文本内容）")):
+        # 占位/护栏文本不摄入（守卫拦截 / 抓取失败 / 空文本 / 单跑上限提示——doc 71 §5.3）
+        if not text or text.startswith(
+            ("URL 被安全守卫拦截", "抓取失败", "（页面无文本内容）", "抓取次数已达上限")
+        ):
             return
         try:
             self._ingester.ingest(competitor, dimension, text, source_url=url)
-        except Exception:  # noqa: BLE001 — 摄入失败不影响采集/分析
+        except Exception:  # noqa: BLE001 - 摄入失败不影响采集/分析
             logger.debug("RAG 摄入跳过: %s/%s %s", competitor, dimension, url)
 
     # ── 复核工具提供方（设计文档 49：代码确定性兜底，不进 LLM 决策）────────

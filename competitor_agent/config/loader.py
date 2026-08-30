@@ -48,7 +48,6 @@ class CollectorConfig:
     max_content_chars: int = 8000  # 统一内容大小上限（设计文档 41，替代 ReAct 2000 / web_tools 8000 硬编码）
     block_private_urls: bool = True  # URL 守卫（设计文档 41）：默认开启；False 用于本地调试
     rate_limit_per_second: int = 2
-    use_playwright: bool = False
     user_agent: str = "competitor-agent/0.1"
     # 外部源多源路由（设计文档 23）：主开关默认关闭，保证无网络/无 Key 的测试与
     # benchmark 不触发真实网络；开启后按维度开关启用对应提供方。
@@ -57,10 +56,26 @@ class CollectorConfig:
     enable_marketplace: bool = True
     enable_community: bool = True
     enable_benchmark: bool = True
-    # 搜索引擎接入（设计文档 66 §3.1）："tavily" / ""；Key 只读环境变量
-    # TAVILY_API_KEY（不落盘）。空 = 不启用（web_search 走可读提示 / DISCOVERY 空候选）。
-    search_provider: str = ""
+    # 搜索引擎接入（设计文档 66 §3.1 + 71 §2.2）："duckduckgo"(免 Key 主力) | "tavily"(需 Key)。
+    # Key 只读环境变量 TAVILY_API_KEY（不落盘）；env 优先级 > yaml（设计文档 71 §7.2）。
+    search_provider: str = "duckduckgo"
     search_max_results: int = 8
+    # 抓取层（设计文档 71 §7.2）：FETCH_ENABLED 主开关（env 优先）、懒触发上限、正文上限、降级链
+    fetch_enabled: bool = True
+    fetch_max_per_run: int = 6
+    fetch_max_chars: int = 8000
+    fetch_fallback_chain: list[str] = field(
+        default_factory=lambda: ["trafilatura", "jina_reader"]
+    )
+    # crawl4ai 浏览器渲染（可选，默认关）：browser_pool>0 且 extra+浏览器就绪才注册进链
+    crawler_headless: bool = True  # == CRAWL4AI_HEADLESS
+    crawler_timeout: int = 30  # == CRAWL4AI_TIMEOUT（单次抓取 + 空闲回收秒数）
+    crawler_browser_pool: int = 0  # 0=禁用该级；1=单例
+    # jina_reader 云端兜底（可选开关）
+    jina_reader_enabled: bool = True
+    # 分级缓存 TTL（搜索 24h / 正文 7d；缺省沿用现有 cache_ttl_seconds=86400）
+    cache_ttl_search_hours: int = 24
+    cache_ttl_fetch_days: int = 7
     # 榜单结构化直连（设计文档 67 §2.1）："swebench" | "terminalbench" | "aider" / ""
     benchmark_provider: str = ""
     # 舆情采样源（设计文档 67 §2.2）："hackernews" | "reddit" / ""
@@ -259,7 +274,7 @@ def load_config(path: str | os.PathLike | None = None) -> AppConfig:
         budget=_build_section(BudgetConfig, raw.get("budget")),
         execution=_build_section(ExecutionConfig, raw.get("execution")),
         dimensions=_build_section(DimensionsConfig, raw.get("dimensions")),
-        collector=_build_section(CollectorConfig, raw.get("collector")),
+        collector=_build_collector(raw.get("collector")),
         memory=_build_section(MemoryConfig, raw.get("memory")),
         report=_build_section(ReportConfig, raw.get("report")),
         freshness=_build_freshness(raw.get("freshness")),
@@ -271,6 +286,48 @@ def load_config(path: str | os.PathLike | None = None) -> AppConfig:
         lead=_build_section(LeadConfig, raw.get("lead")),
         schedule=_build_section(ScheduleConfig, raw.get("schedule")),
     )
+
+
+def _build_collector(data: dict[str, Any] | None) -> CollectorConfig:
+    """构造 collector 配置（设计文档 71 §7.2）：合并嵌套 ``crawler``/``jina_reader`` 子段。
+
+    环境变量优先级 > yaml：``FETCH_ENABLED``/``FETCH_MAX_PER_RUN``/``FETCH_MAX_CHARS``/
+    ``CRAWL4AI_HEADLESS``/``CRAWL4AI_TIMEOUT`` 存在时覆盖 yaml 对应字段。
+    """
+    data = dict(data or {})
+    crawler = data.pop("crawler", None) or {}
+    jina = data.pop("jina_reader", None) or {}
+    flat: dict[str, Any] = dict(data)
+    if isinstance(crawler, dict):
+        flat["crawler_headless"] = crawler.get("headless", True)
+        flat["crawler_timeout"] = crawler.get("timeout", 30)
+        flat["crawler_browser_pool"] = crawler.get("browser_pool", 0)
+    if isinstance(jina, dict):
+        flat["jina_reader_enabled"] = jina.get("enabled", True)
+
+    cfg = _build_section(CollectorConfig, flat)
+
+    def _env_flag(name: str, attr: str, default: bool) -> None:
+        raw = os.environ.get(name)
+        if raw is None:
+            return
+        setattr(cfg, attr, raw.strip().lower() not in ("0", "false", "no", "off", ""))
+
+    def _env_int(name: str, attr: str) -> None:
+        raw = os.environ.get(name)
+        if raw is None or not raw.strip():
+            return
+        try:
+            setattr(cfg, attr, int(raw))
+        except ValueError:
+            pass
+
+    _env_flag("FETCH_ENABLED", "fetch_enabled", cfg.fetch_enabled)
+    _env_int("FETCH_MAX_PER_RUN", "fetch_max_per_run")
+    _env_int("FETCH_MAX_CHARS", "fetch_max_chars")
+    _env_flag("CRAWL4AI_HEADLESS", "crawler_headless", cfg.crawler_headless)
+    _env_int("CRAWL4AI_TIMEOUT", "crawler_timeout")
+    return cfg
 
 
 def _build_freshness(data: dict[str, Any] | None) -> FreshnessConfig:

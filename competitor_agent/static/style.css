@@ -617,6 +617,12 @@ body {
   color: var(--text);
   word-break: break-all;
 }
+/* 设计文档 70 §8.1 D1b：零候选对比提示（琥珀色警示，非红错误） */
+.dossier-warn {
+  margin: 8px 16px 4px;
+  background: var(--amber-soft);
+  border-color: var(--amber);
+}
 .msg.assistant .bubble > .info { color: var(--text-dim); }
 .msg.assistant .bubble > span.error, .msg.assistant .bubble > .error { color: var(--red); }
 

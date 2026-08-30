@@ -167,3 +167,15 @@ class TestExportComparisonJson:
         path = re.export_comparison_json(self._comparison(), output_dir=tmp_path)
         assert path.name == "cursor___windsurf.json"
         assert path.exists()
+
+    def test_default_writes_to_comparison_subdir(
+        self, monkeypatch, tmp_path: Path
+    ) -> None:
+        """设计文档 70 §8.2 D2a：默认（output_dir=None）→ resolve_comparison_dir()，不再写主目录。"""
+        from competitor_agent.core import report_archiver as ra
+
+        monkeypatch.setattr(ra, "get_setting", lambda *a, **k: "")
+        base = ra.resolve_output_dir(None)
+        path = re.export_comparison_json(self._comparison())
+        assert path.parent == base / "comparison"
+        assert path.exists()

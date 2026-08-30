@@ -44,7 +44,6 @@ collector:
   max_retries: 2
   timeout_seconds: 20
   rate_limit_per_second: 2   # 每源限速（ToolGuard）
-  use_playwright: false      # M1 关；M2 接入后按需开
   user_agent: "competitor-agent/0.1"
   # 外部源多源路由（设计文档 23）：默认关闭，保证无网络/无 Key 测试与 benchmark 不触发真实网络。
   # 有网络/Key 的真实运行环境打开 enable_external_sources 即可启用 GitHub/插件市场等外部源。
@@ -53,16 +52,32 @@ collector:
   enable_marketplace: true
   enable_community: true
   enable_benchmark: true
-  # 搜索引擎接入（设计文档 66 §3.1）：真实 Tavily 搜索。Key 只读环境变量 TAVILY_API_KEY
-  # 不落盘；未配 Key/未启用 → 降级不编造。配合 enable_external_sources 主开关门控。
-  search_provider: "tavily"
+  # 搜索引擎接入（设计文档 66 §3.1 + 71 §2.2）：DDG 免费主力（免 Key 恒可用）+ Tavily
+  # 可选付费增强（配 TAVILY_API_KEY 才注册为降级池）。env TAVILY_API_KEY 只读不落盘。
+  search_provider: "duckduckgo"   # 主力："duckduckgo"(免Key) | "tavily"(需Key)；Bocha 预留
   search_max_results: 8
+  # 抓取层（设计文档 71 §7.2）：三级降级链 trafilatura→crawl4ai→jina_reader（默认两级，
+  # crawl4ai 默认关）；FETCH_ENABLED=false = 纯搜索模式（短路抓取层）。env 优先级 > yaml。
+  fetch_enabled: true
+  fetch_max_per_run: 6            # 单跑抓取上限（懒触发防失控）
+  fetch_max_chars: 8000           # 正文上限（对齐 max_content_chars）
+  fetch_fallback_chain: ["trafilatura", "jina_reader"]  # 降级顺序；crawl4ai 启用后插入第 2 级
+  crawler:
+    headless: true                # == CRAWL4AI_HEADLESS（仅启用时生效）
+    timeout: 30                   # == CRAWL4AI_TIMEOUT（单次抓取 + 空闲回收）
+    browser_pool: 0               # 0=禁用该级；>0 且 extra+浏览器就绪才注册（1=单例）
+  jina_reader:
+    enabled: true                 # 云端兜底开关
+  cache_ttl_search_hours: 24      # 搜索缓存 TTL（缺省沿用现有 cache_ttl_seconds=86400）
+  cache_ttl_fetch_days: 7         # 正文缓存 TTL
   # 榜单结构化直连（设计文档 67 §2.1）：swebench | terminalbench | aider / 空=不启用。
   # 配合 enable_external_sources 主开关；performance 维度子 Agent 工具面自动加 benchmark_scores。
-  benchmark_provider: ""
+  # 设计文档 70 §8.4 D4a：官方 SWE-bench 榜单表最稳、与 coding agent 最相关 → 默认 swebench。
+  benchmark_provider: "swebench"
   # 舆情采样源（设计文档 67 §2.2）：hackernews | reddit / 空=不启用。
   # sentiment 维度子 Agent 工具面自动加 sentiment_sampling（带样本量/时间窗）。
-  sentiment_provider: ""
+  # 设计文档 70 §8.4 D4b：公开免 Key、即启即用 → 默认 hackernews。
+  sentiment_provider: "hackernews"
 
 # ===== 记忆 =====
 memory:
@@ -81,7 +96,10 @@ report:
   output_dir: ""   # 空 = 项目 output/（旧值 ~/.competitor_agent/reports/competitor 读侧回退不迁移）
   lead_formatted_body: true   # 设计文档 70 M1：Lead 两段式 Final Answer（正文+JSON），关则全回退模板
   export_json: true          # 结构化 JSON 导出（设计文档 28），与 .md 同目录同名
-  comparison_dir: "~/.competitor_agent/reports/comparison"   # 比较报告品类矩阵 JSON 目录
+  # 设计文档 70 §8.2 D2a/D2b：对比矩阵 JSON 已并入 output/comparison（恒派生自
+  # resolve_output_dir 的 /comparison 子目录），不再读本键；置空并作兜底声明。
+  # 旧目录（~/.competitor_agent/reports/comparison）读侧回退不迁移。无 settings.json 配置键。
+  comparison_dir: ""
   # 产品化闭环（设计文档 67 §3）：HTML 自包含分享 + 审批门 + 告警推送
   export_html: false         # 报告落盘后自动导出单文件自包含 HTML（§3.1，可选触发）
   approval_enabled: true     # human-in-the-loop 审批门（§3.2）：触发规则 → pending_review
@@ -105,7 +123,8 @@ freshness:
 # 安全兜底（url_guard/注入防护/预算/取消/checkpoint/聚合渲染）保持代码，不进 LLM。
 subagents:
   enabled: true            # analyze() 主路径 = Lead ReAct 编排
-  timeout_seconds: 60      # 子 Agent 单次执行超时（并发硬上限见 execution.max_parallel_subagents）
+  # 设计文档 70 §8.4 D4c：无搜索/榜单下靠多次 web_extract 采集加长 → 120s（不过度拖延）
+  timeout_seconds: 120      # 子 Agent 单次执行超时（并发硬上限见 execution.max_parallel_subagents）
 tools:
   validate_facts: true     # 复核工具（事实/数值冲突核验）注册
   detect_conflict: true    # 跨维度冲突检测工具注册

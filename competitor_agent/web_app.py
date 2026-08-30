@@ -162,6 +162,22 @@ def _narrative_sse(event: ProgressEvent, lead_id: str) -> str | None:
     return None
 
 
+def _queue_sse(event: ProgressEvent, lead_id: str) -> str | None:
+    """入队事件 → SSE 串或 None（丢弃）。
+
+    设计文档 70 §8.3 D3a：api 层收尾发的**无 payload report 事件**（CLI/MCP 的「报告完成」
+    信号）在 web 侧丢弃——否则前端 handleEvent 'report' 当真实报告渲染成空 dossier
+    （title="report"、无正文、fetchStatus 缺 JSON → 默认「已批准」幽灵报告）。带 payload 的
+    真实报告事件正常放行（单/对比收尾的 report 事件走旁路直接 yield，不经本队列）。
+    其次沿用设计文档 66 §3.5 分层：叙述型事件转 task / 丢弃；其余原样透传。
+    """
+    if event.event == "report" and not event.payload:
+        return None
+    if event.event in _NARRATIVE_EVENTS:
+        return _narrative_sse(event, lead_id)
+    return event.to_sse()
+
+
 async def _event_generator(
     session_id: str,
     task: str,
@@ -297,23 +313,18 @@ async def _event_generator(
                     yield ": keep-alive\n\n"
                     last_heartbeat = time.monotonic()
                 continue
-            # 叙述型事件分层（设计文档 66 §3.5：丢弃引擎自证/转 task 清单行）；其余事件原样透传
-            if event.event in _NARRATIVE_EVENTS:
-                sse = _narrative_sse(event, lead_id)
-                if sse is not None:
-                    yield sse
-            else:
-                yield event.to_sse()
+            # 事件转发（设计文档 66 §3.5 分层 + 设计文档 70 §8.3 D3 无 payload report 丢弃）；
+            # 返回 None 的事件丢弃，其余原样透传
+            sse = _queue_sse(event, lead_id)
+            if sse is not None:
+                yield sse
 
         # 分析完成：排空残余事件，防"完成瞬间队列中事件丢失"（设计文档 50 §3.3 ②）
         while not events_queue.empty():
             event = events_queue.get_nowait()
-            if event.event in _NARRATIVE_EVENTS:
-                sse = _narrative_sse(event, lead_id)
-                if sse is not None:
-                    yield sse
-            else:
-                yield event.to_sse()
+            sse = _queue_sse(event, lead_id)
+            if sse is not None:
+                yield sse
 
         # 分析完成，获取报告
         report = analysis_task.result()
@@ -404,6 +415,8 @@ async def _event_generator(
                     "markdown_report": report.markdown_report,
                     "session_id": session_id,
                     "is_comparison": True,
+                    # 设计文档 70 §8.1 D1b：候选为 0 → false（前端据此提示"未收集到候选数据"）
+                    "has_candidates": bool(report.reports),
                     "report_url": f"/api/reports/{_safe_filename(name)}/download",
                     "report_path": str(saved_path),
                 },
@@ -419,21 +432,26 @@ async def _event_generator(
                     "summary": f"对比报告完成，{len(report.reports)} 个竞品",
                 },
             ).to_sse()
-            # 归档会话
-            _get_memory().archive_session(
-                AnalysisSession(
-                    task=task,
-                    competitor_name=" / ".join(c.name for c in report.competitors),
-                    session_id=session_id,
-                    raw={
-                        "markdown_report": report.markdown_report,
-                        "terminal_state": "compare",
-                        "dimension_count": len(set(all_dims)),
-                        "competitor_name": " / ".join(c.name for c in report.competitors),
-                        "created_at": report.created_at,
-                    },
+            # 归档会话（设计文档 70 §8.1 D1a：空名 "compare" 兜底 + 整体 try/except——
+            # 零候选/归档失败仅告警，永不阻塞 SSE 主流程）
+            try:
+                names = " / ".join(c.name for c in report.competitors) or "compare"
+                _get_memory().archive_session(
+                    AnalysisSession(
+                        task=task,
+                        competitor_name=names,
+                        session_id=session_id,
+                        raw={
+                            "markdown_report": report.markdown_report,
+                            "terminal_state": "compare",
+                            "dimension_count": len(set(all_dims)),
+                            "competitor_name": names,
+                            "created_at": report.created_at,
+                        },
+                    )
                 )
-            )
+            except Exception:
+                logger.warning("对比会话归档失败（不影响主流程）", exc_info=True)
             return
 
         # 自动落盘 <output>/<竞品>.md（导出/下载用），先落盘再下发地址
@@ -471,12 +489,14 @@ async def _event_generator(
             },
         ).to_sse()
 
-        # 归档会话（统一 raw schema + freshness 元数据）
-        _get_memory().archive_session(
-            AnalysisSession(
-                task=task,
-                competitor_name=report.competitor.name,
-                session_id=session_id,
+        # 归档会话（统一 raw schema + freshness 元数据）；设计文档 70 §8.1 D1a：
+        # 归档失败仅告警，永不阻塞 SSE 主流程
+        try:
+            _get_memory().archive_session(
+                AnalysisSession(
+                    task=task,
+                    competitor_name=report.competitor.name,
+                    session_id=session_id,
                 raw={
                     "markdown_report": report.markdown_report,
                     "terminal_state": report.terminal_state,
@@ -493,6 +513,8 @@ async def _event_generator(
                 },
             )
         )
+        except Exception:
+            logger.warning("会话归档失败（不影响主流程）", exc_info=True)
 
     except asyncio.CancelledError:
         yield ProgressEvent(event="cancelled", phase="report", message="分析已取消").to_sse()
@@ -802,8 +824,14 @@ async def settings_put(
     return JSONResponse(_settings_payload())
 
 
+def _is_abs_like(v: str) -> bool:
+    """绝对路径判定兼容 Windows 盘符：``Path("D:\\...").is_absolute()`` 在 Linux 上为 False
+    （CI/Linux 会把 ``D:/x`` 当相对路径拼到 CWD 破坏比较），此处显式识别盘符前缀。"""
+    return len(v) >= 3 and v[0].isalpha() and v[1] == ":" and v[2] in ("/", "\\")
+
+
 def _normalize_dir_setting(value: str, default: Path) -> str:
-    """设置值规范化：等于项目默认目录 → 存空串（保持派生，不固化绝对路径）；否则原样。
+    """设置值规范化：等于项目默认目录（含斜杠/大小写差异）→ 存空串（保持派生，不固化绝对路径）；否则原样存。
 
     ``~`` 展开、相对路径按 CWD 解析后与默认做大小写/分隔符无关比较；空串即默认原样返回。
     """
@@ -811,7 +839,7 @@ def _normalize_dir_setting(value: str, default: Path) -> str:
     if not v:
         return ""
     p = Path(v).expanduser()
-    if not p.is_absolute():
+    if not p.is_absolute() and not _is_abs_like(str(p)):
         p = Path.cwd() / p
     norm = lambda path: str(path).replace("\\", "/").lower()
     if norm(p) == norm(default):

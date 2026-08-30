@@ -290,6 +290,116 @@ def test_cancel_response_within_bound(
     assert elapsed < _CANCEL_RESPONSE_BOUND, f"取消响应过慢: {elapsed:.3f}s"
 
 
+class TestNoPayloadReportDrop:
+    """设计文档 70 §8.3 D3：web 侧丢弃无 payload 的 report 事件（防幽灵空报告）。"""
+
+    def test_queue_sse_drops_no_payload_report(self) -> None:
+        from competitor_agent.web_app import _queue_sse
+
+        assert _queue_sse(
+            ProgressEvent(event="report", phase="report", message="报告完成"), "lead"
+        ) is None, "无 payload 的 report 事件应被丢弃"
+        assert _queue_sse(
+            ProgressEvent(
+                event="report", phase="report", message="报告完成",
+                payload={"competitor": "cursor"},
+            ),
+            "lead",
+        ) is not None, "带 payload 的 report 事件应正常放行"
+
+    def test_full_sse_stream_no_ghost_report(self, monkeypatch, mock_llm, tmp_path) -> None:
+        """api 层发无 payload report 事件 + 返回正常单竞品报告 → SSE 只保留带 payload 的真实报告。"""
+        from competitor_agent.domain_types.events import ProgressEvent
+
+        class GhostReportAPI:
+            def __init__(self, *args, **kwargs) -> None:
+                self.event_sink = kwargs.get("event_sink")
+
+            def run(self, task, *, session_id=None, history_messages=None):
+                # 模拟 api.py:426 收尾的无 payload report 事件（CLI/MCP 报告完成信号）
+                self.event_sink(ProgressEvent(event="report", phase="report", progress=1.0, message="报告生成完成"))
+                return CompetitorReport(
+                    competitor=Competitor(name="cursor"),
+                    dimension_results=[],
+                    terminal_state="success",
+                    overall_confidence=0.8,
+                    markdown_report="# Cursor 报告",
+                )
+
+        from competitor_agent.memory import FourLayerMemory
+
+        _patch_env(monkeypatch, mock_llm, GhostReportAPI, FourLayerMemory(tmp_path / "memory"))
+        sid = "sess_sse_ghost"
+        web_app._sessions[sid] = {"task": "分析 Cursor", "cancelled": False}
+
+        async def _run() -> list[str]:
+            sse_lines: list[str] = []
+            async for line in web_app._event_generator(sid, "分析 Cursor"):
+                sse_lines.append(line)
+            return sse_lines
+
+        try:
+            sse_lines = asyncio.run(_run())
+        finally:
+            web_app._sessions.pop(sid, None)
+
+        reports = [e for e in _collect(sse_lines) if e["event"] == "report"]
+        assert len(reports) == 1, f"应只剩带 payload 的真实报告事件: {reports}"
+        assert reports[0]["payload"]["competitor"] == "cursor", "保留的是真实报告而非幽灵"
+
+    def test_zero_candidate_comparison_archive_fallback(
+        self, monkeypatch, mock_llm, tmp_path
+    ) -> None:
+        """设计文档 70 §8.1 D1a/D1b：零候选对比走完 SSE 不崩、归档名 "compare"、
+        payload has_candidates==false（前端据此提示）。"""
+        import competitor_agent.memory as mem_mod
+        from competitor_agent.domain_types.report import ComparisonReport
+
+        calls: dict[str, list] = {"names": []}
+
+        class ZeroCandAPI:
+            def __init__(self, *args, **kwargs) -> None:
+                self.event_sink = kwargs.get("event_sink")
+
+            def run(self, task, *, session_id=None, history_messages=None):
+                return ComparisonReport(
+                    competitors=[], reports=[],
+                    markdown_report="# 零候选\n\n未收集到候选数据（候选委派超时/失败），对比矩阵为空，置信度 0% 为事实。",
+                )
+
+        def fake_archive(self, session, *a, **k) -> None:
+            calls["names"].append(getattr(session, "competitor_name", None))
+
+        monkeypatch.setattr(mem_mod.FourLayerMemory, "archive_session", fake_archive)
+        from competitor_agent.memory import FourLayerMemory
+
+        _patch_env(monkeypatch, mock_llm, ZeroCandAPI, FourLayerMemory(tmp_path / "memory"))
+        monkeypatch.setattr(web_app, "save_report_download", lambda *a, **k: tmp_path / "dl.md")
+        sid = "sess_sse_zero"
+        web_app._sessions[sid] = {"task": "对比 Cursor vs Windsurf", "cancelled": False}
+
+        async def _run() -> list[str]:
+            sse_lines: list[str] = []
+            async for line in web_app._event_generator(sid, "对比 Cursor vs Windsurf"):
+                sse_lines.append(line)
+            return sse_lines
+
+        try:
+            sse_lines = asyncio.run(_run())
+        finally:
+            web_app._sessions.pop(sid, None)
+
+        events = _collect(sse_lines)
+        kinds = [e["event"] for e in events]
+        # 零候选不再触发"系统分析异常"
+        assert "error" not in kinds, f"零候选对比不应报错: {[e.get('message') for e in events]}"
+        report_ev = [e for e in events if e["event"] == "report"]
+        assert report_ev, "应有 report 事件（空报告留痕）"
+        assert report_ev[0]["payload"]["has_candidates"] is False
+        assert report_ev[0]["payload"]["competitor"] == "compare"
+        assert calls["names"] == ["compare"], f"归档 competitor_name 应兜底 'compare': {calls['names']}"
+
+
 class TestStaticServing:
     """设计文档 50 §7.3：static 抽离后打包可读性回归——index/静态资源可经资源定位读取。"""
 

@@ -7,7 +7,8 @@
   （拷贝 static/vendor/marked.min.js + DOMPurify.min.js，缺文件时降级为极简
   本地 markdown→HTML 转换，不依赖外网资源）。
 
-生成 <data_dir>/reports/competitor/<name>.html / comparison/<names>.html。
+生成 <output>/<name>.html / <output>/comparison/<names>.html（对比目录恒派生自
+resolve_output_dir 的 /comparison 子目录，设计文档 70 §8.2 D2a）。
 """
 from __future__ import annotations
 
@@ -22,7 +23,6 @@ from typing import Any
 from competitor_agent.core.report_archiver import _safe_filename, resolve_output_dir
 from competitor_agent.core.report_exporter import report_to_dict
 from competitor_agent.domain_types.report import ComparisonReport, CompetitorReport
-from competitor_agent.secret_vault import get_reports_dir
 
 logger = logging.getLogger("competitor_agent.core.report_visuals")
 
@@ -200,8 +200,8 @@ def render_html(
 ) -> Path:
     """单文件自包含 HTML：内嵌 CSS + markdown 正文 + 结构化数据 + 离线 marked。
 
-    ``out_path`` 缺省：单竞品 → <data_dir>/reports/competitor/<name>.html；
-    对比 → <data_dir>/reports/comparison/<names>.html。返回落盘路径。
+    ``out_path`` 缺省：单竞品 → <output>/<name>.html；
+    对比 → <output>/comparison/<names>.html（设计文档 70 §8.2 D2a）。返回落盘路径。
     """
     if isinstance(report, ComparisonReport):
         name = " / ".join(c.name for c in report.competitors) or "compare"
@@ -227,24 +227,22 @@ def _resolve_html_path(
     report: CompetitorReport | ComparisonReport,
     out_path: str | Path | None,
 ) -> Path:
-    """HTML 落盘路径：显式 out_path > 默认（单竞品 competitor/ 对比 comparison/）。"""
+    """HTML 落盘路径：显式 out_path > 默认（单竞品 output/ 对比 output/comparison/）。
+
+    设计文档 70 §8.2 D2a：对比 HTML 落 ``resolve_comparison_dir()``（恒派生自
+    resolve_output_dir 的 /comparison），不再读 config.report.comparison_dir。
+    """
+    from competitor_agent.core.report_archiver import resolve_comparison_dir
+
     if out_path is not None:
         p = Path(out_path).expanduser()
         return p if p.is_absolute() else Path.cwd() / p
     if isinstance(report, ComparisonReport):
-        base = resolve_output_dir(load_config_reports_dir("comparison"))
+        base = resolve_comparison_dir()
     else:
         base = resolve_output_dir()
     name = " / ".join(c.name for c in report.competitors) if isinstance(report, ComparisonReport) else report.competitor.name
     return base / (_safe_filename(name) + ".html")
-
-
-def load_config_reports_dir(section: str) -> str:
-    """读取 config 报告目录（'competitor' | 'comparison'）。"""
-    from competitor_agent.config.loader import load_config
-
-    cfg = load_config().report
-    return cfg.output_dir if section == "competitor" else cfg.comparison_dir
 
 
 def render_radar(
@@ -253,7 +251,7 @@ def render_radar(
 ) -> Path | None:
     """六维置信度雷达图（matplotlib 可选依赖；缺失 → None 并记日志，降级不炸）。
 
-    ``out_path`` 缺省 → <data_dir>/reports/comparison/<names>.png。
+    ``out_path`` 缺省 → <output>/comparison/<names>.png（设计文档 70 §8.2 D2a）。
     """
     try:
         # 经 importlib 加载 matplotlib（可选依赖）：字面 import matplotlib 会触发
@@ -293,7 +291,11 @@ def render_radar(
     if out_path is not None:
         path = Path(out_path).expanduser()
     else:
-        path = get_reports_dir() / "comparison"
+        # 设计文档 70 §8.2 D2a：雷达图落 resolve_comparison_dir()（output/comparison），
+        # 不再用 get_reports_dir()/comparison 与 config.comparison_dir
+        from competitor_agent.core.report_archiver import resolve_comparison_dir
+
+        path = resolve_comparison_dir()
     if path.is_dir() or out_path is None:
         names = " / ".join(c.name for c in report.competitors) or "compare"
         path = path / (_safe_filename(names) + ".png")

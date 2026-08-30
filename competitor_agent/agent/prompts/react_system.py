@@ -8,6 +8,46 @@ from __future__ import annotations
 from competitor_agent.agent.prompts.trust_boundary import wrap_untrusted
 from competitor_agent.interfaces.context import Skill
 
+_TWO_STEP_WEB_PROMPT = """\
+## 联网工具用法（两次调用原则）
+你拥有两个联网工具：
+- web_search(query)：只看**搜索摘要**。命中摘要已含所需事实 → 直接采用，停止这一步。
+- web_extract(url)：抓取**正文**。仅当满足任一条件才调用：
+    1) 摘要缺你写报告所需的数字/明细（定价、榜单分、版本、时间）；
+    2) 需核验来源（摘要来自转载，要落到官网/原文）；
+    3) 结论是事实性断言并将写入报告（定价/版本/榜单/发布），必须核验一手来源；
+    4) 多来源摘要含糊或冲突，需正文裁决。
+  否则默认用摘要，不 fetch（省成本）。
+纪律：
+- 单次任务 fetch 调用上限 6 次；同一 URL 只抓一次。超限后基于已有摘要作答。
+- 先搜索、后按需抓取；不要为了凑证据乱抓。
+- web_extract 返回的 via: 层级用于判断可核验强度：trafilatura/crawl4ai(本地) > jina(云端转译)。
+- 抓取失败（返回"抓取失败/未搜索到"）→ 如实标注「该事实待核验」，不要编造替代证据。"""
+
+_PURE_SEARCH_WEB_PROMPT = """\
+## 联网工具用法（纯搜索模式）
+本环境**已禁用抓取层**（FETCH_ENABLED=false），你只有 web_search，没有 web_extract。
+- 依据搜索摘要作答；摘要的时效与准确度有限。
+- **置信度声明纪律**：凡结论依赖未核验的细节（数字、版本、榜单、精确定价），
+  必须在报告/回答中明确标注「未核验，置信度下调」，并把该缺失事实记入待核验段，不装作已知。
+- 摘要冲突时，列出双方并说明无法核验，不武断选一方。
+- 调用 web_extract 会被工具层拒绝（返回固定提示）；若误调，忽略该提示，继续用摘要作答。"""
+
+
+def _web_tool_section(fetch_enabled: bool) -> str:
+    """联网工具用法段（设计文档 71 §8）：按 fetch_enabled 选版（版本一/版本二）。"""
+    return _TWO_STEP_WEB_PROMPT if fetch_enabled else _PURE_SEARCH_WEB_PROMPT
+
+
+def _fetch_enabled_from_config() -> bool:
+    """读取抓取层开关（纯搜索模式判定）；配置异常按启用处理（提示词不因缺配置塌）。"""
+    try:
+        from competitor_agent.config.loader import load_config
+
+        return bool(load_config().collector.fetch_enabled)
+    except Exception:  # noqa: BLE001 - 无配置环境按启用处理
+        return True
+
 
 def build_react_system_prompt(instructions: str = "") -> str:
     """基础 ReAct 系统提示"""
@@ -78,6 +118,7 @@ def build_lead_system_prompt() -> str:
         "performance→benchmarks，ecosystem→mcp_servers/plugins/ide_support，sentiment→polarity，"
         "roadmap→events。正文与 JSON 都要给全，两者缺一不可。"
     )
+    header += "\n\n" + _web_tool_section(_fetch_enabled_from_config())
     return _with_skills(header, ["planning", "fact_verification", "confidence_disclosure"])
 
 
@@ -133,7 +174,8 @@ def _dimension_header(name: str, desc: str) -> str:
         f'{{"dimension": "{name}", "summary": "结论", "details": {{...}}, '
         '"confidence": 0.0-1.0, "evidence_urls": ["实际引用的来源URL"]}\n'
         "evidence_urls 必须填实际采集/引用的来源 URL（供证据链与记忆沉淀），"
-        "无来源则留空数组，不得编造。只输出 JSON，不要其他文字。"
+        "无来源则留空数组，不得编造。只输出 JSON，不要其他文字。\n\n"
+        + _web_tool_section(_fetch_enabled_from_config())
     )
 
 
@@ -162,7 +204,8 @@ def _build_competitor_prompt(name: str, cfg: object) -> str:
         "ecosystem→mcp_servers/plugins/ide_support、sentiment→polarity、roadmap→events。\n"
         "official_links 填写你核实到的官方来源（供聚合阶段引用），无法核实留空。"
         "evidence_urls 必须填实际采集/引用的来源 URL，无来源则留空数组，不得编造。"
-        "只输出 JSON，不要其他文字。"
+        "只输出 JSON，不要其他文字。\n\n"
+        + _web_tool_section(_fetch_enabled_from_config())
     )
     return _with_skills(header, skills)
 

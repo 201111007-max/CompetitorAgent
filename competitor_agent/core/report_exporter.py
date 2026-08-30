@@ -2,7 +2,8 @@
 
 每次分析产出 ``<data_dir>/reports/competitor/<竞品>.json``（与 .md 同目录同名不同扩展名）：
 机器可读的 competitor / dimensions / evidence / freshness / pricing.profile /
-benchmark_scores；比较报告另出 ``<data_dir>/reports/comparison/<names>.json``（品类矩阵数据）。
+benchmark_scores；比较报告另出 ``<output>/comparison/<names>.json``（品类矩阵数据，
+设计文档 70 §8.2 D2a：恒派生自 resolve_output_dir 的 /comparison 子目录）。
 
 复用 checkpoint 的原子写模式（临时文件 + fsync + os.replace）与 report_archiver
 的路径解析/文件名净化，与 ``report_archiver``（.md）并存不冲突。
@@ -14,7 +15,11 @@ from pathlib import Path
 from typing import Any
 
 from competitor_agent.core.checkpoint import _write_bytes_atomic
-from competitor_agent.core.report_archiver import _safe_filename, resolve_output_dir
+from competitor_agent.core.report_archiver import (
+    _safe_filename,
+    resolve_comparison_dir,
+    resolve_output_dir,
+)
 from competitor_agent.domain_types.enums import ResultStatus
 from competitor_agent.domain_types.report import (
     ComparisonReport,
@@ -191,9 +196,15 @@ def export_comparison_json(
 ) -> Path:
     """原子写 <data_dir>/reports/comparison/<names>.json：matrix + best_per_dimension + summary。
 
-    ``output_dir`` 缺省取 config.report.comparison_dir（<data_dir>/reports/comparison）。
+    ``output_dir`` 缺省取 ``resolve_comparison_dir()``（设计文档 70 §8.2 D2a：恒派生自
+    ``resolve_output_dir()`` 的 ``/comparison`` 子目录，不再读 config.report.comparison_dir）；
+    显式传入（测试/CLI）→ 精确路径，不回退（保持向后兼容）。
     """
-    out_dir = resolve_output_dir(output_dir)
+    out_dir = (
+        resolve_comparison_dir()
+        if output_dir is None
+        else Path(output_dir).expanduser()
+    )
     out_dir.mkdir(parents=True, exist_ok=True)
     names = " / ".join(c.name for c in report.competitors) or "compare"
     path = out_dir / (_safe_filename(names) + ".json")
