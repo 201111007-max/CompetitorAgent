@@ -32,7 +32,8 @@ class TestPlanSchemaFields:
         }, ensure_ascii=False))
         plan = json.loads(result)
         assert plan["output_intent"] == "CTO 选型"
-        assert plan["format_hint"] == "对比型"
+        # 设计文档 71 §8.4：format_hint 在 make_plan 侧 lenient 归一为枚举（对比型 → compare）
+        assert plan["format_hint"] == "compare"
         assert plan["need_history"] is True
 
     def test_make_plan_accepts_old_plan_without_m2(self) -> None:

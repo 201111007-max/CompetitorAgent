@@ -41,6 +41,13 @@ def make_plan(plan_json: Any) -> str:
     problems = LLMClient._validate_schema(plan, PLAN_SCHEMA)
     if problems:
         return f"make_plan 校验失败: {'；'.join(problems)}"
+    # 设计文档 71 §8.4：format_hint 归一——计划里带该字段则规范化为枚举，非法/缺省回退 open。
+    # 不做拒绝（schema 宽松、doc 70 只定调不强制），仅让 loop.plan 携带规范值供阶段二选版。
+    # 仅当字段存在时归一（缺省不新增——旧 plan 原样透传，阶段二把缺失视为 open）
+    if isinstance(plan.get("format_hint"), str):
+        from competitor_agent.agent.react_schemas import normalize_format_hint
+
+        plan["format_hint"] = normalize_format_hint(plan["format_hint"])
     return json.dumps(plan, ensure_ascii=False)
 
 

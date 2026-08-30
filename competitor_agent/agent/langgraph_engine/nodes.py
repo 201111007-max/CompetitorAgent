@@ -180,11 +180,19 @@ def make_report_node(
 
     def report_node(state: dict) -> dict:
         merged = state.get("merged_results") or "（无子 Agent 结果）"
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": state["task"]},
-            {"role": "user", "content": f"{_OBS_PREFIX}{wrap_untrusted(merged)}"},
-        ]
+        from competitor_agent.agent.prompts.react_system import build_report_phase2_section
+
+        messages = [{"role": "system", "content": system_prompt}]
+        # 设计文档 71 §8.4：两阶段任务适配——report 节点按 plan 注入报告结构/对比推理段
+        section = build_report_phase2_section(state.get("plan"))
+        if section:
+            messages.append({"role": "system", "content": section})
+        messages.extend(
+            [
+                {"role": "user", "content": state["task"]},
+                {"role": "user", "content": f"{_OBS_PREFIX}{wrap_untrusted(merged)}"},
+            ]
+        )
         reply = llm.complete(messages)
         answer = (reply or "").removeprefix("Final Answer: ")
         record: dict[str, Any] = {"tool": "report", "args": {}, "result_brief": answer[:_BRIEF_CHARS], "url": ""}
