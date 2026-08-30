@@ -41,7 +41,7 @@ def _api(monkeypatch, cfg, llm, **kwargs) -> CompetitorAnalysisAPI:
 
     monkeypatch.setattr(
         search_mod,
-        "build_search_provider",
+        "build_search_router",
         lambda c: FakeProvider([SearchHit("Cursor", "https://cursor.com", "AI editor")]),
     )
     return CompetitorAnalysisAPI(
@@ -57,12 +57,16 @@ def test_no_injection_when_external_sources_disabled(monkeypatch, mock_llm):
     assert api._discoverer._web_tool is None
 
 
-def test_no_key_degrades_no_fabricate(monkeypatch, mock_llm):
-    """enable_external_sources=True 但 provider 不可用（无 Key）→ 保持 None。"""
+def test_router_unavailable_keeps_none(monkeypatch, mock_llm):
+    """enable_external_sources=True 但搜索路由不可用 → 保持 None（不注入、不编造）。
+
+    设计文档 71 §2.2：注入依赖 build_search_router（DDG 主力恒可用，但主开关关 →
+    None）；router 为 None 时 DISCOVERY 走空候选降级。
+    """
     from competitor_agent.collector import search as search_mod
 
     cfg = _cfg(enable_external_sources=True)
-    monkeypatch.setattr(search_mod, "build_search_provider", lambda c: None)
+    monkeypatch.setattr(search_mod, "build_search_router", lambda c: None)
     api = CompetitorAnalysisAPI(
         llm=mock_llm, use_llm=True, config=cfg, web_tool=None,
         enable_rag=False, enable_memory=False,

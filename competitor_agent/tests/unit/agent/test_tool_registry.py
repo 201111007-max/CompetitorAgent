@@ -62,11 +62,16 @@ class TestRegistryConsistency:
         with pytest.raises(ToolArgumentError, match="缺少必填字段 url"):
             d.dispatch("web_extract", {})
 
-    def test_web_search_no_network(self):
-        # web_search 为提示实现，不触网络；build_react_dispatcher 默认注册全部工具
+    def test_web_search_no_network(self, monkeypatch):
+        # web_search 为提示实现，不触网络；build_react_dispatcher 默认注册全部工具。
+        # 设计文档 71 §2.2：enable_external_sources=false（AppConfig 默认）→ router None
+        # → web_search 返回「搜索功能未启用」提示（不再有 DDG 真实联网）。
+        from competitor_agent.mcp_server.tools import web_tools
+
+        monkeypatch.setattr(web_tools, "load_config", _config)
         d = build_react_dispatcher(config=_config())
         out = d.dispatch("web_search", {"query": "cursor"})
-        assert "搜索" in out
+        assert "搜索功能未启用" in out
 
 
 class TestMcpSameSource:
@@ -119,8 +124,11 @@ def _tool(name: str, args: dict) -> ToolCallReply:
 class TestMultiToolReact:
     """集成：mock LLM 自主走 web_search → web_extract → Final Answer（工具结果回灌）"""
 
-    def test_multi_tool_chain(self):
+    def test_multi_tool_chain(self, monkeypatch):
         calls = []
+        from competitor_agent.mcp_server.tools import web_tools
+
+        monkeypatch.setattr(web_tools, "load_config", _config)  # 无网络（主开关关）
 
         def fake_extract(url):
             calls.append(url)
@@ -140,7 +148,10 @@ class TestMultiToolReact:
         # web_search 结果回灌（tool 消息含工具输出——未配 Key 时返回可读提示）
         assert any("搜索功能未启用" in m for m in tool_msgs)
 
-    def test_recovers_from_unknown_tool(self):
+    def test_recovers_from_unknown_tool(self, monkeypatch):
+        from competitor_agent.mcp_server.tools import web_tools
+
+        monkeypatch.setattr(web_tools, "load_config", _config)  # 无网络（主开关关）
         d = build_react_dispatcher(config=_config())
         answer, tool_msgs = _run_react(
             [
@@ -190,7 +201,7 @@ class TestWebSearchRealProvider:
                     SearchHit("Windsurf", "https://windsurf.com", "agentic IDE"),
                 ]
 
-        monkeypatch.setattr(web_tools, "build_search_provider", lambda cfg: FakeProvider())
+        monkeypatch.setattr(web_tools, "build_search_router", lambda cfg: FakeProvider())
         out = web_tools.web_search("coding agent", max_results=3)
         assert "Cursor" in out and "https://cursor.com" in out and "AI code editor" in out
         assert "Windsurf" in out
@@ -198,7 +209,7 @@ class TestWebSearchRealProvider:
     def test_no_provider_returns_readable_hint(self, monkeypatch):
         from competitor_agent.mcp_server.tools import web_tools
 
-        monkeypatch.setattr(web_tools, "build_search_provider", lambda cfg: None)
+        monkeypatch.setattr(web_tools, "build_search_router", lambda cfg: None)
         out = web_tools.web_search("coding agent")
         assert "未启用" in out
 
@@ -210,9 +221,9 @@ class TestWebSearchRealProvider:
             def search(self, query, max_results=5):
                 raise SearchError("boom")
 
-        monkeypatch.setattr(web_tools, "build_search_provider", lambda cfg: Boom())
+        monkeypatch.setattr(web_tools, "build_search_router", lambda cfg: Boom())
         out = web_tools.web_search("coding agent")
-        assert "搜索失败" in out and "boom" in out
+        assert "搜索暂不可用" in out and "boom" in out
 
 
 class TestDelegateSchemaDerivation:

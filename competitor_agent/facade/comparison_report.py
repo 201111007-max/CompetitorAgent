@@ -22,6 +22,12 @@ from competitor_agent.domain_types.report import ComparisonReport, CompetitorRep
 
 _MARKER = "【市场格局核心结论】"
 
+# 设计文档 70 §8.1 D1d：零候选空报告仍落盘 .md（内容 = 提示），不额外制造垃圾——
+# 矩阵空 + Lead 结论段 + 本提示，报告库可见可点开看原因。
+_ZERO_CANDIDATE_HINT = (
+    "未收集到候选数据（候选委派超时/失败），对比矩阵为空，置信度 0% 为事实。"
+)
+
 
 def assemble_comparison(
     lead_answer: str,
@@ -88,8 +94,15 @@ def assemble_comparison(
                 + (comparison.markdown_report or "").strip()
                 + "\n"
             )
-            return comparison
-    if conclusion:
+    if not comparison.markdown_report.strip():
+        # 设计文档 70 §8.1 D1d：零候选且无正文/结论 → 提示留痕，保证 .md 非空可落盘
+        comparison.markdown_report = _ZERO_CANDIDATE_HINT + "\n"
+    elif not reports and _ZERO_CANDIDATE_HINT not in comparison.markdown_report:
+        # 零候选但有 Lead 正文/结论 → 正文/结论在前、提示追加在后（"矩阵空 + 结论段 + 提示"）
+        comparison.markdown_report = (
+            comparison.markdown_report.rstrip() + "\n\n" + _ZERO_CANDIDATE_HINT + "\n"
+        )
+    if conclusion and "## 市场格局核心结论" not in comparison.markdown_report:
         comparison.markdown_report = (
             comparison.markdown_report.rstrip()
             + "\n\n## 市场格局核心结论\n\n"

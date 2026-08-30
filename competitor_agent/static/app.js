@@ -236,7 +236,7 @@ function makeBtn(cls, text, onClick) {
 }
 
 function renderDossier(opts) {
-  // opts: { name, title, markdown, conf, dims[], isComparison, reportUrl, reportPath, terminalState }
+  // opts: { name, title, markdown, conf, dims[], isComparison, hasCandidates, reportUrl, reportPath, terminalState }
   const bubble = addMessage('assistant', 'report');
   const dossier = document.createElement('div');
   dossier.className = 'dossier';
@@ -284,6 +284,13 @@ function renderDossier(opts) {
   if (opts.conf != null) mh += '<span class="chip chip-conf">置信度 ' + (opts.conf * 100).toFixed(0) + '%</span>';
   meta.innerHTML = mh;
   dossier.appendChild(meta);
+  // 设计文档 70 §8.1 D1b：零候选对比 → 提示"未收集到候选数据"而非干巴巴 0%
+  if (opts.hasCandidates === false) {
+    const warn = document.createElement('div');
+    warn.className = 'report-notice dossier-warn';
+    warn.textContent = '未收集到候选数据（候选委派超时/失败），置信度 0% 为事实';
+    dossier.appendChild(warn);
+  }
 
   // 操作栏：复制 / 下载 + 审批（右对齐）
   const actions = document.createElement('div');
@@ -648,6 +655,7 @@ function handleEvent(data) {
         conf: p.overall_confidence,
         dims: p.dimensions || [],
         isComparison: !!p.is_comparison,
+        hasCandidates: p.has_candidates,
         reportUrl: p.report_url,
         reportPath: p.report_path,
         terminalState: p.terminal_state,

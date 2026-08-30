@@ -70,3 +70,37 @@ class TestPricingConfig:
         client = _build_llm(cfg)
         assert client._pricing_per_1k["input"] == cfg.llm.pricing_per_1k["input"]
         assert client._pricing_per_1k["output"] == cfg.llm.pricing_per_1k["output"]
+
+
+# ── 设计文档 70 §8.4 D4：工具启停 + 超时配置默认值 ──────────────
+
+
+class TestDesign70ToolDefaults:
+    """D4a/D4b/D4c：默认配置即启用榜单/舆情直连 + 加长子 Agent 采集超时；
+    D4d：build_*_provider 据此返回非 None。"""
+
+    def test_default_benchmark_provider_enabled(self):
+        cfg = load_config()
+        assert cfg.collector.benchmark_provider == "swebench"
+        from competitor_agent.collector.benchmark_sources import build_benchmark_provider
+        from competitor_agent.config.loader import CollectorConfig
+
+        c = CollectorConfig(
+            enable_external_sources=True, benchmark_provider=cfg.collector.benchmark_provider
+        )
+        assert build_benchmark_provider(c) is not None
+
+    def test_default_sentiment_provider_enabled(self):
+        cfg = load_config()
+        assert cfg.collector.sentiment_provider == "hackernews"
+        from competitor_agent.collector.sentiment_sources import build_sentiment_provider
+        from competitor_agent.config.loader import CollectorConfig
+
+        c = CollectorConfig(
+            enable_external_sources=True, sentiment_provider=cfg.collector.sentiment_provider
+        )
+        assert build_sentiment_provider(c) is not None
+
+    def test_default_subagent_timeout_120(self):
+        cfg = load_config()
+        assert cfg.subagents.timeout_seconds == 120

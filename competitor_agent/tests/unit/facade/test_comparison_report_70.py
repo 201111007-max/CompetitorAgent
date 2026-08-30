@@ -95,3 +95,26 @@ class TestAssembleComparison:
         assert "品类格局矩阵" in comparison.markdown_report
         assert "## 市场格局核心结论" in comparison.markdown_report
         assert "Cursor 最佳" in comparison.markdown_report
+
+
+class TestZeroCandidateRobustness:
+    """设计文档 70 §8.1 D1d：零候选对比报告健壮性——空报告仍落盘 .md（提示留痕）。"""
+
+    def test_zero_candidate_empty_lead_answer_gets_hint(self):
+        comparison = assemble_comparison("", _PLAN, {}, use_lead_body=True)
+        assert comparison.reports == []
+        assert comparison.markdown_report.strip()
+        assert "未收集到候选数据" in comparison.markdown_report
+
+    def test_zero_candidate_with_lead_body_appends_hint(self):
+        lead_answer = "## 格局结论\n\n候选采集失败，以下是已获取信息。\n"
+        comparison = assemble_comparison(lead_answer, _PLAN, {}, use_lead_body=True)
+        assert lead_answer.strip() in comparison.markdown_report
+        assert "未收集到候选数据" in comparison.markdown_report
+
+    def test_zero_candidate_keep_conclusion_plus_hint(self):
+        lead_answer = "## 结论\n\n综合判断无可靠候选。\n\n【市场格局核心结论】暂无可靠候选"
+        comparison = assemble_comparison(lead_answer, _PLAN, {}, use_lead_body=False)
+        assert comparison.markdown_report.strip()
+        assert "未收集到候选数据" in comparison.markdown_report
+        assert "暂无可靠候选" in comparison.markdown_report

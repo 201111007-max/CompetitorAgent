@@ -161,3 +161,91 @@ JSON 块前文本为 body（复用 doc 65 `_extract_json_block`/`_strip_json_blo
 | 7 | 设置面板位置 | **rail 头部齿轮按钮**（doc 68 布局自然入口） |
 
 > 本文档实现方向以本表为准。
+
+## 8. 运行期健壮性补强（第二十一轮，2026-08-29 grilling 逐项确认，全部按推荐）
+
+> 背景：doc 70 首轮落地后真实市场普查（国内外 coding agent）暴露 5 个运行期问题：
+> 搜索 key 未进服务器进程致搜索禁用、delegate 60s 超时致零候选、零候选对比报告触发
+> 归档崩溃 + 置信度 0%、对比 JSON 仍写 C 盘 comparison_dir、无 payload 的 report 事件
+> 产生「report/已批准（无正文）」幽灵报告。本节为收口设计（决策树经 grilling 确认）。
+
+### 8.1 零候选对比报告健壮性（#1 归档崩溃 + #2 置信度 0% 同根）
+
+**根因**：候选子 Agent 全部超时/失败 → `report.competitors`/`report.reports` 为空 →
+① `web_app.py` 对比归档 `competitor_name=" / ".join([])` = `""` → `SessionArchive.archive_session`
+抛 `ValueError("会话归档需要 competitor_name")` → SSE 异常（「系统分析异常」）；
+② 载荷置信度 `max((r.overall_confidence ...), default=0.0)` = 0.0（「置信度 0%」）。
+
+**决策**：
+- **D1a 归档兜底**：`web_app.py` 对比归档 `names = " / ".join(...) or "compare"`（空名占位）；
+  归档调用整体包 `try/except`（失败仅告警，**永不阻塞 SSE 主流程**）。
+- **D1b 零候选呈现**：report 载荷新增 `has_candidates: bool`（候选为 0 → `false`）；
+  前端 dossier 在 `has_candidates === false` 时显示提示「未收集到候选数据（候选委派超时/失败），
+  置信度 0% 为事实」，不再只显示干巴巴 0%。
+- **D1c 不加代码级重试**：守 doc 62「代码守骨架、LLM 回合内自调」哲学——超时后 Lead 本就可在
+  回合内再 delegate；本次只优雅降级 + 提示（靠 §8.4 超时调大缓解）。
+- **D1d 空报告留痕**：零候选空报告仍落盘 `.md` + 导出 JSON + 入库（报告库可见可点开看原因），
+  不额外制造垃圾（对比 .md 内容为「矩阵空 + Lead 结论段 + 提示」）。
+
+### 8.2 comparison_dir 收口（#3 对比 JSON 写 C 盘）
+
+**根因**：`api.py::_export_comparison_json` 用 `config.report.comparison_dir`
+（yaml 仍为 `~/.competitor_agent/reports/comparison`）；doc 70 Part B 只迁移了竞品 output_dir，
+漏了对比矩阵 JSON。
+
+**决策**：
+- **D2a 新落点**：`<output_dir>/comparison/`（默认 = `<项目>/output/comparison/`）。
+  新增 `report_archiver.resolve_comparison_dir()`：**恒派生自** `resolve_output_dir()`（`/comparison`），
+  不读 config.comparison_dir、不读 settings（无新配置键）。
+- **D2b 不纳入 settings.json**：对比 JSON 是次级产物，跟随主输出目录即可，界面不添乱。
+- **D2c 旧目录读侧回退**：`~/.competitor_agent/reports/comparison/*.json` 读侧回退不迁移
+  （历史对比数据不丢；当前无读消费方，作兜底声明，未来有读方再补回退逻辑）。
+- **D2d 审批不覆盖 comparison**：`/api/reports/{name}/status` + review 只查竞品 JSON，
+  对比报告无审批语义、status 保持默认 approved。
+- 实现：`report_exporter.export_comparison_json` 默认（`output_dir=None`）→ `resolve_comparison_dir()`；
+  `api.py:659` 改 `export_comparison_json(report)`；`report_visuals` 的 comparison 输出路径同步；
+  yaml `comparison_dir: ""`（置空，注释说明已并入 output/comparison）。
+
+### 8.3 无 payload report 事件净化（#5 幽灵空报告）
+
+**根因**：单/对比收尾 `_emit(ProgressEvent(event="report", ...))` 发**无 payload** 的 report 事件
+（api.py:426-433 / 461-468）；`report` ∉ `_NARRATIVE_EVENTS` → web `_event_generator` 原样透传 →
+前端 `handleEvent 'report'` 当真实报告渲染成空 dossier（title="report"、无正文、
+`fetchStatus` 缺 JSON → 默认「已批准」）。
+
+**决策**：
+- **D3a 丢弃而非删除**：api 层事件保留（CLI/MCP 的「报告完成」信号不变）；web 侧在事件分层
+  丢弃「无 payload 的 report 事件」（`_narrative_sse` 前加判定：`event.event == "report" and not event.payload` → 丢弃）。
+- **D3b 单/对比统一处理**：同一丢弃逻辑覆盖两条路径（一处判定，天然统一）。
+
+### 8.4 工具启停 + 超时配置（#4 榜单/舆情未启用、delegate 超时）
+
+**根因**：`build_benchmark_provider` 需 `benchmark_provider ∈ {swebench|terminalbench|aider}`
+（yaml `""` → 未启用）；`sentiment_sampling` 需 `sentiment_provider ∈ {hackernews|reddit}`
+（yaml `""` → 未启用）；搜索 key 未进服务器进程（已修）；`subagents.timeout_seconds: 60`
+（`delegate_tool._DEFAULT_TIMEOUT_SECONDS=60`）在无搜索/榜单下靠多次 web_extract 采集不够。
+
+**决策**：
+- **D4a** `collector.benchmark_provider: "swebench"`（官方 SWE-bench 榜单表最稳、与 coding agent 最相关）。
+- **D4b** `collector.sentiment_provider: "hackernews"`（公开免 Key，即启即用）。
+- **D4c** `subagents.timeout_seconds: 120`（给子 Agent 足够 web 采集时间，不过度拖延）。
+- **D4d 未启用提示带原因**：`web_search`/`benchmark_scores`/`sentiment_sampling` 未启用分支的
+  回灌文案从「未启用」改为带原因（缺 `TAVILY_API_KEY` / 未配 `benchmark_provider` /
+  未配 `sentiment_provider`），Lead 不再困惑、可自行改策略（自恢复）。
+
+### 8.5 测试
+
+- 零候选对比归档兜底：零候选走完 SSE 不崩、归档 competitor_name 为 "compare"。
+- 零候选载荷 `has_candidates == false`；前端提示分支。
+- 无 payload 的 report 事件被 web 丢弃（SSE 流无幽灵 report 事件；带 payload 的正常放行）。
+- `resolve_comparison_dir()` 派生 `<output>/comparison`；`export_comparison_json` 默认写入新目录；
+  旧 comparison 目录读侧回退；`api._export_comparison_json` 不再用 comparison_dir。
+- 配置新值：`benchmark_provider="swebench"`/`sentiment_provider="hackernews"` 时
+  `build_benchmark_provider`/`build_sentiment_provider` 返回非 None；`subagents.timeout_seconds=120` 透传 delegate。
+- 既有 987 unit / 61 integration+e2e / benchmark 门禁回归不破。
+- 起服冒烟：`/api/settings` 仍 200；真实普查不再崩「会话归档需要 competitor_name」。
+- **跨平台路径坑（CI=Linux）**：doc70/§8 测试曾硬编码盘符绝对路径（`D:/...`），在 Linux 上
+  `Path("D:/x")` 非绝对路径会被拼到 CWD → CI「test (3.11)」pytest 挂 4 项（3.11 只是先到先取消，
+  实为平台问题）。已修：`test_report_settings_70`/`test_web_settings_70` 改 tmp_path 派生绝对路径，
+  `web_app._normalize_dir_setting` 加 `_is_abs_like` 盘符绝对判定（不依赖宿主 OS 的 `Path.is_absolute`）；
+  Docker python:3.11 复现 4 挂 → 1148 passed / 43 skipped 全绿。

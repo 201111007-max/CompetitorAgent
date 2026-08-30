@@ -35,3 +35,12 @@ FROM base AS full
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install "/app/competitor_agent[web,rag,mcp,eval]"
 USER agent
+
+# 可选：启用 crawl4ai 浏览器渲染抓取（设计文档 71 §3.4/§10 P3）
+# 体积 +~200MB，仅需渲染级抓取时用 `--target crawler4ai` 构建；slim/full 默认不含。
+# crawl4ai 运行时默认关（collector.crawler.browser_pool=0），浏览器写入 /data 卷可持久化复用。
+FROM base AS crawler4ai
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install "/app/competitor_agent[crawl4ai]" \
+    && python -m crawl4ai.setup --quick
+USER agent

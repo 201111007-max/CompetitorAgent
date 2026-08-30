@@ -68,6 +68,16 @@ def resolve_download_dir() -> Path:
     return path if path.is_absolute() else Path.cwd() / path
 
 
+def resolve_comparison_dir(output_dir: str | Path | None = None) -> Path:
+    """解析对比矩阵 JSON 目录（设计文档 70 §8.2 D2a）：恒派生自 ``resolve_output_dir()`` 的
+    ``/comparison`` 子目录。不读 config.report.comparison_dir、不读 settings（无新配置键）。
+
+    ``output_dir`` 显式传入时（测试/CLI）基于其派生 ``/comparison``。旧 comparison 目录
+    （~/.competitor_agent/reports/comparison）读侧回退不迁移（设计文档 70 §8.2 D2c）。
+    """
+    return resolve_output_dir(output_dir) / "comparison"
+
+
 def _fallback_legacy_path(fname: str) -> Path:
     """旧归档目录路径（读侧回退用，不迁移）。"""
     return _LEGACY_REPORTS_DIR / fname
@@ -139,6 +149,7 @@ def download_file_path(
 __all__ = [
     "download_file_path",
     "report_file_path",
+    "resolve_comparison_dir",
     "resolve_download_dir",
     "resolve_output_dir",
     "save_report_download",

@@ -60,6 +60,13 @@ class TestLeadWebExtractIngest:
             api._lead_web_extract(lambda: "")("https://example.com")
         assert api._store.by_competitor("") == [], "占位文本不应落入知识库"
 
+    def test_limit_placeholder_not_ingested(self, tmp_path, monkeypatch):
+        """review 修复（P1，doc 71 §5.3）：单跑上限提示文本不摄入知识库（防 RAG 污染）。"""
+        api = _api(tmp_path)
+        monkeypatch.setattr(api, "_react_web_extract", lambda url: "正文")
+        api._ingest_fetched("", "web", "https://example.com", "抓取次数已达上限（本任务 6 次）")
+        assert api._store.by_competitor("") == [], "上限提示不应落入知识库"
+
     def test_real_ingest_lands_in_store(self, tmp_path, monkeypatch):
         """真实摄入闭环：抓取正文经 _ingest_fetched 落入知识库，可被检索。"""
         api = _api(tmp_path)
