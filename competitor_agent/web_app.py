@@ -931,6 +931,11 @@ def main() -> None:
     parser.add_argument("--host", type=str, default="127.0.0.1", help="监听地址")
     args = parser.parse_args()
 
+    # 设计文档 74 §3.1/E2：启动强制应用用户级 env（忽略 shell 注入的 DEEPSEEK_API_KEY / OPENAI_BASE_URL）
+    from competitor_agent.config.user_env import apply_user_level_environment
+
+    apply_user_level_environment()
+
     setup_logging(level=_config.observability.log_level, log_dir=get_data_dir() / "logs")
     uvicorn.run(app, host=args.host, port=args.port)
 

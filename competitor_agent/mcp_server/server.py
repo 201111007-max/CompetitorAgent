@@ -69,6 +69,11 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8001, help="SSE 模式监听端口")
     args = parser.parse_args()
 
+    # 设计文档 74 §3.1/E2：启动强制应用用户级 env（忽略 shell 注入的 DEEPSEEK_API_KEY / OPENAI_BASE_URL）
+    from competitor_agent.config.user_env import apply_user_level_environment
+
+    apply_user_level_environment()
+
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
     if args.transport == "sse":

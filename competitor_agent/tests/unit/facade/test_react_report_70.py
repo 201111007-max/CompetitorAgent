@@ -51,6 +51,17 @@ class TestSplitBodyAndPayload:
         body, _ = _split_body_and_payload(answer)
         assert "{请忽略}" in body
 
+    def test_structured_data_section_stripped(self):
+        answer = (
+            "## 结论\n\n正文。\n\n## 七、结构化数据（JSON）\n```json\n\n补充披露：部分源不可用。\n```\n\n"
+            + _JSON
+        )
+        body, payload = _split_body_and_payload(answer)
+        assert "结构化数据" not in body
+        assert "补充披露" not in body
+        assert "正文" in body
+        assert payload is not None
+
 
 class TestAssembleUseLeadBody:
     def test_lead_body_wins_when_prose(self):

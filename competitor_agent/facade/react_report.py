@@ -121,9 +121,60 @@ def _split_body_and_payload(lead_answer: str) -> tuple[str, dict[str, Any] | Non
       的兜底单 react 维度）。
     mock LLM 无正文（纯 JSON）→ body 空 → 模板保底（既有断言零改动）。
     """
-    body = _strip_json_blocks(lead_answer or "")
+    body = _close_orphan_fence(
+        _dedupe_repeated_report(
+            _strip_structured_data_section(_strip_json_blocks(lead_answer or ""))
+        )
+    )
     payload = _parse_report(lead_answer)
     return body, payload
+
+
+def _dedupe_repeated_report(text: str) -> str:
+    """正文去重（设计文档 73 §3.1）：含 2+ 个 H1 标题（^# ）时只保留最后一个 H1 起的内容。
+
+    触发条件：合法报告仅 1 个 H1；出现 ≥2 即「草稿 + 正式稿」形态，取尾（正式稿在后，
+    实证含完整聚合 JSON）。正常单 H1 文本逐字节不变（黄金回归安全）。
+    复查（2026-08-30）：跳过 ``` 围栏内（代码示例）的 ``# `` 行，避免把示例注释误当第二个 H1。
+    """
+    if not text:
+        return text
+    in_fence = False
+    h1_positions: list[int] = []
+    for m in re.finditer(r"^```[^\n]*$|^#\s+[^\n]*", text, re.MULTILINE):
+        if m.group(0).startswith("```"):
+            in_fence = not in_fence
+        elif not in_fence:
+            h1_positions.append(m.start())
+    return text[h1_positions[-1]:] if len(h1_positions) >= 2 else text
+
+
+def _close_orphan_fence(text: str) -> str:
+    """未闭合围栏兜底（设计文档 73 §3.2）：`` ``` `` 开/闭计数失衡（开 > 闭）时文末补闭合。
+
+    对任意章节的截断生效；围栏已配平则原样返回（正常文本零改动）。
+    """
+    if text and text.count("```") % 2 != 0:
+        return text.rstrip() + "\n```\n"
+    return text
+
+
+def _strip_structured_data_section(text: str) -> str:
+    """移除「结构化数据（JSON）」机器段（设计文档 70 M1 第②段）整节。
+
+    JSON 内容块已由 ``_strip_json_blocks`` 剥除；此处把「结构化数据」标题（含编号
+    形态如 ``## 七、结构化数据（JSON）``）及其下直到下一个 Markdown 标题之间的内容
+    （散文、空 ```json 围栏等）一并剔除——该段是给机器/矩阵/compare.json 用的，
+    不应出现在给人读的报告正文。结构化数据仍保留在原始 answer 中供矩阵/导出提取。
+    """
+    if not text:
+        return ""
+    return re.sub(
+        r"^#{1,6}\s*[^\n]*结构化数据[^\n]*\n(?:(?!^#{1,6}\s).*\n?)*",
+        "",
+        text,
+        flags=re.MULTILINE,
+    )
 
 
 def _parse_report(answer: str) -> dict[str, Any] | None:

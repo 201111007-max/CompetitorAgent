@@ -123,8 +123,8 @@ freshness:
 # 安全兜底（url_guard/注入防护/预算/取消/checkpoint/聚合渲染）保持代码，不进 LLM。
 subagents:
   enabled: true            # analyze() 主路径 = Lead ReAct 编排
-  # 设计文档 70 §8.4 D4c：无搜索/榜单下靠多次 web_extract 采集加长 → 120s（不过度拖延）
-  timeout_seconds: 120      # 子 Agent 单次执行超时（并发硬上限见 execution.max_parallel_subagents）
+  # 设计文档 70 §8.4 D4c：无搜索/榜单下靠多次 web_extract 采集加长 → 300s（覆盖真实 2-5min 耗时）
+  timeout_seconds: 300      # 子 Agent 单次执行超时（并发硬上限见 execution.max_parallel_subagents）
 tools:
   validate_facts: true     # 复核工具（事实/数值冲突核验）注册
   detect_conflict: true    # 跨维度冲突检测工具注册

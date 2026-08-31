@@ -13,6 +13,7 @@ M4 新增：analyze_stream()（流式 SSE）/ cancel() / resume() / get_history(
 from __future__ import annotations
 
 import logging
+import os
 import uuid
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -183,6 +184,8 @@ class CompetitorAnalysisAPI:
         max_iterations = max_iterations if max_iterations is not None else cfg.budget.max_iterations
         self._config = cfg
         self._llm = llm
+        # 设计文档 74 §3.1：默认 LLM 客户端（懒构造，端点/模型从 config 显式注入）
+        self._default_llm_client: LLMClient | None = None
         self._use_llm = use_llm
         self._event_sink = event_sink
         self._stream_sink = stream_sink  # 设计文档 63 §5.5：仅 Lead 流式旁路，缺省 None=关闭
@@ -291,6 +294,41 @@ class CompetitorAnalysisAPI:
             self._tracer = Tracer(sinks=[JsonlSink(), LangfuseExporter()])
         else:
             self._tracer = get_tracer()
+
+    def _default_llm(self) -> LLMClient:
+        """默认 LLM 客户端（设计文档 74 §3.1）：端点/模型从 ``config.llm`` 显式注入。
+
+        与现状差异：未显式注入 ``llm`` 时，默认构造不再静默继承 shell env 的
+        ``OPENAI_BASE_URL``/API Key，而是以 ``review_config.yaml`` 的 ``llm`` 段为准——
+        根治 shell env 污染导致的误用端点（0ms 空返回、401）。
+        同时检测 env 与 config 的端点漂移并告警（§3.1 思路 1，配置漂移检测）。
+        """
+        if self._default_llm_client is None:
+            cfg_llm = self._config.llm
+            env_base = os.getenv("OPENAI_BASE_URL")
+            if cfg_llm.api_base_url and env_base and env_base.rstrip("/") != cfg_llm.api_base_url.rstrip("/"):
+                logger.warning(
+                    "LLM 端点漂移检测（设计文档 74 §3.1）: env OPENAI_BASE_URL=%s 与 "
+                    "config.llm.api_base_url=%s 不一致，采用 config 声明端点；如需自定义端点请改 "
+                    "review_config.yaml 的 llm 段（api_base_url/model）",
+                    env_base,
+                    cfg_llm.api_base_url,
+                )
+            self._default_llm_client = LLMClient(
+                model=cfg_llm.model or "deepseek-chat",
+                base_url=cfg_llm.api_base_url or None,
+                fallback_models=cfg_llm.fallback_models,
+                timeout=cfg_llm.timeout,
+                max_retries=cfg_llm.max_retries,
+                pricing_per_1k=cfg_llm.pricing_per_1k,
+                tracer=self._tracer,
+            )
+            logger.info(
+                "LLM 端点（设计文档 74 §3.1）: model=%s base_url=%s",
+                self._default_llm_client._model,
+                cfg_llm.api_base_url or "（未指定，用 SDK 默认）",
+            )
+        return self._default_llm_client
 
     def analyze(
         self,
@@ -656,6 +694,11 @@ class CompetitorAnalysisAPI:
         """设计文档 28 §8.2 D2a：比较报告导出 output/comparison/<names>.json（品类矩阵）。"""
         if not self._config.report.export_json:
             return None
+        if not report.competitors:
+            # 设计文档 73 §3.4 + D1 方案 A：普查/零候选不落空壳矩阵 compare.json
+            # （避免「competitors:[] / matrix:[]」空壳误导前端与下载方）
+            logger.info("零候选对比报告跳过空壳矩阵导出（设计文档 73 §3.4 D1 方案 A）")
+            return None
         try:
             # 设计文档 70 §8.2：默认 → resolve_comparison_dir()（output/comparison），不再用 comparison_dir
             path = export_comparison_json(report)
@@ -852,7 +895,7 @@ class CompetitorAnalysisAPI:
         """
         from competitor_agent.agent.langgraph_engine import run_langgraph
 
-        llm = self._llm or LLMClient(tracer=self._tracer)
+        llm = self._llm or self._default_llm()
         lead_competitor = self._react_competitor(task)
 
         def _subagent_run(name: str, sub_task: str) -> ReactRunResult:
@@ -971,7 +1014,7 @@ class CompetitorAnalysisAPI:
             subagent_sink = _subagent_event_sink(self._event_sink)
             return build_subagent(
                 name,
-                self._llm or LLMClient(tracer=self._tracer),
+                self._llm or self._default_llm(),
                 config=self._config,
                 web_extract=self._web_extract_for(bind_competitor, name, fetch_policy),
                 extra_tools={
@@ -1032,7 +1075,7 @@ class CompetitorAnalysisAPI:
             tracer=self._tracer,  # 设计文档 54：Lead tool.call span
         )
         agent = ReactAgent(
-            llm=self._llm or LLMClient(tracer=self._tracer),
+            llm=self._llm or self._default_llm(),
             dispatcher=dispatcher,
             max_parallel_tool_calls=self._max_parallel_tool_calls,
         )
