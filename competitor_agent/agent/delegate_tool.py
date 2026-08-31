@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -28,12 +29,45 @@ logger = get_logger("agent.delegate_tool")
 _POLL_INTERVAL_SECONDS = 1.0
 _DEFAULT_TIMEOUT_SECONDS = 60
 
+# 最小成功校验（设计文档 74 §3.2）：低于该长度的结果视为退化（无有效输出）
+_MIN_MEANINGFUL_CHARS = 16
+
 _STATUS_LABELS = {
     "running": "执行中",
     "done": "完成",
     "error": "异常",
+    "empty": "空结果",
     "timed_out": "超时",
 }
+
+
+def _answer_text(result: Any) -> str:
+    """从子 Agent 运行结果提取文本（ReactRunResult.answer 或裸 str 兼容）。"""
+    return getattr(result, "answer", "") or str(result)
+
+
+def _meaningful_output(text: str) -> bool:
+    """最小成功校验（设计文档 74 §3.2 meaningful-output gate）。
+
+    空/退化（过短）判无效；REPORT_SCHEMA 形态（JSON dict 带 ``dimensions`` 列表）
+    要求维度非空——空壳 JSON 视为退化；错误形态 JSON（``{"error": ...}`` 等无 prose 字段）
+    同样视为退化（与 ``_parse_report`` 的 fallback 语义对齐）。自由文本非空即有效。
+    """
+    s = (text or "").strip()
+    if not s or len(s) < _MIN_MEANINGFUL_CHARS:
+        return False
+    try:
+        payload = json.loads(s)
+    except (json.JSONDecodeError, TypeError):
+        return True
+    if isinstance(payload, dict):
+        dims = payload.get("dimensions")
+        if isinstance(dims, list):
+            return len(dims) > 0
+        # 无 dimensions 的 dict：仅当含 prose 字段（conclusion/summary/answer）才视为有效，
+        # 错误形态（{"error": ...}/{"detail": ...}）判退化，避免"完成"却静默不收集。
+        return any(payload.get(k) for k in ("conclusion", "summary", "answer"))
+    return True
 
 
 @dataclass
@@ -135,9 +169,11 @@ class DelegateRunner:
             # 对应 logs/<sid>.log（否则 SessionRouterHandler 因无 session 丢弃）。
             set_current_session(rec.session_id)
             runtime = self._runtime_factory(name)
-            if self._tracer is None:
-                result = runtime.run(task)
-            else:
+            started = time.monotonic()
+
+            def _do(sub_task: str) -> Any:
+                if self._tracer is None:
+                    return runtime.run(sub_task)
                 # 子 Agent 运行包在 kind=subagent span 里，并压入 worker 线程栈——
                 # 使子 Agent 内的 llm.call / tool.call 自动挂到本 subagent span 下。
                 with self._tracer.span(
@@ -147,8 +183,35 @@ class DelegateRunner:
                     parent_span_id=rec.parent_span_id,
                     input_brief=task,
                 ) as _:
-                    result = runtime.run(task)
-            rec.result = getattr(result, "answer", "") or str(result)
+                    return runtime.run(sub_task)
+
+            raw = _answer_text(_do(task))
+            if not _meaningful_output(raw):
+                # 设计文档 74 §3.2 + E4：空/退化结果 → 回灌纠错指令重试 1 次，
+                # 仍空则标 empty（不冒泡成功，收集器不收集、Lead 可见"空结果"）。
+                retry_task = (
+                    task
+                    + "\n（系统提示：上次子 Agent 返回空白/退化结果，请基于工具输出重新作答。）"
+                )
+                try:
+                    raw2 = _answer_text(_do(retry_task))
+                except Exception:  # noqa: BLE001 — 重试失败按仍空处理
+                    raw2 = ""
+                if _meaningful_output(raw2):
+                    raw = raw2
+                    logger.info("子 Agent 空/退化结果重试成功: %s (%s)", name, rec.execution_id)
+                else:
+                    elapsed = time.monotonic() - started
+                    logger.warning(
+                        "子 Agent 空/退化结果（重试 1 次仍空，判 empty）: %s (%s) elapsed=%.3fs",
+                        name,
+                        rec.execution_id,
+                        elapsed,
+                    )
+                    rec.status = "empty"
+                    rec.result = raw or "（子 Agent 返回空/退化结果）"
+                    return
+            rec.result = raw
             rec.status = "done"
             logger.info("子 Agent 完成: %s (%s)", name, rec.execution_id)
         except Exception as exc:  # noqa: BLE001 — 单子 Agent 失败不影响其余

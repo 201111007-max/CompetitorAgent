@@ -279,16 +279,17 @@ function renderDossier(opts) {
   const meta = document.createElement('div');
   meta.className = 'dossier-meta';
   let mh = '';
-  if (opts.isComparison) mh += '<span class="chip chip-compare">对比</span>';
+  // 设计文档 73 §3.4 + D1 方案 A：普查（零候选）→ 标「普查」而非「对比」，前端不显示矩阵
+  if (opts.isComparison && opts.hasCandidates !== false) mh += '<span class="chip chip-compare">对比</span>';
+  if (opts.hasCandidates === false) mh += '<span class="chip chip-compare">普查</span>';
   (opts.dims || []).forEach(function (d) { mh += '<span class="chip">' + escapeHtml(d) + '</span>'; });
-  if (opts.conf != null) mh += '<span class="chip chip-conf">置信度 ' + (opts.conf * 100).toFixed(0) + '%</span>';
   meta.innerHTML = mh;
   dossier.appendChild(meta);
   // 设计文档 70 §8.1 D1b：零候选对比 → 提示"未收集到候选数据"而非干巴巴 0%
   if (opts.hasCandidates === false) {
     const warn = document.createElement('div');
     warn.className = 'report-notice dossier-warn';
-    warn.textContent = '未收集到候选数据（候选委派超时/失败），置信度 0% 为事实';
+    warn.textContent = '未收集到候选数据，对比矩阵为空';
     dossier.appendChild(warn);
   }
 

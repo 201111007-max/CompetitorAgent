@@ -45,6 +45,15 @@ class TestLeadBodyText:
     def test_prose_only_kept(self):
         assert _lead_body_text("Cursor 整体领先。") == "Cursor 整体领先。"
 
+    def test_strips_structured_data_section(self):
+        text = _lead_body_text(
+            "## 对比结论\n\nA 领先。\n\n## 七、结构化数据（JSON）\n补充披露：DDG 限流。\n\n"
+            '{"competitors": ["a"], "kind": "compare"}'
+        )
+        assert "结构化数据" not in text
+        assert "补充披露" not in text
+        assert "A 领先" in text
+
 
 class TestAssembleComparison:
     def test_lead_body_plus_matrix(self):

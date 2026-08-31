@@ -101,6 +101,6 @@ class TestDesign70ToolDefaults:
         )
         assert build_sentiment_provider(c) is not None
 
-    def test_default_subagent_timeout_120(self):
+    def test_default_subagent_timeout_300(self):
         cfg = load_config()
-        assert cfg.subagents.timeout_seconds == 120
+        assert cfg.subagents.timeout_seconds == 300

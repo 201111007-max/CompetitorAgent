@@ -24,9 +24,8 @@ _MARKER = "【市场格局核心结论】"
 
 # 设计文档 70 §8.1 D1d：零候选空报告仍落盘 .md（内容 = 提示），不额外制造垃圾——
 # 矩阵空 + Lead 结论段 + 本提示，报告库可见可点开看原因。
-_ZERO_CANDIDATE_HINT = (
-    "未收集到候选数据（候选委派超时/失败），对比矩阵为空，置信度 0% 为事实。"
-)
+# 文案中性化：不臆断「超时/失败」（可能是未委派候选或结果未收集），也不展示置信度。
+_ZERO_CANDIDATE_HINT = "未收集到候选数据，对比矩阵为空。"
 
 
 def assemble_comparison(
@@ -94,11 +93,13 @@ def assemble_comparison(
                 + (comparison.markdown_report or "").strip()
                 + "\n"
             )
+    # 设计文档 73 §3.3：追加判断从「字符串存在性」改「布尔标志」语义——模型把提示抄进
+    # 正文不再骗过守卫（提示/结论丢失修复）；下二分支即"代码已追加"的布尔语义。
     if not comparison.markdown_report.strip():
         # 设计文档 70 §8.1 D1d：零候选且无正文/结论 → 提示留痕，保证 .md 非空可落盘
         comparison.markdown_report = _ZERO_CANDIDATE_HINT + "\n"
-    elif not reports and _ZERO_CANDIDATE_HINT not in comparison.markdown_report:
-        # 零候选但有 Lead 正文/结论 → 正文/结论在前、提示追加在后（"矩阵空 + 结论段 + 提示"）
+    elif not reports:
+        # 零候选但有正文/结论 → 正文/结论在前、提示追加在后
         comparison.markdown_report = (
             comparison.markdown_report.rstrip() + "\n\n" + _ZERO_CANDIDATE_HINT + "\n"
         )
@@ -117,9 +118,18 @@ def _lead_body_text(lead_answer: str) -> str:
 
     正文为空（mock 纯 JSON）→ 空串 → 调用方回退矩阵 + 结论段（确定性不变）。
     """
-    from competitor_agent.facade.react_report import _strip_json_blocks
+    from competitor_agent.facade.react_report import (
+        _close_orphan_fence,
+        _dedupe_repeated_report,
+        _strip_json_blocks,
+        _strip_structured_data_section,
+    )
 
-    text = _strip_json_blocks(lead_answer or "").strip()
+    text = _close_orphan_fence(
+        _dedupe_repeated_report(
+            _strip_structured_data_section(_strip_json_blocks(lead_answer or ""))
+        )
+    ).strip()
     for prefix in ("Final Answer: ", "Final Answer:"):
         if text.startswith(prefix):
             text = text[len(prefix):].lstrip()

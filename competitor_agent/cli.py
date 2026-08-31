@@ -583,6 +583,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # 设计文档 74 §3.1/E2：启动强制应用用户级 env（忽略 shell 注入的 DEEPSEEK_API_KEY / OPENAI_BASE_URL）
+    from competitor_agent.config.user_env import apply_user_level_environment
+
+    apply_user_level_environment()
     parser = build_parser()
     args = parser.parse_args(argv)
     setup_logging(level=load_config().observability.log_level, log_dir=get_data_dir() / "logs")
