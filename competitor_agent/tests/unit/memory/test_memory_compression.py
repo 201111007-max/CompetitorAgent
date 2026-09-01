@@ -130,11 +130,12 @@ class TestCompressArchive:
 
 
 # ── 3. SessionArchive.compress / recent_context（设计文档 35 §3.2） ─────
-
-
+# TTL 与测试日期脱钩（2026-09-01 修复）：本类归档带硬编码历史日期（2026-08-01 等）的会话，
+# 默认 ttl_days=30 会让"超过 30 天"的会话被 _age_out 淘汰（墙钟跨过边界即挂）。本类测的是
+# 压缩/最近/相关度召回，不是 TTL 老化 → ttl_days 放大，避免随日期漂移误挂（CI 无关环境）。
 class TestSessionArchiveCompression:
     def test_compress_folds_and_limits_without_losing_get_history(self, tmp_path):
-        arch = SessionArchive(tmp_path / "mem")
+        arch = SessionArchive(tmp_path / "mem", ttl_days=365)
         for i in range(25):
             arch.archive(_session(f"s{i}", dimensions=[_dim("feature", f"feat-{i}", 0.9)]))
         arch.compress(max_entries=20, keep_full=5)
@@ -149,7 +150,7 @@ class TestSessionArchiveCompression:
         assert [e["type"] for e in context[5:]] == ["summary"] * 15
 
     def test_recent_context_empty_query_recent_first(self, tmp_path):
-        arch = SessionArchive(tmp_path / "mem")
+        arch = SessionArchive(tmp_path / "mem", ttl_days=365)
         arch.archive(_session("old", dimensions=[_dim("feature", "feature old", 0.9)], created_at="2026-08-01T00:00:00Z"))
         arch.archive(_session("new", dimensions=[_dim("feature", "feature new", 0.9)], created_at="2026-08-10T00:00:00Z"))
         out = arch.recent_context("cursor", top_k=5)
@@ -158,7 +159,7 @@ class TestSessionArchiveCompression:
 
     def test_recent_context_relevance_recall_beats_recency(self, tmp_path):
         """相关度召回而非"最近 N 条"：更旧的 pricing 结论应排在更新的 feature 结论前。"""
-        arch = SessionArchive(tmp_path / "mem")
+        arch = SessionArchive(tmp_path / "mem", ttl_days=365)
         arch.archive(_session("recent-feature", dimensions=[_dim("feature", "Cursor has an AI editor", 0.9)], created_at="2026-08-10T00:00:00Z"))
         arch.archive(_session("old-pricing", dimensions=[_dim("pricing", "Pro is $20 per month", 0.9)], created_at="2026-08-01T00:00:00Z"))
         out = arch.recent_context("cursor", top_k=5, query="pricing")
@@ -167,18 +168,18 @@ class TestSessionArchiveCompression:
 
     def test_recent_context_more_compact_than_full(self, tmp_path):
         full_md = "# cursor\n\n" + "正文 " * 500
-        arch = SessionArchive(tmp_path / "mem")
+        arch = SessionArchive(tmp_path / "mem", ttl_days=365)
         arch.archive(_session("s", dimensions=[_dim("pricing", "Pro is $20", 0.9)], markdown=full_md))
         out = "\n".join(arch.recent_context("cursor", top_k=5))
         assert len(out) < len(full_md), "注入内容应较全文精简"
 
     def test_recent_context_unknown_competitor(self, tmp_path):
-        arch = SessionArchive(tmp_path / "mem")
+        arch = SessionArchive(tmp_path / "mem", ttl_days=365)
         assert arch.recent_context("nobody") == []
 
     def test_recent_context_category_recall_across_competitors(self, tmp_path):
         """品类级召回（设计文档 62 §3.9）：competitor=\"\" 跨竞品聚合，按任务语义排序。"""
-        arch = SessionArchive(tmp_path / "mem")
+        arch = SessionArchive(tmp_path / "mem", ttl_days=365)
         arch.archive(_session("s1", competitor="cursor", dimensions=[_dim("pricing", "Cursor Pro is $20 per month", 0.9)]))
         arch.archive(_session("s2", competitor="windsurf", dimensions=[_dim("pricing", "Windsurf is $15 per month", 0.9)]))
         arch.archive(_session("s3", competitor="cline", dimensions=[_dim("feature", "Cline runs in terminal", 0.9)]))
@@ -191,7 +192,7 @@ class TestSessionArchiveCompression:
         assert len(out) == 3
 
     def test_recent_context_category_empty_when_no_sessions(self, tmp_path):
-        arch = SessionArchive(tmp_path / "mem")
+        arch = SessionArchive(tmp_path / "mem", ttl_days=365)
         assert arch.recent_context("", top_k=5, query="coding agent") == []
 
 
@@ -261,14 +262,14 @@ class TestEvolutionPatterns:
 
 class TestFourLayerMemoryDelegation:
     def test_recent_context_and_patterns_via_four_layer(self, tmp_path):
-        mem = FourLayerMemory(tmp_path / "mem")
+        mem = FourLayerMemory(tmp_path / "mem", session_ttl_days=365)
         mem.archive_session(_session("s1", dimensions=[_dim("pricing", "Pro is $20", 0.9)]))
         assert mem.recent_context("cursor", query="pricing") and "Pro is $20" in mem.recent_context("cursor", query="pricing")[0]
         mem.note_pattern("cursor", "pricing", "经验A", outcome="success")
         assert mem.retrieve_patterns("cursor", "pricing") == ["经验A"]
 
     def test_record_success_with_method_via_four_layer(self, tmp_path):
-        mem = FourLayerMemory(tmp_path / "mem")
+        mem = FourLayerMemory(tmp_path / "mem", session_ttl_days=365)
         mem.record_success("cursor", "pricing", "benchmark", method="降级到榜单源")
         assert mem.retrieve_skills("cursor")[0].method == "降级到榜单源"
 
