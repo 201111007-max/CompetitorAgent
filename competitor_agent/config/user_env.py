@@ -42,10 +42,16 @@ def apply_user_level_environment(keys: tuple[str, ...] = _APPLY_KEYS) -> list[st
     try:
         import winreg
 
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
+        # winreg 仅 Windows 存在，其 typeshed stub 也仅在 win32 暴露成员：Linux 上
+        # ``winreg.OpenKey`` 等会报 attr-defined。用 getattr 取（类型为 Any）规避
+        # 跨平台 mypy（本地 Windows 与 CI Linux 双平台零告警，且不引入 unused-ignore）。
+        open_key = getattr(winreg, "OpenKey")  # noqa: B009 - 有意取模块成员规避跨平台 mypy
+        query_value = getattr(winreg, "QueryValueEx")  # noqa: B009 - 有意取模块成员规避跨平台 mypy
+        hive = getattr(winreg, "HKEY_CURRENT_USER")  # noqa: B009 - 有意取模块成员规避跨平台 mypy
+        with open_key(hive, "Environment") as key:
             for name in keys:
                 try:
-                    value, _ = winreg.QueryValueEx(key, name)
+                    value, _ = query_value(key, name)
                 except FileNotFoundError:
                     continue
                 if isinstance(value, str):
