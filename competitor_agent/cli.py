@@ -568,6 +568,19 @@ def _run_eval_anchor_stats(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_eval_diff(args: argparse.Namespace) -> int:
+    """eval-diff：对比两版评测指标快照，输出逐指标 ± Δ 表（设计文档 76 §2.4）。"""
+    from competitor_agent.evaluation.history import diff
+
+    path = Path(args.history) if args.history else None
+    try:
+        print(diff(args.from_rev, args.to_rev, path))
+    except ValueError as exc:
+        print(str(exc))
+        return 1
+    return 0
+
+
 def _run_help(args: str) -> None:
     from competitor_agent.core.command_registry import COMMAND_REGISTRY
 
@@ -690,6 +703,7 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark_p.add_argument("--tag", default=None, help="按 tag 过滤用例子集（如 normal）控制成本")
     benchmark_p.add_argument("--cost-limit", type=float, default=None, dest="cost_limit", help="真实评测成本护栏上限（美元），缺省 real 模式 $1.0")
     benchmark_p.add_argument("--engine", choices=["react", "langgraph", "both"], default=None, help="编排引擎对照（设计文档 51）：both=双引擎顺序跑并落盘对比表")
+    benchmark_p.add_argument("--snapshot", action="store_true", help="跑完写带 commit hash 的指标快照到 evals/history.jsonl（设计文档 76 §2.4，配合 eval-diff）")
 
     sub.add_parser("rag-warmup", help="预缓存向量嵌入模型并打印向量层状态（设计文档 52 M2；唯一触网路径，需显式执行）")
 
@@ -711,6 +725,13 @@ def build_parser() -> argparse.ArgumentParser:
         "eval-anchor-stats", help="锚点统计：样本量/分分布/重测一致率/作废清单（设计文档 83 §4.4）"
     )
     anchor_stats_p.add_argument("--out", default=None, help="锚点 jsonl 路径（与 eval-anchor --out 一致）")
+
+    diff_p = sub.add_parser(
+        "eval-diff", help="对比两版评测指标快照（设计文档 76 §2.4）：commit 短 hash 或 latest/N"
+    )
+    diff_p.add_argument("from_rev", help="起始版本（commit 短 hash / latest / latest/N）")
+    diff_p.add_argument("to_rev", nargs="?", default="latest", help="目标版本（缺省 latest）")
+    diff_p.add_argument("--history", default=None, help="history.jsonl 路径（缺省 evals/history.jsonl）")
     return parser
 
 
@@ -737,6 +758,9 @@ def main(argv: list[str] | None = None) -> int:
         return _run_eval_anchor(args)
     if args.command == "eval-anchor-stats":
         return _run_eval_anchor_stats(args)
+    if args.command == "eval-diff":
+        # 快照对比纯本地读 JSONL，无需构造 API/LLM（设计文档 76 §2.4）
+        return _run_eval_diff(args)
     api = _make_api(engine=engine)
     llm = _build_llm(load_config())
     use_llm = True
@@ -794,6 +818,8 @@ def main(argv: list[str] | None = None) -> int:
             parts += ["--cost-limit", str(args.cost_limit)]
         if args.engine:
             parts += ["--engine", args.engine]
+        if getattr(args, "snapshot", False):
+            parts += ["--snapshot"]
         _run_benchmark(" ".join(parts))
         return 0
 

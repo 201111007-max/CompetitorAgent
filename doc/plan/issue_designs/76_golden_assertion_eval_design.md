@@ -1,5 +1,11 @@
 # 设计文档 76 —— 第二十六轮：黄金断言评测集 + 评测指标版本化（工单 1 + 4）
 
+> **实施说明（2026-09-09，M1/M2 全落地）**：
+> ① **M1 黄金断言**（新 `evaluation/golden.py`）：`GoldenVerdict` 五态 + `GoldenJudge` 协议 + `KeywordGoldenJudge`（mock/CI 默认：拉丁词元精确包含 + **CJK 连续段 bigram 匹配**（≥2 字公共子串容忍改写；tokenize 口径下连续汉字为单一 run，整串匹配不可用——实施期发现并修正设计的隐含假设）+ 产品名/别名经注册表动态剔除 + must_have 命中率 ≥0.6 且 ≥2 单元（单单元命中即 covered）、trap ≥2 单元命中才 tripped 防单 hit 误报如报告合理提到 "Anthropic"）+ `LLMGoldenJudge`（json verdict 解析、解析/调用失败保守缺省不误判）+ `build_golden_judge`（mock→Keyword / real→LLM）+ `load_golden_tasks`（verified_date 空/非法/>90 天 → stale_note 仅提醒不失败）+ `GoldenEvaluator`（固定任务经 `api.run()` 真实生成报告 → 逐条判定 → per_task 聚合；单任务失败不影响其余）。`Benchmark.__init__` 加 `golden_judge/golden_dir/use_golden_cache`，`run()` 末尾 `_run_golden()`（**进程级缓存**：mock 确定性下同 (dir,mode,llm) 重跑逐位一致，省 gate 测试重复 3×api.run；预算中止跳过；golden 成本并入 total_cost）；CSV/Markdown 增 golden 节 + stale 提醒；HARNESS_VERSION **0.11.0→0.12.0**；门禁不卡（--gate 只打印摘要，用户决策 ④）。
+> ② **M2 版本化**（新 `evaluation/history.py`）：`git_head` / `snapshot`（ts/commit/harness_version/llm_mode/**tag 口径**/n_cases + 纯数字 metrics 含 must_have_recall/trap_pass_rate/`judge_spearman: null` 占位）+ `append_history`/`load_history` + `diff`（latest / latest/N / commit 前缀定位 → ± Δ 表）。CLI：`benchmark --snapshot` 透传 + 新 `eval-diff <from> <to>` 子命令（main() 内 API 构造前短路）。
+> ③ **断言集**（`evals/golden/`）：3 任务 × 30 条落盘（analyze_cursor / compare_claude_code_vs_copilot / track_codex_changes，trap 密度按要求 task3 最高）；**verified_date 留空待用户逐条核实**（核实前 stale 提醒按设计打印，跑不失败）——人工核实环节待用户执行。`evals/history.jsonl` 首快照已入库（mock --tag normal）。
+> ④ **测试**：`test_golden.py` 24（Keyword 确定性/单 hit 防误报/LLM 解析与保守缺省/注入/stale 三态/评测聚合/任务失败隔离/benchmark 接线/**mock 连跑 3 次逐位一致**/缓存命中）+ `test_history.py` 15（快照/roundtrip/diff 定位与越界/空历史）。tests/evaluation 全量绿（gate 13 / integration 10 / behavior+skill 29 / failure 19 / extract 27 / real+ablation 29）——§4 验收 4.2/4.3/4.4/4.5/4.6 达成，4.1 达成（≥30 条 ×3，verified_date 待用户回填）。
+
 > 目标：把评测从「能跑」做到「有说服力」的第一次落地——
 > ① **黄金断言评测集**：3 个固定任务 × 每任务 30~50 条人工核实断言（must_have / trap 两型），新增 `must_have 召回率` 与 `trap 通过率` 两个指标，判定器**可注入**（CI 用确定性 mock，real 模式才走 LLM）；
 > ② **评测指标版本化**：benchmark 每次运行产出带 commit hash 的指标快照，追加 `evals/history.jsonl`，提供 `eval-diff` 对比任意两版。

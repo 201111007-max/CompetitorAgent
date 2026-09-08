@@ -1,0 +1,163 @@
+# 黄金断言集 —— 任务 1：分析 Cursor（设计文档 76 §2.1）
+# ⚠ 状态：opencode 草拟初稿（2026-09-09），待用户逐条核实后回填 verified_date（doc 76 §2.1）。
+# must_have = 报告应覆盖的正确结论；trap = 报告不得复述的错误/易过时信息。
+task: "分析 Cursor"
+task_id: analyze_cursor
+verified_date: ""
+assertions:
+  # ── 定价 ──
+  - id: cursor-pricing-free-tier
+    claim: "Cursor 提供免费档（Hobby），对补全等用法有次数限制。"
+    type: must_have
+    source_of_truth: "https://www.cursor.com/pricing"
+    tags: [pricing]
+  - id: cursor-pricing-pro-20
+    claim: "Cursor Pro 个人档定价约 $20/月。"
+    type: must_have
+    source_of_truth: "https://www.cursor.com/pricing"
+    tags: [pricing]
+  - id: cursor-pricing-ultra-tier
+    claim: "Cursor 设有面向重度使用者的高价位档（Ultra，约 $200/月量级）。"
+    type: must_have
+    source_of_truth: "https://www.cursor.com/pricing"
+    tags: [pricing]
+  - id: cursor-pricing-teams-per-seat
+    claim: "Cursor 面向团队提供按席位计费的 Teams/Business 档。"
+    type: must_have
+    source_of_truth: "https://www.cursor.com/pricing"
+    tags: [pricing]
+  - id: cursor-pricing-usage-based
+    claim: "Cursor 对高用量场景提供按用量的附加计费（usage-based / 超额加购）。"
+    type: must_have
+    source_of_truth: "https://docs.cursor.com/account/pricing"
+    tags: [pricing]
+  - id: cursor-trap-no-free-limit
+    claim: "Cursor 的免费档不设任何用量限制。"
+    type: trap
+    source_of_truth: "免费档有明确次数限制（官方 pricing 页）"
+    tags: [pricing]
+  - id: cursor-trap-price-5
+    claim: "Cursor Pro 定价为 $5/月。"
+    type: trap
+    source_of_truth: "官方 pricing 页 Pro 为 $20/月量级"
+    tags: [pricing]
+  # ── 功能 ──
+  - id: cursor-feature-tab-autocomplete
+    claim: "Cursor 的核心能力之一是 Tab 自动补全（多行编辑/跨文件建议）。"
+    type: must_have
+    source_of_truth: "https://www.cursor.com/features"
+    tags: [feature]
+  - id: cursor-feature-agent-mode
+    claim: "Cursor 提供 Agent 模式，可自主执行多步编辑并运行终端命令。"
+    type: must_have
+    source_of_truth: "https://docs.cursor.com/agent"
+    tags: [feature]
+  - id: cursor-feature-composer
+    claim: "Cursor 提供跨文件批量修改的 Composer/内联多文件编辑能力。"
+    type: must_have
+    source_of_truth: "https://docs.cursor.com"
+    tags: [feature]
+  - id: cursor-feature-bugbot
+    claim: "Cursor 提供 Bugbot 代码审查能力（PR 审查场景）。"
+    type: must_have
+    source_of_truth: "https://www.cursor.com/bugbot"
+    tags: [feature]
+  - id: cursor-feature-mcp
+    claim: "Cursor 支持 MCP（Model Context Protocol）接入外部工具。"
+    type: must_have
+    source_of_truth: "https://docs.cursor.com/mcp"
+    tags: [feature]
+  - id: cursor-feature-background-agents
+    claim: "Cursor 支持后台/远程异步代理（background agents）形态。"
+    type: must_have
+    source_of_truth: "https://docs.cursor.com/agent/background-agent"
+    tags: [feature]
+  - id: cursor-feature-context-rules
+    claim: "Cursor 支持 .cursor/rules 项目级规则与 @ 引用等上下文控制手段。"
+    type: must_have
+    source_of_truth: "https://docs.cursor.com/context/rules"
+    tags: [feature]
+  - id: cursor-trap-no-agent
+    claim: "Cursor 没有任何 Agent/多步自主执行能力，仅是补全插件。"
+    type: trap
+    source_of_truth: "官方 Agent 模式文档"
+    tags: [feature]
+  - id: cursor-trap-no-mcp-2026
+    claim: "Cursor 已于 2026 年移除对 MCP 的支持。"
+    type: trap
+    source_of_truth: "官方 MCP 文档持续在线"
+    tags: [feature]
+  # ── 性能 ──
+  - id: cursor-performance-swebench-reported
+    claim: "Cursor 官方或第三方发布过其在 SWE-bench Verified 上的通过率数据。"
+    type: must_have
+    source_of_truth: "官方 blog / SWE-bench leaderboard"
+    tags: [performance]
+  - id: cursor-performance-model-picker
+    claim: "Cursor 支持选择多种底层模型（GPT/Claude/Gemini 系列及自研模型）。"
+    type: must_have
+    source_of_truth: "https://docs.cursor.com/settings/models"
+    tags: [performance]
+  - id: cursor-trap-benchmark-first
+    claim: "Cursor 在 SWE-bench Verified 上排名第一且通过率超过 90%。"
+    type: trap
+    source_of_truth: "leaderboard 无此结论（.vendor 自报数据需核实）"
+    tags: [performance]
+  # ── 生态 ──
+  - id: cursor-ecosystem-vscode-fork
+    claim: "Cursor 是基于 VS Code 分叉（fork）构建的 AI 代码编辑器。"
+    type: must_have
+    source_of_truth: "https://www.cursor.com / 官方文档"
+    tags: [ecosystem]
+  - id: cursor-ecosystem-extensions
+    claim: "Cursor 兼容 VS Code 扩展生态（可导入既有扩展/主题/快捷键）。"
+    type: must_have
+    source_of_truth: "https://docs.cursor.com"
+    tags: [ecosystem]
+  - id: cursor-ecosystem-anysphere
+    claim: "Cursor 的开发公司是 Anysphere。"
+    type: must_have
+    source_of_truth: "https://www.cursor.com/about"
+    tags: [ecosystem]
+  - id: cursor-trap-openai-product
+    claim: "Cursor 是 OpenAI 官方出品的代码编辑器。"
+    type: trap
+    source_of_truth: "Cursor 由 Anysphere 开发，与 OpenAI 无股权关系"
+    tags: [ecosystem]
+  - id: cursor-trap-anthropic-acquisition
+    claim: "Cursor 于 2025 年被 Anthropic 收购。"
+    type: trap
+    source_of_truth: "官方无此事件（截至 2026-09 公开信息）"
+    tags: [ownership]
+  # ── 口碑 ──
+  - id: cursor-sentiment-mixed-usage-limit
+    claim: "社区对 Cursor 的主要负反馈集中在用量限制与涨价/计费变动。"
+    type: must_have
+    source_of_truth: "HackerNews/Reddit 公开讨论（采集时带 as_of）"
+    tags: [sentiment]
+  - id: cursor-sentiment-positive-tab
+    claim: "社区对 Cursor 的主要正反馈集中在 Tab 补全体验与编辑器内工作流。"
+    type: must_have
+    source_of_truth: "HackerNews/Reddit 公开讨论（采集时带 as_of）"
+    tags: [sentiment]
+  - id: cursor-trap-universal-praise
+    claim: "社区对 Cursor 一致好评、无任何争议或负反馈。"
+    type: trap
+    source_of_truth: "公开社区存在大量计费/限制类吐槽"
+    tags: [sentiment]
+  # ── 路线图/时间线 ──
+  - id: cursor-roadmap-funding
+    claim: "Anysphere（Cursor）在 2025 年完成过大规模融资（B/C 轮量级，估值百亿美元级报道）。"
+    type: must_have
+    source_of_truth: "官方公告/主流科技媒体报道"
+    tags: [roadmap]
+  - id: cursor-roadmap-enterprise
+    claim: "Cursor 近期动作面向企业市场（Teams/Enterprise 能力与合规支持）。"
+    type: must_have
+    source_of_truth: "官方 changelog/pricing"
+    tags: [roadmap]
+  - id: cursor-trap-discontinued
+    claim: "Cursor 已于 2026 年停止维护/退出市场。"
+    type: trap
+    source_of_truth: "产品持续更新（官方 changelog）"
+    tags: [roadmap]

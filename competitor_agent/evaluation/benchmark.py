@@ -34,6 +34,14 @@ from competitor_agent.evaluation.behavior_eval import (
     RetrievalEvaluator,
 )
 from competitor_agent.evaluation.failure import FailureRecord, FailureType, classify_case
+from competitor_agent.evaluation.golden import (
+    GOLDEN_DIR,
+    GoldenEvaluator,
+    GoldenJudge,
+    GoldenResult,
+    build_golden_judge,
+    load_golden_tasks,
+)
 from competitor_agent.evaluation.strategy_eval import StrategyCase, StrategyEvaluator, StrategyMetrics
 from competitor_agent.facade.api import CompetitorAnalysisAPI
 from competitor_agent.interfaces.context import SourceContext
@@ -62,7 +70,10 @@ STRATEGY_FIXTURE = "strategy_cases.json"
 #   ReAct-scripted 分支（make_plan(competitors+resolution) → web_search_candidates →
 #   delegate(候选) → aggregate_report → Final comparison JSON）；候选子 Agent 确定性返回
 #   标准多维度 dimensions[]；Lead 按 resolution 分型收尾。
-HARNESS_VERSION = "0.11.0"
+# 0.11.0 → 0.12.0：黄金断言评测（设计文档 76）——BenchmarkReport 增 golden（must_have 召回率
+#   / trap 通过率 / contradicted_count / per_task / stale_warnings），判定器可注入
+#   （mock=KeywordGoldenJudge 确定性，real=LLMGoldenJudge）；指标只记录不卡门禁（用户决策）。
+HARNESS_VERSION = "0.12.0"
 
 # 门禁阈值单一来源（设计文档 55 M1）：--gate CLI、test_benchmark_integration、
 # test_behavior_eval 全部引用本组常量，不新造第二份数值。
@@ -78,6 +89,10 @@ GATE_REFETCH_AFTER_FOLD_MAX = 0
 
 # 单次采集/工具的估算成本（与主流程 IterationBudget 单次 0.01 对齐）
 UNIT_COST = 0.01
+
+# 黄金断言评测进程级缓存（设计文档 76）：mock 确定性下同 key 重跑逐位一致，
+# 避免 gate 集成测试反复 Benchmark().run() 重复支付 3 次 api.run 的编排开销。
+_GOLDEN_CACHE: dict[tuple[str, str, int], GoldenResult] = {}
 
 # 维度 → 默认字段抽取方式（设计文档 §3.1：extract_prediction 按维度抽取可比对字段）
 # 设计文档 29：扩展 ecosystem / sentiment / roadmap（timeline）三维度覆盖
@@ -145,6 +160,8 @@ class BenchmarkReport:
     budget_aborted: bool = False  # 是否因成本护栏超限中止
     # 设计文档 42：行为级评测——工具自恢复率 + 检索命中率（hybrid vs lexical）
     behavior: BehaviorMetrics = field(default_factory=BehaviorMetrics)
+    # 设计文档 76：黄金断言评测——must_have 召回率 + trap 通过率（判定器可注入，只记录不卡门禁）
+    golden: GoldenResult = field(default_factory=GoldenResult)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -182,6 +199,7 @@ class BenchmarkReport:
                 "retrieval_n": self.behavior.retrieval_n,
                 "refetch_after_fold": self.behavior.refetch_after_fold,
             },
+            "golden": self.golden.to_dict(),
         }
 
 
@@ -1258,12 +1276,19 @@ class Benchmark:
         cost_limit_usd: float | None = None,
         engine: str = "react",
         llm_call_counter: list[int] | None = None,
+        golden_judge: GoldenJudge | None = None,
+        golden_dir: Path | None = None,
+        use_golden_cache: bool = True,
     ) -> None:
         self._dir = fixtures_dir or FIXTURES_DIR
         self._llm_mode = llm_mode
         self._llm = llm
         self._tag = tag
         self._cost_limit_usd = cost_limit_usd
+        self._golden_dir = golden_dir or GOLDEN_DIR
+        # 判定器可注入（doc 76 §2 决策 ③）：mock → KeywordGoldenJudge（确定性），real → LLMGoldenJudge
+        self._golden_judge = golden_judge or build_golden_judge(llm_mode, llm)
+        self._use_golden_cache = use_golden_cache
         if build_api is None:
             if llm is not None:
                 self._build_api = lambda case: build_benchmark_api(
@@ -1378,6 +1403,13 @@ class Benchmark:
                 failure_stats.get(FailureType.BUDGET_EXHAUSTED.value, 0) + 1
             )
 
+        # 设计文档 76：黄金断言评测（预算中止时跳过——golden 不应继续消耗护栏）
+        golden_cost_before = self._cost_now()
+        golden_result = GoldenResult() if budget_aborted else self._run_golden()
+        golden_cost = round(self._cost_now() - golden_cost_before, 6)
+        if golden_cost:
+            total_cost = round(total_cost + golden_cost, 6)
+
         return BenchmarkReport(
             accuracy=accuracy,
             strategy=self._strat.evaluate(strat_eval_cases),
@@ -1395,7 +1427,31 @@ class Benchmark:
             cost_limit_usd=self._cost_limit_usd,
             budget_aborted=budget_aborted,
             behavior=self._run_behavior_evals(),
+            golden=golden_result,
         )
+
+    def _run_golden(self) -> GoldenResult:
+        """设计文档 76：黄金断言评测——固定任务经 api.run() 真实生成报告 → 判定器逐条判定。
+
+        进程级缓存（mock 确定性 → 同 (dir, mode, llm) 重跑结果逐位一致，省重复 3 次
+        api.run 的编排开销）；``use_golden_cache=False`` 强制重跑。golden 目录缺失/空
+        → 空结果（has_data=False，报告/CSV 不展示 golden 节）。
+        """
+        tasks = load_golden_tasks(self._golden_dir)
+        if not tasks:
+            return GoldenResult()
+        cache_key = (
+            str(self._golden_dir),
+            self._llm_mode,
+            id(self._llm) if self._llm is not None else 0,
+        )
+        if self._use_golden_cache and cache_key in _GOLDEN_CACHE:
+            return _GOLDEN_CACHE[cache_key]
+        evaluator = GoldenEvaluator(self._golden_judge, self._build_api, tasks)
+        result = evaluator.run()
+        if self._use_golden_cache:
+            _GOLDEN_CACHE[cache_key] = result
+        return result
 
     def _run_behavior_evals(self) -> BehaviorMetrics:
         """设计文档 42：行为级评测——工具自恢复（ScriptedLLM 确定性）+ 检索命中（hybrid vs lexical）。
@@ -1598,6 +1654,13 @@ def _write_csv(report: BenchmarkReport, out: Path, mock_report: BenchmarkReport 
     rows.append([report.harness_version, "behavior.retrieval_n", str(report.behavior.retrieval_n)])
     # 设计文档 56 M3：折叠后重复抓取次数
     rows.append([report.harness_version, "behavior.refetch_after_fold", str(report.behavior.refetch_after_fold)])
+    # 设计文档 76：黄金断言评测（只记录不卡门禁——用户决策）
+    if report.golden.has_data:
+        rows.append([report.harness_version, "golden.must_have_recall", str(report.golden.must_have_recall)])
+        rows.append([report.harness_version, "golden.trap_pass_rate", str(report.golden.trap_pass_rate)])
+        rows.append([report.harness_version, "golden.contradicted_count", str(report.golden.contradicted_count)])
+        rows.append([report.harness_version, "golden.n_must_have", str(report.golden.n_must_have)])
+        rows.append([report.harness_version, "golden.n_trap", str(report.golden.n_trap)])
     # 设计文档 37：mock vs real 对比（real 报告内嵌 mock 基线，直答"评测是不是自证"）
     if mock_report is not None and mock_report.llm_mode != report.llm_mode:
         rows.append([report.harness_version, "vs.mock.accuracy.field_accuracy", str(mock_report.accuracy.field_accuracy)])
@@ -1641,6 +1704,32 @@ def _write_markdown(
     lines.append(f"| 检索命中率 lexical | {report.behavior.retrieval_hit_lexical:.2f} |")
     lines.append(f"| 检索样本数 | {report.behavior.retrieval_n} |")
     lines.append(f"| 折叠后重抓次数（56 M3） | {report.behavior.refetch_after_fold} |")
+
+    # 设计文档 76：黄金断言评测（must_have 召回率 + trap 通过率，判定器可注入）
+    if report.golden.has_data:
+        lines.append("\n## 黄金断言评测（设计文档 76）")
+        lines.append("\n> must_have 召回率 = 报告覆盖的正确结论占比；trap 通过率 = 未复述错误/易过时信息占比。")
+        lines.append("> 新指标先只记录不卡门禁（doc 75 §2 决策）；stale 提醒仅提示人工复核，不失败。")
+        lines.append("\n| 指标 | 值 |")
+        lines.append("|------|----|")
+        lines.append(
+            f"| must_have 召回率 | {report.golden.must_have_recall:.4f}（{report.golden.n_must_have} 条） |"
+        )
+        lines.append(f"| trap 通过率 | {report.golden.trap_pass_rate:.4f}（{report.golden.n_trap} 条） |")
+        lines.append(f"| 矛盾数（contradicted） | {report.golden.contradicted_count} |")
+        lines.append(f"| 任务数 | {report.golden.n_tasks} |")
+        if report.golden.per_task:
+            lines.append("\n### 按任务拆分")
+            lines.append("\n| 任务 | must_have 召回率 | trap 通过率 |")
+            lines.append("|------|-----------------|------------|")
+            for tid, m in report.golden.per_task.items():
+                lines.append(
+                    f"| {tid} | {m.get('must_have_recall', 0.0):.4f} | {m.get('trap_pass_rate', 0.0):.4f} |"
+                )
+        if report.golden.stale_warnings:
+            lines.append("\n### 断言核实提醒（stale）")
+            for warning in report.golden.stale_warnings:
+                lines.append(f"- ⚠ {warning}")
 
     # 设计文档 37：mock vs real 对比段（real 报告内嵌 mock 基线，直答"评测是不是自证"）
     if mock_report is not None and mock_report.llm_mode != report.llm_mode:
@@ -1876,6 +1965,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="门禁执法（设计文档 55 M1）：跑完按 GATE_* 阈值逐项判定，任一项不达标退出码 1 并打印差距；不加本开关行为不变（恒 0）",
     )
+    parser.add_argument(
+        "--snapshot",
+        action="store_true",
+        help="评测指标版本化（设计文档 76 §2.4）：跑完写带 commit hash 的指标快照到 evals/history.jsonl（配合 eval-diff 对比）",
+    )
     args = parser.parse_args(argv)
 
     if args.engine in ("langgraph", "both"):
@@ -1936,8 +2030,22 @@ def main(argv: list[str] | None = None) -> int:
           f"field_acc={report.accuracy.field_accuracy:.4f} "
           f"halluc={report.accuracy.hallucination_rate:.4f} tool_sel={report.strategy.tool_selection_accuracy:.4f} "
           f"cost_eff={report.strategy.cost_efficiency:.4f} harness_v{report.harness_version}")
+    if report.golden.has_data:
+        # 设计文档 76：golden 指标只记录不卡门禁（doc 75 §2 用户决策 ④）
+        print(f"golden: must_have_recall={report.golden.must_have_recall:.4f} "
+              f"trap_pass_rate={report.golden.trap_pass_rate:.4f} "
+              f"contradicted={report.golden.contradicted_count} "
+              f"(n_must={report.golden.n_must_have} n_trap={report.golden.n_trap})")
     print(f"csv: {out}")
     print(f"report: {report_path}")
+
+    if args.snapshot:
+        # 设计文档 76 §2.4：评测指标版本化——带 commit hash 的快照追加 evals/history.jsonl
+        from competitor_agent.evaluation import history as _history
+
+        snap = _history.snapshot(report, wall_seconds=main_wall, tag=args.tag)
+        _history.append_history(None, snap)
+        print(f"snapshot: {_history.DEFAULT_HISTORY_PATH} commit={snap['commit']}")
 
     if args.engine == "both":
         lg_calls: list[int] = []
