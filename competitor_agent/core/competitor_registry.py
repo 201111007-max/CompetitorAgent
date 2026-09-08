@@ -80,6 +80,47 @@ COMPETITOR_REGISTRY: dict[str, Competitor] = {
         },
         external_refs={"github_repo": "sst/opencode"},
     ),
+    # ── 国内竞品（设计文档 83 §3，2026-09-08 web 核实回填）──────────────
+    "trae": Competitor(
+        name="trae",
+        aliases=["trae-ai", "trae ide"],
+        official_links={
+            "home": "https://www.trae.ai",
+            "pricing": "https://www.trae.ai/pricing",
+        },
+    ),
+    "workbuddy": Competitor(
+        name="workbuddy",
+        aliases=["tencent workbuddy", "work-buddy"],
+        official_links={
+            "home": "https://www.workbuddy.ai",
+            "docs": "https://www.codebuddy.cn/docs/workbuddy/Overview",
+        },
+    ),
+    "zcode": Competitor(
+        name="zcode",
+        aliases=["z-code", "zcode agent", "智谱 z code"],
+        official_links={
+            # 用户更正确认（2026-09-08）：独立产品页，非 z.ai 主站；检索限定词 zcode.z.ai
+            "home": "https://zcode.z.ai/cn",
+            "pricing": "https://docs.bigmodel.cn/cn/coding-plan/overview",
+        },
+    ),
+    "kimi-kcode": Competitor(
+        name="kimi-kcode",
+        aliases=["kimi kcode", "kimi code", "kimi k3 coding"],
+        official_links={
+            "home": "https://www.kimi.com",
+            "docs": "https://platform.kimi.com/docs/guide",
+        },
+    ),
+    "deepseek-harness": Competitor(
+        name="deepseek-harness",
+        aliases=["deepseek harness"],
+        official_links={
+            "home": "https://www.deepseek.com/harness",
+        },
+    ),
 }
 
 

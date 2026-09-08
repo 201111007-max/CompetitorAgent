@@ -88,7 +88,7 @@
 | `80_benchmark_provenance_design.md` | 第三十轮：跑分口径 provenance——BenchmarkHit 增 source_type/scaffold_version/model_version/collected_at，报告/时间线/告警全链路口径标注，口径缺失告警降级 info | 中 | 📝 待实施 |
 | `81_stagnation_detection_adr.md` | 第三十一轮：ADR——自然收敛策略的停滞检测补充（保留 max_steps=None，新增 transcript 去重率停滞信号 + 收敛提示注入 + 预算耗尽 partial 评测用例；演进而非推翻 doc 62） | 中 | 📝 待实施 |
 | `82_dossier_export_design.md` | 第三十二轮：竞品档案（Dossier）导出——单竞品全历史聚合（置信度演进/价格/跑分/版本曲线 + 证据索引 + 待跟进问题），CLI/API/Web 三入口，纯聚合零新采集 | 中 | 📝 待实施 |
-| `83_tracking_runbook_anchor_protocol_design.md` | 第三十三轮：两周真实跟踪运行手册（10 竞品全量 × 每周 2 轮、停机跳过、国内 5 竞品注册、DeepSeek 用户级 env）+ 人工锚点评分章程（rubric 1~5 / 盲评 / 理由必填 / 20% 重测 / eval-anchor 工具） | 高 | 📝 待实施 |
+| `83_tracking_runbook_anchor_protocol_design.md` | 第三十三轮：两周真实跟踪运行手册（10 竞品全量 × 每周 2 轮、停机跳过、国内 5 竞品注册、DeepSeek 用户级 env）+ 人工锚点评分章程（rubric 1~5 / 盲评 / 理由必填 / 20% 重测 / eval-anchor 工具） | 高 | ✅ 已实现（2026-09-09：registry 国内 5 竞品（官网核实回填 §3）+ `evaluation/anchor.py` + CLI `eval-anchor`/`eval-anchor-stats`（盲评/理由必填/重测盲态混入/统计），20 新用例；两周实跑与人工打分为运营规程待用户执行，Judge 校准随 doc 76） |
 | `84_adr_react_vs_langgraph.md` | 第三十四轮：ADR——为什么自研 ReAct 引擎而非只用 LangGraph（可控面深度耦合 / 对照实验差异化结论 / 单协议收敛；langgraph 保留为对照引擎） | 中 | ✅ 追溯性 ADR（决策已随 doc 51/53/60/62 落地） |
 | `85_adr_plan_first_mandatory.md` | 第三十五轮：ADR——为什么 plan-first 强制（make_plan 首步 tool_choice API 级强制；下游护栏硬依赖 / 防开放式漂移 / CHAT 分支豁免） | 中 | ✅ 追溯性 ADR（决策已随 doc 44/49/53/64 落地） |
 | `86_adr_dual_engine_retention.md` | 第三十六轮：ADR——为什么保留双引擎对照（架构主张可证伪 / 控变量实验 / 明确退出条件防永久双维护） | 中 | ✅ 追溯性 ADR（决策已随 doc 51 落地） |
