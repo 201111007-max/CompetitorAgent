@@ -12,6 +12,7 @@ M4 新增：analyze_stream()（流式 SSE）/ cancel() / resume() / get_history(
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import uuid
@@ -1926,6 +1927,84 @@ class CompetitorAnalysisAPI:
     def continue_analysis(self, session_id: str) -> CompetitorReport:
         """恢复未完成的会话（对齐 hermes -c/--continue 语义）"""
         return self.resume(session_id)
+
+    def _latest_report_text(self, competitor: str) -> str:
+        """竞品最新归档报告正文（.md 优先，回退 JSON 内嵌 markdown_report）。"""
+        from competitor_agent.core.approval_gate import report_json_path
+        from competitor_agent.core.report_archiver import _safe_filename, resolve_output_dir
+
+        output_dir = self._config.report.output_dir
+        md_path = resolve_output_dir(output_dir) / (_safe_filename(competitor) + ".md")
+        if md_path.exists():
+            return md_path.read_text(encoding="utf-8")
+        json_path = report_json_path(competitor, output_dir)
+        if json_path.exists():
+            try:
+                data = json.loads(json_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                data = {}
+            if isinstance(data, dict) and data.get("markdown_report"):
+                return str(data["markdown_report"])
+        return ""
+
+    def verify_report(self, competitor: str, mode: str | None = None) -> Any:
+        """报告级 NLI 事实校验（设计文档 77 §2.3 产品侧挂点，门面薄路由）。
+
+        对竞品最新归档报告跑 ``NLIVerifier.verify_report``；``verifier.enabled``
+        或审批策略 ``verify_before_approve`` 开启时把结果接入审批门——
+        contradicted 条目进 rejected 理由、superseded 提示重新分析（reviewer_note）。
+        """
+        from competitor_agent.collector.fetch_policy import FetchPolicy
+        from competitor_agent.core.verifier import NLIVerifier
+
+        report_text = self._latest_report_text(competitor)
+        if not report_text:
+            raise FileNotFoundError(f"竞品无归档报告可校验: {competitor}")
+        vcfg = self._config.verifier
+        mode = mode or vcfg.mode
+        verifier = NLIVerifier(
+            llm=self._llm or self._default_llm(),
+            retriever=self._retriever,
+            web_extract=self._react_web_extract,
+            fetch_policy=FetchPolicy(max_per_run=self._config.collector.fetch_max_per_run),
+            timeline=self._timeline,
+            alert_sink=self._build_alert_sink() if vcfg.enabled else None,
+            ingester=self._ingester,
+            max_claims=vcfg.max_claims_per_report,
+            auto_ingest_superseded=vcfg.auto_ingest_superseded,
+        )
+        verification = verifier.verify_report(report_text, competitor, mode=mode)
+        enforce = vcfg.enabled or self._approval_policy.verify_before_approve
+        if enforce:
+            self._apply_verification_to_approval(competitor, verification)
+        return verification
+
+    def _apply_verification_to_approval(self, competitor: str, verification: Any) -> None:
+        """校验结果接入审批门（设计文档 77 §2.3）：contradicted → rejected；
+        仅 superseded → 提示「报告含过期信息，建议重新分析」。"""
+        from competitor_agent.core.approval_gate import (
+            REJECTED,
+            report_json_path,
+            report_status,
+            set_report_status,
+        )
+
+        json_path = report_json_path(competitor, self._config.report.output_dir)
+        if not json_path.exists():
+            return
+        reasons = verification.contradicted_reasons()
+        current = report_status(json_path)
+        if reasons:
+            note = "NLI 校验发现 " + str(len(reasons)) + " 处矛盾（真幻觉）：" + "；".join(reasons[:5])
+            if current != REJECTED:
+                set_report_status(json_path, REJECTED, note)
+            return
+        if verification.n_superseded:
+            set_report_status(
+                json_path,
+                current,
+                "报告含过期信息（superseded " + str(verification.n_superseded) + " 条），建议重新分析",
+            )
 
     def refresh_stale(
         self,

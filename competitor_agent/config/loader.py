@@ -121,6 +121,16 @@ class ScheduleConfig:
 
 
 @dataclass
+class VerifierConfig:
+    """NLI 事实校验器（设计文档 77 §2.4）：产品侧发布前自查开关（评测侧不受此开关控制）"""
+
+    enabled: bool = False  # 产品侧发布前校验开关（开启后 verify_report 结果接入审批门）
+    mode: str = "snapshot"  # 默认 snapshot（确定性）；发布前手动 verify(mode="refetch")
+    max_claims_per_report: int = 40  # 断言抽取上限（控成本）
+    auto_ingest_superseded: bool = True  # superseded 事件携带新原文回灌知识库
+
+
+@dataclass
 class FreshnessConfig:
     """新鲜度/陈旧度配置（设计文档 26 §3.2）"""
 
@@ -241,6 +251,7 @@ class AppConfig:
     agent: AgentConfig = field(default_factory=AgentConfig)
     lead: LeadConfig = field(default_factory=LeadConfig)
     schedule: ScheduleConfig = field(default_factory=ScheduleConfig)
+    verifier: VerifierConfig = field(default_factory=VerifierConfig)
 
 
 def _build_section(cls: type[Any], data: dict[str, Any] | None) -> Any:
@@ -285,6 +296,7 @@ def load_config(path: str | os.PathLike | None = None) -> AppConfig:
         agent=_build_section(AgentConfig, raw.get("agent")),
         lead=_build_section(LeadConfig, raw.get("lead")),
         schedule=_build_section(ScheduleConfig, raw.get("schedule")),
+        verifier=_build_section(VerifierConfig, raw.get("verifier")),
     )
 
 

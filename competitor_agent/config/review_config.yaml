@@ -159,3 +159,12 @@ security:
   cors_origins:
     - "http://localhost:8000"
   auth_token: ""
+
+# ===== NLI 事实校验器（设计文档 77 §2.4）=====
+# 产品侧发布前自查开关（评测侧 benchmark 不受此开关控制）；
+# 默认 snapshot（确定性）；发布前手动 verify_report(mode="refetch") 承担时效代价。
+verifier:
+  enabled: false               # 开启后 verify_report 结果接入审批门（contradicted → rejected）
+  mode: "snapshot"             # snapshot | refetch
+  max_claims_per_report: 40    # 断言抽取上限（控成本）
+  auto_ingest_superseded: true # superseded 事件携带新原文回灌知识库

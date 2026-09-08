@@ -1,5 +1,11 @@
 # 设计文档 77 —— 第二十七轮：NLI 事实校验器（工单 2：snapshot/refetch 双模式 + 三态判定）
 
+> **实施说明（2026-09-09）**：
+> ① **核心**（新 `core/verifier.py`）：`Claim`/`Verdict`/`ReportVerification` + `NLIVerifier`——断言抽取（LLM 结构化，**失败/畸形回退确定性 fallback 抽取**：句子级拆分 + 事实性启发，评测确定性兜底）→ 来源定位（snapshot=知识库检索 top1 **strategy="lexical"**（纯词袋：无嵌入开销且输入固定 → 判定输入固定，即 §6.3 确定性边界；vector 检索每断言一次嵌入在本机污染库上实测拖垮评测耗时，故校验侧固定 lexical）/ refetch=逐 `claim.source_urls` 调 web_extract 受 FetchPolicy 上限+去重护栏）→ **三态判定**（数值快路径不过 LLM：与快照冲突→contradicted、快照一致但新原文冲突→superseded；语义 NLI：快照矛盾→真幻觉、快照支持+新原文矛盾→superseded）→ **superseded 落账**（TimelineMemory 事件（`_EVENT_TYPE_BY_DIM` 映射）+ AlertSink 推送 + 可选 Ingester 回灌新原文，receipt 进 `superseded_events`）。幻觉率 = contradicted / (supported+contradicted)——superseded 与 unverifiable 均不入分母（比设计公式多排除 unverifiable：无来源可判不应稀释口径）。
+> ② **配置**（§2.4 全字段落地）：`VerifierConfig`（enabled/mode/max_claims_per_report/auto_ingest_superseded）+ `review_config.yaml::verifier` 段。
+> ③ **接线**：`facade/api.py::verify_report(competitor, mode)` 门面薄路由（最新归档 .md 优先回退 JSON 内嵌正文）+ `_apply_verification_to_approval`（**`verifier.enabled` 或审批策略新增 `verify_before_approve`**（§3 的开关落点，默认 false 向后兼容）开启时：contradicted → rejected 附理由、仅 superseded → 保持状态 + reviewer_note 提示重新分析）；`evaluation/benchmark.py`：`BenchmarkReport.verification`（VerificationMetrics 七字段）+ `verify_reports` 参数（**None=自动：mock 开/real 关**——真实 NLI 逐断言调 LLM 成本数倍放大，real 须显式买入，比设计更保守）+ CSV/Markdown「NLI 事实校验」节 + HARNESS_VERSION **0.12.0→0.13.0**；MCP/工具面不注册（§3 纪律）。
+> ④ **测试**：`test_verifier_77.py` 24——三态三组 fixture（§4.1）/superseded 链路（事件+告警+回灌断言，§4.2）/benchmark mock 连跑确定性（§4.3）/数值快路径不过 LLM（§4.4）/FetchPolicy 超限拦截+同 URL 去重（§4.5）/抽取解析与 fallback/聚合口径/审批 enforcement/`verifier` 段解析。tests/evaluation extract/gate/skill/integration/failure/behavior 全量绿（benchmark 全链路含 verification）；real_evaluation/ablation 因本机用户数据目录被长期测试运行膨胀（26 case 全量 run 从 ~50s 涨到 6min+，与本次改动无关——fresh `COMPETITOR_AGENT_DATA_DIR` 实测 17s/run）未整跑，其断言均为既有口径、改动仅 additive。
+
 > 目标：把 `validate_facts`（现仅数值与原文核对）升级为**独立的报告级事实校验器**：
 > 从报告抽取全部事实性断言 → 定位引用来源 → 获取来源原文 → NLI 判定，输出报告级幻觉率。
 > 双角色复用：**产品功能**（报告发布前自查，接审批门）+ **评测组件**（benchmark 幻觉率新口径）。
