@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from competitor_agent.agent.react_agent import ReactAgent
+from competitor_agent.agent.stagnation import StagnationConfig, StagnationDetector
 from competitor_agent.core.budget import IterationBudget
 from competitor_agent.core.checkpoint import is_cancelled
 from competitor_agent.domain_types.events import ProgressEvent
@@ -70,6 +71,7 @@ class ReactLoop:
         stream_sink: Callable[[StreamDelta], None] | None = None,  # 设计文档 63 §5.5：仅 Lead 流式旁路
         final_as_payload: bool = True,  # 设计文档 64 §5.2：对话式分支 False → 最终文本走 Stream 通道
         history_messages: list[dict[str, str]] | None = None,  # 设计文档 65 §3.3：多轮会话历史
+        stagnation: StagnationConfig | None = None,  # 设计文档 81：停滞检测（None 用默认开启）
     ) -> None:
         self._agent = agent
         self._max_steps = max_steps
@@ -89,10 +91,31 @@ class ReactLoop:
         self._stream_sink = stream_sink
         self._final_as_payload = final_as_payload  # 设计文档 64 §5.2：对话式分支 False
         self._history_messages = history_messages  # 设计文档 65 §3.3：多轮会话历史
+        # 设计文档 81：停滞检测器（每 run 一个实例——窗口/提示计数状态不可跨 run 泄漏）
+        self._stagnation = StagnationDetector(
+            config=stagnation,
+            on_hint=self._on_stagnation_hint,
+        )
         self.plan: dict | None = None  # make_plan 结果（供报告组装/记忆写侧）
         # 设计文档 62 §3.5：facade 装配侧挂载（非构造参数）——delegate 线程池与候选结果收集器
         self._delegate_runner: Any = None
         self._delegate_collector: dict[str, dict[str, Any]] = {}
+
+    def _on_stagnation_hint(self, kind: str, evidence: str) -> None:
+        """停滞提示/警示 → progress 事件（可观测，不强制截断——设计文档 81 §2.3）。"""
+        message = (
+            "检测到编排停滞，已注入收敛提示"
+            if kind == "hint"
+            else "停滞提示已达上限仍未收尾，请人工关注"
+        )
+        self._emit(
+            ProgressEvent(
+                event="progress",
+                phase="stagnation",
+                message=f"{message}（{evidence}）",
+                payload={"kind": kind, "evidence": evidence},
+            )
+        )
 
     def run(self, task: str) -> str:
         """运行一次分析会话，返回最终结论文本（向后兼容：不携带取消/预算状态）。"""
@@ -126,6 +149,7 @@ class ReactLoop:
                 stream_sink=self._stream_sink,
                 final_as_payload=self._final_as_payload,
                 history_messages=self._history_messages,
+                stagnation_detector=self._stagnation,
             )
             # 取消/预算中断时 ReactAgent 返回"已达最大步数"，此处覆盖为准确终止文案
             if result.cancelled:

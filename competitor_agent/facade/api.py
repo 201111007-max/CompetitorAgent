@@ -40,6 +40,7 @@ from competitor_agent.agent.review_tools import (
     build_validate_facts_tool,
     extract_verified_facts,
 )
+from competitor_agent.agent.stagnation import StagnationConfig
 from competitor_agent.agent.subagent_registry import (
     build_subagent,
     get_subagent_registry,
@@ -1100,6 +1101,14 @@ class CompetitorAnalysisAPI:
             stream_sink=self._stream_sink,  # 设计文档 63 §5.5：仅 Lead（子 Agent 不传）
             final_as_payload=final_as_payload,  # 设计文档 64 §5.2：对话式分支 False
             history_messages=history_messages,  # 设计文档 65 §3.3：多轮会话历史
+            stagnation=StagnationConfig(  # 设计文档 81：停滞检测（自然收敛的客观信号）
+                enabled=self._config.agent.stagnation_enabled,
+                window=self._config.agent.stagnation_window,
+                dup_threshold=self._config.agent.stagnation_dup_threshold,
+                sig_repeat=self._config.agent.stagnation_sig_repeat,
+                max_hints=self._config.agent.stagnation_max_hints,
+                ignore_arg_keys=tuple(self._config.agent.stagnation_ignore_arg_keys),
+            ),
         )
         # 收尾 shutdown 用（挂 loop 实例而非 self，避免并行 analyze 互相误杀线程池）
         loop._delegate_runner = runner

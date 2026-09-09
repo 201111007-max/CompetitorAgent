@@ -91,6 +91,7 @@ class ReactAgent:
         stream_sink: Callable[[StreamDelta], None] | None = None,
         final_as_payload: bool = True,  # 设计文档 64 §5.2：对话式分支 False → 最终文本走 Stream 通道
         history_messages: list[dict[str, str]] | None = None,  # 设计文档 65 §3.3：多轮会话历史
+        stagnation_detector: Any = None,  # 设计文档 81：停滞检测（None = 不启用）
     ) -> str:
         """执行 ReAct 循环直到 Final Answer 或步数耗尽
 
@@ -139,6 +140,7 @@ class ReactAgent:
             stream_sink=stream_sink,
             final_as_payload=final_as_payload,
             history_messages=history_messages,
+            stagnation_detector=stagnation_detector,
         )
 
     def _run_native(
@@ -158,6 +160,7 @@ class ReactAgent:
         stream_sink: Callable[[StreamDelta], None] | None,
         final_as_payload: bool = True,
         history_messages: list[dict[str, str]] | None = None,  # 设计文档 65 §3.3
+        stagnation_detector: Any = None,  # 设计文档 81：停滞检测（None = 不启用）
     ) -> str:
         """原生 function calling 循环（设计文档 53 §2.1，唯一循环，设计文档 60）。
 
@@ -261,6 +264,18 @@ class ReactAgent:
             messages, summary_lines = self._compress_history(
                 messages, max_history_steps, summary_lines, pinned_facts
             )
+            # 设计文档 81：停滞检测——回合末统计窗口重复度，停滞时注入收敛提示
+            # （system 消息置于消息流末尾，下一轮 LLM 可见；只含统计证据无工具原文）
+            if stagnation_detector is not None:
+                try:
+                    hint = stagnation_detector.record_round(
+                        [(c.name, dict(c.arguments or {}), str(r)) for c, r in results]
+                    )
+                except Exception:
+                    logger.warning("停滞检测统计失败", exc_info=True)
+                    hint = None
+                if hint:
+                    messages.append({"role": "system", "content": hint})
             step += 1
 
         return "已达到最大推理步数，未得出明确结论。"

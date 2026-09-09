@@ -217,6 +217,15 @@ class AgentConfig:
     """ReAct 循环配置（设计文档 56 M1 Q4）"""
 
     max_history_steps: int = 8  # 子 Agent 工具步超过后折叠旧步为摘要（默认 8，行为不变）
+    # 停滞检测（设计文档 81）：自然收敛（max_steps=None）的客观收敛信号——纯本地统计
+    stagnation_enabled: bool = True  # 关闭即回到纯自然收敛（无信号）
+    stagnation_window: int = 8  # 统计窗口（最近 N 个工具步）
+    stagnation_dup_threshold: float = 0.85  # 工具结果重复率阈值（jaccard 均值）
+    stagnation_sig_repeat: int = 3  # 同 signature 重复次数阈值
+    stagnation_max_hints: int = 2  # 收敛提示注入上限（防提示本身成为循环源）
+    stagnation_ignore_arg_keys: list[str] = field(
+        default_factory=lambda: ["ts", "_t", "nonce", "timestamp", "session_id"]
+    )  # args 规范化剔除的噪声键
 
 
 @dataclass
