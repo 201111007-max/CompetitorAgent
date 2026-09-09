@@ -325,14 +325,19 @@ class NLIVerifier:
             if fresh_text:
                 fresh_url = url
                 break
-        # 数值三态快路径：与快照就矛盾 → 真幻觉；快照一致但新原文矛盾 → superseded
-        if claim.numeric and snap_text:
-            if count_numeric_conflicts(claim.numeric, snap_text):
+        # 数值三态快路径：与快照就矛盾 → 真幻觉；快照一致但新原文矛盾 → superseded；
+        # 无快照基线时与最新原文矛盾 → 真幻觉（不伪装 superseded）
+        if claim.numeric:
+            if snap_text and count_numeric_conflicts(claim.numeric, snap_text):
                 return Verdict(
                     claim, "contradicted", snap_url, "数值与知识库快照原文不符（真幻觉）", "refetch"
                 )
             if fresh_text and count_numeric_conflicts(claim.numeric, fresh_text):
-                return self._register_superseded(claim, competitor, snap_url, fresh_url, fresh_text)
+                if snap_text:
+                    return self._register_superseded(claim, competitor, snap_url, fresh_url, fresh_text)
+                return Verdict(
+                    claim, "contradicted", fresh_url, "数值与最新原文不符（无快照基线，真幻觉）", "refetch"
+                )
         # 语义三态：先快照 NLI；快照矛盾即真幻觉；快照支持 + 新原文矛盾 → superseded
         if snap_text:
             snap_verdict = self._nli(claim, snap_text, snap_url, "refetch")
@@ -345,7 +350,13 @@ class NLIVerifier:
                 claim, "unverifiable", snap_url, "快照与最新原文均不可得", "refetch"
             )
         fresh_verdict = self._nli(claim, fresh_text, fresh_url, "refetch")
-        if fresh_verdict.verdict == "contradicted" and (not snap_text or snap_verdict.verdict == "supported"):
+        # superseded 需要快照基线（快照支持 + 新原文矛盾 = 现实已变）；无快照时与
+        # 最新原文矛盾即真幻觉（计入幻觉率），不得伪装成「信息过期」逃避分母
+        if (
+            fresh_verdict.verdict == "contradicted"
+            and snap_text
+            and snap_verdict.verdict == "supported"
+        ):
             return self._register_superseded(claim, competitor, snap_url, fresh_url, fresh_text)
         return fresh_verdict
 

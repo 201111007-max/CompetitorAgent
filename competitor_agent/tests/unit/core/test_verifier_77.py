@@ -180,6 +180,36 @@ class TestRefetchMode:
         )
         assert verdict.verdict == "superseded"
 
+    def test_no_snapshot_fresh_contradicted_is_hallucination_not_superseded(self) -> None:
+        """无快照基线 + 新原文矛盾 → contradicted（真幻觉），不得伪装 superseded。
+
+        superseded 要求「快照支持」基线（doc 77 §2.2）；无基线时矛盾计入幻觉率，
+        且不得发假「信息过期」时间线事件/告警。
+        """
+        llm = _ScriptedLLM(mapping={"每月 30 美元": "contradicted"})
+        timeline = _FakeTimeline()
+        sink = _FakeAlertSink()
+
+        def web_extract(url: str) -> str:
+            return "Cursor Pro 调价为每月 30 美元"
+
+        v = NLIVerifier(
+            llm,
+            retriever=_FakeRetriever([]),  # 知识库无该断言来源
+            web_extract=web_extract,
+            fetch_policy=FetchPolicy(max_per_run=5),
+            timeline=timeline,
+            alert_sink=sink,
+        )
+        verdict = v.verify_claim(
+            Claim(text="Cursor Pro 定价 $20/月", source_urls=["https://example.com/pricing"]),
+            "cursor",
+            mode="refetch",
+        )
+        assert verdict.verdict == "contradicted"
+        assert not timeline.events  # 无基线不落「信息过期」事件
+        assert not sink.alerts
+
     def test_fetch_failed_falls_back_to_snapshot(self) -> None:
         llm = _ScriptedLLM(default="supported")
         v = self._verifier(llm, fresh_text="")  # 重抓失败

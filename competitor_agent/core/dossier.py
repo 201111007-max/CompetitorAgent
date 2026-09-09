@@ -119,7 +119,7 @@ class DossierBuilder:
         """该竞品时间线事件（occurred_at 升序；window_days 有界时只保留窗口内）。"""
         try:
             events = self._timeline.events(competitor, limit=500)
-        except Exception:  # noqa: BLE001 — 时间线读取失败不炸档案
+        except Exception:
             logger.warning("时间线读取失败（竞品: %s）", competitor, exc_info=True)
             events = []
         rows: list[dict[str, Any]] = [
@@ -192,7 +192,7 @@ class DossierBuilder:
         for event in events:
             changes.setdefault(event["event_type"] or "change", []).append(event)
         questions: list[str] = []
-        for data in reversed(reports_data):  # 旧 → 新，新报告的同名缺口排后（去重保先见）
+        for data in reports_data:  # 时间升序遍历：同名缺口保留首见（最早报告），去重
             gaps = data.get("gaps_pending") or data.get("pending_gaps") or []
             for gap in gaps:
                 gap_text = str(gap)
