@@ -775,6 +775,13 @@ class CompetitorAnalysisAPI:
                 self.build_weekly_report()
             except Exception:
                 logger.warning("定时轮末尾周报聚合失败（不影响主流程）", exc_info=True)
+        if refreshed and self._config.schedule.refresh_dossiers:
+            # 设计文档 82 §2.3：调度轮末尾为当轮竞品刷新档案（默认关，防跟踪期磁盘膨胀）
+            for report in refreshed:
+                try:
+                    self.build_dossier(report.competitor.name)
+                except Exception:
+                    logger.warning("竞品档案刷新失败（不影响主流程）", exc_info=True)
         return refreshed
 
     def _build_alert_sink(self) -> AlertSink:
@@ -2014,6 +2021,22 @@ class CompetitorAnalysisAPI:
                 current,
                 "报告含过期信息（superseded " + str(verification.n_superseded) + " 条），建议重新分析",
             )
+
+    def build_dossier(self, competitor: str, window_days: int | None = None) -> Any:
+        """单竞品档案导出（设计文档 82 §2.3 门面薄路由）：纯本地聚合零新采集。
+
+        返回 (md_path, json_path)；数据源 = 归档报告 + 时间线 + 知识库证据。
+        """
+        from competitor_agent.core.dossier import DossierBuilder
+
+        builder = DossierBuilder(
+            reports_dir=self._config.report.output_dir,
+            data_dir=self._timeline.data_dir,
+            timeline=self._timeline,
+            store=self._store,
+        )
+        dossier = builder.build(competitor, window_days=window_days)
+        return builder.write(dossier)
 
     def refresh_stale(
         self,

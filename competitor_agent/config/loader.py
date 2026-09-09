@@ -118,6 +118,7 @@ class ScheduleConfig:
     cron_expr: str = ""  # cron 模式（minute hour day month weekday）；优先于 interval
     weekly_window_days: int = 7  # 周报聚合窗口（天）
     weekly_report: bool = False  # run_scheduled 末尾是否触发周报聚合
+    refresh_dossiers: bool = False  # 调度轮末尾为当轮竞品刷新档案（设计文档 82；默认关防磁盘膨胀）
 
 
 @dataclass

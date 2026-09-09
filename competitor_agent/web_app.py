@@ -710,6 +710,29 @@ async def status(session_id: str, _: None = Depends(require_auth)) -> JSONRespon
     )
 
 
+@app.get("/api/dossier/{competitor}")
+async def dossier(
+    competitor: str,
+    _: None = Depends(require_auth),
+    window_days: int | None = Query(default=None, ge=1, le=3650),
+) -> JSONResponse:
+    """单竞品档案 JSON（设计文档 82 §2.3 Web 入口）：纯本地聚合，零新采集。
+
+    API 以 use_llm=False 构造（档案只读 reports/timeline/知识库，不触发 LLM）。
+    """
+    api = CompetitorAnalysisAPI(use_llm=False, config=load_config(), memory=_get_memory())
+    try:
+        md_path, json_path = api.build_dossier(competitor, window_days=window_days)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"档案构建失败: {exc}") from exc
+    try:
+        data = json.loads(Path(json_path).read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        raise HTTPException(status_code=500, detail=f"档案 JSON 读取失败: {exc}") from exc
+    data["markdown_path"] = str(md_path)
+    return JSONResponse(data)
+
+
 @app.get("/api/logs/{session_id}")
 async def logs(
     session_id: str,

@@ -581,6 +581,28 @@ def _run_eval_diff(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_dossier(args: argparse.Namespace) -> int:
+    """dossier：单竞品档案导出（设计文档 82）——纯本地聚合，无需构造 API/LLM。"""
+    from competitor_agent.core.dossier import DossierBuilder
+    from competitor_agent.core.report_archiver import resolve_output_dir
+
+    builder = DossierBuilder(
+        reports_dir=args.reports_dir or resolve_output_dir(None),
+        data_dir=args.data_dir or get_data_dir(),
+    )
+    dossier = builder.build(args.competitor, window_days=args.window_days)
+    if not dossier.reports and dossier.total_changes == 0:
+        print(f"（{args.competitor} 无历史报告与变化事件——仍输出空态档案，不编造）")
+    md_path, json_path = builder.write(dossier)
+    print(
+        f"档案已导出: {md_path}\n"
+        f"结构化 JSON: {json_path}\n"
+        f"覆盖 {len(dossier.reports)} 份报告 / {dossier.total_changes} 条变化事件 / "
+        f"证据 {len(dossier.evidence_index)} 条"
+    )
+    return 0
+
+
 def _run_help(args: str) -> None:
     from competitor_agent.core.command_registry import COMMAND_REGISTRY
 
@@ -732,6 +754,14 @@ def build_parser() -> argparse.ArgumentParser:
     diff_p.add_argument("from_rev", help="起始版本（commit 短 hash / latest / latest/N）")
     diff_p.add_argument("to_rev", nargs="?", default="latest", help="目标版本（缺省 latest）")
     diff_p.add_argument("--history", default=None, help="history.jsonl 路径（缺省 evals/history.jsonl）")
+
+    dossier_p = sub.add_parser(
+        "dossier", help="单竞品档案导出（设计文档 82）：置信度演进/变化曲线/证据索引，纯本地聚合"
+    )
+    dossier_p.add_argument("--competitor", required=True, help="竞品规范名")
+    dossier_p.add_argument("--window-days", type=int, default=None, help="事件时间窗（天）；缺省全历史")
+    dossier_p.add_argument("--reports-dir", default=None, help="报告归档目录（缺省按 config/report 设置解析）")
+    dossier_p.add_argument("--data-dir", default=None, help="数据根目录（缺省 <data_dir>）")
     return parser
 
 
@@ -761,6 +791,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "eval-diff":
         # 快照对比纯本地读 JSONL，无需构造 API/LLM（设计文档 76 §2.4）
         return _run_eval_diff(args)
+    if args.command == "dossier":
+        # 档案导出纯本地聚合，无需构造 API/LLM（设计文档 82）
+        return _run_dossier(args)
     api = _make_api(engine=engine)
     llm = _build_llm(load_config())
     use_llm = True
