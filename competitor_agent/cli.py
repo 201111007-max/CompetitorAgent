@@ -461,7 +461,7 @@ def _anchor_out_path(explicit: str | None) -> Path:
 def _run_eval_anchor(args: argparse.Namespace) -> int:
     """eval-anchor：人工锚点盲评打分（设计文档 83 §4.4）。
 
-    盲评脱敏（display=内容短 hash；``--no-blind`` 关闭后展示真实文件名）/ 顺序确定性随机 /
+    盲评脱敏（display=内容短 hash；``--no-blind`` 关闭后展示真实文件名且保持池顺序）/ 顺序确定性随机 /
     已打分排除 / 重测盲态混入 / 理由必填 + 分数域校验（validate_entry）——
     公平性机制全部由工具强制（doc 83 §4.3）。
     """

@@ -55,11 +55,11 @@ def collect_pool(
     seed: int = 0,
     blind: bool = True,
 ) -> list[AnchorItem]:
-    """收集待打分条目：排除已打分 → 按 ``retest_rate`` 抽回重测 → 确定性洗牌。
+    """收集待打分条目：排除已打分 → 按 ``retest_rate`` 抽回重测 → 盲评洗牌。
 
-    盲评（默认 ``blind=True``）：展示名恒为内容 hash（``--no-blind`` 关闭后展示真实
-    文件名），``is_retest=True`` 条目盲态混入，打分者不可分辨；两种模式下顺序均为
-    seed 确定性洗牌。
+    盲评（默认 ``blind=True``）：展示名恒为内容 hash，``is_retest=True`` 条目盲态
+    混入，打分者不可分辨，顺序为 seed 确定性洗牌；``--no-blind``（``blind=False``）
+    展示真实文件名且保持池顺序（不打乱），``is_retest`` 标记保留供统计。
     """
     scored = scored_hashes or set()
     unscored = [p for p in pool if report_hash(p) not in scored]
@@ -73,7 +73,8 @@ def collect_pool(
 
     items = [AnchorItem(path=p, hash=report_hash(p), display=_display(p), is_retest=True) for p in retests]
     items += [AnchorItem(path=p, hash=report_hash(p), display=_display(p), is_retest=False) for p in unscored]
-    random.Random(seed).shuffle(items)
+    if blind:  # --no-blind：实名展示 + 保持池顺序（不打乱）
+        random.Random(seed).shuffle(items)
     return items
 
 

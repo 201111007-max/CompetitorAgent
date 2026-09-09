@@ -89,6 +89,24 @@ class TestCollectPool:
         assert retests[0].hash == report_hash(first)
         assert retests[0].display == report_hash(first)  # 盲态：不打分者看不出是重测
 
+    def test_no_blind_shows_filename_and_keeps_order(self, tmp_path: Path) -> None:
+        """--no-blind（doc 83 §4.4）：实名展示 + 池顺序（不洗牌）。"""
+        pool = self._pool(tmp_path)
+        items = collect_pool(pool, set(), retest_rate=0.0, seed=7, blind=False)
+        assert [it.display for it in items] == ["r1.md", "r2.md", "r3.md"]
+        assert [it.hash for it in items] == [report_hash(p) for p in pool]
+
+    def test_no_blind_keeps_retest_flag(self, tmp_path: Path) -> None:
+        """--no-blind 下重测仍带 is_retest 标记（统计需要），但实名可见。"""
+        pool = self._pool(tmp_path)
+        scored = {report_hash(pool[0])}
+        items = collect_pool(pool, scored_hashes=scored, retest_rate=1.0, seed=1, blind=False)
+        assert [(it.display, it.is_retest) for it in items] == [
+            ("r1.md", True),
+            ("r2.md", False),
+            ("r3.md", False),
+        ]
+
 
 class TestValidateEntry:
     def test_reason_required(self) -> None:
