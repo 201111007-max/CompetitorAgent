@@ -1,5 +1,11 @@
 # 设计文档 80 —— 第三十轮：跑分口径 provenance（工单 6：数据陷阱的系统级防线）
 
+> **实施说明（2026-09-09，全链路落地）**：
+> ① **共享契约**（`domain_types/benchmark.py`）：`provenance_note`（`[口径: 第三方实测·swebench·scaffold=v2.1·model=…·collected=…date]`，未声明显式 `[口径未声明]`）/ `provenance_note_from_entry` / `provenance_complete`（source_type+model_version 齐全）/ `first_benchmark_entry` / `has_vendor_self_reported`。collected_at 语义由既有 `fetched_at` 承担（不新增重复字段）。
+> ② **采集**：`BenchmarkHit` 增 `source_type`（默认 third_party）/`provider_name`/`scaffold_version`/`model_version`（to_dict 同步）；`_HEADER_ALIASES` 增 scaffold/harness/version 别名列，`_parse_leaderboard_table` 解析落值（解析不到留空——留空即诚实）；`TableBenchmarkProvider` 增 `source_type` 参数（厂商自报源预留接入位 §2.3，本设计零新增联网源）。
+> ③ **消费点标注**：`benchmark_scores` 工具每行尾注（str→str 契约不变）；performance 子 Agent 与候选子 Agent prompt 增口径纪律段（performance 专属，其他维度 prompt 零变化保 mock 确定性）；`MarkdownRenderer` performance 段厂商自报条目前加 `> ⚠ 以下含厂商自报口径数据，未经第三方复核`（结构性区分）；`TimelineMemory._summarize_change` performance 事件摘要强制携带口径尾注（无口径 → 「口径未声明」）——周报 `score_changes` 行复用事件摘要**自动携带**（零改动）；`report_diff` 对口径不完整（缺 source_type/model_version）的 score_change 告警降级 `severity="info"`（Alert 增 severity 字段，默认 warn 行为不变，to_dict/Console/File 透传）。
+> ④ **测试**：`test_provenance_80.py` 23——契约助手/解析（带口径列落值 + 无列留空）/工具尾注/渲染 ⚠/时间线尾注（含未声明）/告警降级与 complete 保持 warn/prompt 纪律段/周报行携带；相关既有 51 用例（alerting/renderer/timeline/freshness/benchmark_sources/weekly）+ skill 注入/benchmark extract 全绿。
+
 > 目标：coding agent 领域最大的数据陷阱是「跑分不可比」（厂商自报 vs 第三方实测、scaffold/模型版本差异）。本设计给每条跑分记录强制携带 provenance 元数据，并在报告/时间线/告警全链路显式标注口径——把「数据可信」做成系统级能力而非人工注意。
 >
 > 本文档为**设计**（不实现）。

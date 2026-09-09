@@ -270,6 +270,13 @@ def build_subagent_system_prompt(name: str) -> str:
 
 def _dimension_header(name: str, desc: str) -> str:
     """维度子 Agent 的 schema 头部（SUBAGENT_RESULT_SCHEMA）。"""
+    provenance = (
+        "\n跑分口径纪律（设计文档 80）：引用跑分必须复述口径（来源类型/scaffold 版本/"
+        "模型版本/采集时间）；benchmark_scores 工具输出的 [口径: …] 尾注原样保留进 "
+        "details.benchmarks 条目；无口径的分数标注『口径未声明』，不得省略口径当第三方数据引用。\n"
+        if name == "performance"
+        else ""
+    )
     return (
         f"你是竞品分析的「{name}」维度子 Agent。\n任务：{desc}\n"
         "自行调用可用工具采集信息（web_extract / web_search / 维度专属工具），"
@@ -278,7 +285,9 @@ def _dimension_header(name: str, desc: str) -> str:
         f'{{"dimension": "{name}", "summary": "结论", "details": {{...}}, '
         '"confidence": 0.0-1.0, "evidence_urls": ["实际引用的来源URL"]}\n'
         "evidence_urls 必须填实际采集/引用的来源 URL（供证据链与记忆沉淀），"
-        "无来源则留空数组，不得编造。只输出 JSON，不要其他文字。\n\n"
+        "无来源则留空数组，不得编造。只输出 JSON，不要其他文字。\n"
+        + provenance
+        + "\n"
         + _web_tool_section(_fetch_enabled_from_config())
     )
 
@@ -306,6 +315,9 @@ def _build_competitor_prompt(name: str, cfg: object) -> str:
         "无法核实的维度 summary 标注『待核验』且 confidence 置低，不得编造）。\n"
         "details 键名遵循各维度抽取惯例：pricing→plans、feature→features、performance→benchmarks、"
         "ecosystem→mcp_servers/plugins/ide_support、sentiment→polarity、roadmap→events。\n"
+        "performance→benchmarks 条目必须携带跑分口径（设计文档 80）：source_type"
+        "（third_party/vendor_self_reported）/scaffold_version/model_version，benchmark_scores "
+        "输出的 [口径: …] 尾注可原样复述；无口径标注『口径未声明』。\n"
         "official_links 填写你核实到的官方来源（供聚合阶段引用），无法核实留空。"
         "evidence_urls 必须填实际采集/引用的来源 URL，无来源则留空数组，不得编造。"
         "只输出 JSON，不要其他文字。\n\n"
