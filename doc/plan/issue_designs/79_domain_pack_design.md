@@ -1,5 +1,11 @@
 # 设计文档 79 —— 第二十九轮：Domain Pack 配置化（工单 5：领域可插拔）
 
+> **实施说明（2026-09-09，全落地）**：
+> ① **模型与加载**（新 `core/domain_pack.py`）：`DimensionSpec`（name/description/tools/skills/data_sources）/`RegistrySeed`/`DomainPack` + `load_domain_pack`（**防呆 §4.4**：缺 domain/dimensions/registry_seeds 段、维度重复 → 可读 ValueError；文件缺失 → FileNotFoundError）+ `active_pack_name`（模块覆盖 > env `COMPETITOR_AGENT_ACTIVE_PACK` > `config.domains.active_pack`，缺省 coding_agent）+ `set_active_pack`（运行时切换并同步重建竞品注册表/子 Agent 注册表/技能加载器缓存）+ **双保险**：yaml 目录缺失/损坏 → 内联 coding 默认（`agent/subagent_registry_defaults.py`，与下沉前逐位一致）。
+> ② **pack 文件**：`config/domains/coding_agent.yaml`（第一实例：6 维度 tools/skills/descriptions + 13 竞品 seeds + 权重，**与下沉前字面量逐位等价**——等价性冒烟断言 dims/tools/skills/desc/weights/registry 全 NONE-diff）+ `config/domains/saas_pm.yaml`（第二实例：pricing/feature/**integrations/adoption**/sentiment/roadmap + notion/linear/asana seeds + 独立权重，**全文无 coding agent 叙事**）。`DomainsConfig(active_pack)` + review_config.yaml `domains` 段。
+> ③ **三处解耦**：**L1** `SubagentRegistry.from_pack(pack)` + `get_subagent_registry` 按 pack 名缓存构建（失败回退内联默认）+ `reset_subagent_registry`；**L2** `competitor_registry.COMPETITOR_REGISTRY` 由 pack `registry_seeds` 构建（`reload_registry_from_pack`；`canonicalize/resolve_competitor` 语义不变）+ `Competitor.category` 默认值 `"ai_coding_agent"`→`""`（**有意行为变更**，由 pack `category_label` 填充：注册表 seeds、`CompetitorDiscoverer._to_competitors`）；**L3** `react_schemas.pack_dimensions` 运行时枚举（DIMENSIONS 保留为 coding 静态镜像）+ `make_plan(allowed_dimensions)` 按 pack 裁剪 enum（三处调用经 `self._domain_pack.dimension_names` 注入）+ `ReportBuilder(dimension_weights)` 按注入（api 装配 `self._domain_pack`）。**L4** `SkillLoader` 叠加扫描 `skills/domains/<active_pack>/`（主目录同名优先）+ `skills/domains/saas_pm/` 8 个领域 skill。
+> ④ **测试**：`test_domain_pack_79.py` 16——4.1 回归基线（yaml==内联逐位/注册表 seeds 等价/注册表形状/make_plan 6 维通过）+ 4.2/4.3 可插拔（saas_pm 切换后维度/注册表/品类/技能/发现品类注入/报告 pack 权重 + **零 coding agent 词汇 grep**）+ 4.4 防呆 5 条 + 兼容（from_pack/competitor 命名空间/reset）。回归：agent+domain+registry+discoverer 266、core+evaluation+config 440（4 失败为基线即有 chroma 文件锁环境问题，stash 验证）、facade 208 全绿；`test_domain_types` category 默认值断言随 L2 有意变更更新。
+
 > 目标：把 6 个维度子 Agent 的定义从硬编码 dict 下沉为 yaml 配置（Domain Pack），并**同步解耦三处领域渗漏**；以第二个领域（SaaS 项目管理工具）全链路独立出报告为验收——证明架构不是硬编码。
 >
 > 本文档为**设计**（不实现）。

@@ -264,11 +264,28 @@ def build_subagent_system_prompt(name: str) -> str:
         return _with_agent_md(_with_skills(header, skills))
     desc = cfg.system_prompt
     skills = list(cfg.skills)
-    header = _dimension_header(name, desc)
+    header = _dimension_header(
+        name, desc, data_sources=tuple(getattr(cfg, "data_sources", ()) or ())
+    )
     return _with_agent_md(_with_skills(header, skills))
 
 
-def _dimension_header(name: str, desc: str) -> str:
+def _data_sources_section(data_sources: tuple[dict[str, str], ...]) -> str:
+    """pack 声明的优先数据源（设计文档 79 L4）：名称 + notes 一行指引。"""
+    if not data_sources:
+        return ""
+    lines = ["优先数据源（pack 声明）："]
+    for ds in data_sources:
+        notes = str(ds.get("notes") or "")
+        lines.append(f"- {ds.get('name', '')}" + (f"（{notes}）" if notes else ""))
+    return "\n".join(lines) + "\n\n"
+
+
+def _dimension_header(
+    name: str,
+    desc: str,
+    data_sources: tuple[dict[str, str], ...] = (),
+) -> str:
     """维度子 Agent 的 schema 头部（SUBAGENT_RESULT_SCHEMA）。"""
     provenance = (
         "\n跑分口径纪律（设计文档 80）：引用跑分必须复述口径（来源类型/scaffold 版本/"
@@ -279,7 +296,8 @@ def _dimension_header(name: str, desc: str) -> str:
     )
     return (
         f"你是竞品分析的「{name}」维度子 Agent。\n任务：{desc}\n"
-        "自行调用可用工具采集信息（web_extract / web_search / 维度专属工具），"
+        + _data_sources_section(data_sources)
+        + "自行调用可用工具采集信息（web_extract / web_search / 维度专属工具），"
         "交叉核验来源后收尾。\n"
         "以 Final Answer 输出 SUBAGENT_RESULT_SCHEMA JSON：\n"
         f'{{"dimension": "{name}", "summary": "结论", "details": {{...}}, '

@@ -15,8 +15,12 @@ from competitor_agent.agent.react_schemas import PLAN_SCHEMA
 from competitor_agent.llm.client import LLMClient
 
 
-def make_plan(plan_json: Any) -> str:
-    """校验并规范化 PLAN_SCHEMA 规划 JSON；非法返回可读错误（回灌自恢复）。"""
+def make_plan(plan_json: Any, allowed_dimensions: list[str] | None = None) -> str:
+    """校验并规范化 PLAN_SCHEMA 规划 JSON；非法返回可读错误（回灌自恢复）。
+
+    ``allowed_dimensions``（设计文档 79 §2.2 L3）：激活 DomainPack 的维度枚举；
+    None 用静态 PLAN_SCHEMA（coding 镜像，现状等价）。
+    """
     plan: Any = plan_json
     if isinstance(plan, str):
         try:
@@ -38,7 +42,12 @@ def make_plan(plan_json: Any) -> str:
             return "make_plan 校验失败：缺少必填字段 competitor（单竞品规范名）或 competitors（多竞品清单/发现后回填）"
     if competitor and competitors:
         return "make_plan 校验失败：competitor 与 competitors 不能同时出现——单竞品用 competitor，多竞品用 competitors"
-    problems = LLMClient._validate_schema(plan, PLAN_SCHEMA)
+    schema: dict[str, Any] = PLAN_SCHEMA
+    if allowed_dimensions:
+        # 设计文档 79 L3：dimensions 枚举按激活 pack 裁剪（运行时 schema，避免两套真相）
+        schema = json.loads(json.dumps(PLAN_SCHEMA))  # 深拷贝，不改静态契约
+        schema["properties"]["dimensions"]["items"]["enum"] = list(allowed_dimensions)
+    problems = LLMClient._validate_schema(plan, schema)
     if problems:
         return f"make_plan 校验失败: {'；'.join(problems)}"
     # 设计文档 71 §8.4：format_hint 归一——计划里带该字段则规范化为枚举，非法/缺省回退 open。
@@ -51,10 +60,16 @@ def make_plan(plan_json: Any) -> str:
     return json.dumps(plan, ensure_ascii=False)
 
 
-def build_make_plan_tool(plan_sink: Callable[[str], None] | None = None) -> Callable[..., str]:
-    """构造 make_plan 工具函数（可选 plan_sink 透传；缺省由 ReactLoop 内部接收）。"""
+def build_make_plan_tool(
+    plan_sink: Callable[[str], None] | None = None,
+    allowed_dimensions: list[str] | None = None,
+) -> Callable[..., str]:
+    """构造 make_plan 工具函数（可选 plan_sink 透传；缺省由 ReactLoop 内部接收）。
+
+    ``allowed_dimensions``：激活 DomainPack 维度枚举（设计文档 79 L3），None 用静态镜像。
+    """
     def _tool(plan_json: Any) -> str:
-        result = make_plan(plan_json)
+        result = make_plan(plan_json, allowed_dimensions=allowed_dimensions)
         if plan_sink is not None and not result.startswith("make_plan"):
             plan_sink(result)
         return result

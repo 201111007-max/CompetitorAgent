@@ -168,3 +168,8 @@ verifier:
   mode: "snapshot"             # snapshot | refetch
   max_claims_per_report: 40    # 断言抽取上限（控成本）
   auto_ingest_superseded: true # superseded 事件携带新原文回灌知识库
+# ===== 领域包（设计文档 79 §2.3）=====
+# 切换 active_pack 即整体换领域（维度/注册表/品类/权重/技能随 pack 注入）；
+# pack 文件见 config/domains/（coding_agent = 现状等价基线，saas_pm = 可插拔验证实例）。
+domains:
+  active_pack: "coding_agent"

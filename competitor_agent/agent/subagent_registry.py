@@ -11,40 +11,17 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from competitor_agent.agent.react_loop import ReactLoop
-from competitor_agent.agent.react_schemas import DIMENSIONS
+from competitor_agent.agent.subagent_registry_defaults import (
+    _SUBAGENT_DESCRIPTIONS,
+    _SUBAGENT_SKILLS,
+    _SUBAGENT_TOOLS,
+    CODING_DIMENSIONS,
+)
 from competitor_agent.agent.tool_dispatcher import ToolSpec
 from competitor_agent.llm.client import LLMClient
 from competitor_agent.observability.logger import get_logger
 
 logger = get_logger("agent.subagent_registry")
-
-# 工具子集白名单：pricing 含定价工具，ecosystem/roadmap 含 github 系列。
-# 一律排除 analyze_competitor（防递归调用 analyze()）。
-_SUBAGENT_TOOLS: dict[str, list[str]] = {
-    "pricing": ["web_extract", "web_search", "analyze_pricing"],
-    "feature": ["web_extract", "web_search"],
-    # 设计文档 67 §2.1：performance 加结构化榜单直连工具（替代 LLM 读网页）
-    "performance": ["web_extract", "web_search", "benchmark_scores"],
-    "ecosystem": ["web_extract", "web_search", "github_stars", "github_releases", "github_commits"],
-    # 设计文档 67 §2.2：sentiment 加结构化采样工具（带样本量/时间窗）
-    "sentiment": ["web_extract", "web_search", "sentiment_sampling"],
-    "roadmap": ["web_extract", "web_search", "github_releases", "github_commits"],
-}
-
-# skill 注入清单：维度抽取 + 事实边界 + 置信度披露
-_SUBAGENT_SKILLS: dict[str, list[str]] = {
-    dim: [f"{dim}_analysis", "fact_verification", "confidence_disclosure"]
-    for dim in DIMENSIONS
-}
-
-_SUBAGENT_DESCRIPTIONS: dict[str, str] = {
-    "pricing": "分析竞品定价：套餐档位、按量计费、月付/年付价格与成本场景估算。",
-    "feature": "分析竞品核心功能矩阵与特性。",
-    "performance": "分析竞品性能：榜单、延迟、胜率等基准数据。",
-    "ecosystem": "分析竞品生态：MCP server 数量、IDE/插件支持、GitHub 社区活跃度。",
-    "sentiment": "分析竞品口碑：正负极性、社区评价。",
-    "roadmap": "分析竞品路线图与版本发布节奏。",
-}
 
 # 候选竞品子 Agent（设计文档 62 §3.2）：整竞品分析，工具面排除 delegate 防递归。
 _COMPETITOR_TOOLS = (
@@ -71,14 +48,19 @@ class SubagentConfig:
     tools: tuple[str, ...] = ()
     skills: tuple[str, ...] = ()
     system_prompt: str = ""
+    data_sources: tuple[dict[str, str], ...] = ()  # 设计文档 79：pack 声明式数据源
 
     @classmethod
     def for_dimension(cls, name: str) -> SubagentConfig:
+        """内联 coding 默认（设计文档 79 兜底层；优先走 from_pack）。"""
+        pack = CODING_DIMENSIONS
+        spec = pack.dimension(name)
         return cls(
             name=name,
-            tools=tuple(_SUBAGENT_TOOLS.get(name, [])),
-            skills=tuple(_SUBAGENT_SKILLS.get(name, [])),
-            system_prompt=_SUBAGENT_DESCRIPTIONS.get(name, ""),
+            tools=spec.tools if spec else tuple(_SUBAGENT_TOOLS.get(name, [])),
+            skills=spec.skills if spec else tuple(_SUBAGENT_SKILLS.get(name, [])),
+            system_prompt=spec.description if spec else _SUBAGENT_DESCRIPTIONS.get(name, ""),
+            data_sources=spec.data_sources if spec else (),
         )
 
     @classmethod
@@ -93,17 +75,38 @@ class SubagentConfig:
 
 
 class SubagentRegistry:
-    """预注册 6 维度 + 1 通用 candidate 命名空间子 Agent 配置；可按名查询/追加注册。
+    """预注册维度 + 1 通用 candidate 命名空间子 Agent 配置；可按名查询/追加注册。
 
     设计文档 62 §3.2：注册表是唯一委派键源——维度名 → 维度配置；其他任意名
     （候选竞品）经 ``resolve`` 落到 ``competitor`` 通用配置，无需逐个登记即可委派。
+    设计文档 79 §2.2（L1）：维度配置来自激活 DomainPack（``from_pack``）。
     """
 
     def __init__(self) -> None:
         self._configs: dict[str, SubagentConfig] = {}
+        from competitor_agent.agent.react_schemas import DIMENSIONS
+
         for dim in DIMENSIONS:
             self.register(SubagentConfig.for_dimension(dim))
         self.register(SubagentConfig.for_competitor())
+
+    @classmethod
+    def from_pack(cls, pack: Any) -> SubagentRegistry:
+        """按 DomainPack 构建注册表（L1 下沉）：维度定义 = pack.dimensions。"""
+        registry = cls.__new__(cls)
+        registry._configs = {}
+        for spec in pack.dimensions:
+            registry.register(
+                SubagentConfig(
+                    name=spec.name,
+                    tools=tuple(spec.tools),
+                    skills=tuple(spec.skills),
+                    system_prompt=spec.description,
+                    data_sources=tuple(spec.data_sources),
+                )
+            )
+        registry.register(SubagentConfig.for_competitor())
+        return registry
 
     def register(self, config: SubagentConfig) -> None:
         self._configs[config.name] = config
@@ -126,15 +129,34 @@ class SubagentRegistry:
         return "\n".join(lines)
 
 
-_REGISTRY: SubagentRegistry | None = None
+# pack 名 → 注册表缓存（设计文档 79：按激活 pack 构建；env/config 切换后重建）
+_REGISTRY_BY_PACK: dict[str, SubagentRegistry] = {}
+
+
+def reset_subagent_registry() -> None:
+    """清空缓存（测试/运行时切 pack 后调用，下次 get 重建）。"""
+    _REGISTRY_BY_PACK.clear()
 
 
 def get_subagent_registry() -> SubagentRegistry:
-    """模块级单例（懒加载 + 缓存）；显式传参时建新实例（测试用）。"""
-    global _REGISTRY
-    if _REGISTRY is None:
-        _REGISTRY = SubagentRegistry()
-    return _REGISTRY
+    """按激活 DomainPack 构建的模块级缓存单例（设计文档 79 §2.2 L1）。
+
+    pack 加载失败 → 回退内联 coding 默认（SubagentRegistry() 现状等价）。
+    """
+    from competitor_agent.core.domain_pack import active_domain_pack, active_pack_name
+
+    name = active_pack_name()
+    cached = _REGISTRY_BY_PACK.get(name)
+    if cached is not None:
+        return cached
+    try:
+        pack = active_domain_pack()
+        registry = SubagentRegistry.from_pack(pack)
+    except Exception:
+        logger.warning("DomainPack 子 Agent 注册表构建失败，回退内联默认", exc_info=True)
+        registry = SubagentRegistry()
+    _REGISTRY_BY_PACK[name] = registry
+    return registry
 
 
 def build_subagent(

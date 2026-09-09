@@ -67,6 +67,7 @@ from competitor_agent.core.checkpoint import (
     set_cancel,
 )
 from competitor_agent.core.competitor_discoverer import CompetitorDiscoverer
+from competitor_agent.core.domain_pack import active_domain_pack
 from competitor_agent.core.input_sanitizer import sanitize_task
 from competitor_agent.core.report_builder import ReportBuilder
 from competitor_agent.core.report_exporter import (
@@ -198,8 +199,13 @@ class CompetitorAnalysisAPI:
         self._max_parallel_tool_calls = max_parallel_tool_calls
 
         self._extractor = extractor or WebExtractor()
+        # DomainPack（设计文档 79）：激活领域包——维度/权重/品类随 pack 注入装配层
+        self._domain_pack = active_domain_pack(cfg)
         # 新鲜度 TTL（设计文档 26）：build() 为报告计算 freshness 元数据
-        self._builder = ReportBuilder(dimension_ttl_days=cfg.freshness.dimension_ttl_days)
+        self._builder = ReportBuilder(
+            dimension_ttl_days=cfg.freshness.dimension_ttl_days,
+            dimension_weights=self._domain_pack.default_dimension_weights or None,
+        )
         self._budget = BudgetController(max_iterations=max_iterations)
         # 竞品时间线记忆（设计文档 26 §3.4）：跨分析 diff，独立于四层记忆
         self._timeline = timeline or TimelineMemory()
@@ -935,7 +941,7 @@ class CompetitorAnalysisAPI:
             config=self._config,
             web_extract=lambda url: self._web_extract_checked(url, lg_fetch_policy),
             exclude=("analyze_competitor",),
-            extra_tools={"make_plan": build_make_plan_tool()},
+            extra_tools={"make_plan": build_make_plan_tool(allowed_dimensions=self._domain_pack.dimension_names)},
             tracer=self._tracer,
         )
         base_prompt = ReactAgent(
@@ -946,7 +952,7 @@ class CompetitorAnalysisAPI:
         plan, answer, transcript = run_langgraph(
             task,
             llm=llm,
-            make_plan_fn=build_make_plan_tool(),
+            make_plan_fn=build_make_plan_tool(allowed_dimensions=self._domain_pack.dimension_names),
             subagent_run=_subagent_run,
             registry=get_subagent_registry(),
             event_sink=self._event_sink,
@@ -1051,7 +1057,7 @@ class CompetitorAnalysisAPI:
             tracer=self._tracer,  # 设计文档 54：跨线程 subagent span
         )
         extra_tools: dict[str, Callable[..., str] | ToolSpec] = {
-            "make_plan": build_make_plan_tool(),
+            "make_plan": build_make_plan_tool(allowed_dimensions=self._domain_pack.dimension_names),
             "delegate": make_delegate_tool(
                 runner,
                 registry=get_subagent_registry(),

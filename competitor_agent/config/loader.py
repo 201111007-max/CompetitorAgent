@@ -239,6 +239,13 @@ class LeadConfig:
 
 
 @dataclass
+class DomainsConfig:
+    """领域包激活配置（设计文档 79 §2.3）：切换 active_pack 即整体换领域"""
+
+    active_pack: str = "coding_agent"  # coding_agent（默认）/ saas_pm；pack 文件见 config/domains/
+
+
+@dataclass
 class AppConfig:
     """应用级配置聚合（对应 review_config.yaml 各 section）"""
 
@@ -262,6 +269,7 @@ class AppConfig:
     lead: LeadConfig = field(default_factory=LeadConfig)
     schedule: ScheduleConfig = field(default_factory=ScheduleConfig)
     verifier: VerifierConfig = field(default_factory=VerifierConfig)
+    domains: DomainsConfig = field(default_factory=DomainsConfig)
 
 
 def _build_section(cls: type[Any], data: dict[str, Any] | None) -> Any:
@@ -307,6 +315,7 @@ def load_config(path: str | os.PathLike | None = None) -> AppConfig:
         lead=_build_section(LeadConfig, raw.get("lead")),
         schedule=_build_section(ScheduleConfig, raw.get("schedule")),
         verifier=_build_section(VerifierConfig, raw.get("verifier")),
+        domains=_build_section(DomainsConfig, raw.get("domains")),
     )
 
 

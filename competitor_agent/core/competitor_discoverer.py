@@ -135,11 +135,14 @@ class CompetitorDiscoverer:
                 continue
             resolved = _resolve_registry(name)
             if resolved is None:
-                # 未知竞品：用规范名直接构建（保留连字符），并补全官方链接
+                # 未知竞品：用规范名直接构建（保留连字符），并补全官方链接；
+                # 品类标签来自激活 DomainPack（设计文档 79 §2.2 L2，不再硬编码 coding agent）
+                from competitor_agent.core.domain_pack import active_domain_pack
+
                 resolved = Competitor(
                     name=canonicalize(name),
                     aliases=[str(a) for a in cand.get("aliases", []) if a],
-                    category="ai_coding_agent",
+                    category=active_domain_pack().category_label,
                     official_links=_extract_links(cand),
                 )
             key = resolved.name
