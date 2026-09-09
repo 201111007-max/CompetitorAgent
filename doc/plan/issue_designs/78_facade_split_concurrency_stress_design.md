@@ -1,5 +1,9 @@
 # 设计文档 78 —— 第二十八轮：facade/api.py 拆分 + 并发压测（工单 8 + 9'）
 
+> **实施说明（2026-09-09，§2.3 压测落地 / §2 拆分待实施）**：
+> ① **并发压测 ✅**（新 `tests/evaluation/test_concurrency_stress.py`，5 用例 11.6s）：DelegateRunner 满负荷 6 并发 + 脚本化子 Agent（固定调用次数/文本长度 → 逐调用成本确定性）——**A1 成本恒等**（并行 vs 串行同负载 `total_cost_usd` round(,9) 逐位一致，容忍求和顺序）、**A2 无丢失**（runner 6/6 状态完成 + compare 6 候选 `delegate_collector` 全收集）、**A3 wall 收敛**（并行 < 串行×0.6，防假并行）、**A4 取消传播**（取消信号贯穿编排 60s 内终止）。asyncio 迁移维持否决不实施。
+> ② **facade 拆分 📝 待实施**（1.5 天工作量，建议独立会话执行）：方法清点已完成（api.py 2063 行 / ~50 方法；迁移映射：schedule 簇 run_scheduled/build_weekly_report/get_history/resume/refresh_stale → schedule_service；compare/discover/_task_with_sources/_export_comparison_json → compare_service；Lead 编排 `_react_loop` 闭包组整体 → analysis_service；`__init__` 装配 → assembly.Dependencies）。验收三件套不变：签名冻结 + 既有断言零改动 + benchmark 全绿。
+
 > 目标：① 把 ~1700 行的 `facade/api.py`（god object）按职责拆为「门面路由 + 四个服务模块」，`CompetitorAnalysisAPI` 公共签名逐位不变；② 落地并发压测断言（工单 9 降级后的保留项）：`max_parallel_subagents` 满负荷下成本核算误差 = 0。
 > **本设计包含一次显式否决**：asyncio 迁移被砍（doc 75 §1 工单 9——论据不成立 + 改动面叠加），本文档只做纯重构 + 压测。
 >
