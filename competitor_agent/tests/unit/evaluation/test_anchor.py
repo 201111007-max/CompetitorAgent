@@ -56,6 +56,22 @@ class TestCollectPool:
             assert it.display == it.hash
             assert "r" not in it.display
 
+    def test_blind_off_shows_real_names(self, tmp_path: Path) -> None:
+        """--no-blind（blind=False）：展示真实文件名；hash 字段仍为内容短 hash（重测关联不受影响）。"""
+        pool = self._pool(tmp_path)
+        items = collect_pool(pool, set(), retest_rate=0.0, seed=42, blind=False)
+        by_name = {it.display: it for it in items}
+        assert set(by_name) == {"r1.md", "r2.md", "r3.md"}
+        for it in items:
+            assert it.hash == report_hash(it.path)
+            assert it.hash != it.display  # 展示名不再是 hash
+
+    def test_blind_default_on(self, tmp_path: Path) -> None:
+        """默认盲评：不传 blind 等价于 blind=True。"""
+        pool = self._pool(tmp_path)
+        for it in collect_pool(pool, set(), retest_rate=0.0, seed=42):
+            assert it.display == it.hash
+
     def test_deterministic_shuffle(self, tmp_path: Path) -> None:
         pool = self._pool(tmp_path)
         run1 = collect_pool(pool, set(), retest_rate=0.0, seed=7)

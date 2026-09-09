@@ -89,6 +89,17 @@ class TestBuildParser:
         args = parser.parse_args(["benchmark"])
         assert args.command == "benchmark"
 
+    def test_eval_anchor_blind_default_on(self):
+        parser = build_parser()
+        args = parser.parse_args(["eval-anchor", "--pool", "reports/"])
+        assert args.command == "eval-anchor"
+        assert args.blind is True  # 盲评默认开（doc 83 §4.4）
+
+    def test_eval_anchor_no_blind_flag(self):
+        parser = build_parser()
+        args = parser.parse_args(["eval-anchor", "--pool", "reports/", "--no-blind"])
+        assert args.blind is False  # --no-blind 关闭盲评（展示真实文件名）
+
     def test_schedule_subcommand(self):
         parser = build_parser()
         args = parser.parse_args(["schedule", "--competitors", "cursor,copilot"])

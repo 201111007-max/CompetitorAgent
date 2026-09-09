@@ -461,8 +461,9 @@ def _anchor_out_path(explicit: str | None) -> Path:
 def _run_eval_anchor(args: argparse.Namespace) -> int:
     """eval-anchor：人工锚点盲评打分（设计文档 83 §4.4）。
 
-    盲评脱敏（display=内容短 hash）/ 顺序确定性随机 / 已打分排除 / 重测盲态混入 /
-    理由必填 + 分数域校验（validate_entry）——公平性机制全部由工具强制（doc 83 §4.3）。
+    盲评脱敏（display=内容短 hash；``--no-blind`` 关闭后展示真实文件名）/ 顺序确定性随机 /
+    已打分排除 / 重测盲态混入 / 理由必填 + 分数域校验（validate_entry）——
+    公平性机制全部由工具强制（doc 83 §4.3）。
     """
     import random as _random
     from datetime import datetime, timezone
@@ -487,6 +488,7 @@ def _run_eval_anchor(args: argparse.Namespace) -> int:
         scored_hashes=load_scored_hashes(out),
         retest_rate=max(0.0, args.retest_rate),
         seed=seed,
+        blind=getattr(args, "blind", True),
     )
     retests = sum(1 for it in items if it.is_retest)
     if not items:

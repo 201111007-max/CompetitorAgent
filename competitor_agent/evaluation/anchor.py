@@ -53,10 +53,13 @@ def collect_pool(
     scored_hashes: set[str] | None = None,
     retest_rate: float = 0.0,
     seed: int = 0,
+    blind: bool = True,
 ) -> list[AnchorItem]:
     """收集待打分条目：排除已打分 → 按 ``retest_rate`` 抽回重测 → 确定性洗牌。
 
-    展示名恒为内容 hash（盲评）；``is_retest=True`` 条目盲态混入，打分者不可分辨。
+    盲评（默认 ``blind=True``）：展示名恒为内容 hash（``--no-blind`` 关闭后展示真实
+    文件名），``is_retest=True`` 条目盲态混入，打分者不可分辨；两种模式下顺序均为
+    seed 确定性洗牌。
     """
     scored = scored_hashes or set()
     unscored = [p for p in pool if report_hash(p) not in scored]
@@ -65,10 +68,11 @@ def collect_pool(
     k = max(0, min(k, len(retest_pool)))
     retests = random.Random(seed).sample(retest_pool, k) if k else []
 
-    items = [AnchorItem(path=p, hash=report_hash(p), display=report_hash(p), is_retest=True) for p in retests]
-    items += [
-        AnchorItem(path=p, hash=report_hash(p), display=report_hash(p), is_retest=False) for p in unscored
-    ]
+    def _display(p: Path) -> str:
+        return p.name if not blind else report_hash(p)
+
+    items = [AnchorItem(path=p, hash=report_hash(p), display=_display(p), is_retest=True) for p in retests]
+    items += [AnchorItem(path=p, hash=report_hash(p), display=_display(p), is_retest=False) for p in unscored]
     random.Random(seed).shuffle(items)
     return items
 
