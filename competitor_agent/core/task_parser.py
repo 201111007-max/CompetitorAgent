@@ -10,20 +10,20 @@
 """
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING
 
+from competitor_agent.core.json_extract import coerce_str_list, extract_json_block
+from competitor_agent.domain_types.enums import DIMENSION_NAMES
 from competitor_agent.interfaces.exceptions import LLMUnavailableError
 
 if TYPE_CHECKING:
     from competitor_agent.llm.client import LLMClient
 
-# 合法维度集合（规划枚举约束，供 _parse_task_llm 校验 dimensions 白名单）
-_VALID_DIMENSIONS = frozenset(
-    {"pricing", "performance", "feature", "ecosystem", "sentiment", "roadmap"}
-)
+# 合法维度集合（规划枚举约束，供 _parse_task_llm 校验 dimensions 白名单；
+# 单一来源 DIMENSION_NAMES，设计文档 87 §1.4-C3）
+_VALID_DIMENSIONS = frozenset(DIMENSION_NAMES)
 
 _LLM_PARSE_PROMPT = (
     "你是竞品分析任务的语义解析器。从用户任务中提取结构化信息，只输出 JSON，不要其他文字。"
@@ -102,10 +102,14 @@ def _parse_task_llm(task: str, llm: LLMClient) -> TaskParseResult:
             {"role": "user", "content": task},
         ]
     )
-    data = json.loads(raw)
-    if not isinstance(data, dict):
-        raise LLMUnavailableError(f"LLM 任务解析返回非 JSON 对象: {type(data).__name__}")
-    competitors = [str(c) for c in data.get("competitors", []) if c]
+    # 设计文档 87 §1.1A：裸 json.loads → 共享 extract_json_block（括号配平 + 轻修复），
+    # 容忍 ```json 围栏与散文前缀（"好的，解析结果如下："），与主链路同一套健壮化
+    data = extract_json_block(raw)
+    if data is None:
+        raise LLMUnavailableError(f"LLM 任务解析返回非 JSON 对象: {raw[:120]!r}")
+    # 设计文档 87 §1.1B：competitors 类型归一——模型返回字符串时按整体一项，
+    # 不再被按字符迭代成 ["C","l","a","u","d","e",...] 静默垃圾
+    competitors = coerce_str_list(data.get("competitors"))
     dimensions_raw = data.get("dimensions")
     dimensions: list[str] | None = None
     if isinstance(dimensions_raw, list) and dimensions_raw:

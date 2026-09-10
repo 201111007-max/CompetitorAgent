@@ -377,6 +377,7 @@ class CompetitorAnalysisAPI:
                 # 设计文档 51：LangGraph 引擎——取消/预算/checkpoint 不对齐（差异化结论）
                 plan, answer, transcript = self._run_langgraph_engine(task, sid)
                 terminal = "success"
+                error_kind = ""
             else:
                 loop, result = self._run_react_loop(task, sid)
                 plan, answer, transcript = loop.plan, result.answer, result.transcript
@@ -385,6 +386,7 @@ class CompetitorAnalysisAPI:
                     if result.cancelled
                     else ("partial" if result.budget_exhausted else "success")
                 )
+                error_kind = result.error_kind
             report = react_report.assemble(
                 lead_answer=answer,
                 competitor=self._lead_competitor(task, plan),
@@ -392,6 +394,7 @@ class CompetitorAnalysisAPI:
                 transcript=transcript,
                 builder=self._builder,
                 terminal_state=terminal,
+                error_kind=error_kind,
             )
             # 设计文档 62 §3.5：组装后收尾提取为共享 helper（analyze/run registry 分型共用）
             return self._finalize_competitor_report(report, task, sid, transcript, terminal)
@@ -858,6 +861,7 @@ class CompetitorAnalysisAPI:
             transcript=result.transcript,
             builder=self._builder,
             terminal_state=terminal,
+            error_kind=result.error_kind,
         )
 
     def _run_react_loop(
@@ -1820,6 +1824,7 @@ class CompetitorAnalysisAPI:
                 transcript=result.transcript,
                 builder=self._builder,
                 terminal_state=terminal,
+                error_kind=result.error_kind,
             )
             return self._finalize_competitor_report(report, task, sid, result.transcript, terminal)
         except Exception:

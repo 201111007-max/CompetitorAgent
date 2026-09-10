@@ -139,3 +139,56 @@ class TestResolutionDecision:
             use_llm=True,
         )
         assert result.custom_sources == {"home": "https://cursor.com"}
+
+
+class TestParsingRobustness87:
+    """设计文档 87 §1.1：task_parser 复用共享 extract/coerce 基建（P0 修复）"""
+
+    @staticmethod
+    def _llm_raw(text: str) -> LLMClient:
+        return LLMClient(call_func=lambda messages, model: text)
+
+    _PAYLOAD = json.dumps(
+        {"resolution": "registry", "competitors": ["cursor"], "dimensions": ["pricing"], "custom_sources": {}}
+    )
+
+    def test_fenced_json_parsed(self):
+        """§1.1A：```json 围栏输出不再抛 LLMUnavailableError。"""
+        llm = self._llm_raw(f"```json\n{self._PAYLOAD}\n```")
+        result = parse_task("分析 Cursor", llm=llm, use_llm=True)
+        assert result.competitors == ["cursor"]
+        assert result.dimensions == ["pricing"]
+
+    def test_prose_prefix_parsed(self):
+        """§1.1A：散文前缀（"好的，解析结果如下："）不再抛 LLMUnavailableError。"""
+        llm = self._llm_raw(f"好的，解析结果如下：\n{self._PAYLOAD}")
+        result = parse_task("分析 Cursor", llm=llm, use_llm=True)
+        assert result.competitors == ["cursor"]
+
+    def test_garbage_still_raises(self):
+        """完全无 JSON → 仍响亮失败（兜底响亮语义不变）。"""
+        llm = self._llm_raw("完全无法解析的内容")
+        with pytest.raises(LLMUnavailableError):
+            parse_task("分析 Cursor", llm=llm, use_llm=True)
+
+    def test_competitors_str_not_char_iterated(self):
+        """§1.1B：competitors 返回字符串 → 整体一项，不按字符迭代成静默垃圾。"""
+        llm = self._llm_raw(
+            '{"resolution": "registry", "competitors": "Claude Code", "dimensions": null}'
+        )
+        result = parse_task("分析 Claude Code", llm=llm, use_llm=True)
+        assert result.competitors == ["Claude Code"]
+
+    def test_competitors_none_to_empty(self):
+        """§1.1B：competitors 返回 null → 空列表（不抛 TypeError）。"""
+        llm = self._llm_raw('{"resolution": "chat", "competitors": null, "dimensions": null}')
+        result = parse_task("你好", llm=llm, use_llm=True)
+        assert result.competitors == []
+
+    def test_competitors_mixed_list_filters_non_str(self):
+        """§1.1B：混合 list → 只留非空字符串项。"""
+        llm = self._llm_raw(
+            '{"resolution": "compare", "competitors": ["cursor", 30, "", "windsurf"], "dimensions": null}'
+        )
+        result = parse_task("对比", llm=llm, use_llm=True)
+        assert result.competitors == ["cursor", "windsurf"]

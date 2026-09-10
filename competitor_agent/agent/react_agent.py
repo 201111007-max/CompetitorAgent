@@ -39,6 +39,10 @@ _PINNED_MSG_PREFIX = "已核验事实（经复核工具核验，压缩后保留�
 _PINNED_MAX_LINES = 8    # pinned 段行数上限（超限只保最近核验）
 _PINNED_LINE_CHARS = 120 # pinned 单行字符上限
 
+# 超步数终止文案（共享常量，设计文档 87 §1.3）：ReactLoop 据此判 error_kind="max_steps"，
+# 生产/消费两侧引用同一常量，文案改动不会静默失效
+MAX_STEPS_ANSWER = "已达到最大推理步数，未得出明确结论。"
+
 
 class ReactAgent:
     """让 LLM 借助工具分解决策的轻量 function calling Agent（设计文档 60：单协议）"""
@@ -263,7 +267,7 @@ class ReactAgent:
             )
             step += 1
 
-        return "已达到最大推理步数，未得出明确结论。"
+        return MAX_STEPS_ANSWER
 
     def _dispatch_call(self, call: Any) -> str:
         """分发原生 tool_call：参数解析失败/参数错误/工具缺失/执行异常转可回灌文本。"""

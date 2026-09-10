@@ -7,7 +7,9 @@
 from __future__ import annotations
 
 import json
+import logging
 
+import pytest
 from competitor_agent.agent.delegate_tool import (
     DelegateRunner,
     SubagentRuntime,
@@ -127,3 +129,42 @@ def test_error_json_flagged_empty() -> None:
     assert "状态: 空结果" in text
     assert collector == {}
     assert len(calls) == 2
+
+
+def test_prose_prefixed_schema_still_collected() -> None:
+    """设计文档 87 §1.2：候选子 Agent 结果带散文前缀 → 复用共享 extract 括号配平，
+    候选仍被收集（修复前裸 json.loads 直接静默丢列）。"""
+    valid = "分析完成，结果如下：\n" + json.dumps(
+        {
+            "competitor": "cursor",
+            "dimensions": [
+                {
+                    "dimension": "pricing",
+                    "summary": "Cursor Pro 订阅 $20/月，长度远大于 16 字符阈值。",
+                    "details": {},
+                    "confidence": 0.8,
+                    "evidence_urls": ["https://cursor.com/pricing"],
+                }
+            ],
+        }
+    )
+    runner, calls = _runner_with([valid])
+    collector: dict[str, dict] = {}
+    tool = make_delegate_tool(runner, registry=_FakeRegistry(), collector=collector)
+    text = tool(dimensions=["cursor"], task="分析 X")
+    assert "状态: 完成" in text
+    assert collector["cursor"]["dimensions"][0]["dimension"] == "pricing"
+    assert len(calls) == 1
+
+
+def test_unparseable_result_skipped_with_warning(caplog: pytest.LogCaptureFixture) -> None:
+    """设计文档 87 §1.2：完全无 JSON 的结果 → 不收集且记 warning（不再静默跳过）。"""
+    prose = "这是一段足够长的纯散文结果，没有任何 JSON 结构可以提取。"
+    runner, _calls = _runner_with([prose])
+    collector: dict[str, dict] = {}
+    tool = make_delegate_tool(runner, registry=_FakeRegistry(), collector=collector)
+    with caplog.at_level(logging.WARNING, logger="agent.delegate_tool"):
+        text = tool(dimensions=["cursor"], task="分析 X")
+    assert "状态: 完成" in text
+    assert collector == {}
+    assert any("不收集" in r.message and "cursor" in r.message for r in caplog.records)

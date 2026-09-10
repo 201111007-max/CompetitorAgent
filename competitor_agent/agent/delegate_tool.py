@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from competitor_agent.agent.prompts.trust_boundary import wrap_untrusted
+from competitor_agent.core.json_extract import extract_json_block
 from competitor_agent.observability.logger import current_session, get_logger, set_current_session
 
 logger = get_logger("agent.delegate_tool")
@@ -414,13 +415,14 @@ def _collect_candidate(
     """把候选子 Agent 的标准多维度结果收集到 collector（供 comparison 组装器读取）。
 
     只收 REPORT_SCHEMA 形态（``dimensions`` 为数组）；维度子 Agent 的单维度结果
-    （无 ``dimensions`` 键）不收集。解析失败静默跳过（组装器有矩阵兜底）。
+    （无 ``dimensions`` 键）不收集。设计文档 87 §1.2：复用共享 ``extract_json_block``
+    （容忍散文前缀/围栏），解析失败记 warning 留痕——不再静默丢候选。
     """
     if collector is None or rec.status != "done":
         return
-    try:
-        payload = json.loads(rec.result or "")
-    except (json.JSONDecodeError, TypeError):
+    payload = extract_json_block(rec.result or "")
+    if payload is None:
+        logger.warning("子 Agent 结果未含可解析 JSON，不收集: %s", rec.name)
         return
-    if isinstance(payload, dict) and isinstance(payload.get("dimensions"), list):
+    if isinstance(payload.get("dimensions"), list):
         collector[rec.name] = payload

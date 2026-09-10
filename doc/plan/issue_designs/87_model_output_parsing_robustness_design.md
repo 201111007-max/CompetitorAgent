@@ -11,7 +11,11 @@
 > 第 X 轮 header blockquote、分节含「问题现状 / 总体架构 / 接口设计 / 配置清单 / 测试验收 /
 > 实施计划 / 风险权衡 / 核心技术点总结」、`README.md` 索引登记），格式模板参考 **doc 73/74**。
 >
-> **状态（2026-09-10）**：待实施，仅记录存档。doc 74 §1.2 已记录「子 Agent 结果无最小成功校验」，
+> **状态（2026-09-10）**：工作线 A（§10.2 第 1-4 步）**已实施**——`core/json_extract` 基建下移
+> （react_report 保留旧名别名）、C3 维度集合收敛至 `domain_types.enums.DIMENSION_NAMES`、
+> task_parser 两处 P0 修复、`_collect_candidate` 复用 extract + warning、`error_kind`
+> 结构化信号（ReactRunResult 打标 → assemble 兜底消费，中文包含判定已删除）、C1
+> `evidence_urls` 归一随附落地。doc 74 §1.2 已记录「子 Agent 结果无最小成功校验」，
 > 本文档 §1.2 是从**解析健壮性**角度对同一区域的补充证据（静默丢数据路径），交叉引用不重复定性。
 >
 > **修订（2026-09-10，v2）**：用户决策架构演进为**研究员/作家分离**（原 §3.4 M2 可选方案升格为

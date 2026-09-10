@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from competitor_agent.agent.react_agent import ReactAgent
+from competitor_agent.agent.react_agent import MAX_STEPS_ANSWER, ReactAgent
 from competitor_agent.core.budget import IterationBudget
 from competitor_agent.core.checkpoint import is_cancelled
 from competitor_agent.domain_types.events import ProgressEvent
@@ -33,6 +33,9 @@ class ReactRunResult:
     cancelled: bool = False
     budget_exhausted: bool = False
     transcript: list[dict] = field(default_factory=list)  # 工具步记录（设计文档 49 §3.5）
+    # 结构化终止原因（设计文档 87 §1.3）："unavailable" | "max_steps" | "stopped" | ""，
+    # 替代报告组装侧的中文案包含判定；非空 = 非正常终止（组装侧降级低置信）
+    error_kind: str = ""
 
 
 class ReactLoop:
@@ -130,17 +133,24 @@ class ReactLoop:
             # 取消/预算中断时 ReactAgent 返回"已达最大步数"，此处覆盖为准确终止文案
             if result.cancelled:
                 result.answer = "推理已取消（会话被中断）。"
+                result.error_kind = "stopped"
                 self._emit(
                     ProgressEvent(event="cancelled", phase="react", message="ReAct 推理已取消")
                 )
             elif result.budget_exhausted:
                 result.answer = "推理已停止（预算耗尽）。"
+                result.error_kind = "stopped"
                 self._emit(
                     ProgressEvent(event="error", phase="react", message="ReAct 推理预算耗尽")
                 )
+            elif result.answer == MAX_STEPS_ANSWER:
+                # 超步数终止（ReactAgent 共享常量判定，设计文档 87 §1.3）：
+                # 未得出明确结论 ≠ 正常收尾，组装侧据此降级置信度
+                result.error_kind = "max_steps"
         except LLMUnavailableError as exc:
             logger.warning("LLM 不可用，ReAct 无法执行: %s", exc)
             result.answer = "LLM 服务不可用，跳过 ReAct 推理。"
+            result.error_kind = "unavailable"
             self._emit(ProgressEvent(event="error", phase="react", message=str(exc)))
         self._emit(ProgressEvent(event="phase_complete", phase="react", message="ReAct 推理完成"))
         return result

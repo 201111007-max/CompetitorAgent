@@ -55,6 +55,7 @@ def assemble(
     builder: Any | None = None,
     terminal_state: str = "success",
     use_lead_body: bool | None = None,
+    error_kind: str = "",
 ) -> CompetitorReport:
     """把 Lead Final Answer 组装为 CompetitorReport。
 
@@ -74,7 +75,9 @@ def assemble(
         use_lead_body = load_config().report.lead_formatted_body
     body, payload = _split_body_and_payload(lead_answer)
     if payload is None:
-        return _fallback_single_dimension(lead_answer, competitor, builder, terminal_state, loop_plan)
+        return _fallback_single_dimension(
+            lead_answer, competitor, builder, terminal_state, loop_plan, error_kind=error_kind
+        )
 
     dimensions: list[DimensionResult] = []
     for item in payload.get("dimensions") or []:
@@ -351,11 +354,16 @@ def _fallback_single_dimension(
     builder: Any,
     terminal_state: str,
     loop_plan: dict[str, Any] | None = None,
+    *,
+    error_kind: str = "",
 ) -> CompetitorReport:
     """非 JSON / 无 dimensions：单 react 维度 PARTIAL（LLM 不可用/超步数文案）。
 
     设计文档 65 §2.2 兜底净化：即使无有效 JSON，赋给 react 维度 summary 前先剔除文中
     的 JSON 块（复用括号配平定位），只保留纯散文——用户不再看到一坨 JSON dump。
+
+    设计文档 87 §1.3：unavailable 判定改结构化信号——``error_kind`` 非空（unavailable/
+    max_steps/stopped）即非正常终止，置信度 0.1；不再做中文字符串包含匹配。
 
     plan 已声明但未产出的维度 → gaps_pending（供 resume/预算判定），与
     assemble() 正常路径一致。
@@ -363,9 +371,8 @@ def _fallback_single_dimension(
     text = (answer or "").strip()
     if text:
         text = _strip_json_blocks(text)
-    is_unavailable = "LLM 服务不可用" in text or "已达最大" in text or "推理已停止" in text
     status = ResultStatus.PARTIAL
-    confidence = 0.1 if is_unavailable else 0.4
+    confidence = 0.1 if error_kind else 0.4
     dr = DimensionResult(
         dimension="react",
         summary=text or "（Lead Agent 未产出结构化结论）",
