@@ -19,19 +19,21 @@ details, confidence, evidence_urls}]）→ 多维度 ``DimensionResult`` → Com
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
 from typing import Any
 
 from competitor_agent.core.json_extract import (
-    coerce_str_list,
     extract_json_block,
     light_fix_json,
     parse_json_candidate,
 )
+from competitor_agent.core.report_aggregator import (
+    aggregate_researcher_results,
+    dimension_from_item,
+    planned_dimensions,
+)
 from competitor_agent.domain_types.competitor import Competitor
 from competitor_agent.domain_types.enums import GapStatus, ResultStatus
 from competitor_agent.domain_types.info_gap import InfoGap
-from competitor_agent.domain_types.observation import SourceEvidence
 from competitor_agent.domain_types.report import CompetitorReport, DimensionResult
 from competitor_agent.observability.logger import get_logger
 
@@ -43,8 +45,9 @@ _extract_json_block = extract_json_block
 _light_fix_json = light_fix_json
 _parse_json_candidate = parse_json_candidate
 
-# details 非空但零证据 URL 的维度：置信度封顶（防无来源断言）
-_MAX_CONFIDENCE_NO_EVIDENCE = 0.5
+# 向后兼容别名（设计文档 88 §4.1：聚合逻辑平移 core/report_aggregator，纯平移语义不变）
+_dimension_from_item = dimension_from_item
+_planned_dimensions = planned_dimensions
 
 
 def assemble(
@@ -79,39 +82,11 @@ def assemble(
             lead_answer, competitor, builder, terminal_state, loop_plan, error_kind=error_kind
         )
 
-    dimensions: list[DimensionResult] = []
-    for item in payload.get("dimensions") or []:
-        dr = _dimension_from_item(item)
-        if dr is not None:
-            dimensions.append(dr)
-
-    # 跨维度同源冲突兜底（按证据 URL 键，代码强制，不进 LLM 决策）
-    conflict_note = ""
-    if dimensions:
-        try:
-            from competitor_agent.domain_types.conflict import detect_conflicts_across
-
-            conflicts = detect_conflicts_across(
-                [
-                    {
-                        "dimension": d.dimension,
-                        "details": d.details,
-                        "evidence_urls": [e.url for e in d.evidence],
-                    }
-                    for d in dimensions
-                ]
-            )
-            if conflicts:
-                lines = [f"- {c.summary}" for c in conflicts]
-                conflict_note = "## 跨维度冲突备注\n\n" + "\n".join(lines) + "\n"
-        except Exception:
-            logger.warning("跨维度冲突检测失败，跳过", exc_info=True)
-
-    # plan 声明但未产出的维度 → gaps_pending（供 resume/预算/报告标注）
-    planned = _planned_dimensions(loop_plan)
-    produced = {d.dimension for d in dimensions}
-    missing = [dim for dim in planned if dim not in produced]
-    gaps_pending = [InfoGap(field=dim, priority=5, status=GapStatus.PARTIAL) for dim in missing]
+    # 聚合层（设计文档 88 §4.1，N1）：确定性合并 + 冲突检测 + planned/produced 对账
+    agg = aggregate_researcher_results(payload.get("dimensions") or [], loop_plan)
+    dimensions = agg.dimensions
+    conflict_note = agg.conflict_note
+    gaps_pending = agg.gaps_pending
 
     report = builder.build(
         competitor=competitor,
@@ -296,56 +271,6 @@ def _strip_json_blocks(text: str) -> str:
     cleaned = "".join(out)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
     return cleaned
-
-
-def _dimension_from_item(item: dict[str, Any]) -> DimensionResult | None:
-    dim = str(item.get("dimension") or "").strip()
-    if not dim:
-        return None
-    summary = str(item.get("summary") or "")
-    raw_details = item.get("details")
-    details: dict[str, Any] = raw_details if isinstance(raw_details, dict) else {}
-    raw_confidence = item.get("confidence")
-    confidence = 0.5
-    if raw_confidence is not None:
-        try:
-            confidence = max(0.0, min(1.0, float(raw_confidence)))
-        except (TypeError, ValueError):
-            confidence = 0.5
-    # 设计文档 87 §1.4-C1：evidence_urls 归一——模型返回单个字符串 URL 时按整体一项，
-    # 不再被按字符迭代成 "h","t","t","p" 垃圾证据
-    urls = coerce_str_list(item.get("evidence_urls"))
-    # 数值真值核对兜底：details 非空但零证据 → 置信度封顶并标注（防无来源断言）
-    if details and not urls:
-        confidence = min(confidence, _MAX_CONFIDENCE_NO_EVIDENCE)
-    evidence = [
-        SourceEvidence(
-            source_name="web",
-            url=url,
-            access_time=datetime.now(timezone.utc).isoformat(),
-            trust_level=0.8,
-        )
-        for url in urls
-    ]
-    return DimensionResult(
-        dimension=dim,
-        summary=summary,
-        details=details,
-        confidence=confidence,
-        evidence=evidence,
-        status=ResultStatus.COMPLETE if confidence >= 0.5 else ResultStatus.PARTIAL,
-        # 证据链（设计文档 49 §3.1）：无 content_hash，以 URL 代理（跨维度冲突按 URL 键）
-        evidence_hashes=list(urls),
-    )
-
-
-def _planned_dimensions(loop_plan: dict[str, Any] | None) -> list[str]:
-    if not isinstance(loop_plan, dict):
-        return []
-    dims = loop_plan.get("dimensions")
-    if isinstance(dims, list):
-        return [str(d) for d in dims if d]
-    return []
 
 
 def _fallback_single_dimension(
