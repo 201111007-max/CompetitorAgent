@@ -17,7 +17,6 @@ from competitor_agent.core import report_exporter
 from competitor_agent.domain_types import distilled
 from competitor_agent.domain_types.competitor import Competitor
 from competitor_agent.domain_types.report import CompetitorReport, DimensionResult
-from competitor_agent.evaluation import benchmark as bench
 from competitor_agent.memory import timeline_memory
 
 # ── benchmark 五分支：fixture = (details, key/term, 字面期望) ──────────────
@@ -86,29 +85,27 @@ _SENTIMENT_CASES: list[tuple[dict[str, Any], str, Any]] = [
 
 
 class TestBenchmarkBranchEquivalence:
+    """C2 后：benchmark 五分支已切蒸馏原语，此处字面期望即回归网（distilled 一侧与
+    benchmark._extract_field 走同一函数，等价性由同源性保证）。"""
+
     @pytest.mark.parametrize(("details", "term", "expected"), _PLAN_PRICE_CASES)
     def test_plan_price(self, details: dict[str, Any], term: str, expected: str) -> None:
-        assert bench._plan_price(details, term) == expected
         assert distilled.plan_price(details, term) == expected
 
     @pytest.mark.parametrize(("details", "term", "expected"), _FEATURE_CASES)
     def test_feature_present(self, details: dict[str, Any], term: str, expected: str) -> None:
-        assert bench._feature_present(details, term) == expected
         assert distilled.feature_present(details, term) == expected
 
     @pytest.mark.parametrize(("details", "term", "expected"), _BENCHMARK_SCORE_CASES)
     def test_benchmark_score(self, details: dict[str, Any], term: str, expected: str) -> None:
-        assert bench._benchmark_score(details, term) == expected
         assert distilled.benchmark_score(details, term) == expected
 
     @pytest.mark.parametrize(("details", "key", "expected"), _ECOSYSTEM_CASES)
     def test_ecosystem_signal(self, details: dict[str, Any], key: str, expected: Any) -> None:
-        assert bench._ecosystem_signal(details, key) == expected
         assert distilled.ecosystem_signal(details, key) == expected
 
     @pytest.mark.parametrize(("details", "key", "expected"), _SENTIMENT_CASES)
     def test_sentiment_signal(self, details: dict[str, Any], key: str, expected: Any) -> None:
-        assert bench._sentiment_signal(details, key) == expected
         assert distilled.sentiment_signal(details, key) == expected
 
 
@@ -165,23 +162,8 @@ _TIMELINE_CASES: list[tuple[dict[str, Any], str]] = [
 
 
 class TestTimelineEquivalence:
-    """timeline `_pricing_price_label` 旧实现 vs 基于 pricing_plans 的重实现（C2 目标形态）。"""
-
-    @staticmethod
-    def _new_label(snapshot: dict[str, Any]) -> str:
-        details = snapshot.get("details") or {}
-        if not isinstance(details, dict):
-            details = {}
-        parts: list[str] = []
-        for plan in distilled.pricing_plans(details):
-            if plan.requires_quote:
-                parts.append(f"{plan.tier}: 需询价")
-                continue
-            if plan.monthly_price_usd is not None:
-                parts.append(f"{plan.tier}: ${plan.monthly_price_usd:g}/mo")
-        return "；".join(parts[:4])
+    """C2 后：`_pricing_price_label` 已委托 pricing_plans，字面期望即回归网。"""
 
     @pytest.mark.parametrize(("snapshot", "expected"), _TIMELINE_CASES)
     def test_pricing_price_label(self, snapshot: dict[str, Any], expected: str) -> None:
         assert timeline_memory._pricing_price_label(snapshot) == expected
-        assert self._new_label(snapshot) == expected

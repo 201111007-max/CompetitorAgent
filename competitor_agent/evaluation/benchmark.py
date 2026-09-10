@@ -24,6 +24,7 @@ from typing import Any, Callable
 
 from competitor_agent.collector.web_extractor import WebExtractor
 from competitor_agent.config.loader import AppConfig, CollectorConfig
+from competitor_agent.domain_types import distilled
 from competitor_agent.domain_types.enums import ObservationStatus
 from competitor_agent.domain_types.observation import Observation, SourceEvidence
 from competitor_agent.evaluation.accuracy_eval import AccuracyEvaluator, AccuracyMetrics, EvalCase
@@ -990,105 +991,6 @@ class BenchmarkMockLLM:
 # ── 字段抽取：从真实报告提取可比对字段（设计文档 §3.1） ──────────────
 
 
-_PERIOD_ALIAS = {"mo": "month"}
-
-_PRICE_VALUE_RE = re.compile(r"[$¥€]?\s*([\d.,]+)\s*(?:USD|CNY|RMB|美元|元)?\s*/\s*([A-Za-z一-鿿]+)")
-
-
-def _coerce_plan_value(value: Any) -> dict[str, str]:
-    """真实 LLM 输出漂移兜底：plans 可能是 {"Pro": "30 USD/month"} 字典形态（real 轨实测暴露）"""
-    if isinstance(value, dict):
-        return {"price": str(value.get("price") or ""), "period": str(value.get("period") or "")}
-    match = _PRICE_VALUE_RE.search(str(value))
-    if not match:
-        return {}
-    return {"price": match.group(1), "period": match.group(2)}
-
-
-def _plan_price(details: dict[str, Any], term: str) -> str:
-    """从 plans[].price/period 拼装 "$N/unit"（与 ground_truth 同命名空间）"""
-    plans = details.get("plans", [])
-    if isinstance(plans, dict):
-        plans = [{"name": str(name), **_coerce_plan_value(value)} for name, value in plans.items()]
-    for plan in plans:
-        if not isinstance(plan, dict):
-            continue
-        name = str(plan.get("name") or "").lower()
-        if term.lower() in name:
-            price = str(plan.get("price") or "").strip().lstrip("$¥€")
-            period_raw = str(plan.get("period") or "").lower()
-            period = _PERIOD_ALIAS.get(period_raw, period_raw)
-            return f"${price}/{period}" if period else f"${price}"
-    return ""
-
-
-def _feature_present(details: dict[str, Any], term: str) -> str:
-    """特征存在性：term 出现在任一 features 行则 "true"，否则 "false"（防幻觉，拒绝虚构）"""
-    for feature in details.get("features", []):
-        if term.lower() in str(feature).lower():
-            return "true"
-    return "false"
-
-
-def _benchmark_score(details: dict[str, Any], term: str) -> str:
-    """基准分：按名匹配 benchmarks[]（兼容 mock 的 name/score 与规则层的 raw 行）"""
-    for benchmark in details.get("benchmarks", []):
-        if not isinstance(benchmark, dict):
-            continue
-        name = str(benchmark.get("name") or "").lower()
-        raw = str(benchmark.get("raw") or "").lower()
-        if term.lower() in name or (raw and term.lower() in raw):
-            if "score" in benchmark:
-                return str(benchmark["score"])
-            if ":" in raw:
-                return raw.split(":", 1)[1].strip()
-            return raw
-    return ""
-
-
-def _ecosystem_signal(details: dict[str, Any], key: str) -> Any:
-    """生态信号（设计文档 24 的 EcosystemAnalyzer details）：MCP 数量 / IDE 支持 / 插件市场"""
-    if key == "mcp_servers":
-        return len(details.get("mcp_servers") or [])
-    if key == "plugins":
-        plugins = details.get("plugins")
-        return plugins.get("count", 0) if isinstance(plugins, dict) else 0
-    if key == "stars":
-        activity = details.get("repo_activity")
-        return activity.get("stars", 0) if isinstance(activity, dict) else 0
-    if key in ("vscode", "jetbrains", "terminal"):
-        ide = [str(i).lower() for i in (details.get("ide_support") or [])]
-        return "true" if key in ide else "false"
-    if key == "ide":
-        return " ".join(str(i) for i in (details.get("ide_support") or []))
-    return ""
-
-
-def _sentiment_signal(details: dict[str, Any], key: str) -> Any:
-    """口碑信号（设计文档 24 的 SentimentAnalyzer details）：极性主导 / 正负信号有无"""
-    ratio = details.get("polarity_ratio")
-    if not isinstance(ratio, dict):
-        ratio = {}
-    if key == "polarity":
-        pos = float(ratio.get("pos") or 0.0)
-        neg = float(ratio.get("neg") or 0.0)
-        neu = float(ratio.get("neu") or 0.0)
-        if pos > neg and pos > neu:
-            return "pos"
-        if neg > pos and neg > neu:
-            return "neg"
-        return "neu"
-    if key == "positive":
-        return "true" if (ratio.get("pos") or 0) > 0 else "false"
-    if key == "negative":
-        return "true" if (ratio.get("neg") or 0) > 0 else "false"
-    if key == "neutral":
-        return "true" if (ratio.get("neu") or 0) > 0 else "false"
-    if key in ("pos", "neg", "neu"):
-        return ratio.get(key, 0.0)
-    return ""
-
-
 def _timeline_event(report: object, key: str) -> str:
     """时间线事件（设计文档 26）：从报告内嵌「竞品时间线」段落判断是否有事件。
 
@@ -1101,16 +1003,17 @@ def _timeline_event(report: object, key: str) -> str:
 
 
 def _extract_field(kind: str, details: dict[str, Any], key: str) -> Any:
+    """按 kind 分派字段抽取（设计文档 88 §4.1：五分支全部委托蒸馏层原语，同源单一事实）。"""
     if kind == "plan_price":
-        return _plan_price(details, key)
+        return distilled.plan_price(details, key)
     if kind == "feature_present":
-        return _feature_present(details, key)
+        return distilled.feature_present(details, key)
     if kind == "benchmark_score":
-        return _benchmark_score(details, key)
+        return distilled.benchmark_score(details, key)
     if kind == "ecosystem_signal":
-        return _ecosystem_signal(details, key)
+        return distilled.ecosystem_signal(details, key)
     if kind == "sentiment_signal":
-        return _sentiment_signal(details, key)
+        return distilled.sentiment_signal(details, key)
     return ""
 
 

@@ -67,13 +67,18 @@ def _pricing_profile(report: CompetitorReport) -> dict[str, Any] | None:
 
 
 def _benchmark_scores(report: CompetitorReport) -> list[dict[str, Any]]:
-    """从 performance 维度结果的 details["benchmarks"] 提取榜单分数。"""
+    """从 performance 维度结果的 details["benchmarks"] 提取榜单分数。
+
+    设计文档 88 §4.1：委托蒸馏层 ``benchmark_entries``（单一事实源，容忍非 list/非 dict）。
+    """
     for r in report.dimension_results:
         if r.dimension != "performance":
             continue
         details = getattr(r, "details", None)
-        if isinstance(details, dict) and isinstance(details.get("benchmarks"), list):
-            return [b for b in details["benchmarks"] if isinstance(b, dict)]
+        if isinstance(details, dict):
+            from competitor_agent.domain_types.distilled import benchmark_entries
+
+            return benchmark_entries(details)
     return []
 
 
