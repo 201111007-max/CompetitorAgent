@@ -1,6 +1,13 @@
-"""Markdown 渲染器 — 把 CompetitorReport 渲染为 Markdown"""
+"""Markdown 渲染器 — 把 CompetitorReport 渲染为 Markdown
+
+设计文档 88 §4.3：新增 ``render_skeleton``（代码骨架 + 叙事槽占位）与模块级
+``inject_slots``（槽位注入/降级注记）——研究员/作家分离下，断言性内容
+（标题/表格/数字/注记）100% 代码渲染，writer 只填 ``{{slot:*}}`` 叙事槽。
+legacy ``render()`` 逐字节不动（writer_pass=false 的确定性路径）。
+"""
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 
 from competitor_agent.domain_types.enums import ResultStatus
@@ -64,6 +71,78 @@ class MarkdownRenderer:
         lines.append("")
         lines.append("_本报告由 competitor_agent 自动生成。_")
         return "\n".join(lines)
+
+    def render_skeleton(self, report: CompetitorReport, *, show_gaps: bool = False) -> str:
+        """代码骨架渲染（设计文档 88 §4.3）：结构/数字全代码，叙事槽留 ``{{slot:*}}`` 占位。
+
+        与 legacy ``render()`` 的差异：① H1 元信息块后插 ``{{slot:executive_summary}}``；
+        ② 每维段落不再倾倒 details blob（``_render_details_blob``），pricing 表保留
+        （断言性内容本就代码渲染），置信度行前插 ``{{slot:dimension_insight:{dim}}}``；
+        ③ 末尾追加代码标题 ``## 市场格局结论`` + ``{{slot:market_conclusion}}``。
+        show_gaps 语义与 render() 一致。
+        """
+        lines: list[str] = []
+        lines.append(f"# {report.competitor.name} 竞品分析报告")
+        lines.append("")
+        lines.append(f"> 生成时间: {report.created_at}")
+        lines.append(f"> 终态: `{report.terminal_state}`")
+        lines.append(f"> 综合置信度: **{report.overall_confidence:.2f}**")
+        lines.append("")
+        if report.freshness is not None:
+            note = report.freshness.markdown_note()
+            if note:
+                lines.append(note)
+                lines.append("")
+        lines.append("{{slot:executive_summary}}")
+        lines.append("")
+        lines.append("## 维度结论")
+        lines.append("")
+
+        for result in report.dimension_results:
+            self._render_dimension_skeleton(lines, result)
+
+        if show_gaps:
+            lines.append("## 未关闭缺口")
+            lines.append("")
+            if report.gaps_pending:
+                for gap in report.gaps_pending:
+                    tried = ", ".join(gap.sources_tried) or "无"
+                    lines.append(f"- **{gap.field}** (priority={gap.priority}, confidence={gap.confidence:.2f})")
+                    lines.append(f"  - 已尝试源: {tried}")
+                    lines.append(f"  - 状态: {gap.status.value}")
+            else:
+                lines.append("_全部缺口已关闭或无待处理缺口。_")
+            lines.append("")
+        lines.append("## 市场格局结论")
+        lines.append("")
+        lines.append("{{slot:market_conclusion}}")
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+        lines.append("_本报告由 competitor_agent 自动生成。_")
+        return "\n".join(lines)
+
+    def _render_dimension_skeleton(self, lines: list[str], result: DimensionResult) -> None:
+        """骨架模式的单维段落：去 details blob，pricing 表保留，置信度行前插叙事槽。"""
+        label = _STATUS_LABEL.get(result.status, "•")
+        lines.append(f"### {label} {result.dimension}")
+        lines.append("")
+        lines.append(result.summary or "（无结论）")
+        lines.append("")
+
+        if result.dimension == "pricing":
+            profile = profile_from_details(result.details, result.evidence) if isinstance(result.details, dict) else None
+            if profile is not None and profile.has_pricing_data:
+                self._render_pricing(lines, profile)
+
+        lines.append(f"{{{{slot:dimension_insight:{result.dimension}}}}}")
+        lines.append("")
+        lines.append(f"置信度: `{result.confidence:.2f}`")
+        if result.evidence:
+            urls = ", ".join(ev.url for ev in result.evidence if ev.url)
+            if urls:
+                lines.append(f"证据: {urls}")
+        lines.append("")
 
     def _render_dimension(self, lines: list[str], result: DimensionResult) -> None:
         label = _STATUS_LABEL.get(result.status, "•")
@@ -241,6 +320,35 @@ class MarkdownRenderer:
         lines.append("")
         lines.append("_本报告由 competitor_agent 自动生成。_")
         return "\n".join(lines)
+
+
+# 叙事槽占位符：独占一行 ``{{slot:slot_id}}``（slot_id 允许字母/数字/_/-/:）
+_SLOT_PLACEHOLDER_RE = re.compile(r"^\{\{slot:([\w:-]+)\}\}$", re.MULTILINE)
+
+# 槽位降级注记（设计文档 88 §4.3 N4）：缺失/失败槽 → 注记，骨架照常产出
+SLOT_FALLBACK_DIMENSION = "（本维度解读暂缺）"
+SLOT_FALLBACK_SECTION = "（本节解读暂缺）"
+
+
+def inject_slots(skeleton: str, prose_by_slot: dict[str, str]) -> str:
+    """槽位注入（设计文档 88 §4.3）：``{{slot:*}}`` 占位 → writer prose。
+
+    - prose 缺失/空白/校验降级（调用方不传该槽）→ 降级注记：dimension_insight 槽
+      「（本维度解读暂缺）」，executive_summary/market_conclusion 「（本节解读暂缺）」；
+    - prose 含骨架未声明的槽位键 → 忽略（防御）；
+    - 占位符必须独占一行，prose 正文内的 ``{{`` 文本不误匹配。
+    """
+
+    def _sub(match: re.Match[str]) -> str:
+        slot_id = match.group(1)
+        prose = (prose_by_slot.get(slot_id) or "").strip()
+        if prose:
+            return prose
+        if slot_id.startswith("dimension_insight:"):
+            return SLOT_FALLBACK_DIMENSION
+        return SLOT_FALLBACK_SECTION
+
+    return _SLOT_PLACEHOLDER_RE.sub(_sub, skeleton)
 
 
 def _fmt_money(value: float | None) -> str:
