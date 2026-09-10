@@ -95,6 +95,10 @@ report:
   # 持久化 <data_dir>/settings.json；优先级 显式 > settings > yaml > 项目默认）。
   output_dir: ""   # 空 = 项目 output/（旧值 ~/.competitor_agent/reports/competitor 读侧回退不迁移）
   lead_formatted_body: true   # 设计文档 70 M1：Lead 两段式 Final Answer（正文+JSON），关则全回退模板
+  # 设计文档 88 §5：writer 叙事槽（骨架代码渲染 + LLM 只填解读槽）；false = 纯骨架渲染（mock/CI 确定路径）
+  # writer_pass=true 时 lead_formatted_body 被取代（Lead body 不再作为正文）；两段式退役后删除该键
+  writer_pass: false
+  writer_slot_max_retries: 1   # N2 保真校验不过的单槽重试次数，仍败 → 槽位「解读暂缺」注记降级
   export_json: true          # 结构化 JSON 导出（设计文档 28），与 .md 同目录同名
   # 设计文档 70 §8.2 D2a/D2b：对比矩阵 JSON 已并入 output/comparison（恒派生自
   # resolve_output_dir 的 /comparison 子目录），不再读本键；置空并作兜底声明。
