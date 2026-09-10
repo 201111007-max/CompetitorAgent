@@ -218,3 +218,47 @@ class TestBenchmarkMockDispatch:
             ]
         )
         assert out == MOCK_SLOT_PROSE
+
+
+class TestSkeletonEvent:
+    """设计文档 88 §2.1 —— report_skeleton SSE 事件接线（commit G）。"""
+
+    def test_skeleton_event_precedes_report_event(self, mock_llm: Any, fake_extractor: Any) -> None:
+        from competitor_agent.config.loader import CollectorConfig
+        from competitor_agent.facade.api import CompetitorAnalysisAPI
+
+        cfg = AppConfig(collector=CollectorConfig(block_private_urls=False))
+        cfg.report.writer_pass = True
+        events: list[Any] = []
+        api = CompetitorAnalysisAPI(
+            extractor=fake_extractor,
+            llm=mock_llm,
+            use_llm=True,
+            config=cfg,
+            event_sink=events.append,
+        )
+        report = api.analyze("分析 Cursor")
+        kinds = [e.event for e in events]
+        assert "report_skeleton" in kinds
+        assert kinds.index("report_skeleton") < kinds.index("report")
+        skeleton_evt = next(e for e in events if e.event == "report_skeleton")
+        assert skeleton_evt.phase == "writer"
+        assert "{{slot:executive_summary}}" in skeleton_evt.payload["skeleton"]  # 骨架先于注入
+        assert "{{slot:" not in report.markdown_report  # 终稿已注入
+        assert MOCK_SLOT_PROSE in report.markdown_report  # mock 槽 prose 确定性注入
+
+    def test_no_skeleton_event_when_writer_off(self, mock_llm: Any, fake_extractor: Any) -> None:
+        from competitor_agent.config.loader import CollectorConfig
+        from competitor_agent.facade.api import CompetitorAnalysisAPI
+
+        cfg = AppConfig(collector=CollectorConfig(block_private_urls=False))
+        events: list[Any] = []
+        api = CompetitorAnalysisAPI(
+            extractor=fake_extractor,
+            llm=mock_llm,
+            use_llm=True,
+            config=cfg,
+            event_sink=events.append,
+        )
+        api.analyze("分析 Cursor")
+        assert "report_skeleton" not in [e.event for e in events]

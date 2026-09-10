@@ -428,6 +428,7 @@ class CompetitorAnalysisAPI:
                 llm=self._llm,
                 stream_sink=self._stream_sink,
                 config=self._config.report,
+                on_skeleton=self._emit_report_skeleton,
             )
         slog = get_session_logger(sid)
         log_event(
@@ -1995,6 +1996,18 @@ class CompetitorAnalysisAPI:
                 )
             )
         return refreshed
+
+    def _emit_report_skeleton(self, skeleton: str) -> None:
+        """设计文档 88 §2.1：骨架就绪即推 ``report_skeleton``（先于槽位 text_delta，
+        前端可预渲染骨架/表格）；未知事件前端 switch 默认忽略，向后兼容。"""
+        self._emit(
+            ProgressEvent(
+                event="report_skeleton",
+                phase="writer",
+                message="报告骨架就绪，撰写叙事槽位",
+                payload={"skeleton": skeleton},
+            )
+        )
 
     def _emit(self, event: ProgressEvent) -> None:
         if self._event_sink is not None:
