@@ -9,15 +9,11 @@ from __future__ import annotations
 
 from typing import Any
 
-# 6 个分析维度（对齐 domain_types.enums.DimensionType）
-DIMENSIONS: list[str] = [
-    "pricing",
-    "feature",
-    "performance",
-    "ecosystem",
-    "sentiment",
-    "roadmap",
-]
+from competitor_agent.domain_types.enums import DIMENSION_NAMES
+
+# 6 个分析维度（值对齐 domain_types.enums.DimensionType；单一来源 DIMENSION_NAMES，
+# 设计文档 87 §1.4-C3——顺序不变，prompt/schema 字节级兼容）
+DIMENSIONS: list[str] = list(DIMENSION_NAMES)
 
 _DIM_ENUM: list[str] = list(DIMENSIONS)
 

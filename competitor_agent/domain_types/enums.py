@@ -12,6 +12,19 @@ class DimensionType(Enum):
     ROADMAP = "roadmap"
 
 
+# 六维规范名（值同 DimensionType；顺序为 schema/prompt 嵌入的规范序）。
+# 单一来源（设计文档 87 §1.4-C3）：react_schemas.DIMENSIONS 与 task_parser._VALID_DIMENSIONS
+# 均由此派生，新增第 7 个维度只需改此处与 DimensionType。
+DIMENSION_NAMES: list[str] = [
+    "pricing",
+    "feature",
+    "performance",
+    "ecosystem",
+    "sentiment",
+    "roadmap",
+]
+
+
 class GapStatus(Enum):
     """信息缺口状态（中枢状态机）"""
     OPEN = "open"

@@ -18,11 +18,16 @@ details, confidence, evidence_urls}]）→ 多维度 ``DimensionResult`` → Com
 """
 from __future__ import annotations
 
-import json
 import re
 from datetime import datetime, timezone
 from typing import Any
 
+from competitor_agent.core.json_extract import (
+    coerce_str_list,
+    extract_json_block,
+    light_fix_json,
+    parse_json_candidate,
+)
 from competitor_agent.domain_types.competitor import Competitor
 from competitor_agent.domain_types.enums import GapStatus, ResultStatus
 from competitor_agent.domain_types.info_gap import InfoGap
@@ -31,6 +36,12 @@ from competitor_agent.domain_types.report import CompetitorReport, DimensionResu
 from competitor_agent.observability.logger import get_logger
 
 logger = get_logger("facade.react_report")
+
+# 向后兼容别名（设计文档 87 §3.1：基建下移 core/json_extract，纯平移语义不变；
+# comparison_report 与既有测试仍引用旧名）
+_extract_json_block = extract_json_block
+_light_fix_json = light_fix_json
+_parse_json_candidate = parse_json_candidate
 
 # details 非空但零证据 URL 的维度：置信度封顶（防无来源断言）
 _MAX_CONFIDENCE_NO_EVIDENCE = 0.5
@@ -211,92 +222,6 @@ def _parse_report(answer: str) -> dict[str, Any] | None:
     return None
 
 
-def _extract_json_block(text: str) -> dict[str, Any] | None:
-    """从文本中提取首个平衡 JSON 对象（设计文档 65 §2.1 括号配平 + 字符串感知）。
-
-    快路径：文本整体以 ``{`` 开头 → 直接 ``json.loads``（覆盖绝大多数场景，行为不变）。
-    慢路径：定位首个 ``{`` 后逐字符扫描，维护深度；字符串字面量感知——命中 ``"`` 时
-    进入字符串态并跳过 ``\\"`` 转义，防止 JSON 字符串内部的 ``{``/``}`` 干扰配平；
-    深度归零处截取候选块 ``_parse_json_candidate``（失败先轻修复再解析），成功且为
-    dict → 返回。首个候选失败时再尝试 ``re.search`` 懒提取兜底。未闭合/无 JSON → None。
-
-    设计文档 66 §3.3：候选块 ``json.loads`` 失败时先做两条轻修复（``"key": ,`` 空值 →
-    null、``, ,``/``,]`` 空数组项）再试，兜住模型手滑畸形（``"details": ,`` 等）。
-    """
-    if not text:
-        return None
-    stripped = text.strip()
-    if stripped.startswith("{"):
-        payload = _parse_json_candidate(stripped)
-        if payload is not None:
-            return payload
-    start = stripped.find("{")
-    if start == -1:
-        return None
-    depth = 0
-    in_string = False
-    escaped = False
-    for i in range(start, len(stripped)):
-        ch = stripped[i]
-        if in_string:
-            if escaped:
-                escaped = False
-            elif ch == "\\":
-                escaped = True
-            elif ch == '"':
-                in_string = False
-            continue
-        if ch == '"':
-            in_string = True
-        elif ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0:
-                candidate = stripped[start : i + 1]
-                payload = _parse_json_candidate(candidate)
-                if payload is not None:
-                    return payload
-                break
-    # 慢路径候选失败/未闭合 → 懒提取兜底（贪婪到最后一个 }，容忍尾部散文）
-    match = re.search(r"\{.*\}", stripped, re.DOTALL)
-    if match:
-        payload = _parse_json_candidate(match.group(0))
-        if payload is not None:
-            return payload
-    return None
-
-
-def _light_fix_json(candidate: str) -> str:
-    """轻修复模型手滑畸形 JSON（设计文档 66 §3.3）：
-
-    - ``"key": ,``（空值）→ ``"key": null,``；
-    - ``, ,``（空数组项）/ `,]`` / `,}`` → 去除多余逗号；
-    - ``[,``（数组开头多余逗号）→ 去除（如 ``[ , , ]`` 叠代后残留）。
-    修复后由调用方再次 ``json.loads``；仍失败才放弃（保守语义不变）。
-    """
-    fixed = re.sub(r'"([A-Za-z_][A-Za-z0-9_]*)":\s*,', r'"\1": null,', candidate)
-    fixed = re.sub(r',\s*,', ",", fixed)
-    fixed = re.sub(r',\s*\]', "]", fixed)
-    fixed = re.sub(r',\s*\}', "}", fixed)
-    fixed = re.sub(r"\[\s*,", "[", fixed)
-    return fixed
-
-
-def _parse_json_candidate(candidate: str) -> dict[str, Any] | None:
-    """解析候选 JSON 块；``json.loads`` 失败先 ``_light_fix_json`` 轻修复再试一次。"""
-    payload: Any = None
-    try:
-        payload = json.loads(candidate)
-    except (json.JSONDecodeError, TypeError):
-        try:
-            payload = json.loads(_light_fix_json(candidate))
-        except (json.JSONDecodeError, TypeError):
-            return None
-    if isinstance(payload, dict) and payload:
-        return payload
-    return None
-
 
 def _looks_like_json_block(candidate: str) -> bool:
     """判定一块 ``{...}`` 是否"像报告 JSON dump"（设计文档 66 §3.3）。
@@ -384,7 +309,9 @@ def _dimension_from_item(item: dict[str, Any]) -> DimensionResult | None:
             confidence = max(0.0, min(1.0, float(raw_confidence)))
         except (TypeError, ValueError):
             confidence = 0.5
-    urls = [str(u) for u in (item.get("evidence_urls") or []) if u]
+    # 设计文档 87 §1.4-C1：evidence_urls 归一——模型返回单个字符串 URL 时按整体一项，
+    # 不再被按字符迭代成 "h","t","t","p" 垃圾证据
+    urls = coerce_str_list(item.get("evidence_urls"))
     # 数值真值核对兜底：details 非空但零证据 → 置信度封顶并标注（防无来源断言）
     if details and not urls:
         confidence = min(confidence, _MAX_CONFIDENCE_NO_EVIDENCE)
