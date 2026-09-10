@@ -75,7 +75,12 @@ def assemble(
     if use_lead_body is None:
         from competitor_agent.config.loader import load_config
 
-        use_lead_body = load_config().report.lead_formatted_body
+        report_cfg = load_config().report
+        # 设计文档 88 §9.1：writer_pass 开 → Lead body 被取代（正文由骨架+writer 槽衍生），
+        # 两段式 body 不再作为报告正文（prompt 侧退役为 §7 第 7 步，过渡期 body 被忽略）
+        use_lead_body = report_cfg.lead_formatted_body and not report_cfg.writer_pass
+        if report_cfg.lead_formatted_body and report_cfg.writer_pass:
+            logger.info("writer_pass 开启，lead_formatted_body 被取代（Lead body 不再作为正文）")
     body, payload = _split_body_and_payload(lead_answer)
     if payload is None:
         return _fallback_single_dimension(

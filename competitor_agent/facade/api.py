@@ -417,6 +417,18 @@ class CompetitorAnalysisAPI:
         （正常 CompetitorReport 或取消时的 CancelledResult）。异常路径的 trace 闭合
         由调用方 try/except 负责。
         """
+        # 设计文档 88 §4.4：writer 叙事槽（report.writer_pass 开关，默认关）。挂在 finalize
+        # 顶部 = analyze 双引擎（react/langgraph）与 run 两路径的单点汇聚；仅正常终态写作
+        # （取消/预算耗尽无完整事实源）。时间线段落追加在其后，「## 竞品时间线」串不受影响。
+        if self._config.report.writer_pass and terminal == "success":
+            from competitor_agent.facade import writer_pass as _writer_pass
+
+            _writer_pass.maybe_run_writer_pass(
+                report,
+                llm=self._llm,
+                stream_sink=self._stream_sink,
+                config=self._config.report,
+            )
         slog = get_session_logger(sid)
         log_event(
             slog, "report.built", "report",

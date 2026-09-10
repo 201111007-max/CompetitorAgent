@@ -93,6 +93,8 @@ class MarkdownRenderer:
             if note:
                 lines.append(note)
                 lines.append("")
+        lines.append("## 执行摘要")
+        lines.append("")
         lines.append("{{slot:executive_summary}}")
         lines.append("")
         lines.append("## 维度结论")

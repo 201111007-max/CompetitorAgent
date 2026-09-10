@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from competitor_agent.agent.writer_slots import MOCK_SLOT_PROSE, WRITER_SYSTEM_MARKER
 from competitor_agent.collector.web_extractor import WebExtractor
 from competitor_agent.config.loader import AppConfig, CollectorConfig
 from competitor_agent.domain_types import distilled
@@ -345,6 +346,9 @@ class BenchmarkMockLLM:
             return "{}"
         system = messages[0].get("content", "")
         user = self._user_text(messages)
+        if WRITER_SYSTEM_MARKER in system:
+            # writer 叙事槽（设计文档 88 §4.2）：固定串无数字/URL → N2/N3 必过，CI 确定
+            return MOCK_SLOT_PROSE
         if "语义解析器" in system:
             # 任务解析 prompt：从任务文本提取竞品 + 分辨率（mock 固定 oracle）
             return self._parse_task(user)

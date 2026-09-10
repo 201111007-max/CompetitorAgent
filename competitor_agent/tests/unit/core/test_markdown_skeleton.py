@@ -52,6 +52,8 @@ class TestRenderSkeleton:
 
     def test_slot_positions(self) -> None:
         skeleton = MarkdownRenderer().render_skeleton(_report())
+        assert "## 执行摘要" in skeleton  # 槽位标题由骨架渲染（代码），writer 只产 prose
+        assert skeleton.index("## 执行摘要") < skeleton.index("{{slot:executive_summary}}")
         assert skeleton.index("{{slot:executive_summary}}") < skeleton.index("## 维度结论")
         pricing_section = skeleton.index("### [OK] pricing")
         assert skeleton.index("{{slot:dimension_insight:pricing}}") > pricing_section
