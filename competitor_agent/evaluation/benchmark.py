@@ -992,13 +992,30 @@ class BenchmarkMockLLM:
 
 _PERIOD_ALIAS = {"mo": "month"}
 
+_PRICE_VALUE_RE = re.compile(r"[$¥€]?\s*([\d.,]+)\s*(?:USD|CNY|RMB|美元|元)?\s*/\s*([A-Za-z一-鿿]+)")
+
+
+def _coerce_plan_value(value: Any) -> dict[str, str]:
+    """真实 LLM 输出漂移兜底：plans 可能是 {"Pro": "30 USD/month"} 字典形态（real 轨实测暴露）"""
+    if isinstance(value, dict):
+        return {"price": str(value.get("price") or ""), "period": str(value.get("period") or "")}
+    match = _PRICE_VALUE_RE.search(str(value))
+    if not match:
+        return {}
+    return {"price": match.group(1), "period": match.group(2)}
+
 
 def _plan_price(details: dict[str, Any], term: str) -> str:
     """从 plans[].price/period 拼装 "$N/unit"（与 ground_truth 同命名空间）"""
-    for plan in details.get("plans", []):
+    plans = details.get("plans", [])
+    if isinstance(plans, dict):
+        plans = [{"name": str(name), **_coerce_plan_value(value)} for name, value in plans.items()]
+    for plan in plans:
+        if not isinstance(plan, dict):
+            continue
         name = str(plan.get("name") or "").lower()
         if term.lower() in name:
-            price = str(plan.get("price") or "").strip()
+            price = str(plan.get("price") or "").strip().lstrip("$¥€")
             period_raw = str(plan.get("period") or "").lower()
             period = _PERIOD_ALIAS.get(period_raw, period_raw)
             return f"${price}/{period}" if period else f"${price}"
@@ -1016,6 +1033,8 @@ def _feature_present(details: dict[str, Any], term: str) -> str:
 def _benchmark_score(details: dict[str, Any], term: str) -> str:
     """基准分：按名匹配 benchmarks[]（兼容 mock 的 name/score 与规则层的 raw 行）"""
     for benchmark in details.get("benchmarks", []):
+        if not isinstance(benchmark, dict):
+            continue
         name = str(benchmark.get("name") or "").lower()
         raw = str(benchmark.get("raw") or "").lower()
         if term.lower() in name or (raw and term.lower() in raw):
@@ -1032,9 +1051,11 @@ def _ecosystem_signal(details: dict[str, Any], key: str) -> Any:
     if key == "mcp_servers":
         return len(details.get("mcp_servers") or [])
     if key == "plugins":
-        return (details.get("plugins") or {}).get("count", 0)
+        plugins = details.get("plugins")
+        return plugins.get("count", 0) if isinstance(plugins, dict) else 0
     if key == "stars":
-        return (details.get("repo_activity") or {}).get("stars", 0)
+        activity = details.get("repo_activity")
+        return activity.get("stars", 0) if isinstance(activity, dict) else 0
     if key in ("vscode", "jetbrains", "terminal"):
         ide = [str(i).lower() for i in (details.get("ide_support") or [])]
         return "true" if key in ide else "false"
@@ -1045,7 +1066,9 @@ def _ecosystem_signal(details: dict[str, Any], key: str) -> Any:
 
 def _sentiment_signal(details: dict[str, Any], key: str) -> Any:
     """口碑信号（设计文档 24 的 SentimentAnalyzer details）：极性主导 / 正负信号有无"""
-    ratio = details.get("polarity_ratio") or {}
+    ratio = details.get("polarity_ratio")
+    if not isinstance(ratio, dict):
+        ratio = {}
     if key == "polarity":
         pos = float(ratio.get("pos") or 0.0)
         neg = float(ratio.get("neg") or 0.0)

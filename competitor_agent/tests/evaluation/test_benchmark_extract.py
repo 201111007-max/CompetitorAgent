@@ -40,6 +40,37 @@ class TestExtractPrediction:
         pred = extract_prediction(report, "pricing", {"enterprise": ""})
         assert pred == {"enterprise": ""}
 
+    def test_pricing_plan_price_dict_shape_from_real_llm(self):
+        # 真实 LLM 输出漂移（real 轨实测暴露）：plans 为 {"Pro": "30 USD/month"} 字典形态
+        report = _report_with("pricing", {"plans": {"Pro": "30 USD/month", "Max": "$150/month"}})
+        pred = extract_prediction(report, "pricing", {"pro": "$30/month", "max": "$150/month"})
+        assert pred == {"pro": "$30/month", "max": "$150/month"}
+
+    def test_pricing_plan_price_dict_of_dict(self):
+        report = _report_with("pricing", {"plans": {"Pro": {"price": "20", "period": "mo"}}})
+        pred = extract_prediction(report, "pricing", {"pro": "$20/month"})
+        assert pred == {"pro": "$20/month"}
+
+    def test_pricing_plan_price_non_dict_entry_skipped(self):
+        report = _report_with("pricing", {"plans": ["garbage", {"name": "Pro", "price": "20", "period": "month"}]})
+        pred = extract_prediction(report, "pricing", {"pro": "$20/month"})
+        assert pred == {"pro": "$20/month"}
+
+    def test_benchmark_score_non_dict_entry_skipped(self):
+        report = _report_with("performance", {"benchmarks": ["garbage", {"name": "latency", "score": "200ms"}]})
+        pred = extract_prediction(report, "performance", {"latency": "200ms"})
+        assert pred == {"latency": "200ms"}
+
+    def test_ecosystem_non_dict_payload_no_crash(self):
+        report = _report_with("ecosystem", {"plugins": ["a", "b"], "repo_activity": "high"})
+        pred = extract_prediction(report, "ecosystem", {"plugins": 0, "stars": 0})
+        assert pred == {"plugins": 0, "stars": 0}
+
+    def test_sentiment_non_dict_ratio_no_crash(self):
+        report = _report_with("sentiment", {"polarity_ratio": "mostly positive"})
+        pred = extract_prediction(report, "sentiment", {"polarity": "neu", "positive": "false"})
+        assert pred == {"polarity": "neu", "positive": "false"}
+
     def test_feature_present_flag(self):
         report = _report_with("feature", {"features": ["supports mcp and cli"]})
         pred = extract_prediction(report, "feature", {"mcp": "true", "cli": "true", "rag": "false"})
