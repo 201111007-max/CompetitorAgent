@@ -12,8 +12,20 @@
 > 第 X 轮 header blockquote、分节含「问题现状 / 总体架构 / 接口设计 / 配置清单 / 测试验收 /
 > 实施计划 / 风险权衡 / 核心技术点总结」、`README.md` 索引登记），格式模板参考 **doc 73/74**。
 >
-> **状态（2026-09-10）**：待实施，仅记录存档。核心决策已定（§9 ADR）：
+> **状态（2026-09-10）**：**§7 步骤 1-6 已实施**（commit 序列：聚合平移 → 蒸馏层 →
+> 等价性切换 → 配置 → 骨架 → writer 接线 → SSE 骨架事件；步骤 7 Lead prompt 两段式退役
+> 按原计划留待「3 稳定后」）。核心决策已定（§9 ADR）：
 > ① 放弃两段式改单一事实源；② 落地形态 D2 非 D1；③ 聚合层代码确定性合并。
+>
+> **实施修正两处（与本文档原始表述的差异，以代码为准）**：
+> ① `writer_pass=false` 的产物 = legacy `MarkdownRenderer.render()` **逐字节同现状**
+> （非 §5/§6 原表述的「新骨架 + 全槽注记」）——保住 doc 76 式字节断言与既有测试零回归；
+> writer 整体异常降级 = 保持 assemble 产物（legacy），单槽失败 = 新骨架 + 该槽注记，
+> 两形态钉死无第三态（§6 降级验收条已相应修订）。
+> ② 蒸馏层落位 `domain_types/distilled.py`（非 §4.1 所写的 `core/report_aggregator` 内）——
+> memory/evaluation 两消费点只应依赖 domain_types，放 core 会拉入 observability 依赖并有
+> 成环风险；聚合（core）→ 蒸馏（domain_types）方向合法，「三处共用一份蒸馏函数」意图不变，
+> 且实际扩为四处（render/exporter/benchmark + timeline_memory 全部切同源）。
 
 ---
 
@@ -112,6 +124,12 @@ flowchart TD
 
 ### 4.1 聚合层（N1，纯代码）
 
+> 实施落位（修正②）：聚合层 = `core/report_aggregator.py`（`aggregate_researcher_results`），
+> 蒸馏层 = `domain_types/distilled.py`（三层：第 0 层命名空间归一原语供
+> benchmark/exporter/timeline_memory 直接消费、第 1 层 facts 视图供 writer/N2、
+> 第 2 层查询 helper）。`DistilledFact` 实际字段为
+> `term/label/value/unit/numeric/evidence_urls`（frozen dataclass + tuple）。
+
 ```python
 # core/report_aggregator.py（新）
 @dataclass
@@ -189,7 +207,7 @@ doc 64 text_delta 通道，N6）→ N2 校验 → 注入落盘；Lead 循环保�
 
 | 键 | 默认 | 说明 |
 |---|---|---|
-| `report.writer_pass` | `false` | writer 叙事槽总开关；false = 纯骨架渲染（mock/CI 确定路径） |
+| `report.writer_pass` | `false` | writer 叙事槽总开关；false = legacy `render()` 逐字节同现状（mock/CI/黄金断言确定路径，修正①） |
 | `report.writer_slot_max_retries` | `1` | N2 校验不过的单槽重试次数，仍败 → 槽位注记降级 |
 
 无其他新键；成本走既有 cost_limit 护栏（writer 约占单轮总成本 5-10%，doc 87 §10.2-N5）。
@@ -202,7 +220,7 @@ doc 64 text_delta 通道，N6）→ N2 校验 → 注入落盘；Lead 循环保�
 | 槽位契约 | 单测：三槽 input_facts 切分正确；mock 固定串注入后骨架逐字节确定（doc 76 适配后零回归） |
 | N2 校验 | 单测：槽 prose 含清单外数字 → 违规；重试仍败 → 注记降级且骨架/他槽不受影响 |
 | N3 引用 | 单测：prose 占位 → 代码锚定 URL 正确替换；prose 自写 URL → 校验剔除 |
-| 降级 | writer 异常/超时 → 全槽注记 + 骨架落盘 = `writer_pass=false` 产物 |
+| 降级 | 两形态钉死（修正①）：writer 整体异常 → 不动 report（保持 assemble 产物 = legacy render）；单槽异常/N2 两败 → 新骨架 + 该槽注记，他槽/骨架不受影响；无第三态 |
 | SSE | 集成：骨架事件先于槽 text_delta；槽间顺序稳定 |
 | 回归 | pytest 全绿 + ruff/mypy；`writer_pass=false` 黄金断言（doc 76）零改动 |
 
