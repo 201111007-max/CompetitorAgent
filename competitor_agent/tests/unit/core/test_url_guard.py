@@ -30,6 +30,26 @@ def _resolve(*ips: str):
     return fake
 
 
+class TestProxyEnvMessage:
+    """设计文档 90（C 方案）：DNS 失败 + 代理环境变量 → 显式不兼容说明，不静默降级。"""
+
+    def _gai_fail(self, *_args, **_kwargs):
+        raise socket.gaierror(-3, "Temporary failure in name resolution")
+
+    def test_proxy_env_explicit_message(self, monkeypatch):
+        monkeypatch.setattr(socket, "getaddrinfo", self._gai_fail)
+        monkeypatch.setenv("https_proxy", "http://proxy.example:8080")
+        with pytest.raises(URLError, match="代理.*SSRF|SSRF.*代理"):
+            resolve_all("example.com")
+
+    def test_no_proxy_env_original_message(self, monkeypatch):
+        monkeypatch.setattr(socket, "getaddrinfo", self._gai_fail)
+        for var in ("https_proxy", "HTTPS_PROXY", "http_proxy", "HTTP_PROXY"):
+            monkeypatch.delenv(var, raising=False)
+        with pytest.raises(URLError, match="^域名解析失败: example.com"):
+            resolve_all("example.com")
+
+
 def _blocked_urls():
     """(url, 应解析出的 IP) 黑名单用例"""
     return [
@@ -218,6 +238,7 @@ class TestMcpSide:
         assert out.count("X") <= 20  # 截断到 fetch_max_chars
         assert "截断" in out
 
+    @pytest.mark.network  # url_guard 真实 DNS 解析（设计文档 89 §2）
     def test_fetch_disabled_message(self, monkeypatch):
         from competitor_agent.mcp_server.tools import web_tools
 
@@ -227,6 +248,7 @@ class TestMcpSide:
         out = web_tools.web_extract("https://example.com/")
         assert "抓取层已禁用" in out
 
+    @pytest.mark.network  # url_guard 真实 DNS 解析（设计文档 89 §2）
     def test_no_provider_distinct_message(self, monkeypatch):
         """review 修复（P1）：fetch 启用但无可用 provider → 明确文案（非「已禁用」误导）。"""
         from competitor_agent.mcp_server.tools import web_tools

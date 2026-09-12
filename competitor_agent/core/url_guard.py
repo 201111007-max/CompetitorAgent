@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import ipaddress
+import os
 import socket
 import urllib.parse
 
@@ -18,16 +19,30 @@ PRIVATE_NETS = (
 )
 _BLOCKED_NETS = tuple(ipaddress.ip_network(net) for net in PRIVATE_NETS)
 
+_PROXY_ENV_VARS = ("https_proxy", "HTTPS_PROXY", "http_proxy", "HTTP_PROXY")
+
 
 class URLError(ValueError):
     """URL 校验失败（携带可读原因，供回灌；与 ToolArgumentError 语义一致）"""
 
 
 def resolve_all(host: str) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
-    """getaddrinfo 全量解析 host；解析失败抛 URLError('域名解析失败')。"""
+    """getaddrinfo 全量解析 host；解析失败抛 URLError('域名解析失败')。
+
+    设计文档 90（C 方案）：代理环境变量存在时给显式不兼容说明——代理出网模式下
+    DNS 应由代理代做、本机解析公网域名必失败，而 SSRF 预检必须本机解析，
+    二者互斥；显式报错替代静默降级，不做运行时豁免。
+    """
     try:
         infos = socket.getaddrinfo(host, None)
     except socket.gaierror as exc:
+        proxy_var = next((v for v in _PROXY_ENV_VARS if os.environ.get(v)), None)
+        if proxy_var is not None:
+            raise URLError(
+                f"域名解析失败: {host}——检测到代理环境变量 {proxy_var}：代理出网模式下"
+                "本机不做 DNS，而 SSRF 守卫必须本机预检目标 IP，二者不兼容。"
+                "请在 DNS 可直连的环境运行抓取；代理环境支持属待决策设计项（设计文档 90）。"
+            ) from exc
         raise URLError(f"域名解析失败: {host}（{exc}）") from exc
     ips: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = []
     for info in infos:
