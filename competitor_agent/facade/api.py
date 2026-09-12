@@ -408,6 +408,7 @@ class CompetitorAnalysisAPI:
             return self._finalize_competitor_report(report, task, sid, transcript, terminal)
         except Exception:
             # 异常路径：闭合 trace 为 error，避免残留悬半根节点（设计文档 54 §2.2）
+            logger.warning("analyze 会话 %s 异常终止", sid, exc_info=True)
             self._tracer.end_trace(sid, status="error", output_brief="")
             raise
 
@@ -1490,21 +1491,31 @@ class CompetitorAnalysisAPI:
     def _save_checkpoint_for_resume(
         self, session_id: str, task: str, report: CompetitorReport
     ) -> None:
-        """取消时保留 checkpoint（设计文档 14）：未关闭缺口 + 已完成维度，供 /resume 续跑。"""
+        """取消时保留 checkpoint（设计文档 14）：未关闭缺口 + 已完成维度，供 /resume 续跑。
+
+        保存失败（磁盘 IO/序列化）不破坏取消保证：记 error 日志后继续返回
+        CancelledResult（取消生效优先；checkpoint 丢失非静默，可排障）。
+        """
         gaps = [
             InfoGap(field=g.field, priority=g.priority, status=GapStatus.OPEN)
             for g in report.gaps_pending
         ]
-        save_checkpoint(
-            session_id=session_id,
-            task=task,
-            competitor_name=report.competitor.name,
-            gaps=gaps,
-            dimension_results=report.dimension_results,
-            iterations_used=self._budget.iteration_count,
-            max_iterations=self._budget.max_iterations,
-            sources_tried=[e.url for r in report.dimension_results for e in r.evidence],
-        )
+        try:
+            save_checkpoint(
+                session_id=session_id,
+                task=task,
+                competitor_name=report.competitor.name,
+                gaps=gaps,
+                dimension_results=report.dimension_results,
+                iterations_used=self._budget.iteration_count,
+                max_iterations=self._budget.max_iterations,
+                sources_tried=[e.url for r in report.dimension_results for e in r.evidence],
+            )
+        except (OSError, TypeError, ValueError):
+            logger.exception(
+                "会话 %s 取消后 checkpoint 保存失败，续跑不可用（取消仍生效）",
+                session_id,
+            )
 
     # ── team 兼容薄包装（设计文档 49：内部固定流水线删除，保留入口）────────
 
@@ -1864,6 +1875,7 @@ class CompetitorAnalysisAPI:
             )
             return self._finalize_competitor_report(report, task, sid, result.transcript, terminal)
         except Exception:
+            logger.warning("run 会话 %s 异常终止", sid, exc_info=True)
             self._tracer.end_trace(sid, status="error", output_brief="")
             raise
 
@@ -1925,6 +1937,7 @@ class CompetitorAnalysisAPI:
                 session_id=sid,
             )
         except Exception:
+            logger.warning("chat 会话 %s 异常终止", sid, exc_info=True)
             self._tracer.end_trace(sid, status="error", output_brief="")
             raise
 

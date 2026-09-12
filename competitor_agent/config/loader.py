@@ -6,12 +6,15 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent / "review_config.yaml"
 _CONFIG_ENV = "COMPETITOR_AGENT_CONFIG"
@@ -357,7 +360,7 @@ def _build_collector(data: dict[str, Any] | None) -> CollectorConfig:
         try:
             setattr(cfg, attr, int(raw))
         except ValueError:
-            pass
+            logger.warning("环境变量 %s=%r 非整数，忽略并保留默认值", name, raw)
 
     _env_flag("FETCH_ENABLED", "fetch_enabled", cfg.fetch_enabled)
     _env_int("FETCH_MAX_PER_RUN", "fetch_max_per_run")

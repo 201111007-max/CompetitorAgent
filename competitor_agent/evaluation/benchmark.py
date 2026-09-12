@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import re
 import sys
 import tempfile
@@ -53,6 +54,8 @@ from competitor_agent.memory.timeline_memory import TimelineMemory
 from competitor_agent.secret_vault import get_reports_dir
 
 FIXTURES_DIR = Path(__file__).resolve().parent.parent / "tests" / "evaluation" / "fixtures"
+
+logger = logging.getLogger(__name__)
 
 ACCURACY_FIXTURE = "accuracy_cases.json"
 STRATEGY_FIXTURE = "strategy_cases.json"
@@ -378,7 +381,7 @@ class BenchmarkMockLLM:
                 if isinstance(parsed, dict):
                     arguments = parsed
             except (json.JSONDecodeError, TypeError):
-                pass
+                logger.debug("LLM Args 非合法 JSON，按空参数处理: %r", args_raw.group(1)[:80])
         return ToolCallReply(
             tool_calls=[ToolCall(id="call_0", name=action.group(1), arguments=arguments)]
         )

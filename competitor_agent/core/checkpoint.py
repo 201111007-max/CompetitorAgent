@@ -87,8 +87,8 @@ def _sweep_stale_tmp(path: Path) -> None:
     for stale in path.parent.glob(f".{path.stem}.*.tmp"):
         try:
             stale.unlink(missing_ok=True)
-        except OSError:
-            pass
+        except OSError as exc:
+            logger.debug("陈旧 checkpoint 临时文件清理失败: %s (%s)", stale, exc)
 
 
 def _write_bytes_atomic(path: Path, data_bytes: bytes) -> None:
@@ -104,8 +104,8 @@ def _write_bytes_atomic(path: Path, data_bytes: bytes) -> None:
     finally:
         try:
             tmp.unlink(missing_ok=True)
-        except OSError:
-            pass
+        except OSError as exc:
+            logger.debug("checkpoint 临时文件残留清理失败（由 sweep 兜底）: %s (%s)", tmp, exc)
 
 
 def _atomic_write(path: Path, data: dict[str, Any]) -> None:
@@ -116,8 +116,8 @@ def _atomic_write(path: Path, data: dict[str, Any]) -> None:
             with open(path, "rb") as pf:
                 old_bytes = pf.read()
             _write_bytes_atomic(_backup_path(path), old_bytes)
-        except OSError:
-            pass
+        except OSError as exc:
+            logger.warning("checkpoint 备份写入失败（继续覆盖主文件）: %s (%s)", path, exc)
     _write_bytes_atomic(path, payload)
 
 
@@ -154,8 +154,8 @@ class CheckpointLock:
             try:
                 self._fh.seek(0)
                 msvcrt.locking(self._fh.fileno(), msvcrt.LK_UNLCK, 1)  # type: ignore[attr-defined]  # Windows 专用
-            except OSError:
-                pass
+            except OSError as unlock_exc:
+                logger.warning("checkpoint 文件锁释放失败: %s (%s)", self._lock_path, unlock_exc)
         self._fh.close()
         self._fh = None
 
@@ -258,8 +258,8 @@ def delete_checkpoint(session_id: str) -> None:
     for target in (path, _backup_path(path), path.with_suffix(path.suffix + ".lock")):
         try:
             target.unlink(missing_ok=True)
-        except OSError:
-            pass
+        except OSError as exc:
+            logger.warning("checkpoint 删除失败（残留可能被 resume 误拾）: %s (%s)", target, exc)
     _sweep_stale_tmp(path)
     _drop_session_lock(session_id)
     logger.info("Checkpoint 已删除: %s", session_id)

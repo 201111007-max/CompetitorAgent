@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import tempfile
 from dataclasses import dataclass, field
@@ -27,6 +28,8 @@ from competitor_agent.llm.client import LLMClient, ToolCallReply
 
 # 设计文档 38 四类反馈关键词：ScriptedLLM 据此"读取" Observation 修正重试
 _ERROR_MARKERS = ("工具参数错误", "工具不可用", "工具参数解析失败", "工具执行异常")
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -170,7 +173,7 @@ class ScriptedLLM:
                 if isinstance(parsed, dict):
                     arguments = parsed
             except (json.JSONDecodeError, TypeError):
-                pass
+                logger.debug("LLM Args 非合法 JSON，按空参数处理: %r", args_str[:80])
         return ToolCallReply(
             tool_calls=[ToolCall(id="call_0", name=name, arguments=arguments)]
         )
