@@ -9,6 +9,7 @@
 - 向量召回（设计文档 52 §2.1）：可选注入 VectorStore（独立 collection），
   recent_context 向量优先，不可用/异常回退词袋（行为与现状逐位一致）。
 """
+
 from __future__ import annotations
 
 import logging
@@ -19,8 +20,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from competitor_agent.domain_types.text_utils import tokenize
 from competitor_agent.interfaces.context import AnalysisSession
-from competitor_agent.knowledge_base.competitor_store import tokenize
 from competitor_agent.memory.json_store import JsonStore, now_iso
 from competitor_agent.memory.session_summary import compress_archive
 
@@ -236,7 +237,7 @@ def _entry_id(competitor: str, entry: dict[str, Any], index: int) -> str:
 
 
 def _rank_entries(entries: list[dict[str, Any]], query: str) -> list[dict[str, Any]]:
-    """词袋相关度召回：按 query 与条目文本的 TF 余弦降序（复用 knowledge_base 分词层）。"""
+    """词袋相关度召回：按 query 与条目文本的 TF 余弦降序（分词复用 domain_types.text_utils）。"""
     q_tokens = tokenize(query)
     if not q_tokens:
         return entries

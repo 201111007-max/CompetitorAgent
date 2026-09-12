@@ -10,32 +10,48 @@ from __future__ import annotations
 
 import logging
 import math
-import re
 import threading
+import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
+from competitor_agent.domain_types.text_utils import tokenize
 from competitor_agent.knowledge_base.vector_store import VectorStore, VectorStoreUnavailableError
 from competitor_agent.memory.json_store import JsonStore
 
 logger = logging.getLogger("competitor_agent.knowledge_base.competitor_store")
 
-_WORD_RE = re.compile(r"[a-z0-9\u4e00-\u9fff]+")
+# \u65f6\u6548\u8870\u51cf\u534a\u8870\u671f\uff08\u5929\uff09\uff1a\u8bbe\u8ba1\u6587\u6863 93 \u51b3\u7b56 2\u2014\u2014\u7ade\u54c1\u4e8b\u5b9e"\u8fd1\u51b5\u4f18\u5148"\uff0c30 \u5929\u534a\u6743
+_HALF_LIFE_DAYS = 30.0
+_SECONDS_PER_DAY = 86400.0
+
+__all__ = ["CompetitorStore", "TextChunk", "chunk_text", "tokenize"]
 
 
 class TextChunk:
-    """一条可检索的文档片段"""
+    """一条可检索的文档片段
 
-    __slots__ = ("chunk_id", "competitor", "dimension", "source_url", "text")
+    ingested_at：摄取时间戳（epoch 秒，设计文档 93 决策 3）；<=0 表示无时间戳，
+    检索不衰减（直接构造未打戳的片段行为与旧版一致）。
+    """
+
+    __slots__ = ("chunk_id", "competitor", "dimension", "ingested_at", "source_url", "text")
 
     def __init__(
-        self, chunk_id: str, competitor: str, dimension: str, text: str, source_url: str = ""
+        self,
+        chunk_id: str,
+        competitor: str,
+        dimension: str,
+        text: str,
+        source_url: str = "",
+        ingested_at: float = 0.0,
     ) -> None:
         self.chunk_id = chunk_id
         self.competitor = competitor
         self.dimension = dimension
         self.text = text
         self.source_url = source_url
+        self.ingested_at = float(ingested_at)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -44,12 +60,8 @@ class TextChunk:
             "dimension": self.dimension,
             "text": self.text,
             "source_url": self.source_url,
+            "ingested_at": self.ingested_at,
         }
-
-
-def tokenize(text: str) -> list[str]:
-    """中英文通用分词（小写 + 词元）"""
-    return _WORD_RE.findall(text.lower())
 
 
 def chunk_text(text: str, size: int = 1200, overlap: int = 200) -> list[str]:
@@ -75,30 +87,54 @@ class CompetitorStore:
         self,
         data_dir: Path | str | None = None,
         vector_store: VectorStore | None = None,
+        now_fn: Callable[[], float] | None = None,
     ) -> None:
         self._store = JsonStore("knowledge_base", data_dir)
         self._chunks: list[TextChunk] = []
         self._idf: dict[str, float] = {}
         # 可选向量层（设计文档 32）：不可用时 search_hybrid 自动降级词袋
         self._vector_store = vector_store
+        # 时钟可注入（设计文档 93 §2.1）：测试不依赖墙钟
+        self._now_fn: Callable[[], float] = now_fn or time.time
         # RLock：并行缺口共享同一知识库（采集摄入 + 分析检索并发）
         self._lock = threading.RLock()
         self._load_chunks()
 
+    # ---- 时效（设计文档 93 §2.1） ----
+    def current_time(self) -> float:
+        """注入时钟当前值（epoch 秒）；同批排序取同一时钟快照用。"""
+        return float(self._now_fn())
+
+    def decay_factor(self, chunk: TextChunk, now: float | None = None) -> float:
+        """时效衰减因子：0.5 ** (age_days / 30)；无时间戳（ingested_at<=0）不衰减返回 1.0。"""
+        ts = chunk.ingested_at
+        if ts <= 0:
+            return 1.0
+        current = self._now_fn() if now is None else now
+        age_days = max(0.0, (current - ts) / _SECONDS_PER_DAY)
+        return 0.5 ** (age_days / _HALF_LIFE_DAYS)
+
     # ---- 写入 ----
     def add(self, chunk: TextChunk) -> None:
-        with self._lock:
-            self._chunks.append(chunk)
-            self._rebuild_index()
-            self._persist()
-            self._embed_chunks([chunk])
+        self.add_many([chunk])
 
     def add_many(self, chunks: list[TextChunk]) -> None:
         with self._lock:
-            self._chunks.extend(chunks)
+            by_id = {c.chunk_id: c for c in self._chunks}
+            fresh: list[TextChunk] = []
+            for chunk in chunks:
+                existing = by_id.get(chunk.chunk_id)
+                if existing is not None:
+                    # 决策 4：重复摄取同一内容 = 刷新为最近确认（只更新时间戳，不重复追加）
+                    if chunk.ingested_at > 0:
+                        existing.ingested_at = chunk.ingested_at
+                    continue
+                by_id[chunk.chunk_id] = chunk
+                fresh.append(chunk)
+            self._chunks.extend(fresh)
             self._rebuild_index()
             self._persist()
-            self._embed_chunks(chunks)
+            self._embed_chunks(fresh)
 
     def clear(self) -> None:
         with self._lock:
@@ -131,6 +167,7 @@ class CompetitorStore:
             if not q_tokens:
                 return []
             q_weights = _term_weights(q_tokens, self._idf)
+            now = self._now_fn()
             scored: list[tuple[TextChunk, float]] = []
             for chunk in self._chunks:
                 c_tokens = tokenize(chunk.text)
@@ -142,6 +179,8 @@ class CompetitorStore:
                 for dim_token in tokenize(chunk.dimension):
                     if dim_token in q_tokens:
                         score += 0.15
+                # 时效衰减（设计文档 93 §2.1）：0.5 ** (age_days / 30)
+                score *= self.decay_factor(chunk, now)
                 if score > 0:
                     scored.append((chunk, score))
             scored.sort(key=lambda kv: kv[1], reverse=True)
@@ -176,13 +215,17 @@ class CompetitorStore:
             vec_map = _minmax({cid: 1.0 / (1.0 + d) for cid, d in vector_hits})
 
             merged: list[tuple[TextChunk, float, str]] = []
+            now = self._now_fn()
             for cid in set(lex_map) | set(vec_map):
                 chunk = by_id[cid]
                 lv = lex_map.get(cid, 0.0)
                 vv = vec_map.get(cid, 0.0)
-                fused = (1.0 - alpha) * lv + alpha * vv
-                source = "fused" if (cid in lex_map and cid in vec_map) else (
-                    "lexical" if cid in lex_map else "vector"
+                # 时效衰减（设计文档 93 §2.1）：融合分乘 0.5 ** (age_days / 30)
+                fused = ((1.0 - alpha) * lv + alpha * vv) * self.decay_factor(chunk, now)
+                source = (
+                    "fused"
+                    if (cid in lex_map and cid in vec_map)
+                    else ("lexical" if cid in lex_map else "vector")
                 )
                 if fused > 0:
                     merged.append((chunk, fused, source))
@@ -194,8 +237,16 @@ class CompetitorStore:
         raw = self._store.get("chunks", [])
         if not isinstance(raw, list):
             return
+        migrated = False
         for item in raw:
             if isinstance(item, dict):
+                # 迁移语义（设计文档 93 §2.1）：旧 JSON 无 ingested_at 字段 →
+                # 置为迁移时刻（首次以新版本加载的时间），随后按自然老化
+                if "ingested_at" in item:
+                    ts = float(item.get("ingested_at") or 0.0)
+                else:
+                    ts = float(self._now_fn())
+                    migrated = True
                 self._chunks.append(
                     TextChunk(
                         chunk_id=str(item.get("chunk_id", "")),
@@ -203,9 +254,12 @@ class CompetitorStore:
                         dimension=str(item.get("dimension", "")),
                         text=str(item.get("text", "")),
                         source_url=str(item.get("source_url", "")),
+                        ingested_at=ts,
                     )
                 )
         self._rebuild_index()
+        if migrated:
+            self._persist()  # 迁移只发生一次：时间戳落盘后后续加载走正常字段
         # 从 JSON 重载后若有可用向量层则重建向量索引（哈希/mock 嵌入确定性可复现）
         self._embed_chunks(self._chunks)
 
@@ -244,6 +298,7 @@ class CompetitorStore:
                     "competitor": c.competitor,
                     "dimension": c.dimension,
                     "source_url": c.source_url,
+                    "ingested_at": c.ingested_at,
                 }
                 for c in fresh
             ],

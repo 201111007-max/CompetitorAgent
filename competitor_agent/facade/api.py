@@ -100,7 +100,18 @@ from competitor_agent.interfaces.context import (
 )
 from competitor_agent.interfaces.exceptions import DataSourceUnavailableError
 from competitor_agent.interfaces.memory import IFourLayerMemory
+
+# 设计文档 93 §2.3：knowledge_base↔memory 循环依赖已拆解（tokenize 下沉
+# domain_types.text_utils），恢复顶层导入。CompetitorStore 经模块属性实例化
+# （保持测试可 monkeypatch 其宿主模块）。
+from competitor_agent.knowledge_base import competitor_store as _competitor_store_mod
+from competitor_agent.knowledge_base.competitor_store import CompetitorStore
+from competitor_agent.knowledge_base.ingester import Ingester
+from competitor_agent.knowledge_base.reranker import CrossEncoderReranker
+from competitor_agent.knowledge_base.retriever import Retriever
+from competitor_agent.knowledge_base.vector_store import VectorStore
 from competitor_agent.llm.client import LLMClient
+from competitor_agent.memory.four_layer_memory import FourLayerMemory
 from competitor_agent.memory.timeline_memory import TimelineMemory
 from competitor_agent.observability.logger import (
     close_session_log,
@@ -167,8 +178,9 @@ class CompetitorAnalysisAPI:
         timeline: TimelineMemory | None = None,
         enable_rag: bool = True,  # 设计文档 30：消融开关（默认开启，行为不变）
         enable_memory: bool = True,  # 设计文档 30：消融开关（默认开启，行为不变）
-        rag_store: object | None = None,  # 设计文档 30：消融可注入共享知识库实例
-        vector_store: object | None = None,  # 设计文档 32：可注入向量层（测试/评测确定性 mock）
+        rag_store: CompetitorStore | None = None,  # 设计文档 30：消融可注入共享知识库实例
+        vector_store: VectorStore | None = None,  # 设计文档 32：可注入向量层（测试/评测确定性 mock）
+        reranker: CrossEncoderReranker | None = None,  # 设计文档 93：可注入精排层（None 时默认探测构造）
         tool_dispatcher: object | None = None,  # 历史兼容：已由 Lead 工具面取代，保留签名
         engine: str = "react",  # 设计文档 51：编排引擎 "react"（默认）| "langgraph"
         tracer: Any = None,  # 设计文档 54：链路追踪底座（None 用模块单例，默认 JsonlSink）
@@ -217,33 +229,35 @@ class CompetitorAnalysisAPI:
 
         # RAG 知识库：分析后摄入 + Lead/子 Agent 检索注入（外部事实依据，降低幻觉）
         # enable_rag=False：不组装知识库，Lead/子 Agent 对 None 走"跳过检索"路径
-        # knowledge_base ↔ memory 存在循环依赖，类只能局部导入 → 属性标注用 Any
-        # （不做模块级 import，避免 circular import）
-        self._store: Any = None
-        self._ingester: Any = None
-        self._retriever: Any = None
-        self._vector_store: Any = None
+        # （设计文档 93 §2.3：knowledge_base↔memory 循环依赖已拆解，恢复顶层导入与类型契约）
+        self._store: CompetitorStore | None = None
+        self._ingester: Ingester | None = None
+        self._retriever: Retriever | None = None
+        self._vector_store: VectorStore | None = None
+        self._reranker: CrossEncoderReranker | None = None
         if enable_rag:
-            from competitor_agent.knowledge_base.competitor_store import CompetitorStore
-            from competitor_agent.knowledge_base.ingester import Ingester
-            from competitor_agent.knowledge_base.retriever import Retriever
-            from competitor_agent.knowledge_base.vector_store import VectorStore
-
             # 向量层（设计文档 32）：注入的优先；默认 VectorStore 懒加载——嵌入模型
             # 不可用（未缓存/未装依赖）时 is_available()=False，检索自动降级纯词袋，行为不变
             if vector_store is not None:
                 self._vector_store = vector_store
             else:
                 self._vector_store = VectorStore()
-            self._store = rag_store or CompetitorStore(vector_store=self._vector_store)
+            self._store = rag_store or _competitor_store_mod.CompetitorStore(
+                vector_store=self._vector_store
+            )
             self._ingester = Ingester(store=self._store)
-            self._retriever = Retriever(store=self._store)
+            # 精排层（设计文档 93 §2.2，决策 5/6）：注入的优先；默认本地权重探测
+            # （不触网），权重未缓存 → None，检索完全走现状 hybrid 路径（回归安全阀）
+            if reranker is not None:
+                self._reranker = reranker
+            else:
+                candidate = CrossEncoderReranker()
+                self._reranker = candidate if candidate.is_available() else None
+            self._retriever = Retriever(store=self._store, reranker=self._reranker)
 
             # 记忆召回向量层（设计文档 52 §2.1）：独立 collection 与知识库隔离，
             # 注入 L1 会话归档；嵌入模型不可用/未装 rag extra 时 is_available()=False，
             # 记忆召回保持词袋路径，行为与现状逐位一致
-            from competitor_agent.memory.four_layer_memory import FourLayerMemory
-
             if isinstance(self._memory, FourLayerMemory):
                 self._memory.attach_vector_store(
                     VectorStore(collection_name="session_summaries", data_dir=self._memory.data_dir)
@@ -255,11 +269,16 @@ class CompetitorAnalysisAPI:
                 logger.info("向量层状态: available(%s)", vs.model_name)
             else:
                 logger.info("向量层状态: degraded(模型 %s 未缓存，降级词袋)", vs.model_name)
+            if self._reranker is not None:
+                logger.info("精排层状态: available(%s)", self._reranker.model_name)
+            else:
+                logger.info("精排层状态: degraded(权重未缓存，hybrid 结果直出)")
         else:
             self._store = None
             self._ingester = None
             self._retriever = None
             self._vector_store = None
+            self._reranker = None
 
         # 竞品发现器（设计文档 20）：仅 DISCOVERY 意图时被调用，web_tool 可注入。
         # 设计文档 66 §3.1 + 71 §2.2：未显式注入 web_tool 时，装配层零入口注入搜索路由

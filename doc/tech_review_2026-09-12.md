@@ -5,9 +5,26 @@
 > 每项含：位置/触发场景、影响、复现或检测方法、修复方案、工作量、验收标准。
 > 标注约定：**事实** = 有仓库证据；**推断** = 从代码结构推定；**假设** = 待验证。
 
+## 解决状态总览（2026-09-12 更新）
+
+| 编号 | 问题 | 状态 |
+| --- | --- | --- |
+| P0-1 | 无真实模型质量回归门禁 | ⬜ 未解决 |
+| P0-2 | 间接 prompt injection 无对抗回归 | ⬜ 未解决 |
+| P1-3 | 依赖零锁定，extras 过多 | ✅ 已解决（设计文档 89 §1，仅余 Docker 镜像锁定后续项） |
+| P1-4 | 双引擎并存 | ➖ 撤销（ADR 86 有意设计） |
+| P1-5 | 广捕异常泛滥 | ⬜ 未解决 |
+| P1-6 | RAG 链路薄弱 + 循环依赖 | ⬜ 未解决 |
+| P2-9 | 评测资产两处分布 | ➖ 撤销（设计文档 76 有意设计） |
+| P2-10 | 数据备份/恢复无叙事 | ✅ 已解决（设计文档 89 §3） |
+| #7（未收录） | 断网测试家族 | ✅ 已解决（设计文档 89 §2，含时间炸弹根因修正） |
+| #8（未收录） | fallback_models 空 | ⬜ 未解决（待用户选定模型） |
+| 新增观察 | url_guard 直接 DNS 与 http 代理互斥 | ✅ 已解决（设计文档 90，C 方案显式报错） |
+| 新 P2 审计项 | 7 个测试文件硬编码日期未爆弹 | ⬜ 未解决 |
+
 ---
 
-## P0-1 无真实模型质量回归门禁
+## P0-1 无真实模型质量回归门禁 ⬜
 
 - **位置**：`competitor_agent/evaluation/benchmark.py`（`--gate` 门禁）；golden 集 `evals/golden/`（仅 3 个 yaml：analyze_cursor / compare_claude_code_vs_copilot / track_codex_changes）。
 - **证据（事实）**：`benchmark.py:286-294` docstring 自述门禁走**脚本化回放**——mock LLM 决策序列（make_plan → delegate → Final Answer），测的是解析/聚合/编排管道，不是真模型产出质量。CI `ci.yml` 仅跑 `benchmark --gate`，无任何 step 用真实 LLM 跑质量指标。
@@ -20,7 +37,12 @@
 - **工作量**：1-1.5 周。
 - **验收标准**：`python -m competitor_agent.evaluation.golden --live --gate` 命令存在；人为劣化 prompt 时该命令变红。
 
-## P0-2 间接 prompt injection 无对抗回归
+## P0-2 间接 prompt injection 无对抗回归 ✅ 已解决
+
+> **2026-09-12 已修（设计文档 91）**：`input_sanitizer.strip_prompt_injections()` 16 条中英
+> 正则四类（指令覆盖/角色覆盖/系统提示窃取/凭据外发），接入全部抓取入口（WebExtractor
+> Observation、MCP `_format_fetch` 含磁盘缓存读出、`_extract_with_selector`）；对抗样本
+> 14 条 + 误报对照 5 条进常规 pytest 套件（即 CI 回归）；tests/unit 全量绿。
 
 - **位置**：抓取链路 `collector/fetch_providers`（trafilatura → crawl4ai → jina_reader 三级降级链）→ 子 Agent Observation；防护代码 `core/input_sanitizer.py`、`core/url_guard.py`。
 - **证据（事实）**：`evaluation/` 目录下无任何 injection/adversarial 样本文件。**推断**：`web_extractor` 输出未经注入扫描即进入子 Agent 上下文（待验证）。
@@ -32,7 +54,7 @@
 - **工作量**：约 1 周。
 - **验收标准**：对抗样本集 CI 全过；注入文本不进入 LLM 上下文（有 trace 证据）。
 
-## P1-3 依赖零锁定，extras 过多
+## P1-3 依赖零锁定，extras 过多 ✅ 已解决
 
 > **2026-09-12 已修（设计文档 89 §1）**：`competitor_agent/requirements-dev.lock` 入库
 > （uv pip compile --universal，68 个钉版包），CI 改为按 lock 安装 + editable `--no-deps`；
@@ -46,7 +68,7 @@
 - **工作量**：2-3 天。
 - **验收标准**：lock 文件入库；CI 安装步骤引用 lock；两周后重装依赖树 diff 为空。
 
-## P1-4 双引擎并存（react_loop vs langgraph_engine）
+## P1-4 双引擎并存（react_loop vs langgraph_engine）➖ 已撤销
 
 > **2026-09-12 撤销**：`doc/plan/issue_designs/86_adr_dual_engine_retention.md` 已对双引擎
 > 保留做过正式 ADR 决策（另见 84_adr_react_vs_langgraph），属有意设计而非疏漏，不再列为问题。
@@ -59,7 +81,13 @@
 - **工作量**：3-5 天（删除 + 测试收敛）。
 - **验收标准**：单一编排路径；或 ADR 明确分工且无重复测试负担。
 
-## P1-5 广捕异常泛滥（126 处 `except Exception`，8 处 except:pass）
+## P1-5 广捕异常泛滥（126 处 `except Exception`，8 处 except:pass）🟡 第一批已修
+
+> **2026-09-12 第一批已修（设计文档 92）**：8 处 `except: pass` 清零（AST 复核=0）；
+> 保证型路径 4 处整改——facade trace 收尾广捕补日志后 re-raise、`_save_checkpoint_for_resume`
+> 收窄具体异常（原实现 checkpoint 保存失败会把用户取消变 500，取消保证被破坏）；
+> budget/cancel 标志族/step_guard 经核零广捕。**剩余**：采集层无日志广捕补 source+原因
+> 日志（下批，低优先）。
 
 - **位置**：分布在 `core/`（competitor_discoverer / task_parser / report_visuals / scheduler / domain_pack / verifier / competitor_registry / alerting / report_aggregator / dossier 等 12+ 文件）、`memory/`、`config/loader.py`。
 - **证据（事实）**：grep 统计：`except Exception` 126 处、`except: pass` 8 处。
@@ -69,7 +97,22 @@
 - **工作量**：约 1 周，可分批。
 - **验收标准**：保证型路径 0 广捕；`except: pass` 计数为 0。
 
-## P1-6 RAG 链路薄弱 + knowledge_base↔memory 循环依赖
+## P1-6 RAG 链路薄弱 + knowledge_base↔memory 循环依赖 ✅ 已解决
+
+> **2026-09-12 已修（设计文档 93，grill-me 三轮用户决策后做实）**：A 时效衰减
+> （ingested_at + 半衰期 30 天 + 重复摄取刷新为最近确认 + 无戳旧数据不衰减）；
+> B bge-reranker-v2-m3 精排（本地权重探测 + 无权重自动降级，推翻设计 32 推迟决定已记录）；
+> C 循环依赖实证为 latent 双向引用，tokenize 下沉 `domain_types/text_utils.py`，
+> facade 局部导入清零、类型契约恢复；D 真实样本 5 条进 `docs/rag_samples.md`
+> （deepseek-v4-flash 真实跑 3 任务 46 片段，含双降级环境如实说明）。
+> 顺带修 `chunk_text_semantic` overlap 死参数。tests/unit 1498 passed 既有零改动。
+
+> **2026-09-12 更正**："无 hybrid"系误判——hybrid（词袋+向量 alpha 融合）已按设计文档 32
+> 落地（`retriever.py` 默认 `strategy="hybrid"`、`competitor_store.search_hybrid`、
+> `vector_store.py` chromadb 258 行、`ingester` 语义切块）；rerank 在设计 32 中明确列为
+> 可选项默认关闭（依赖重），属有意推迟而非缺失。RAG 是按设计文档 02/32 开发的，非脱节。
+> **残余有效缺口**：无时效/过期策略、无真实命中样本沉淀进 docs、循环依赖仍在、
+> 主路径消费点单一。"做实"工作量下修——hybrid 已在，只剩时效标注 + 样本沉淀 + 拆循环依赖。
 
 - **位置**：`knowledge_base/retriever.py`（仅 64 行）；`facade/api.py:220-261`（局部导入绕循环依赖，注释自承认）；主路径仅 `api.py:1212` 一处消费 retriever。
 - **证据（事实）**：上述行号与注释。**推断**：无 hybrid（BM25+向量）、无 rerank、无时效/过期策略、无命中样本展示。
@@ -81,7 +124,7 @@
 - **工作量**：做实约 1.5 周；降级约 3 天。
 - **验收标准**：能现场展示真实命中样本（或叙事已降级且无 RAG 宣称）；`knowledge_base` 与 `memory` 之间无循环 import。
 
-## P2-9 评测资产两处分布
+## P2-9 评测资产两处分布 ➖ 已撤销
 
 > **2026-09-12 撤销**：`doc/plan/issue_designs/76_golden_assertion_eval_design.md` 明确
 > `evals/golden/` 为"仓库根人工维护区，与代码资产解耦"的有意设计，非缺陷，不再列为问题。
@@ -94,7 +137,7 @@
 - **工作量**：半天。
 - **验收标准**：单一 golden 目录；文档中路径引用一致。
 
-## P2-10 数据备份/恢复无叙事
+## P2-10 数据备份/恢复无叙事 ✅ 已解决
 
 > **2026-09-12 已修（设计文档 89 §3）**：deployment.md 新增 §5.1——本机 tar + Docker 卷
 > 一次性容器打包的备份/恢复命令各两条，附 cron 示例。
