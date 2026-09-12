@@ -48,7 +48,8 @@ jobs:
         run: mypy .
 
       - name: Test with pytest
-        run: pytest -v --tb=short --cov=competitor_agent --cov-report=term-missing
+        # -n auto（pytest-xdist）：套件 CPU 密集且用例独立，4 vCPU runner 上约省 60-70% 墙钟
+        run: pytest -n auto -v --tb=short --cov=competitor_agent --cov-report=term-missing
 
       - name: Generate benchmark report
         # 设计文档 55 M1：--gate 门禁执法——质量退化（field_accuracy/幻觉率/工具选择/trace/行为门禁）CI 变红

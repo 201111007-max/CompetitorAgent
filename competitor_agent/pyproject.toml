@@ -90,6 +90,7 @@ all = [
 test = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23.0",
+    "pytest-xdist>=3.0",
     "respx>=0.23.0",
 ]
 dev = [
@@ -99,6 +100,7 @@ dev = [
     # 最小装走 [search] extra；缺装时链静默降为 jina_reader）
     "pytest>=8.0",
     "pytest-asyncio>=0.23.0",
+    "pytest-xdist>=3.0",
     "respx>=0.23.0",
     "ruff>=0.1.0",
     "mypy>=1.0",

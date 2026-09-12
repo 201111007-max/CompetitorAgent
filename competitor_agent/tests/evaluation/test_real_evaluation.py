@@ -30,19 +30,35 @@ def _shared_mock_llm() -> LLMClient:
     return LLMClient(call_func=BenchmarkMockLLM().complete)
 
 
+@pytest.fixture(scope="module")
+def mock_report() -> BenchmarkReport:
+    """全量 mock 基准报告：确定性输出，模块级共享一次运行（原每用例一跑约 8s）。"""
+    return Benchmark(llm_mode="mock").run()
+
+
+@pytest.fixture(scope="module")
+def mock_normal_report() -> BenchmarkReport:
+    """normal 子集 mock 报告，模块级共享。"""
+    return Benchmark(tag="normal").run()
+
+
+@pytest.fixture(scope="module")
+def real_report() -> BenchmarkReport:
+    """共享 mock LLM 的 real 轨报告（无成本上限），模块级共享一次运行（原每用例一跑约 20s+）。"""
+    return Benchmark(llm_mode="real", llm=_shared_mock_llm()).run()
+
+
 class TestReportFields:
     """设计文档 37 §5：BenchmarkReport 字段 + to_dict"""
 
-    def test_default_mock_has_llm_mode(self):
-        report = Benchmark(llm_mode="mock").run()
-        assert report.llm_mode == "mock"
-        assert report.cost_usd == 0.0
-        assert report.cost_limit_usd is None
-        assert report.budget_aborted is False
+    def test_default_mock_has_llm_mode(self, mock_report):
+        assert mock_report.llm_mode == "mock"
+        assert mock_report.cost_usd == 0.0
+        assert mock_report.cost_limit_usd is None
+        assert mock_report.budget_aborted is False
 
-    def test_to_dict_carries_real_fields(self):
-        report = Benchmark(llm_mode="mock").run()
-        d = report.to_dict()
+    def test_to_dict_carries_real_fields(self, mock_report):
+        d = mock_report.to_dict()
         assert d["llm_mode"] == "mock"
         assert "cost_usd" in d
         assert "per_case_cost" in d
@@ -58,34 +74,30 @@ class TestReportFields:
 class TestCostAccounting:
     """设计文档 37 §2.3/§3.1：共享实例跨 case 累计成本"""
 
-    def test_shared_llm_accumulates_cost(self):
-        report = Benchmark(llm_mode="real", llm=_shared_mock_llm()).run()
-        assert report.llm_mode == "real"
-        assert report.cost_usd > 0.0
-        assert len(report.per_case_cost) == report.n_cases
-        assert all(v >= 0.0 for v in report.per_case_cost.values())
+    def test_shared_llm_accumulates_cost(self, real_report):
+        assert real_report.llm_mode == "real"
+        assert real_report.cost_usd > 0.0
+        assert len(real_report.per_case_cost) == real_report.n_cases
+        assert all(v >= 0.0 for v in real_report.per_case_cost.values())
 
-    def test_mock_no_shared_llm_cost_zero(self):
-        report = Benchmark(llm_mode="mock").run()
-        assert report.cost_usd == 0.0
-        assert report.per_case_cost and all(v == 0.0 for v in report.per_case_cost.values())
+    def test_mock_no_shared_llm_cost_zero(self, mock_report):
+        assert mock_report.cost_usd == 0.0
+        assert mock_report.per_case_cost and all(v == 0.0 for v in mock_report.per_case_cost.values())
 
 
 class TestTagFilter:
     """设计文档 37 §3.1：--tag 子集过滤（先跑 normal 控制成本）"""
 
-    def test_tag_normal_reduces_cases(self):
-        full = Benchmark().run()
-        normal = Benchmark(tag="normal").run()
-        assert normal.n_cases < full.n_cases
-        assert normal.n_cases >= 2
+    def test_tag_normal_reduces_cases(self, mock_report, mock_normal_report):
+        assert mock_normal_report.n_cases < mock_report.n_cases
+        assert mock_normal_report.n_cases >= 2
 
-    def test_tag_matches_fixture_tags(self):
+    def test_tag_matches_fixture_tags(self, mock_normal_report):
         b = Benchmark()
         acc = b._load_accuracy(b._dir / ACCURACY_FIXTURE)
         strat = b._load_strategy(b._dir / STRATEGY_FIXTURE)
         expected = sum(1 for c in acc if "normal" in c.tags) + sum(1 for c in strat if "normal" in c.tags)
-        assert Benchmark(tag="normal").run().n_cases == expected
+        assert mock_normal_report.n_cases == expected
 
 
 class TestCostGuardrail:
@@ -97,11 +109,11 @@ class TestCostGuardrail:
         assert report.cost_limit_usd == 0.0
         assert report.failure_stats.get("budget_exhausted", 0) >= 1
 
-    def test_no_limit_not_aborted(self):
-        report = Benchmark(llm_mode="real", llm=_shared_mock_llm()).run()
-        assert report.budget_aborted is False
+    def test_no_limit_not_aborted(self, real_report):
+        assert real_report.budget_aborted is False
 
     def test_reasonable_limit_completes(self):
+        # 单独跑：覆盖「上限未触发」分支，report.cost_limit_usd 须为显式值，不能复用 real_report
         report = Benchmark(llm_mode="real", llm=_shared_mock_llm(), cost_limit_usd=1.0).run()
         assert report.budget_aborted is False
         assert report.cost_usd < 1.0
@@ -110,36 +122,30 @@ class TestCostGuardrail:
 class TestRenderBranches:
     """设计文档 37 §5：mock / real 渲染分支 + mock vs real 对比段"""
 
-    def test_markdown_includes_mode_and_cost(self, tmp_path):
-        report = Benchmark(llm_mode="real", llm=_shared_mock_llm()).run()
+    def test_markdown_includes_mode_and_cost(self, real_report, tmp_path):
         out = tmp_path / "benchmark_real.md"
-        _write_markdown(report, out)
+        _write_markdown(real_report, out)
         text = out.read_text(encoding="utf-8")
         assert "llm_mode: real" in text
         assert "累计成本" in text
         assert "| LLM 模式 | real |" in text
         assert "cost_usd" in text
 
-    def test_markdown_mock_vs_real_section(self, tmp_path):
-        mock_report = Benchmark(llm_mode="mock").run()
-        real_report = Benchmark(llm_mode="real", llm=_shared_mock_llm()).run()
+    def test_markdown_mock_vs_real_section(self, mock_report, real_report, tmp_path):
         out = tmp_path / "benchmark_real.md"
         _write_markdown(real_report, out, mock_report=mock_report)
         text = out.read_text(encoding="utf-8")
         assert "## mock vs real 对比" in text
         assert "mock" in text and "real" in text
 
-    def test_markdown_mock_no_comparison(self, tmp_path):
-        report = Benchmark(llm_mode="mock").run()
+    def test_markdown_mock_no_comparison(self, mock_report, tmp_path):
         out = tmp_path / "benchmark.md"
-        _write_markdown(report, out)
+        _write_markdown(mock_report, out)
         text = out.read_text(encoding="utf-8")
         assert "## mock vs real 对比" not in text
         assert "| LLM 模式 | mock |" in text
 
-    def test_csv_includes_mode_cost_and_vs(self, tmp_path):
-        mock_report = Benchmark(llm_mode="mock").run()
-        real_report = Benchmark(llm_mode="real", llm=_shared_mock_llm()).run()
+    def test_csv_includes_mode_cost_and_vs(self, mock_report, real_report, tmp_path):
         out = tmp_path / "benchmark_real.csv"
         _write_csv(real_report, out, mock_report=mock_report)
         text = out.read_text(encoding="utf-8")
@@ -179,10 +185,9 @@ class TestRealSmoke:
         assert api._llm is shared
 
 
-def test_mock_regression_unchanged():
+def test_mock_regression_unchanged(mock_report):
     """回归：--llm mock 输出与既有断言兼容（字段准确率/幻觉率/工具选择/trace）"""
-    report = Benchmark(llm_mode="mock").run()
-    assert report.accuracy.field_accuracy == 1.0
-    assert report.accuracy.hallucination_rate == 0.0
-    assert report.strategy.tool_selection_accuracy >= 0.85
-    assert report.trace_completeness == 1.0
+    assert mock_report.accuracy.field_accuracy == 1.0
+    assert mock_report.accuracy.hallucination_rate == 0.0
+    assert mock_report.strategy.tool_selection_accuracy >= 0.85
+    assert mock_report.trace_completeness == 1.0
