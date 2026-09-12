@@ -142,7 +142,7 @@ def _registry_from_pack(pack: Any) -> dict[str, Competitor]:
     """pack.registry_seeds → Competitor 条目（category = pack.category_label）。"""
     label = str(getattr(pack, "category_label", "") or "")
     out: dict[str, Competitor] = {}
-    for seed in getattr(pack, "registry_seeds", ()):  # type: ignore[attr-defined]
+    for seed in getattr(pack, "registry_seeds", ()):
         out[seed.name] = Competitor(
             name=seed.name,
             aliases=list(seed.aliases),
