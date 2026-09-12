@@ -144,3 +144,9 @@
    置 `block_private_urls: false`（同测试 `_OFFLINE_CFG` 模式）；
    本机无 bge 权重，向量/精排层按设计自动降级，样本分数为词袋×衰减。
 
+7. **类型收紧连带修正（CI 3.12 run 34684998128 mypy 红）**：修正 6 把 facade
+   `rag_store` 收紧为 `CompetitorStore | None` 后，`evaluation/benchmark.py:1163`
+   注入侧签名仍为 `object | None`，CI `mypy .`（全量）报 arg-type——子 agent 只跑了
+   改动文件 mypy 未跑全量，漏网。benchmark.py 签名同步收紧 + 顶层导入
+   CompetitorStore（导入无环已验证）。教训：收紧公共入口类型后必须跑 `mypy .`
+   全量而非仅改动文件。

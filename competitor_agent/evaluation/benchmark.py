@@ -30,6 +30,7 @@ from competitor_agent.domain_types import distilled
 from competitor_agent.domain_types.enums import ObservationStatus
 from competitor_agent.domain_types.observation import Observation, SourceEvidence
 from competitor_agent.evaluation.accuracy_eval import AccuracyEvaluator, AccuracyMetrics, EvalCase
+from competitor_agent.knowledge_base.competitor_store import CompetitorStore
 from competitor_agent.evaluation.behavior_eval import (
     BehaviorMetrics,
     FoldRecallEvaluator,
@@ -1160,7 +1161,7 @@ def build_benchmark_api(
     enable_rag: bool = True,
     enable_memory: bool = True,
     memory: object | None = None,
-    rag_store: object | None = None,
+    rag_store: "CompetitorStore | None" = None,
     timeline: object | None = None,
     engine: str = "react",
     llm_call_counter: list[int] | None = None,
