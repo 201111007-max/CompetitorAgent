@@ -18,6 +18,7 @@ from competitor_agent.collector.fetch_cache import FetchCache
 from competitor_agent.collector.fetch_policy import FetchPolicy
 from competitor_agent.collector.search import SearchError, SearchHit, build_search_router
 from competitor_agent.config.loader import CollectorConfig, load_config
+from competitor_agent.core.input_sanitizer import strip_prompt_injections
 from competitor_agent.core.url_guard import URLError, guard_http_url
 
 logger = logging.getLogger("competitor_agent.mcp_server.tools.web_tools")
@@ -81,8 +82,13 @@ def web_search(query: str, max_results: int = 5) -> str:
 
 
 def _format_fetch(result: FetchResult, max_chars: int) -> str:
-    """抓取成功文本：顶部 `via: {级}` 一行元信息 + 正文（doc 71 §4.3）。"""
-    body = result.content
+    """抓取成功文本：顶部 `via: {级}` 一行元信息 + 正文（doc 71 §4.3）。
+
+    提示注入过滤（设计文档 91）在此统一执行——新鲜抓取/单跑去重回读/磁盘缓存
+    命中三路都经本函数格式化，是抓取链文本进入 LLM 上下文前的唯一出口；
+    历史缓存中的未过滤条目读出时同样被拦。
+    """
+    body, _hits = strip_prompt_injections(result.content, source=result.url)
     if max_chars and len(body) > max_chars:
         body = body[:max_chars] + "…（截断）"
     if result.provider:
@@ -205,6 +211,7 @@ def _extract_with_selector(
     except Exception as exc:  # noqa: BLE001
         logger.warning("web_extract 选择器解析异常: %s", exc)
         return f"⚠ 选择器解析异常: {exc}"
+    text, _hits = strip_prompt_injections(text, source=url)  # 设计文档 91
     if len(text) > max_chars:
         text = text[:max_chars] + "…（截断）"
     return text or f"⚠ 未从 {url} 提取到内容"

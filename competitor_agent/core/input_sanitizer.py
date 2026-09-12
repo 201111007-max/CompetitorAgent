@@ -11,10 +11,13 @@
 """
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 
 from competitor_agent.agent.prompts.trust_boundary import wrap_untrusted
+
+logger = logging.getLogger("competitor_agent.core.input_sanitizer")
 
 # @file: 引用允许的数据目录（仅数据文件，禁止源码/配置/凭据，见风险 R25）
 # 相对条目按 base_dir/CWD 解析（evaluation/cases 为评测用例库）；
@@ -117,6 +120,85 @@ def _within_allowed_dirs(path: Path, root: Path) -> bool:
     return False
 
 
+# ---------------------------------------------------------------------------
+# 抓取文本提示注入过滤（设计文档 91，架构 R16 三层防御补强）
+#
+# 与 trust_boundary._INJECTION_PATTERNS（宽检测、仅打标包裹警示）分工不同：
+# 这里的模式会**真删内容**（整行替换），必须高精度——只匹配指令性/角色覆盖/
+# 系统提示窃取动词短语，不过滤裸关键词（竞品对象是 AI coding 工具，合法页面
+# 高频正当讨论 "system prompt"/"系统提示词"，裸词必误报）。
+# ---------------------------------------------------------------------------
+
+#: 命中行替换标记（测试与 trace 断言用）
+INJECTION_REDACTED_LINE = "[已过滤：疑似提示注入内容]"
+
+#: (模式名, 编译正则) 列表；逐行扫描，命中即整行替换
+_INJECTION_LINE_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+    (name, re.compile(pat, re.IGNORECASE))
+    for name, pat in [
+        # 英文：指令覆盖
+        ("en_ignore", r"\bignore\s+(?:all\s+)?(?:the\s+)?(?:previous|prior|above|earlier)\s+(?:instructions?|prompts?|directives?)"),
+        ("en_disregard", r"\bdisregard\s+(?:all\s+)?(?:the\s+)?(?:previous|prior|above|earlier)\b"),
+        ("en_forget", r"\bforget\s+(?:all\s+)?(?:the\s+)?(?:previous|prior|above|earlier)\s+(?:instructions?|prompts?)?"),
+        ("en_do_not_follow", r"\bdo\s+not\s+follow\s+(?:your|any|the)\s+(?:previous|prior|original\s+)?instructions?"),
+        ("en_override", r"\boverride\s+(?:your|all|the)\s+(?:safety\s+|security\s+)?(?:instructions?|rules?|guidelines?|constraints?)"),
+        # 英文：角色覆盖
+        ("en_you_are_now", r"\byou\s+are\s+now\b"),
+        ("en_new_persona", r"\bnew\s+(?:persona|role|instructions?)\s*:"),
+        # 英文：系统提示窃取 / 外发
+        ("en_reveal_prompt", r"\b(?:output|print|reveal|show|display|repeat|leak|expose)\b[^\n]{0,40}?\b(?:system\s+prompt|system\s+instructions?|initial\s+instructions?)"),
+        ("en_exfiltrate", r"\b(?:send|post|exfiltrate|upload)\b[^\n]{0,60}?\b(?:system\s+prompt|api[\s_-]?key|secret|token)"),
+        # 中文：指令覆盖
+        ("cn_ignore", r"忽略(?:之前|以上|上面|前面|上述)(?:的)?(?:所有|全部)?(?:指令|指示|提示|命令)"),
+        ("cn_forget", r"忘记(?:之前|以上|上面|前面)(?:的)?(?:所有|全部)?(?:指令|提示|命令)"),
+        ("cn_do_not_follow", r"不要(?:再)?(?:遵循|遵守|听从)(?:之前|以上|原始|原来)?(?:的)?(?:指令|规则|约束)"),
+        ("cn_execute", r"执行(?:以下|下列|下面)(?:的)?(?:指令|命令|操作)"),
+        # 中文：角色覆盖
+        ("cn_you_are_now", r"你现在是"),
+        # 中文：系统提示窃取 / 外发
+        ("cn_reveal_prompt", r"(?:输出|打印|泄露|展示|告诉|复述)[^\n]{0,12}?(?:系统提示|提示词|系统指令|初始指令)"),
+        ("cn_exfiltrate", r"(?:(?:发送|上传|传输|提交)[^\n]{0,20}?(?:系统提示|提示词|密钥|令牌))|(?:(?:系统提示|提示词|密钥|令牌)[^\n]{0,12}?(?:发送|上传|传输|提交))"),
+    ]
+]
+
+
+def strip_prompt_injections(text: str, *, source: str = "") -> tuple[str, list[str]]:
+    """过滤抓取文本中的提示注入行（设计文档 91：注入文本不进入 LLM 上下文）。
+
+    逐行扫描，命中任一高精度注入模式（指令覆盖/角色覆盖/系统提示窃取）的行
+    整行替换为 ``INJECTION_REDACTED_LINE``。只删行、不抛错、不丢弃整篇。
+
+    Args:
+        text: 抓取/外部不可信文本（已清洗 HTML 的正文）。
+        source: 来源标识（通常 URL），仅用于命中时的 warning trace 留痕。
+
+    Returns:
+        (过滤后文本, 命中的模式名列表)；无命中时原样返回且列表为空。
+    """
+    if not text:
+        return text, []
+    hits: list[str] = []
+    out_lines: list[str] = []
+    changed = False
+    for line in text.splitlines():
+        matched = [name for name, pat in _INJECTION_LINE_PATTERNS if pat.search(line)]
+        if matched:
+            hits.extend(matched)
+            out_lines.append(INJECTION_REDACTED_LINE)
+            changed = True
+        else:
+            out_lines.append(line)
+    if changed:
+        logger.warning(
+            "提示注入行已过滤 source=%s patterns=%s",
+            source or "?",
+            sorted(set(hits)),
+            extra={"injection_event": "strip", "source": source, "patterns": sorted(set(hits))},
+        )
+        return "\n".join(out_lines), hits
+    return text, hits
+
+
 def sanitize_task(task: str, base_dir: str | None = None) -> str:
     """组合全部入站浅清洗。
 
@@ -135,9 +217,11 @@ def sanitize_task(task: str, base_dir: str | None = None) -> str:
 
 
 __all__ = [
+    "INJECTION_REDACTED_LINE",
     "expand_references",
     "sanitize_surrogates",
     "sanitize_task",
     "strip_paste_wrappers",
+    "strip_prompt_injections",
     "strip_terminal_leaks",
 ]

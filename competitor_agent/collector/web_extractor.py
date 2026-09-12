@@ -9,6 +9,7 @@ import logging
 
 import httpx
 
+from competitor_agent.core.input_sanitizer import strip_prompt_injections
 from competitor_agent.domain_types.enums import ObservationStatus
 from competitor_agent.domain_types.info_gap import InfoGap
 from competitor_agent.domain_types.observation import Observation, SourceEvidence
@@ -55,6 +56,8 @@ class WebExtractor:
             raise DataSourceUnavailableError(f"无法抓取 {url}")
 
         text = self._clean(content)
+        # 提示注入过滤（设计文档 91）：注入行整行替换，hash/状态均按过滤后文本
+        text, _hits = strip_prompt_injections(text, source=url)
         evidence = SourceEvidence(
             source_name="web_extractor",
             url=url,
