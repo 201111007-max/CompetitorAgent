@@ -36,6 +36,14 @@ from competitor_agent.evaluation.behavior_eval import (
     RetrievalEvaluator,
 )
 from competitor_agent.evaluation.failure import FailureRecord, FailureType, classify_case
+from competitor_agent.evaluation.golden import (
+    GOLDEN_DIR,
+    GoldenEvaluator,
+    GoldenJudge,
+    GoldenResult,
+    build_golden_judge,
+    load_golden_tasks,
+)
 from competitor_agent.evaluation.strategy_eval import StrategyCase, StrategyEvaluator, StrategyMetrics
 from competitor_agent.facade.api import CompetitorAnalysisAPI
 from competitor_agent.interfaces.context import SourceContext
@@ -64,7 +72,13 @@ STRATEGY_FIXTURE = "strategy_cases.json"
 #   ReAct-scripted 分支（make_plan(competitors+resolution) → web_search_candidates →
 #   delegate(候选) → aggregate_report → Final comparison JSON）；候选子 Agent 确定性返回
 #   标准多维度 dimensions[]；Lead 按 resolution 分型收尾。
-HARNESS_VERSION = "0.11.0"
+# 0.11.0 → 0.12.0：黄金断言评测（设计文档 76）——BenchmarkReport 增 golden（must_have 召回率
+#   / trap 通过率 / contradicted_count / per_task / stale_warnings），判定器可注入
+#   （mock=KeywordGoldenJudge 确定性，real=LLMGoldenJudge）；指标只记录不卡门禁（用户决策）。
+# 0.12.0 → 0.13.0：NLI 事实校验器（设计文档 77）——BenchmarkReport 增 verification
+#   （报告级幻觉率双口径：contradicted/(supported+contradicted)，superseded 不计入）；
+#   mock 模式默认开启（确定性），real 模式默认关闭（LLM 成本护栏，可显式买入）。
+HARNESS_VERSION = "0.13.0"
 
 # 门禁阈值单一来源（设计文档 55 M1）：--gate CLI、test_benchmark_integration、
 # test_behavior_eval 全部引用本组常量，不新造第二份数值。
@@ -80,6 +94,12 @@ GATE_REFETCH_AFTER_FOLD_MAX = 0
 
 # 单次采集/工具的估算成本（与主流程 IterationBudget 单次 0.01 对齐）
 UNIT_COST = 0.01
+
+# 黄金断言评测进程级缓存（设计文档 76）：mock 确定性下同 key 重跑逐位一致，
+# 避免 gate 集成测试反复 Benchmark().run() 重复支付 3 次 api.run 的编排开销。
+# key=(golden_dir, llm_mode)：real 模式共享 LLM 实例每次 run 新建 → id() 键会击穿
+# 缓存（每测试重付 3 次 golden run），按 mode 复用进程内首次结果（real 金本就非确定）。
+_GOLDEN_CACHE: dict[tuple[str, str], GoldenResult] = {}
 
 # 维度 → 默认字段抽取方式（设计文档 §3.1：extract_prediction 按维度抽取可比对字段）
 # 设计文档 29：扩展 ecosystem / sentiment / roadmap（timeline）三维度覆盖
@@ -125,6 +145,35 @@ class BenchStrategyCase:
 
 
 @dataclass
+class VerificationMetrics:
+    """NLI 事实校验汇总（设计文档 77 §2.3 评测侧）。
+
+    幻觉率双口径：``contradicted / (supported + contradicted)``——superseded（现实
+    已变）与 unverifiable（无来源可判）不计入分母，与字段级 hallucination_rate 并列
+    展示不替换（doc 77 §2.3）。
+    """
+
+    hallucination_rate: float = 0.0
+    n_claims: int = 0
+    n_supported: int = 0
+    n_contradicted: int = 0
+    n_superseded: int = 0
+    n_unverifiable: int = 0
+    n_verified_cases: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "hallucination_rate": self.hallucination_rate,
+            "n_claims": self.n_claims,
+            "n_supported": self.n_supported,
+            "n_contradicted": self.n_contradicted,
+            "n_superseded": self.n_superseded,
+            "n_unverifiable": self.n_unverifiable,
+            "n_verified_cases": self.n_verified_cases,
+        }
+
+
+@dataclass
 class BenchmarkReport:
     accuracy: AccuracyMetrics = field(default_factory=AccuracyMetrics)
     strategy: StrategyMetrics = field(default_factory=StrategyMetrics)
@@ -147,6 +196,10 @@ class BenchmarkReport:
     budget_aborted: bool = False  # 是否因成本护栏超限中止
     # 设计文档 42：行为级评测——工具自恢复率 + 检索命中率（hybrid vs lexical）
     behavior: BehaviorMetrics = field(default_factory=BehaviorMetrics)
+    # 设计文档 76：黄金断言评测——must_have 召回率 + trap 通过率（判定器可注入，只记录不卡门禁）
+    golden: GoldenResult = field(default_factory=GoldenResult)
+    # 设计文档 77：NLI 事实校验（报告级幻觉率双口径，mock 默认开、real 默认关）
+    verification: VerificationMetrics = field(default_factory=VerificationMetrics)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -184,6 +237,8 @@ class BenchmarkReport:
                 "retrieval_n": self.behavior.retrieval_n,
                 "refetch_after_fold": self.behavior.refetch_after_fold,
             },
+            "golden": self.golden.to_dict(),
+            "verification": self.verification.to_dict(),
         }
 
 
@@ -1173,6 +1228,20 @@ def build_benchmark_api(
 # ── Benchmark 主类：真实执行评测 ──────────────────────────────────────
 
 
+class _VerifierMockLLM:
+    """NLI 校验确定性 mock LLM（设计文档 77 评测接线）。
+
+    NLI prompt（含 "NLI" 标记）→ 恒 supported（语义判定无法 mock，数值快路径
+    才是真信号）；抽取 prompt → 非 JSON 输出触发 NLIVerifier 的确定性 fallback 抽取。
+    """
+
+    def complete(self, messages: list[dict[str, str]], json_mode: bool = False, **kwargs: Any) -> str:
+        content = str(messages[-1].get("content", "")) if messages else ""
+        if "NLI" in content:
+            return '{"result": "supported", "reason": "确定性 mock 判定"}'
+        return "not-json-output"
+
+
 class Benchmark:
     """运行完整 benchmark 评测（真实调用系统，而非 fixture 自证）"""
 
@@ -1188,12 +1257,25 @@ class Benchmark:
         cost_limit_usd: float | None = None,
         engine: str = "react",
         llm_call_counter: list[int] | None = None,
+        golden_judge: GoldenJudge | None = None,
+        golden_dir: Path | None = None,
+        use_golden_cache: bool = True,
+        verify_reports: bool | None = None,
     ) -> None:
         self._dir = fixtures_dir or FIXTURES_DIR
         self._llm_mode = llm_mode
         self._llm = llm
         self._tag = tag
         self._cost_limit_usd = cost_limit_usd
+        self._golden_dir = golden_dir or GOLDEN_DIR
+        # 判定器可注入（doc 76 §2 决策 ③）：mock → KeywordGoldenJudge（确定性），real → LLMGoldenJudge
+        self._golden_judge = golden_judge or build_golden_judge(llm_mode, llm)
+        self._use_golden_cache = use_golden_cache
+        # 设计文档 77：NLI 事实校验——None=自动（mock 开/real 关：真实 NLI 判定逐断言
+        # 调 LLM，成本数倍放大，real 须显式买入）；显式 True/False 覆盖默认
+        self._verify_reports = (
+            (llm_mode == "mock") if verify_reports is None else bool(verify_reports)
+        )
         if build_api is None:
             if llm is not None:
                 self._build_api = lambda case: build_benchmark_api(
@@ -1227,12 +1309,14 @@ class Benchmark:
 
         # 字段真实评测：逐 case 调用 api.analyze() → 从真实报告提取 prediction
         acc_eval_cases: list[EvalCase] = []
+        apis_by_case: dict[str, Any] = {}
         for acc_case in acc_cases:
             if self._budget_exceeded(total_cost):
                 budget_aborted = True
                 break
             before = self._cost_now()
-            report = self._analyze(acc_case)
+            report, api = self._analyze(acc_case)
+            apis_by_case[acc_case.case_id or acc_case.task] = api
             cost = round(self._cost_now() - before, 6)
             total_cost = round(total_cost + cost, 6)
             per_case_cost[acc_case.case_id or acc_case.task] = cost
@@ -1258,7 +1342,8 @@ class Benchmark:
                 budget_aborted = True
                 break
             before = self._cost_now()
-            report = self._analyze(strat_case)
+            report, api = self._analyze(strat_case)
+            apis_by_case[strat_case.case_id or strat_case.task] = api
             cost = round(self._cost_now() - before, 6)
             total_cost = round(total_cost + cost, 6)
             per_case_cost[strat_case.case_id or strat_case.task] = cost
@@ -1308,6 +1393,16 @@ class Benchmark:
                 failure_stats.get(FailureType.BUDGET_EXHAUSTED.value, 0) + 1
             )
 
+        # 设计文档 76：黄金断言评测（预算中止时跳过——golden 不应继续消耗护栏）
+        golden_cost_before = self._cost_now()
+        golden_result = GoldenResult() if budget_aborted else self._run_golden()
+        golden_cost = round(self._cost_now() - golden_cost_before, 6)
+        if golden_cost:
+            total_cost = round(total_cost + golden_cost, 6)
+
+        # 设计文档 77：NLI 事实校验（报告级幻觉率双口径；mock 确定性 / real 默认关）
+        verification = self._run_verification(apis_by_case, reports_by_case)
+
         return BenchmarkReport(
             accuracy=accuracy,
             strategy=self._strat.evaluate(strat_eval_cases),
@@ -1325,7 +1420,70 @@ class Benchmark:
             cost_limit_usd=self._cost_limit_usd,
             budget_aborted=budget_aborted,
             behavior=self._run_behavior_evals(),
+            golden=golden_result,
+            verification=verification,
         )
+
+    def _run_verification(
+        self, apis_by_case: dict[str, Any], reports_by_case: dict[str, object]
+    ) -> VerificationMetrics:
+        """设计文档 77 §2.3 评测侧：对每个 case 报告跑 snapshot 模式 NLI 校验。
+
+        - mock：注入确定性 mock LLM（NLI 恒 supported、抽取走 fallback 语义）——
+          数值快路径（不依赖 LLM）仍产生真实信号，全链路连跑逐位一致；
+        - real：默认关闭（成本护栏），``verify_reports=True`` 显式买入后用共享 LLM；
+        - 评测侧不落时间线/不推送告警（timeline/alert_sink 均 None，零副作用）。
+        """
+        if not self._verify_reports:
+            return VerificationMetrics()
+        from competitor_agent.core.verifier import NLIVerifier
+
+        metrics = VerificationMetrics()
+        llm: Any
+        if self._llm_mode == "real" and self._llm is not None:
+            llm = self._llm
+        else:
+            llm = _VerifierMockLLM()
+        for case_id, api in apis_by_case.items():
+            report = reports_by_case.get(case_id)
+            text = str(getattr(report, "markdown_report", "") or "")
+            if not text:
+                continue
+            competitor = str(getattr(getattr(report, "competitor", None), "name", "") or case_id)
+            verifier = NLIVerifier(
+                llm=llm,
+                retriever=getattr(api, "_retriever", None),
+                max_claims=12,  # 评测成本护栏：单 case 断言上限
+            )
+            result = verifier.verify_report(text, competitor, mode="snapshot")
+            metrics.n_claims += result.total
+            metrics.n_supported += result.n_supported
+            metrics.n_contradicted += result.n_contradicted
+            metrics.n_superseded += result.n_superseded
+            metrics.n_unverifiable += result.n_unverifiable
+            metrics.n_verified_cases += 1
+        judged = metrics.n_supported + metrics.n_contradicted
+        metrics.hallucination_rate = round(metrics.n_contradicted / judged, 4) if judged else 0.0
+        return metrics
+
+    def _run_golden(self) -> GoldenResult:
+        """设计文档 76：黄金断言评测——固定任务经 api.run() 真实生成报告 → 判定器逐条判定。
+
+        进程级缓存（mock 确定性 → 同 (dir, mode, llm) 重跑结果逐位一致，省重复 3 次
+        api.run 的编排开销）；``use_golden_cache=False`` 强制重跑。golden 目录缺失/空
+        → 空结果（has_data=False，报告/CSV 不展示 golden 节）。
+        """
+        tasks = load_golden_tasks(self._golden_dir)
+        if not tasks:
+            return GoldenResult()
+        cache_key = (str(self._golden_dir), self._llm_mode)
+        if self._use_golden_cache and cache_key in _GOLDEN_CACHE:
+            return _GOLDEN_CACHE[cache_key]
+        evaluator = GoldenEvaluator(self._golden_judge, self._build_api, tasks)
+        result = evaluator.run()
+        if self._use_golden_cache:
+            _GOLDEN_CACHE[cache_key] = result
+        return result
 
     def _run_behavior_evals(self) -> BehaviorMetrics:
         """设计文档 42：行为级评测——工具自恢复（ScriptedLLM 确定性）+ 检索命中（hybrid vs lexical）。
@@ -1356,9 +1514,10 @@ class Benchmark:
         """当前累计 LLM 成本（设计文档 37：共享实例累计；无共享实例则 0）。"""
         return self._llm.total_cost_usd if self._llm is not None else 0.0
 
-    def _analyze(self, case: AccuracyCase | BenchStrategyCase) -> object:
+    def _analyze(self, case: AccuracyCase | BenchStrategyCase) -> tuple[object, Any]:
+        """逐 case 真实分析；返回 (report, api)——api 供 NLI 校验取同一知识库检索器（doc 77）。"""
         api = self._build_api(case)
-        return api.analyze(case.task, mode=getattr(case, "mode", "single"))
+        return api.analyze(case.task, mode=getattr(case, "mode", "single")), api
 
     def _load_accuracy(self, path: Path) -> list[AccuracyCase]:
         if not path.exists():
@@ -1528,6 +1687,18 @@ def _write_csv(report: BenchmarkReport, out: Path, mock_report: BenchmarkReport 
     rows.append([report.harness_version, "behavior.retrieval_n", str(report.behavior.retrieval_n)])
     # 设计文档 56 M3：折叠后重复抓取次数
     rows.append([report.harness_version, "behavior.refetch_after_fold", str(report.behavior.refetch_after_fold)])
+    # 设计文档 76：黄金断言评测（只记录不卡门禁——用户决策）
+    if report.golden.has_data:
+        rows.append([report.harness_version, "golden.must_have_recall", str(report.golden.must_have_recall)])
+        rows.append([report.harness_version, "golden.trap_pass_rate", str(report.golden.trap_pass_rate)])
+        rows.append([report.harness_version, "golden.contradicted_count", str(report.golden.contradicted_count)])
+        rows.append([report.harness_version, "golden.n_must_have", str(report.golden.n_must_have)])
+        rows.append([report.harness_version, "golden.n_trap", str(report.golden.n_trap)])
+    # 设计文档 77：NLI 事实校验（报告级幻觉率双口径）
+    rows.append([report.harness_version, "verification.hallucination_rate", str(report.verification.hallucination_rate)])
+    rows.append([report.harness_version, "verification.n_claims", str(report.verification.n_claims)])
+    rows.append([report.harness_version, "verification.n_contradicted", str(report.verification.n_contradicted)])
+    rows.append([report.harness_version, "verification.n_superseded", str(report.verification.n_superseded)])
     # 设计文档 37：mock vs real 对比（real 报告内嵌 mock 基线，直答"评测是不是自证"）
     if mock_report is not None and mock_report.llm_mode != report.llm_mode:
         rows.append([report.harness_version, "vs.mock.accuracy.field_accuracy", str(mock_report.accuracy.field_accuracy)])
@@ -1571,6 +1742,46 @@ def _write_markdown(
     lines.append(f"| 检索命中率 lexical | {report.behavior.retrieval_hit_lexical:.2f} |")
     lines.append(f"| 检索样本数 | {report.behavior.retrieval_n} |")
     lines.append(f"| 折叠后重抓次数（56 M3） | {report.behavior.refetch_after_fold} |")
+
+    # 设计文档 76：黄金断言评测（must_have 召回率 + trap 通过率，判定器可注入）
+    if report.golden.has_data:
+        lines.append("\n## 黄金断言评测（设计文档 76）")
+        lines.append("\n> must_have 召回率 = 报告覆盖的正确结论占比；trap 通过率 = 未复述错误/易过时信息占比。")
+        lines.append("> 新指标先只记录不卡门禁（doc 75 §2 决策）；stale 提醒仅提示人工复核，不失败。")
+        lines.append("\n| 指标 | 值 |")
+        lines.append("|------|----|")
+        lines.append(
+            f"| must_have 召回率 | {report.golden.must_have_recall:.4f}（{report.golden.n_must_have} 条） |"
+        )
+        lines.append(f"| trap 通过率 | {report.golden.trap_pass_rate:.4f}（{report.golden.n_trap} 条） |")
+        lines.append(f"| 矛盾数（contradicted） | {report.golden.contradicted_count} |")
+        lines.append(f"| 任务数 | {report.golden.n_tasks} |")
+        if report.golden.per_task:
+            lines.append("\n### 按任务拆分")
+            lines.append("\n| 任务 | must_have 召回率 | trap 通过率 |")
+            lines.append("|------|-----------------|------------|")
+            for tid, m in report.golden.per_task.items():
+                lines.append(
+                    f"| {tid} | {m.get('must_have_recall', 0.0):.4f} | {m.get('trap_pass_rate', 0.0):.4f} |"
+                )
+        if report.golden.stale_warnings:
+            lines.append("\n### 断言核实提醒（stale）")
+            for warning in report.golden.stale_warnings:
+                lines.append(f"- ⚠ {warning}")
+
+    # 设计文档 77：NLI 事实校验（报告级幻觉率双口径，与字段级幻觉率并列不替换）
+    lines.append("\n## NLI 事实校验（设计文档 77）")
+    lines.append("\n> 幻觉率 = contradicted / (supported + contradicted)；superseded（现实已变）")
+    lines.append("> 与 unverifiable（无来源可判）不计入分母——时效性问题从质量问题中剥离。")
+    lines.append("\n| 指标 | 值 |")
+    lines.append("|------|----|")
+    v = report.verification
+    lines.append(f"| NLI 幻觉率 | {v.hallucination_rate:.4f} |")
+    lines.append(f"| 断言总数 | {v.n_claims}（{v.n_verified_cases} 个 case） |")
+    lines.append(f"| supported | {v.n_supported} |")
+    lines.append(f"| contradicted | {v.n_contradicted} |")
+    lines.append(f"| superseded | {v.n_superseded} |")
+    lines.append(f"| unverifiable | {v.n_unverifiable} |")
 
     # 设计文档 37：mock vs real 对比段（real 报告内嵌 mock 基线，直答"评测是不是自证"）
     if mock_report is not None and mock_report.llm_mode != report.llm_mode:
@@ -1806,6 +2017,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="门禁执法（设计文档 55 M1）：跑完按 GATE_* 阈值逐项判定，任一项不达标退出码 1 并打印差距；不加本开关行为不变（恒 0）",
     )
+    parser.add_argument(
+        "--snapshot",
+        action="store_true",
+        help="评测指标版本化（设计文档 76 §2.4）：跑完写带 commit hash 的指标快照到 evals/history.jsonl（配合 eval-diff 对比）",
+    )
     args = parser.parse_args(argv)
 
     if args.engine in ("langgraph", "both"):
@@ -1866,8 +2082,25 @@ def main(argv: list[str] | None = None) -> int:
           f"field_acc={report.accuracy.field_accuracy:.4f} "
           f"halluc={report.accuracy.hallucination_rate:.4f} tool_sel={report.strategy.tool_selection_accuracy:.4f} "
           f"cost_eff={report.strategy.cost_efficiency:.4f} harness_v{report.harness_version}")
+    if report.golden.has_data:
+        # 设计文档 76：golden 指标只记录不卡门禁（doc 75 §2 用户决策 ④）
+        print(f"golden: must_have_recall={report.golden.must_have_recall:.4f} "
+              f"trap_pass_rate={report.golden.trap_pass_rate:.4f} "
+              f"contradicted={report.golden.contradicted_count} "
+              f"(n_must={report.golden.n_must_have} n_trap={report.golden.n_trap})")
+    print(f"nli_verify: hallucination_rate={report.verification.hallucination_rate:.4f} "
+          f"claims={report.verification.n_claims} contradicted={report.verification.n_contradicted} "
+          f"superseded={report.verification.n_superseded}")
     print(f"csv: {out}")
     print(f"report: {report_path}")
+
+    if args.snapshot:
+        # 设计文档 76 §2.4：评测指标版本化——带 commit hash 的快照追加 evals/history.jsonl
+        from competitor_agent.evaluation import history as _history
+
+        snap = _history.snapshot(report, wall_seconds=main_wall, tag=args.tag)
+        _history.append_history(None, snap)
+        print(f"snapshot: {_history.DEFAULT_HISTORY_PATH} commit={snap['commit']}")
 
     if args.engine == "both":
         lg_calls: list[int] = []

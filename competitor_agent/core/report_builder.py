@@ -12,7 +12,7 @@ from competitor_agent.observability.logger import get_logger
 
 logger = get_logger("core.report_builder")
 
-# 维度权重（用于综合评分）
+# 维度权重（用于综合评分）——coding pack 静态镜像；运行时按 DomainPack 注入（设计文档 79 L3）
 _DIMENSION_WEIGHTS = {
     "pricing": 0.25,
     "feature": 0.25,
@@ -30,10 +30,13 @@ class ReportBuilder:
         self,
         renderer: MarkdownRenderer | None = None,
         dimension_ttl_days: dict[str, int] | None = None,
+        dimension_weights: dict[str, float] | None = None,
     ) -> None:
         self._renderer = renderer or MarkdownRenderer()
         # 新鲜度 TTL（设计文档 26）：传入时 build() 为报告计算 freshness 元数据
         self._ttl = dict(dimension_ttl_days) if dimension_ttl_days else None
+        # 维度权重（设计文档 79 L3）：pack.default_dimension_weights；None 用 coding 静态镜像
+        self._weights = dict(dimension_weights) if dimension_weights else dict(_DIMENSION_WEIGHTS)
 
     def build(
         self,
@@ -63,7 +66,7 @@ class ReportBuilder:
         score = 0.0
         confidence = 0.0
         for r in results:
-            w = _DIMENSION_WEIGHTS.get(r.dimension, 0.1)
+            w = self._weights.get(r.dimension, 0.1)
             total_weight += w
             score += w * r.confidence
             confidence += w * r.confidence

@@ -1,5 +1,10 @@
 # 设计文档 82 —— 第三十二轮：竞品档案（Dossier）导出（工单 7）
 
+> **实施说明（2026-09-09，全落地）**：
+> ① **模块**（新 `core/dossier.py`）：`Dossier`（competitor/generated_at/reports[]/confidence_trend/changes{event_type→events 升序}/evidence_index/open_questions）+ `DossierBuilder(reports_dir, data_dir, *, timeline, store)`——纯本地聚合（归档报告 JSON 兼容 competitor str/{"name"} 两形态 + gaps_pending 键；时间线事件按竞品过滤 + window_days 有界；知识库 chunk 按 source_url 去重出证据索引）+ `render_markdown`（§2.2 七节结构：置信度演进含 ASCII 条形 + 价格/跑分/版本/功能变化（score_change 事件摘要已带 doc 80 口径尾注自动携带）+ 报告索引 + 证据索引 + 待跟进 gaps_pending 并集去重）+ `write`（`<reports>/dossiers/<competitor>.md + .json`，`_write_bytes_atomic` 原子写，json 为结构化真源）。
+> ② **入口**：CLI `dossier --competitor [--window-days/--reports-dir/--data-dir]`（main() 内 API/LLM 构造前短路，纯本地聚合）；API `build_dossier(competitor, window_days)` 门面薄路由；Web `GET /api/dossier/{competitor}`（use_llm=False 构造 + require_auth）；调度 `schedule.refresh_dossiers`（默认 false，run_scheduled 末尾为当轮竞品刷新档案）。`get_history` 零改动。
+> ③ **测试**：`test_dossier_82.py` 8——3 报告+5 事件聚合计数/升序/并集去重、window_days 过滤、证据索引去重、Markdown 七节+双格式一致（json 真源）、空态合法不编造、CLI 解析与 smoke；tests/unit/core 327 + web 45 全绿。
+
 > 目标：基于现有 `TimelineMemory` + 历史报告 + 知识库，产出**单竞品完整档案**——历史报告索引、价格/版本/跑分变化曲线、证据链接。这是「增量跟踪」叙事的实体产物，也是对外发布的内容形态（工单 12 两周跟踪的收口物）。
 >
 > 本文档为**设计**（不实现）。

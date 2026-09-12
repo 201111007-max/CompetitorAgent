@@ -159,6 +159,8 @@ class MarkdownRenderer:
                 self._render_pricing(lines, profile)
             else:
                 self._render_details_blob(lines, result.details)
+        elif result.dimension == "performance":
+            self._render_performance(lines, result.details)
         else:
             self._render_details_blob(lines, result.details)
 
@@ -178,6 +180,15 @@ class MarkdownRenderer:
         lines.append(str(details)[:1000])
         lines.append("```")
         lines.append("")
+
+    def _render_performance(self, lines: list[str], details: object) -> None:
+        """performance 明细渲染（设计文档 80 §2.2）：厂商自报口径数据加 ⚠ 结构性引导行。"""
+        from competitor_agent.domain_types.benchmark import has_vendor_self_reported
+
+        if has_vendor_self_reported(details):
+            lines.append("> ⚠ 以下含厂商自报口径数据，未经第三方复核")
+            lines.append("")
+        self._render_details_blob(lines, details)
 
     def _render_pricing(self, lines: list[str], profile: PricingProfile) -> None:
         """渲染定价档位表 + 按量计费表 + 成本场景表（设计文档 27 §3.2）。"""

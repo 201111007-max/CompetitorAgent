@@ -124,6 +124,17 @@ class ScheduleConfig:
     cron_expr: str = ""  # cron 模式（minute hour day month weekday）；优先于 interval
     weekly_window_days: int = 7  # 周报聚合窗口（天）
     weekly_report: bool = False  # run_scheduled 末尾是否触发周报聚合
+    refresh_dossiers: bool = False  # 调度轮末尾为当轮竞品刷新档案（设计文档 82；默认关防磁盘膨胀）
+
+
+@dataclass
+class VerifierConfig:
+    """NLI 事实校验器（设计文档 77 §2.4）：产品侧发布前自查开关（评测侧不受此开关控制）"""
+
+    enabled: bool = False  # 产品侧发布前校验开关（开启后 verify_report 结果接入审批门）
+    mode: str = "snapshot"  # 默认 snapshot（确定性）；发布前手动 verify(mode="refetch")
+    max_claims_per_report: int = 40  # 断言抽取上限（控成本）
+    auto_ingest_superseded: bool = True  # superseded 事件携带新原文回灌知识库
 
 
 @dataclass
@@ -213,6 +224,15 @@ class AgentConfig:
     """ReAct 循环配置（设计文档 56 M1 Q4）"""
 
     max_history_steps: int = 8  # 子 Agent 工具步超过后折叠旧步为摘要（默认 8，行为不变）
+    # 停滞检测（设计文档 81）：自然收敛（max_steps=None）的客观收敛信号——纯本地统计
+    stagnation_enabled: bool = True  # 关闭即回到纯自然收敛（无信号）
+    stagnation_window: int = 8  # 统计窗口（最近 N 个工具步）
+    stagnation_dup_threshold: float = 0.85  # 工具结果重复率阈值（jaccard 均值）
+    stagnation_sig_repeat: int = 3  # 同 signature 重复次数阈值
+    stagnation_max_hints: int = 2  # 收敛提示注入上限（防提示本身成为循环源）
+    stagnation_ignore_arg_keys: list[str] = field(
+        default_factory=lambda: ["ts", "_t", "nonce", "timestamp", "session_id"]
+    )  # args 规范化剔除的噪声键
 
 
 @dataclass
@@ -222,6 +242,13 @@ class LeadConfig:
     """
 
     max_history_steps: int = 12  # Lead 上下文压缩保留步数（透传 ReactAgent._compress_history）
+
+
+@dataclass
+class DomainsConfig:
+    """领域包激活配置（设计文档 79 §2.3）：切换 active_pack 即整体换领域"""
+
+    active_pack: str = "coding_agent"  # coding_agent（默认）/ saas_pm；pack 文件见 config/domains/
 
 
 @dataclass
@@ -247,6 +274,8 @@ class AppConfig:
     agent: AgentConfig = field(default_factory=AgentConfig)
     lead: LeadConfig = field(default_factory=LeadConfig)
     schedule: ScheduleConfig = field(default_factory=ScheduleConfig)
+    verifier: VerifierConfig = field(default_factory=VerifierConfig)
+    domains: DomainsConfig = field(default_factory=DomainsConfig)
 
 
 def _build_section(cls: type[Any], data: dict[str, Any] | None) -> Any:
@@ -291,6 +320,8 @@ def load_config(path: str | os.PathLike | None = None) -> AppConfig:
         agent=_build_section(AgentConfig, raw.get("agent")),
         lead=_build_section(LeadConfig, raw.get("lead")),
         schedule=_build_section(ScheduleConfig, raw.get("schedule")),
+        verifier=_build_section(VerifierConfig, raw.get("verifier")),
+        domains=_build_section(DomainsConfig, raw.get("domains")),
     )
 
 

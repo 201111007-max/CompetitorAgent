@@ -17,6 +17,18 @@ DIMENSIONS: list[str] = list(DIMENSION_NAMES)
 
 _DIM_ENUM: list[str] = list(DIMENSIONS)
 
+
+def pack_dimensions(config: Any = None) -> list[str]:
+    """激活 DomainPack 的维度枚举（设计文档 79 §2.2 L3：运行时 schema）。
+
+    DIMENSIONS 保留为 coding pack 的静态镜像（测试/兼容引用）；运行时
+    make_plan 校验 / 子 Agent 注册 / 报告权重按本函数取值。
+    """
+    from competitor_agent.core.domain_pack import active_domain_pack
+
+    names = active_domain_pack(config).dimension_names
+    return names or list(DIMENSIONS)
+
 # 设计文档 71 §8.4：format_hint 收敛为四型枚举（两阶段任务适配阶段二选"报告结构"用）。
 # PLAN_SCHEMA 仍保持宽松字符串（doc 70 只定调不强制、旧 plan 兼容），
 # 枚举化由 `normalize_format_hint` 在解析侧完成（非法/缺省回退 open，§11 风险 8 缓解）。

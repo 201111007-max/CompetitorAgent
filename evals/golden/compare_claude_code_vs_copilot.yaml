@@ -1,0 +1,162 @@
+# 黄金断言集 —— 任务 2：对比 Claude Code vs Copilot（设计文档 76 §2.1）
+# ⚠ 状态：opencode 草拟初稿（2026-09-09），待用户逐条核实后回填 verified_date（doc 76 §2.1）。
+# 断言含 per-competitor 归属（id 前缀 cc-* = Claude Code，copilot-* = GitHub Copilot）。
+task: "对比 Claude Code 和 Copilot"
+task_id: compare_claude_code_vs_copilot
+verified_date: ""
+assertions:
+  # ── Claude Code：产品形态 ──
+  - id: cc-terminal-first
+    claim: "Claude Code 以终端 CLI 为主要形态的 Agent 编码工具。"
+    type: must_have
+    source_of_truth: "https://docs.anthropic.com/en/docs/claude-code"
+    tags: [feature]
+  - id: cc-vendor-anthropic
+    claim: "Claude Code 由 Anthropic 开发。"
+    type: must_have
+    source_of_truth: "https://www.anthropic.com"
+    tags: [ecosystem]
+  - id: cc-ide-extensions
+    claim: "Claude Code 除终端外还提供 VS Code/JetBrains 扩展等 IDE 接入形态。"
+    type: must_have
+    source_of_truth: "https://docs.anthropic.com/en/docs/claude-code/ide-integrations"
+    tags: [feature]
+  - id: cc-mcp-support
+    claim: "Claude Code 支持 MCP（Model Context Protocol）。"
+    type: must_have
+    source_of_truth: "https://docs.anthropic.com/en/docs/claude-code/mcp"
+    tags: [feature]
+  - id: cc-subagents-hooks
+    claim: "Claude Code 支持子代理（subagents）与 hooks 等可编程扩展机制。"
+    type: must_have
+    source_of_truth: "https://docs.anthropic.com/en/docs/claude-code/sub-agents"
+    tags: [feature]
+  - id: cc-gha-integration
+    claim: "Claude Code 提供 GitHub Actions 集成（/github-action 或 CI 场景）。"
+    type: must_have
+    source_of_truth: "https://docs.anthropic.com/en/docs/claude-code/github-actions"
+    tags: [feature]
+  - id: cc-trap-free
+    claim: "Claude Code 完全免费、无需任何订阅。"
+    type: trap
+    source_of_truth: "需 Claude 订阅（Pro/Max）或 API 计费"
+    tags: [pricing]
+  - id: cc-trap-ide-only
+    claim: "Claude Code 只能作为 IDE 插件使用、无终端形态。"
+    type: trap
+    source_of_truth: "终端 CLI 是其原生主形态"
+    tags: [feature]
+  # ── Claude Code：定价 ──
+  - id: cc-pricing-subscription-model
+    claim: "Claude Code 通过 Claude 订阅（Pro/Max）或 API 按量计费使用。"
+    type: must_have
+    source_of_truth: "https://www.anthropic.com/pricing"
+    tags: [pricing]
+  - id: cc-pricing-max-high-tier
+    claim: "Claude Max 提供更高用量上限的高价位档（$100/$200 每月量级）。"
+    type: must_have
+    source_of_truth: "https://www.anthropic.com/pricing"
+    tags: [pricing]
+  - id: cc-trap-per-seat-10
+    claim: "Claude Code 定价为 $10/月的 IDE 插件订阅。"
+    type: trap
+    source_of_truth: "$10/月是 Copilot Pro 的价位，非 Claude Code"
+    tags: [pricing]
+  # ── Copilot：产品形态 ──
+  - id: copilot-ide-first
+    claim: "GitHub Copilot 以 IDE 扩展（VS Code/JetBrains/Visual Studio 等）为主要形态。"
+    type: must_have
+    source_of_truth: "https://docs.github.com/en/copilot"
+    tags: [feature]
+  - id: copilot-vendor-github
+    claim: "GitHub Copilot 由 GitHub（微软旗下）开发。"
+    type: must_have
+    source_of_truth: "https://github.com/features/copilot"
+    tags: [ecosystem]
+  - id: copilot-agent-mode
+    claim: "Copilot 已引入 Agent 模式（自主多步编辑/终端执行）。"
+    type: must_have
+    source_of_truth: "https://code.visualstudio.com/docs/copilot/chat/agent-mode"
+    tags: [feature]
+  - id: copilot-coding-agent
+    claim: "Copilot 提供托管在 github.com 上的异步 coding agent（issue→PR）。"
+    type: must_have
+    source_of_truth: "https://github.blog/news-insights/product-news/github-copilot-coding-agent-in-public-preview/"
+    tags: [feature]
+  - id: copilot-multi-model
+    claim: "Copilot 支持多模型选择（OpenAI/Anthropic/Google 等多家模型）。"
+    type: must_have
+    source_of_truth: "https://docs.github.com/en/copilot/ai-models"
+    tags: [performance]
+  - id: copilot-mcp-support
+    claim: "Copilot 支持 MCP（Model Context Protocol）。"
+    type: must_have
+    source_of_truth: "https://docs.github.com/en/copilot/customizing-copilot/extending-copilot-chat-with-mcp"
+    tags: [feature]
+  - id: copilot-code-review
+    claim: "Copilot 提供 AI 代码审查能力（Copilot code review）。"
+    type: must_have
+    source_of_truth: "https://docs.github.com/en/copilot/about-copilot/code-review"
+    tags: [feature]
+  - id: copilot-cli
+    claim: "Copilot 提供 GitHub Copilot CLI 终端形态。"
+    type: must_have
+    source_of_truth: "https://docs.github.com/en/copilot/github-copilot-in-the-cli"
+    tags: [feature]
+  - id: copilot-trap-openai-only
+    claim: "Copilot 只能使用 OpenAI 的模型、不支持其他厂商模型。"
+    type: trap
+    source_of_truth: "官方多模型选择文档"
+    tags: [performance]
+  - id: copilot-trap-anthropic-acquisition
+    claim: "GitHub Copilot 于 2026 年被 Anthropic 收购。"
+    type: trap
+    source_of_truth: "官方无此事件（GitHub/微软所有）"
+    tags: [ownership]
+  # ── Copilot：定价 ──
+  - id: copilot-pricing-free-tier
+    claim: "Copilot 提供免费档（Copilot Free，限量）。"
+    type: must_have
+    source_of_truth: "https://github.com/features/copilot/plans"
+    tags: [pricing]
+  - id: copilot-pricing-pro-10
+    claim: "Copilot Pro 个人档定价约 $10/月。"
+    type: must_have
+    source_of_truth: "https://github.com/features/copilot/plans"
+    tags: [pricing]
+  - id: copilot-pricing-pro-plus
+    claim: "Copilot 设有更高用量的 Pro+ 档（约 $39/月）。"
+    type: must_have
+    source_of_truth: "https://github.com/features/copilot/plans"
+    tags: [pricing]
+  - id: copilot-pricing-business-enterprise
+    claim: "Copilot 面向组织提供 Business/Enterprise 按席位档。"
+    type: must_have
+    source_of_truth: "https://github.com/features/copilot/plans"
+    tags: [pricing]
+  - id: copilot-trap-price-200
+    claim: "Copilot Pro 定价为 $200/月。"
+    type: trap
+    source_of_truth: "$200/月量级是 Claude Max/Cursor Ultra 的价位，非 Copilot Pro"
+    tags: [pricing]
+  # ── 对比综合 ──
+  - id: compare-different-anchors
+    claim: "两者产品锚点不同：Claude Code 偏终端 Agent 工作流，Copilot 偏 IDE 内嵌与 GitHub 生态。"
+    type: must_have
+    source_of_truth: "双方官方文档形态对比"
+    tags: [feature]
+  - id: compare-pricing-gap
+    claim: "个人档价位差异明显：Copilot Pro（$10）显著低于 Claude Code 的高强度使用成本（Max 档）。"
+    type: must_have
+    source_of_truth: "双方官方 pricing 页"
+    tags: [pricing]
+  - id: compare-trap-same-vendor
+    claim: "Claude Code 与 Copilot 出自同一家公司。"
+    type: trap
+    source_of_truth: "Anthropic vs GitHub（微软）——两家不同公司"
+    tags: [ecosystem]
+  - id: compare-trap-identical-features
+    claim: "两者功能完全同质、无差异化定位。"
+    type: trap
+    source_of_truth: "产品形态/生态/计费均有显著差异"
+    tags: [feature]

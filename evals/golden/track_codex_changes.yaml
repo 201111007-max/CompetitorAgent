@@ -1,0 +1,161 @@
+# 黄金断言集 —— 任务 3：追踪 OpenAI Codex 价格/版本变化（设计文档 76 §2.1）
+# ⚠ 状态：opencode 草拟初稿（2026-09-09），待用户逐条核实后回填 verified_date（doc 76 §2.1）。
+# 本任务 trap 密度最高（版本/价格类易过时信息陷阱）。
+task: "追踪 OpenAI Codex 价格/版本变化"
+task_id: track_codex_changes
+verified_date: ""
+assertions:
+  # ── 版本/时间线（must_have） ──
+  - id: codex-relaunch-2025
+    claim: "OpenAI 于 2025 年以 agentic coding 工具形态重新推出 Codex（云端软件工程代理）。"
+    type: must_have
+    source_of_truth: "https://openai.com/index/introducing-codex/"
+    tags: [roadmap]
+  - id: codex-cli-open-source
+    claim: "Codex CLI 是开源的（openai/codex 仓库）。"
+    type: must_have
+    source_of_truth: "https://github.com/openai/codex"
+    tags: [feature]
+  - id: codex-cli-rust-rewrite
+    claim: "Codex CLI 以 Rust 重写（早期为 TypeScript 原型）。"
+    type: must_have
+    source_of_truth: "https://github.com/openai/codex"
+    tags: [feature]
+  - id: codex-model-codex-1
+    claim: "初版 Codex 由 codex-1 模型驱动（o3 衍生优化）。"
+    type: must_have
+    source_of_truth: "https://openai.com/index/introducing-codex/"
+    tags: [performance]
+  - id: codex-model-gpt5-codex
+    claim: "2025 年 9 月 OpenAI 发布 GPT-5-Codex（agentic coding 专用模型）并逐步替代 codex-1。"
+    type: must_have
+    source_of_truth: "https://openai.com/index/gpt-5-codex/"
+    tags: [roadmap]
+  - id: codex-cloud-sandbox
+    claim: "Codex 云端代理在隔离沙箱中运行任务（可读仓库/执行命令/跑测试）。"
+    type: must_have
+    source_of_truth: "https://openai.com/index/introducing-codex/"
+    tags: [feature]
+  - id: codex-pr-tasks
+    claim: "Codex 的典型产出是可审查的 diff/PR（与环境隔离并行多任务）。"
+    type: must_have
+    source_of_truth: "官方产品页"
+    tags: [feature]
+  - id: codex-ide-extension
+    claim: "Codex 提供 IDE 扩展形态（VS Code 等）。"
+    type: must_have
+    source_of_truth: "https://help.openai.com/zh-cn/articles/11369540"
+    tags: [feature]
+  - id: codex-cli-local-tasks
+    claim: "Codex CLI 可在本地终端运行任务（带沙箱/审批安全模式）。"
+    type: must_have
+    source_of_truth: "https://github.com/openai/codex README"
+    tags: [feature]
+  - id: codex-chatgpt-integration
+    claim: "Codex 已并入 ChatGPT 客户端（桌面/网页端可直接使用）。"
+    type: must_have
+    source_of_truth: "官方 changelog"
+    tags: [roadmap]
+  # ── 定价（must_have） ──
+  - id: codex-pricing-bundled-chatgpt
+    claim: "Codex 面向 ChatGPT 订阅用户（Plus/Pro/Team/Enterprise）提供，不单独售卖许可证。"
+    type: must_have
+    source_of_truth: "https://help.openai.com/zh-cn/articles/11369540"
+    tags: [pricing]
+  - id: codex-pricing-plus-20
+    claim: "ChatGPT Plus（约 $20/月）即可使用 Codex（带用量上限）。"
+    type: must_have
+    source_of_truth: "官方 pricing/help 文档"
+    tags: [pricing]
+  - id: codex-pricing-pro-200
+    claim: "ChatGPT Pro（约 $200/月）提供更高的 Codex 用量上限。"
+    type: must_have
+    source_of_truth: "官方 pricing/help 文档"
+    tags: [pricing]
+  - id: codex-pricing-api-credits
+    claim: "Codex CLI 亦可用 API Key 按量计费（credits 方式）。"
+    type: must_have
+    source_of_truth: "https://github.com/openai/codex README"
+    tags: [pricing]
+  - id: codex-pricing-rate-limits
+    claim: "Codex 按订阅档位设用量/速率上限，超限需等待重置或升级档位。"
+    type: must_have
+    source_of_truth: "官方 help 文档"
+    tags: [pricing]
+  # ── 版本陷阱（trap，密度最高） ──
+  - id: codex-trap-2021-deprecated
+    claim: "现役 Codex 就是 2021 年的代码补全模型（已弃用）。"
+    type: trap
+    source_of_truth: "2021 Codex API 已弃用；2025 起 Codex 是全新 agentic 产品线"
+    tags: [roadmap]
+  - id: codex-trap-discontinued
+    claim: "Codex 产品线已停止维护/下线。"
+    type: trap
+    source_of_truth: "产品持续迭代（官方 changelog）"
+    tags: [roadmap]
+  - id: codex-trap-node-only
+    claim: "Codex CLI 只能以 Node.js 运行。"
+    type: trap
+    source_of_truth: "现行 CLI 为 Rust 实现（多平台二进制）"
+    tags: [feature]
+  - id: codex-trap-per-request-fee
+    claim: "Codex 按每次任务 $10 单独收费。"
+    type: trap
+    source_of_truth: "订阅捆绑 + API 按量计费，无按次 $10 定价"
+    tags: [pricing]
+  - id: codex-trap-merged-copilot
+    claim: "Codex 已并入 GitHub Copilot。"
+    type: trap
+    source_of_truth: "Codex 是 OpenAI 产品，与 GitHub Copilot 无归属关系"
+    tags: [ecosystem]
+  - id: codex-trap-codex1-latest
+    claim: "codex-1 仍是 Codex 当前最新的驱动模型。"
+    type: trap
+    source_of_truth: "GPT-5-Codex 已发布并逐步替代（2025-09）"
+    tags: [roadmap]
+  - id: codex-trap-price-2-per-month
+    claim: "Codex 的订阅价格是 $2/月。"
+    type: trap
+    source_of_truth: "随 ChatGPT 订阅（Plus $20/Pro $200 量级）"
+    tags: [pricing]
+  - id: codex-trap-closed-cli
+    claim: "Codex CLI 是闭源商业软件。"
+    type: trap
+    source_of_truth: "openai/codex 仓库开源（Apache-2.0）"
+    tags: [feature]
+  - id: codex-trap-free-unlimited
+    claim: "Codex 对所有用户免费且无用量限制。"
+    type: trap
+    source_of_truth: "需订阅且设用量上限"
+    tags: [pricing]
+  # ── 追踪综合（must_have） ──
+  - id: codex-track-version-pipeline
+    claim: "Codex 的模型线保持快速迭代（codex-1 → GPT-5-Codex 量级的版本演进可被时间线记录）。"
+    type: must_have
+    source_of_truth: "官方发布记录"
+    tags: [roadmap]
+  - id: codex-track-enterprise
+    claim: "Codex 面向企业/团队场景扩展（Team/Enterprise 档与管理能力）。"
+    type: must_have
+    source_of_truth: "官方公告"
+    tags: [roadmap]
+  - id: codex-track-swebench-reported
+    claim: "OpenAI 发布过 Codex 系列模型在 SWE-bench Verified 上的自报通过率。"
+    type: must_have
+    source_of_truth: "官方 blog（vendor_self_reported，需 provenance 打标）"
+    tags: [performance]
+  - id: codex-trap-swebench-100
+    claim: "Codex 在 SWE-bench Verified 上通过率 100%。"
+    type: trap
+    source_of_truth: "自报/第三方数据均无此结论"
+    tags: [performance]
+  - id: codex-trap-price-drop-2026
+    claim: "OpenAI 于 2026 年将 Codex 独立定价为 $5/月。"
+    type: trap
+    source_of_truth: "无此定价事件（截至草拟日公开信息）"
+    tags: [pricing]
+  - id: codex-trap-openai-microsoft
+    claim: "Codex 是微软开发的编程助手。"
+    type: trap
+    source_of_truth: "Codex 由 OpenAI 开发（微软是投资方而非该产品归属方）"
+    tags: [ecosystem]

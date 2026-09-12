@@ -46,6 +46,17 @@ _HEADER_ALIASES: dict[str, str] = {
     "updated": "date",
     "last updated": "date",
     "timestamp": "date",
+    # 跑分口径 provenance 列（设计文档 80）：解析不到留空——留空即诚实，不编造
+    "scaffold": "scaffold_version",
+    "scaffold version": "scaffold_version",
+    "scaffold/harness": "scaffold_version",
+    "harness": "scaffold_version",
+    "harness version": "scaffold_version",
+    "agent scaffold": "scaffold_version",
+    "model version": "model_version",
+    "model_version": "model_version",
+    "version": "model_version",
+    "ver": "model_version",
 }
 
 
@@ -55,7 +66,11 @@ class BenchmarkError(RuntimeError):
 
 @dataclass
 class BenchmarkHit:
-    """一条榜单记录（结构化数字，替代 LLM 读网页解析）"""
+    """一条榜单记录（结构化数字，替代 LLM 读网页解析）
+
+    provenance（设计文档 80）：source_type 区分厂商自报 vs 第三方实测；scaffold/model
+    版本从榜单表头解析（解析不到留空）；采集时间由既有 ``fetched_at`` 承担（collected_at 语义）。
+    """
 
     benchmark: str  # swe-bench / terminal-bench / aider
     rank: str
@@ -64,6 +79,11 @@ class BenchmarkHit:
     date: str
     source_url: str
     fetched_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    # 跑分口径 provenance（设计文档 80，全部带默认值向后兼容）
+    source_type: str = "third_party"  # vendor_self_reported | third_party
+    provider_name: str = ""  # swebench / terminalbench / aider / ...
+    scaffold_version: str = ""  # 榜单声明的 harness/scaffold 版本（解析不到留空）
+    model_version: str = ""  # 被测模型版本（与 model 名分离，空 = 未声明）
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -74,7 +94,23 @@ class BenchmarkHit:
             "date": self.date,
             "source_url": self.source_url,
             "fetched_at": self.fetched_at,
+            "source_type": self.source_type,
+            "provider_name": self.provider_name,
+            "scaffold_version": self.scaffold_version,
+            "model_version": self.model_version,
         }
+
+    def provenance_note(self) -> str:
+        """口径尾注（复用 domain_types 共享助手）。"""
+        from competitor_agent.domain_types.benchmark import provenance_note
+
+        return provenance_note(
+            source_type=self.source_type,
+            provider_name=self.provider_name,
+            scaffold_version=self.scaffold_version,
+            model_version=self.model_version,
+            collected_at=self.fetched_at,
+        )
 
 
 class BenchmarkSourceProvider(ABC):
@@ -101,11 +137,12 @@ def _parse_leaderboard_table(
     html: str,
     benchmark: str,
     source_url: str,
+    source_type: str = "third_party",
 ) -> list[BenchmarkHit]:
     """从榜单 HTML 解析 ``<table>`` 为 BenchmarkHit 列表。
 
-    表头别名映射字段（model/score/rank/date）；无表头或无可识别列 → 返回空
-    （不编造）。字段缺失容错：缺失列给空串。
+    表头别名映射字段（model/score/rank/date + provenance: scaffold_version/model_version）；
+    无表头或无可识别列 → 返回空（不编造）。字段缺失容错：缺失列给空串（口径留空即诚实）。
     """
     from bs4 import BeautifulSoup
 
@@ -131,6 +168,8 @@ def _parse_leaderboard_table(
             score = ""
             rank = ""
             date = ""
+            scaffold_version = ""
+            model_version = ""
             for i, cell in enumerate(cells):
                 field = col_map.get(i)
                 if field is None:
@@ -144,6 +183,10 @@ def _parse_leaderboard_table(
                     rank = value
                 elif field == "date":
                     date = value
+                elif field == "scaffold_version":
+                    scaffold_version = value
+                elif field == "model_version":
+                    model_version = value
             if not model and not score:
                 continue
             hits.append(
@@ -154,13 +197,21 @@ def _parse_leaderboard_table(
                     score=score,
                     date=date,
                     source_url=source_url,
+                    source_type=source_type,
+                    provider_name=benchmark,
+                    scaffold_version=scaffold_version,
+                    model_version=model_version,
                 )
             )
     return hits
 
 
 class TableBenchmarkProvider(BenchmarkSourceProvider):
-    """通用官方榜单 HTML 表提供方（可注入 client 供测试）。"""
+    """通用官方榜单 HTML 表提供方（可注入 client 供测试）。
+
+    ``source_type``：口径标注（设计文档 80）——官方第三方榜单默认 third_party；
+    未来厂商自报页 provider 只需传 vendor_self_reported（§2.3 预留接入位）。
+    """
 
     def __init__(
         self,
@@ -169,12 +220,14 @@ class TableBenchmarkProvider(BenchmarkSourceProvider):
         timeout: float = 20.0,
         user_agent: str = _DEFAULT_USER_AGENT,
         client: httpx.Client | None = None,
+        source_type: str = "third_party",
     ) -> None:
         self._benchmark = benchmark
         self._base_url = base_url
         self._timeout = timeout
         self._user_agent = user_agent
         self._client = client
+        self._source_type = source_type
 
     def fetch(self, benchmark: str) -> list[BenchmarkHit]:
         url = self._base_url or benchmark
@@ -188,7 +241,7 @@ class TableBenchmarkProvider(BenchmarkSourceProvider):
             raise BenchmarkError(f"榜单请求失败: {exc}") from exc
         if resp.status_code >= 400:
             raise BenchmarkError(f"榜单 HTTP {resp.status_code}: {resp.text[:200]}")
-        hits = _parse_leaderboard_table(resp.text, self._benchmark, url)
+        hits = _parse_leaderboard_table(resp.text, self._benchmark, url, source_type=self._source_type)
         if not hits:
             raise BenchmarkError("榜单页面无可解析的表行（数据可能已改版）")
         return hits

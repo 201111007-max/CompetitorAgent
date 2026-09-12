@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 from typing import NoReturn
 
 from competitor_agent.config.loader import AppConfig, load_config
@@ -451,6 +452,159 @@ def _run_trace(action: str, sid: str | None) -> int:
     return 0
 
 
+def _anchor_out_path(explicit: str | None) -> Path:
+    if explicit:
+        return Path(explicit)
+    return get_data_dir() / "anchors.jsonl"
+
+
+def _run_eval_anchor(args: argparse.Namespace) -> int:
+    """eval-anchor：人工锚点盲评打分（设计文档 83 §4.4）。
+
+    盲评脱敏（display=内容短 hash；``--no-blind`` 关闭后展示真实文件名且保持池顺序）/ 顺序确定性随机 /
+    已打分排除 / 重测盲态混入 / 理由必填 + 分数域校验（validate_entry）——
+    公平性机制全部由工具强制（doc 83 §4.3）。
+    """
+    import random as _random
+    from datetime import datetime, timezone
+
+    from competitor_agent.evaluation.anchor import (
+        anchor_stats,
+        append_anchor,
+        collect_pool,
+        load_scored_hashes,
+        validate_entry,
+    )
+
+    pool_dir = Path(args.pool)
+    if not pool_dir.is_dir():
+        print(f"报告池目录不存在: {pool_dir}")
+        return 1
+    out = _anchor_out_path(args.out)
+    pool = sorted([*pool_dir.glob("*.md"), *pool_dir.glob("*.json")])
+    seed = args.seed if args.seed is not None else _random.randrange(2**31)
+    items = collect_pool(
+        pool,
+        scored_hashes=load_scored_hashes(out),
+        retest_rate=max(0.0, args.retest_rate),
+        seed=seed,
+        blind=getattr(args, "blind", True),
+    )
+    retests = sum(1 for it in items if it.is_retest)
+    if not items:
+        print("（待打分池为空：目录无报告，或全部已打分且无重测混入）")
+        return 0
+    session_id = f"anchor-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
+    print(f"锚点评分 session={session_id} 共 {len(items)} 份（含盲态重测 {retests} 份）→ {out}")
+    print("评分锚点（doc 83 §4.2）：1=纯罗列 2=单维常识 3=单维推断有据 4=跨维度综合 5=反直觉/可操作建议")
+    print("（s=跳过当前份，q=退出；已记录条目即时落盘）")
+    done = 0
+    for idx, it in enumerate(items, 1):
+        body = it.path.read_text(encoding="utf-8", errors="replace").lstrip("\ufeff")
+        print(f"\n===== [{idx}/{len(items)}] {it.display} =====")
+        print(body[:20000])
+        if len(body) > 20000:
+            print("…（正文过长已截断）")
+        while True:
+            try:
+                raw = input("分数 1-5: ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                print(f"\n（已中断；本 session 记录 {done} 条）")
+                return 0
+            if raw == "q":
+                print(f"（退出；本 session 记录 {done} 条）")
+                return 0
+            if raw == "s":
+                print("（跳过）")
+                break
+            if not raw.isdigit() or not 1 <= int(raw) <= 5:
+                print("[X] 请输入 1~5 的整数")
+                continue
+            try:
+                reason = input("理由（必填）: ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print(f"\n（已中断；本 session 记录 {done} 条）")
+                return 0
+            error = validate_entry(int(raw), reason)
+            if error:
+                print(f"[X] {error}")
+                continue
+            append_anchor(
+                out,
+                {
+                    "report_hash": it.hash,
+                    "score": int(raw),
+                    "reason": reason,
+                    "scored_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                    "session_id": session_id,
+                    "is_retest": it.is_retest,
+                },
+            )
+            done += 1
+            print("[OK] 已记录")
+            break
+    stats = anchor_stats(out)
+    print(
+        f"\n完成 {done} 条；累计 n={stats['n']} 重测一致 {stats['retest_consistent']}/{stats['retest_pairs']}"
+    )
+    return 0
+
+
+def _run_eval_anchor_stats(args: argparse.Namespace) -> int:
+    """eval-anchor-stats：样本量 / 分分布 / 重测一致率 / 作废清单（doc 83 §4.4）。"""
+    from competitor_agent.evaluation.anchor import anchor_stats
+
+    out = _anchor_out_path(args.out)
+    stats = anchor_stats(out)
+    print(f"锚点文件: {out}")
+    print(f"样本量 n={stats['n']}（Spearman 校准要求 n≥10，较稳 n≥15）")
+    if stats["distribution"]:
+        dist = "  ".join(f"{k}分:{v}" for k, v in sorted(stats["distribution"].items()))
+        print(f"分分布: {dist}")
+    pairs = stats["retest_pairs"]
+    if pairs:
+        rate = stats["retest_consistent"] / pairs
+        print(f"重测一致率: {stats['retest_consistent']}/{pairs} = {rate:.0%}（分差>1 两次分数均作废重评）")
+    if stats["retest_invalidated"]:
+        print(f"作废报告 hash: {', '.join(stats['retest_invalidated'])}")
+    return 0
+
+
+def _run_eval_diff(args: argparse.Namespace) -> int:
+    """eval-diff：对比两版评测指标快照，输出逐指标 ± Δ 表（设计文档 76 §2.4）。"""
+    from competitor_agent.evaluation.history import diff
+
+    path = Path(args.history) if args.history else None
+    try:
+        print(diff(args.from_rev, args.to_rev, path))
+    except ValueError as exc:
+        print(str(exc))
+        return 1
+    return 0
+
+
+def _run_dossier(args: argparse.Namespace) -> int:
+    """dossier：单竞品档案导出（设计文档 82）——纯本地聚合，无需构造 API/LLM。"""
+    from competitor_agent.core.dossier import DossierBuilder
+    from competitor_agent.core.report_archiver import resolve_output_dir
+
+    builder = DossierBuilder(
+        reports_dir=args.reports_dir or resolve_output_dir(None),
+        data_dir=args.data_dir or get_data_dir(),
+    )
+    dossier = builder.build(args.competitor, window_days=args.window_days)
+    if not dossier.reports and dossier.total_changes == 0:
+        print(f"（{args.competitor} 无历史报告与变化事件——仍输出空态档案，不编造）")
+    md_path, json_path = builder.write(dossier)
+    print(
+        f"档案已导出: {md_path}\n"
+        f"结构化 JSON: {json_path}\n"
+        f"覆盖 {len(dossier.reports)} 份报告 / {dossier.total_changes} 条变化事件 / "
+        f"证据 {len(dossier.evidence_index)} 条"
+    )
+    return 0
+
+
 def _run_help(args: str) -> None:
     from competitor_agent.core.command_registry import COMMAND_REGISTRY
 
@@ -573,12 +727,43 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark_p.add_argument("--tag", default=None, help="按 tag 过滤用例子集（如 normal）控制成本")
     benchmark_p.add_argument("--cost-limit", type=float, default=None, dest="cost_limit", help="真实评测成本护栏上限（美元），缺省 real 模式 $1.0")
     benchmark_p.add_argument("--engine", choices=["react", "langgraph", "both"], default=None, help="编排引擎对照（设计文档 51）：both=双引擎顺序跑并落盘对比表")
+    benchmark_p.add_argument("--snapshot", action="store_true", help="跑完写带 commit hash 的指标快照到 evals/history.jsonl（设计文档 76 §2.4，配合 eval-diff）")
 
     sub.add_parser("rag-warmup", help="预缓存向量嵌入模型并打印向量层状态（设计文档 52 M2；唯一触网路径，需显式执行）")
 
     trace_p = sub.add_parser("trace", help="查看链路追踪（设计文档 54）：list=最近 trace 列表；show <sid>=文本瀑布图")
     trace_p.add_argument("action", nargs="?", choices=["list", "show"], default="list")
     trace_p.add_argument("sid", nargs="?", default=None, help="trace_id（通常即 session_id）")
+
+    anchor_p = sub.add_parser(
+        "eval-anchor",
+        help="人工锚点盲评打分（设计文档 83 §4.4）：hash 脱敏 + 随机顺序 + 理由必填 + 重测盲态混入",
+    )
+    anchor_p.add_argument("--pool", required=True, help="待打分报告池目录（*.md/*.json，自动排除已打分）")
+    anchor_p.add_argument("--out", default=None, help="锚点 jsonl 路径（缺省 <data_dir>/anchors.jsonl）")
+    anchor_p.add_argument("--no-blind", dest="blind", action="store_false", help="关闭盲评（默认开）")
+    anchor_p.add_argument("--retest-rate", type=float, default=0.2, help="从已打分池抽回重测比例（默认 0.2）")
+    anchor_p.add_argument("--seed", type=int, default=None, help="洗牌种子（缺省随机）")
+
+    anchor_stats_p = sub.add_parser(
+        "eval-anchor-stats", help="锚点统计：样本量/分分布/重测一致率/作废清单（设计文档 83 §4.4）"
+    )
+    anchor_stats_p.add_argument("--out", default=None, help="锚点 jsonl 路径（与 eval-anchor --out 一致）")
+
+    diff_p = sub.add_parser(
+        "eval-diff", help="对比两版评测指标快照（设计文档 76 §2.4）：commit 短 hash 或 latest/N"
+    )
+    diff_p.add_argument("from_rev", help="起始版本（commit 短 hash / latest / latest/N）")
+    diff_p.add_argument("to_rev", nargs="?", default="latest", help="目标版本（缺省 latest）")
+    diff_p.add_argument("--history", default=None, help="history.jsonl 路径（缺省 evals/history.jsonl）")
+
+    dossier_p = sub.add_parser(
+        "dossier", help="单竞品档案导出（设计文档 82）：置信度演进/变化曲线/证据索引，纯本地聚合"
+    )
+    dossier_p.add_argument("--competitor", required=True, help="竞品规范名")
+    dossier_p.add_argument("--window-days", type=int, default=None, help="事件时间窗（天）；缺省全历史")
+    dossier_p.add_argument("--reports-dir", default=None, help="报告归档目录（缺省按 config/report 设置解析）")
+    dossier_p.add_argument("--data-dir", default=None, help="数据根目录（缺省 <data_dir>）")
     return parser
 
 
@@ -600,6 +785,17 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "trace":
         # 链路追踪查看纯本地读 JSONL，无需构造 API/LLM（截图展示用）
         return _run_trace(args.action or "list", args.sid)
+    if args.command == "eval-anchor":
+        # 人工锚点盲评打分纯本地文件操作，无需构造 API/LLM（设计文档 83 §4.4）
+        return _run_eval_anchor(args)
+    if args.command == "eval-anchor-stats":
+        return _run_eval_anchor_stats(args)
+    if args.command == "eval-diff":
+        # 快照对比纯本地读 JSONL，无需构造 API/LLM（设计文档 76 §2.4）
+        return _run_eval_diff(args)
+    if args.command == "dossier":
+        # 档案导出纯本地聚合，无需构造 API/LLM（设计文档 82）
+        return _run_dossier(args)
     api = _make_api(engine=engine)
     llm = _build_llm(load_config())
     use_llm = True
@@ -657,6 +853,8 @@ def main(argv: list[str] | None = None) -> int:
             parts += ["--cost-limit", str(args.cost_limit)]
         if args.engine:
             parts += ["--engine", args.engine]
+        if getattr(args, "snapshot", False):
+            parts += ["--snapshot"]
         _run_benchmark(" ".join(parts))
         return 0
 

@@ -12,6 +12,7 @@ M4 新增：analyze_stream()（流式 SSE）/ cancel() / resume() / get_history(
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import uuid
@@ -39,6 +40,7 @@ from competitor_agent.agent.review_tools import (
     build_validate_facts_tool,
     extract_verified_facts,
 )
+from competitor_agent.agent.stagnation import StagnationConfig
 from competitor_agent.agent.subagent_registry import (
     build_subagent,
     get_subagent_registry,
@@ -65,6 +67,7 @@ from competitor_agent.core.checkpoint import (
     set_cancel,
 )
 from competitor_agent.core.competitor_discoverer import CompetitorDiscoverer
+from competitor_agent.core.domain_pack import active_domain_pack
 from competitor_agent.core.input_sanitizer import sanitize_task
 from competitor_agent.core.report_builder import ReportBuilder
 from competitor_agent.core.report_exporter import (
@@ -196,8 +199,13 @@ class CompetitorAnalysisAPI:
         self._max_parallel_tool_calls = max_parallel_tool_calls
 
         self._extractor = extractor or WebExtractor()
+        # DomainPack（设计文档 79）：激活领域包——维度/权重/品类随 pack 注入装配层
+        self._domain_pack = active_domain_pack(cfg)
         # 新鲜度 TTL（设计文档 26）：build() 为报告计算 freshness 元数据
-        self._builder = ReportBuilder(dimension_ttl_days=cfg.freshness.dimension_ttl_days)
+        self._builder = ReportBuilder(
+            dimension_ttl_days=cfg.freshness.dimension_ttl_days,
+            dimension_weights=self._domain_pack.default_dimension_weights or None,
+        )
         self._budget = BudgetController(max_iterations=max_iterations)
         # 竞品时间线记忆（设计文档 26 §3.4）：跨分析 diff，独立于四层记忆
         self._timeline = timeline or TimelineMemory()
@@ -789,6 +797,13 @@ class CompetitorAnalysisAPI:
                 self.build_weekly_report()
             except Exception:
                 logger.warning("定时轮末尾周报聚合失败（不影响主流程）", exc_info=True)
+        if refreshed and self._config.schedule.refresh_dossiers:
+            # 设计文档 82 §2.3：调度轮末尾为当轮竞品刷新档案（默认关，防跟踪期磁盘膨胀）
+            for report in refreshed:
+                try:
+                    self.build_dossier(report.competitor.name)
+                except Exception:
+                    logger.warning("竞品档案刷新失败（不影响主流程）", exc_info=True)
         return refreshed
 
     def _build_alert_sink(self) -> AlertSink:
@@ -943,7 +958,7 @@ class CompetitorAnalysisAPI:
             config=self._config,
             web_extract=lambda url: self._web_extract_checked(url, lg_fetch_policy),
             exclude=("analyze_competitor",),
-            extra_tools={"make_plan": build_make_plan_tool()},
+            extra_tools={"make_plan": build_make_plan_tool(allowed_dimensions=self._domain_pack.dimension_names)},
             tracer=self._tracer,
         )
         base_prompt = ReactAgent(
@@ -954,7 +969,7 @@ class CompetitorAnalysisAPI:
         plan, answer, transcript = run_langgraph(
             task,
             llm=llm,
-            make_plan_fn=build_make_plan_tool(),
+            make_plan_fn=build_make_plan_tool(allowed_dimensions=self._domain_pack.dimension_names),
             subagent_run=_subagent_run,
             registry=get_subagent_registry(),
             event_sink=self._event_sink,
@@ -1059,7 +1074,7 @@ class CompetitorAnalysisAPI:
             tracer=self._tracer,  # 设计文档 54：跨线程 subagent span
         )
         extra_tools: dict[str, Callable[..., str] | ToolSpec] = {
-            "make_plan": build_make_plan_tool(),
+            "make_plan": build_make_plan_tool(allowed_dimensions=self._domain_pack.dimension_names),
             "delegate": make_delegate_tool(
                 runner,
                 registry=get_subagent_registry(),
@@ -1116,6 +1131,14 @@ class CompetitorAnalysisAPI:
             stream_sink=self._stream_sink,  # 设计文档 63 §5.5：仅 Lead（子 Agent 不传）
             final_as_payload=final_as_payload,  # 设计文档 64 §5.2：对话式分支 False
             history_messages=history_messages,  # 设计文档 65 §3.3：多轮会话历史
+            stagnation=StagnationConfig(  # 设计文档 81：停滞检测（自然收敛的客观信号）
+                enabled=self._config.agent.stagnation_enabled,
+                window=self._config.agent.stagnation_window,
+                dup_threshold=self._config.agent.stagnation_dup_threshold,
+                sig_repeat=self._config.agent.stagnation_sig_repeat,
+                max_hints=self._config.agent.stagnation_max_hints,
+                ignore_arg_keys=tuple(self._config.agent.stagnation_ignore_arg_keys),
+            ),
         )
         # 收尾 shutdown 用（挂 loop 实例而非 self，避免并行 analyze 互相误杀线程池）
         loop._delegate_runner = runner
@@ -1944,6 +1967,100 @@ class CompetitorAnalysisAPI:
     def continue_analysis(self, session_id: str) -> CompetitorReport:
         """恢复未完成的会话（对齐 hermes -c/--continue 语义）"""
         return self.resume(session_id)
+
+    def _latest_report_text(self, competitor: str) -> str:
+        """竞品最新归档报告正文（.md 优先，回退 JSON 内嵌 markdown_report）。"""
+        from competitor_agent.core.approval_gate import report_json_path
+        from competitor_agent.core.report_archiver import _safe_filename, resolve_output_dir
+
+        output_dir = self._config.report.output_dir
+        md_path = resolve_output_dir(output_dir) / (_safe_filename(competitor) + ".md")
+        if md_path.exists():
+            return md_path.read_text(encoding="utf-8")
+        json_path = report_json_path(competitor, output_dir)
+        if json_path.exists():
+            try:
+                data = json.loads(json_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                data = {}
+            if isinstance(data, dict) and data.get("markdown_report"):
+                return str(data["markdown_report"])
+        return ""
+
+    def verify_report(self, competitor: str, mode: str | None = None) -> Any:
+        """报告级 NLI 事实校验（设计文档 77 §2.3 产品侧挂点，门面薄路由）。
+
+        对竞品最新归档报告跑 ``NLIVerifier.verify_report``；``verifier.enabled``
+        或审批策略 ``verify_before_approve`` 开启时把结果接入审批门——
+        contradicted 条目进 rejected 理由、superseded 提示重新分析（reviewer_note）。
+        """
+        from competitor_agent.collector.fetch_policy import FetchPolicy
+        from competitor_agent.core.verifier import NLIVerifier
+
+        report_text = self._latest_report_text(competitor)
+        if not report_text:
+            raise FileNotFoundError(f"竞品无归档报告可校验: {competitor}")
+        vcfg = self._config.verifier
+        mode = mode or vcfg.mode
+        verifier = NLIVerifier(
+            llm=self._llm or self._default_llm(),
+            retriever=self._retriever,
+            web_extract=self._react_web_extract,
+            fetch_policy=FetchPolicy(max_per_run=self._config.collector.fetch_max_per_run),
+            timeline=self._timeline,
+            alert_sink=self._build_alert_sink() if vcfg.enabled else None,
+            ingester=self._ingester,
+            max_claims=vcfg.max_claims_per_report,
+            auto_ingest_superseded=vcfg.auto_ingest_superseded,
+        )
+        verification = verifier.verify_report(report_text, competitor, mode=mode)
+        enforce = vcfg.enabled or self._approval_policy.verify_before_approve
+        if enforce:
+            self._apply_verification_to_approval(competitor, verification)
+        return verification
+
+    def _apply_verification_to_approval(self, competitor: str, verification: Any) -> None:
+        """校验结果接入审批门（设计文档 77 §2.3）：contradicted → rejected；
+        仅 superseded → 提示「报告含过期信息，建议重新分析」。"""
+        from competitor_agent.core.approval_gate import (
+            REJECTED,
+            report_json_path,
+            report_status,
+            set_report_status,
+        )
+
+        json_path = report_json_path(competitor, self._config.report.output_dir)
+        if not json_path.exists():
+            return
+        reasons = verification.contradicted_reasons()
+        current = report_status(json_path)
+        if reasons:
+            note = "NLI 校验发现 " + str(len(reasons)) + " 处矛盾（真幻觉）：" + "；".join(reasons[:5])
+            if current != REJECTED:
+                set_report_status(json_path, REJECTED, note)
+            return
+        if verification.n_superseded:
+            set_report_status(
+                json_path,
+                current,
+                "报告含过期信息（superseded " + str(verification.n_superseded) + " 条），建议重新分析",
+            )
+
+    def build_dossier(self, competitor: str, window_days: int | None = None) -> Any:
+        """单竞品档案导出（设计文档 82 §2.3 门面薄路由）：纯本地聚合零新采集。
+
+        返回 (md_path, json_path)；数据源 = 归档报告 + 时间线 + 知识库证据。
+        """
+        from competitor_agent.core.dossier import DossierBuilder
+
+        builder = DossierBuilder(
+            reports_dir=self._config.report.output_dir,
+            data_dir=self._timeline.data_dir,
+            timeline=self._timeline,
+            store=self._store,
+        )
+        dossier = builder.build(competitor, window_days=window_days)
+        return builder.write(dossier)
 
     def refresh_stale(
         self,

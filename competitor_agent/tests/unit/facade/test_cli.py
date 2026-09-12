@@ -89,6 +89,17 @@ class TestBuildParser:
         args = parser.parse_args(["benchmark"])
         assert args.command == "benchmark"
 
+    def test_eval_anchor_blind_default_on(self):
+        parser = build_parser()
+        args = parser.parse_args(["eval-anchor", "--pool", "reports/"])
+        assert args.command == "eval-anchor"
+        assert args.blind is True  # 盲评默认开（doc 83 §4.4）
+
+    def test_eval_anchor_no_blind_flag(self):
+        parser = build_parser()
+        args = parser.parse_args(["eval-anchor", "--pool", "reports/", "--no-blind"])
+        assert args.blind is False  # --no-blind 关闭盲评（展示真实文件名）
+
     def test_schedule_subcommand(self):
         parser = build_parser()
         args = parser.parse_args(["schedule", "--competitors", "cursor,copilot"])
@@ -325,3 +336,30 @@ class TestRepl:
             pass
         captured = capsys.readouterr()
         assert "竞品分析报告" in captured.out
+
+
+class TestEvalAnchorNoBlind:
+    """eval-anchor --no-blind 透传（doc 83 §4.4：关闭盲评=实名+不洗牌）。"""
+
+    def _run(self, monkeypatch, tmp_path, calls, extra):
+        def fake_collect_pool(pool, scored_hashes=None, retest_rate=0.0, seed=0, blind=True):
+            calls.append(blind)
+            return []
+
+        monkeypatch.setattr(
+            "competitor_agent.evaluation.anchor.collect_pool", fake_collect_pool
+        )
+        from competitor_agent.cli import main
+
+        argv = ["eval-anchor", "--pool", str(tmp_path), "--out", str(tmp_path / "a.jsonl"), *extra]
+        return main(argv)
+
+    def test_no_blind_flag_reaches_collect_pool(self, monkeypatch, tmp_path, capsys):
+        calls: list[bool] = []
+        assert self._run(monkeypatch, tmp_path, calls, ["--no-blind"]) == 0
+        assert calls == [False]
+
+    def test_default_blind_true(self, monkeypatch, tmp_path, capsys):
+        calls: list[bool] = []
+        assert self._run(monkeypatch, tmp_path, calls, []) == 0
+        assert calls == [True]

@@ -40,6 +40,8 @@ class ApprovalPolicy:
     review_price_change: bool = True  # 本周价格变动（时间线 price_change 事件）
     review_score_change: bool = True  # 榜单分数变化（score_change 事件）
     review_new_competitor: bool = True  # 新增竞品（无先前基线）
+    # 设计文档 77 §3：发布前 NLI 事实校验（verify_report 结果接入审批：contradicted → rejected）
+    verify_before_approve: bool = False
 
 
 def decide_approval(

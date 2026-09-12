@@ -10,7 +10,9 @@ class Competitor:
 
     name: str
     aliases: list[str] = field(default_factory=list)
-    category: str = "ai_coding_agent"
+    # 品类标签由激活 DomainPack 填充（设计文档 79 §2.2 L2 解耦）：注册表/discovery
+    # 构造时写入 pack.category_label；空串 = 未声明（不再硬编码 coding agent）
+    category: str = ""
     official_links: dict[str, str] = field(default_factory=dict)
     # 官网之外的结构化引用（设计文档 23）：如 {"github_repo": "getcursor/cursor",
     # "marketplace": "https://marketplace.visualstudio.com/items?itemName=..."}

@@ -46,9 +46,12 @@ class Alert:
     new_value: str = ""
     evidence_urls: list[str] = field(default_factory=list)
     occurred_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    # 设计文档 80 §2.2：告警级别——口径不完整的 score_change 降级 info（防「换模型版本」
+    # 被当成「竞品暴涨」制造告警疲劳）；既有路径默认 warn 行为不变
+    severity: str = "warn"  # warn | info
 
     def to_dict(self) -> dict[str, object]:
-        """推送载荷（Webhook/Email 通用）：竞品/kind/summary/old→new/证据/时间。"""
+        """推送载荷（Webhook/Email 通用）：竞品/kind/summary/old→new/证据/时间/级别。"""
         return {
             "competitor": self.competitor,
             "kind": self.kind,
@@ -57,6 +60,7 @@ class Alert:
             "new_value": self.new_value,
             "evidence_urls": list(self.evidence_urls),
             "occurred_at": self.occurred_at,
+            "severity": self.severity,
         }
 
 
@@ -70,7 +74,8 @@ class ConsoleAlertSink:
     """打印告警到控制台（CRON/脚本场景可视化）"""
 
     def emit(self, alert: Alert) -> None:
-        print(f"[alert:{alert.kind}] {alert.competitor}: {alert.summary}", flush=True)
+        level = "" if alert.severity == "warn" else f":{alert.severity}"
+        print(f"[alert{level}:{alert.kind}] {alert.competitor}: {alert.summary}", flush=True)
 
 
 class FileAlertSink:
@@ -92,8 +97,9 @@ class FileAlertSink:
         out_dir.mkdir(parents=True, exist_ok=True)
         date = str(alert.occurred_at)[:10]
         path = out_dir / f"{date}.md"
+        level = "" if alert.severity == "warn" else f" [{alert.severity}]"
         lines = [
-            f"- [{alert.kind}] **{alert.competitor}**: {alert.summary}",
+            f"- {level}[{alert.kind}] **{alert.competitor}**: {alert.summary}",
         ]
         if alert.old_value or alert.new_value:
             lines.append(f"  变化: {alert.old_value or '-'} → {alert.new_value or '-'}")
@@ -260,14 +266,33 @@ def report_diff(prev: object, cur: object) -> list[Alert]:
 
     无变化（或 prev 无基线）返回空列表。prev/cur 为 CompetitorReport 或
     duck-type（dimension_results / competitor.name），与 TimelineMemory.diff 一致。
+
+    设计文档 80 §2.2：score_change 告警在跑分口径不完整（缺 source_type/model_version）
+    时降级 info——分数变化可能只是换榜/换模型版本，非真实涨跌。
     """
+    from competitor_agent.domain_types.benchmark import first_benchmark_entry, provenance_complete
     from competitor_agent.memory.timeline_memory import TimelineMemory
 
     # prev/cur 为 duck-type（不限于 CompetitorReport）；cast Any 兼容 TimelineMemory.diff
     # 的严格签名（孤立文件跑 mypy 时 follow_imports=skip 会让 ignore 判定为"未使用"，
     # 全仓跑时又会报 arg-type——cast 在两种上下文都稳定）。
     events = TimelineMemory.diff(cast(Any, prev), cast(Any, cur))
-    return [_alert_from_event(e) for e in events]
+    perf_result = next(
+        (
+            r
+            for r in (getattr(cur, "dimension_results", []) or [])
+            if getattr(r, "dimension", "") == "performance"
+        ),
+        None,
+    )
+    perf_entry = first_benchmark_entry(getattr(perf_result, "details", None)) if perf_result else None
+    alerts: list[Alert] = []
+    for e in events:
+        alert = _alert_from_event(e)
+        if alert.kind == "score_change" and not provenance_complete(perf_entry):
+            alert.severity = "info"
+        alerts.append(alert)
+    return alerts
 
 
 __all__ = [

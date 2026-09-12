@@ -1,0 +1,128 @@
+# Domain Pack: coding_agent（设计文档 79 §2.1 第一实例）
+# 内容与下沉前的硬编码 dict / 注册表字面量**逐位等价**（现状等价改写 = 回归基线）。
+# 任何行为差异都是 bug 而非特性（doc 79 §6.2）。
+domain: coding_agent
+category_label: "ai_coding_agent"
+dimensions:
+  - name: pricing
+    description: "分析竞品定价：套餐档位、按量计费、月付/年付价格与成本场景估算。"
+    tools: [web_extract, web_search, analyze_pricing]
+    skills: [pricing_analysis, fact_verification, confidence_disclosure]
+    data_sources:
+      - name: official_pricing_page
+        notes: "定价页变动频繁，引用需带 as_of"
+  - name: feature
+    description: "分析竞品核心功能矩阵与特性。"
+    tools: [web_extract, web_search]
+    skills: [feature_analysis, fact_verification, confidence_disclosure]
+  - name: performance
+    description: "分析竞品性能：榜单、延迟、胜率等基准数据。"
+    tools: [web_extract, web_search, benchmark_scores]
+    skills: [performance_analysis, fact_verification, confidence_disclosure]
+    data_sources:
+      - name: benchmark_scores
+        notes: "官方榜单直连（doc 67/80）：引用须带 provenance 口径"
+  - name: ecosystem
+    description: "分析竞品生态：MCP server 数量、IDE/插件支持、GitHub 社区活跃度。"
+    tools: [web_extract, web_search, github_stars, github_releases, github_commits]
+    skills: [ecosystem_analysis, fact_verification, confidence_disclosure]
+  - name: sentiment
+    description: "分析竞品口碑：正负极性、社区评价。"
+    tools: [web_extract, web_search, sentiment_sampling]
+    skills: [sentiment_analysis, fact_verification, confidence_disclosure]
+    data_sources:
+      - name: sentiment_sampling
+        notes: "结构化采样带样本量/时间窗（doc 67 §2.2）"
+  - name: roadmap
+    description: "分析竞品路线图与版本发布节奏。"
+    tools: [web_extract, web_search, github_releases, github_commits]
+    skills: [roadmap_analysis, fact_verification, confidence_disclosure]
+registry_seeds:
+  - name: claude-code
+    aliases: [claude, claude code, anthropic claude code]
+    official_links:
+      home: "https://www.anthropic.com/claude-code"
+      docs: "https://docs.anthropic.com/en/docs/claude-code"
+      pricing: "https://www.anthropic.com/pricing"
+    external_refs:
+      github_repo: "anthropics/claude-code"
+  - name: cursor
+    aliases: [anysphere, cursor ai]
+    official_links:
+      home: "https://www.cursor.com"
+      pricing: "https://www.cursor.com/pricing"
+      docs: "https://docs.cursor.com"
+    external_refs:
+      github_repo: "getcursor/cursor"
+      marketplace: "https://marketplace.visualstudio.com/items?itemName=Anysphere.cursor"
+  - name: copilot
+    aliases: [github copilot]
+    official_links:
+      home: "https://github.com/features/copilot"
+      docs: "https://docs.github.com/en/copilot"
+      pricing: "https://github.com/pricing"
+  - name: codex
+    aliases: [openai codex]
+    official_links:
+      home: "https://openai.com/index/introducing-codex/"
+    external_refs:
+      github_repo: "openai/codex"
+  - name: windsurf
+    aliases: [windsurf ai, codeium]
+    official_links:
+      home: "https://windsurf.com"
+      pricing: "https://windsurf.com/pricing"
+    external_refs:
+      marketplace: "https://marketplace.visualstudio.com/items?itemName=Windsurf.windsurf"
+  - name: aider
+    aliases: [aider ai]
+    official_links:
+      home: "https://aider.chat"
+      docs: "https://aider.chat/docs/"
+    external_refs:
+      github_repo: "Aider-AI/aider"
+  - name: gemini-cli
+    aliases: [gemini cli]
+    official_links:
+      home: "https://github.com/google-gemini/gemini-cli"
+    external_refs:
+      github_repo: "google-gemini/gemini-cli"
+  - name: opencode
+    aliases: []
+    official_links:
+      home: "https://opencode.ai"
+    external_refs:
+      github_repo: "sst/opencode"
+  # ── 国内竞品（设计文档 83 §3，2026-09-08 web 核实回填）──────────────
+  - name: trae
+    aliases: [trae-ai, trae ide]
+    official_links:
+      home: "https://www.trae.ai"
+      pricing: "https://www.trae.ai/pricing"
+  - name: workbuddy
+    aliases: [tencent workbuddy, work-buddy]
+    official_links:
+      home: "https://www.workbuddy.ai"
+      docs: "https://www.codebuddy.cn/docs/workbuddy/Overview"
+  - name: zcode
+    aliases: [z-code, zcode agent, 智谱 z code]
+    official_links:
+      # 用户更正确认（2026-09-08）：独立产品页，非 z.ai 主站；检索限定词 zcode.z.ai
+      home: "https://zcode.z.ai/cn"
+      pricing: "https://docs.bigmodel.cn/cn/coding-plan/overview"
+  - name: kimi-kcode
+    aliases: [kimi kcode, kimi code, kimi k3 coding]
+    official_links:
+      home: "https://www.kimi.com"
+      docs: "https://platform.kimi.com/docs/guide"
+  - name: deepseek-harness
+    aliases: [deepseek harness]
+    official_links:
+      home: "https://www.deepseek.com/harness"
+default_dimension_weights:
+  pricing: 0.25
+  feature: 0.25
+  performance: 0.2
+  ecosystem: 0.1
+  sentiment: 0.1
+  roadmap: 0.1

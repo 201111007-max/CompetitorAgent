@@ -22,7 +22,8 @@ class TestCompetitor:
     def test_name_normalized(self):
         c = Competitor(name="Claude Code", aliases=["claude-code", "claude"])
         assert c.name == "claude-code"
-        assert c.category == "ai_coding_agent"
+        # 设计文档 79 L2：category 不再硬编码 coding agent，默认空串（由激活 pack 填充）
+        assert c.category == ""
         assert c.official_links == {}
 
     def test_aliases_and_links(self):

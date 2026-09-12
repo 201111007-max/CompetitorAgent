@@ -65,5 +65,6 @@ def benchmark_scores(benchmark: str = "") -> str:
     lines = [f"# {hits[0].benchmark} 榜单（来源: {hits[0].source_url}）"]
     for h in hits[:20]:
         rank = h.rank or "-"
-        lines.append(f"- #{rank} {h.model}: {h.score}（{h.date or '日期未知'}）")
+        # 设计文档 80：口径尾注强制携带（来源类型/scaffold/模型版本/采集时间；未声明显式标注）
+        lines.append(f"- #{rank} {h.model}: {h.score}（{h.date or '日期未知'}）{h.provenance_note()}")
     return "\n".join(lines)

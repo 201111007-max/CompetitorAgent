@@ -38,17 +38,20 @@ schedule:
 
 ## 3. 竞品注册（registry 扩充）
 
-新增 5 个国内竞品注册表条目（`core/competitor_registry.py`，doc 79 合入后随 `coding_agent.yaml::registry_seeds`）：
+新增 5 个国内竞品注册表条目（`core/competitor_registry.py`，doc 79 合入后随 `coding_agent.yaml::registry_seeds`）。**核实结论已回填（2026-09-08，来源：web 核实 + 用户补充情报）**：
 
-| 竞品 | 规范名 | 别名（建议） | 官网核实 |
-|------|--------|-------------|---------|
-| Trae（字节） | `trae` | trae-ai, trae ide | 实施时联网核实，登记 official_links |
-| WorkBuddy | `workbuddy` | work-buddy | 同上（⚠ 若查无可靠官网，回请用户补线索） |
-| 智谱 Z Code | `zcode` | z-code, zhipu code, 智谱清言代码 | 同上 |
-| Kimi Kcode（月之暗面） | `kimi-kcode` | kimi k2 coding, kimi for coding | 同上 |
-| DeepSeek Harness | `deepseek-harness` | deepseek coding harness | 同上（⚠ 产品形态待核实，可能为开源仓库主页） |
+| 竞品 | 规范名 | 别名（建议） | 官网核实结论 |
+|------|--------|-------------|-------------|
+| Trae（字节） | `trae` | trae-ai, trae ide | ✅ https://www.trae.ai（另有国内版 trae.cn）；定位 "AI Coding Engineer"（TraeCode）+ 办公（TraeWork） |
+| WorkBuddy（腾讯） | `workbuddy` | tencent workbuddy, work-buddy | ✅ https://www.workbuddy.ai（文档 codebuddy.cn/docs/workbuddy；2026-03-09 上线的全场景 AI 办公工作台，开放平台 open.workbuddy.cn） |
+| Z Code（智谱） | `zcode` | z-code, zhipu zcode, zcode agent | ✅ https://zcode.z.ai/cn（"GLM-5.3 官方 Harness"，氛围编程工具，macOS/Windows/Linux v3.11.2）；**检索限定词：`zcode.z.ai` 或 `智谱 Z Code`，裸搜 "Z Code" 全是噪声** |
+| Kimi Code（月之暗面） | `kimi-kcode` | kimi kcode, kimi code, kimi k3 coding | ✅ https://www.kimi.com（Kimi K3 上线；Kimi Code 桌面端：kimi.ai/products/download；API 平台 platform.kimi.com） |
+| DeepSeek Harness | `deepseek-harness` | deepseek harness | ✅ https://www.deepseek.com/harness（2026-08-27 developer preview，"Everything is a plugin"） |
 
-核实结论与链接**回填本文档 §3 表格**；查无官网者 entry 留 `official_links={}`（不编造，doc 47 纪律），依赖 DISCOVERY 联网路径补全。
+**随核实确认的时间线情报（供 doc 80/82/时间线种子）**：
+- Z Code 发布 2025-12-26（B 级来源）；**2026-06 转自研 ZCode Agent 内核、不再适配第三方 Agent**（重要时间线事件，首分析建档时应落 `version_release`/策略类事件）。
+- GLM Coding Plan 证据统一 A 级来源：`https://docs.bigmodel.cn/cn/coding-plan/overview`；定价 ¥118 / ¥538 / ¥1078 三档（ZCode 官网首页展示价 Lite/Pro/Max，**2026-09 采集，一年内已两次调价，强时效**——pricing 维度断言/报告引用必须带 as_of）。
+- 跑分 provenance 打标（doc 80 契约首个实战用例）：「Z Code vs Claude Code 通过率 +2.39%」→ `source_type=vendor_self_reported` + 自研 benchmark（Z.ai Code Bench），**风险等级最高**；「GLM-5.1 SWE-bench 77.8」→ **待核实**官方提交/第三方复测，采集时不得标注为 third_party。
 
 ## 4. 人工锚点评分章程（工单 3 真值来源）
 
@@ -80,12 +83,15 @@ schedule:
 
 ```
 python -m competitor_agent.cli eval-anchor          # 交互式打分
-  --pool <reports_dir>        # 待打分报告池（自动排除已打分）
-  --blind                     # 文件名 hash 化 + 随机顺序（默认开）
-  --out <data_dir>/anchors.jsonl   # {report_hash, score, reason, scored_at, session_id, is_retest}
-  --retest-rate 0.2           # 从上周已打分池抽 20% 混入本周（盲态重测）
-python -m competitor_agent.cli eval-anchor-stats    # 统计：样本量/重测一致率/分分布
+  --pool <reports_dir>        # 待打分报告池（*.md/*.json，自动排除已打分）
+  --no-blind                  # 关闭盲评（默认开：hash 化展示名 + 确定性随机顺序）
+  --out <data_dir>/anchors.jsonl   # {report_hash, score, reason, scored_at, session_id, is_retest}，缺省 <data_dir>/anchors.jsonl
+  --retest-rate 0.2           # 从已打分池抽 20% 混入本周（盲态重测）
+  --seed N                    # 洗牌种子（缺省随机，session 内固定）
+python -m competitor_agent.cli eval-anchor-stats    # 统计：样本量/分分布/重测一致率/作废清单
 ```
+
+> **实施说明（2026-09-09）**：`evaluation/anchor.py` 纯函数层（`report_hash` 内容短 hash 关联重测 / `collect_pool` 排除已打分+确定性洗牌+重测盲态混入 / `validate_entry` 理由必填+分数域 / `append_anchor`/`anchor_stats`/`load_scored_hashes`）+ CLI `eval-anchor`/`eval-anchor-stats` 两条子命令（main() 内 LLM/API 构造前短路）。20 个新单测（`test_registry_domains_83.py` 8 + `test_anchor.py` 12）；§6.2 注册表验收、§6.3 打分工具单测覆盖均达成。两周实跑与人工打分为运营规程（§1/§4.1~§4.3/§5），待用户执行；Judge 校准（Spearman）依赖本工具产出的锚点集，随 doc 76 评测体系实施。
 
 两周结束后：LLM Judge（rubric 同表注入）对全部报告打分 → `judge_scores.jsonl` → Spearman 计算（`evaluation/golden.py` 或独立 `evals/judge_calibration.py`）→ 结果与散点图进 README（工单 11）。
 

@@ -24,25 +24,43 @@ def _skills_dir() -> Path:
 
 
 class SkillLoader:
-    """从 skills/*.md（YAML frontmatter + 正文）加载技能，按文件名 stem 索引。"""
+    """从 skills/*.md（YAML frontmatter + 正文）加载技能，按文件名 stem 索引。
+
+    设计文档 79 L4：额外扫描 pack 目录 ``skills/domains/<active_pack>/``——
+    领域专属 skill 随 pack 提供；主目录同名优先（覆写），pack 目录缺失静默跳过。
+    """
 
     def __init__(self, skills_dir: Path | str | None = None) -> None:
         self.skills_dir = Path(skills_dir) if skills_dir is not None else _skills_dir()
         self.skills: dict[str, dict[str, str | dict[str, str]]] = {}
         self.reload()
 
+    def _pack_dirs(self) -> list[Path]:
+        """激活 DomainPack 的技能目录（按优先级：主目录之后叠加扫描）。"""
+        try:
+            from competitor_agent.core.domain_pack import active_pack_name
+
+            pack = active_pack_name()
+        except Exception:  # noqa: BLE001 — pack 名解析失败 → 无 pack 目录
+            return []
+        if not pack:
+            return []
+        d = self.skills_dir / "domains" / pack
+        return [d] if d.is_dir() else []
+
     def reload(self) -> None:
-        """重读目录下所有 *.md（缺目录/读失败静默跳过）。"""
+        """重读目录下所有 *.md（缺目录/读失败静默跳过）；主目录后叠加 pack 目录。"""
         self.skills = {}
-        if not self.skills_dir.exists():
-            return
-        for path in sorted(self.skills_dir.glob("*.md")):
-            try:
-                text = path.read_text(encoding="utf-8")
-            except OSError:
+        for directory in [self.skills_dir, *self._pack_dirs()]:
+            if not directory.exists():
                 continue
-            meta, body = self._parse_frontmatter(text)
-            self.skills[path.stem] = {"meta": meta, "body": body}
+            for path in sorted(directory.glob("*.md")):
+                try:
+                    text = path.read_text(encoding="utf-8")
+                except OSError:
+                    continue
+                meta, body = self._parse_frontmatter(text)
+                self.skills[path.stem] = {"meta": meta, "body": body}
 
     @staticmethod
     def _parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
@@ -101,6 +119,12 @@ class SkillLoader:
 
 
 _loader: SkillLoader | None = None
+
+
+def reset_skill_loader() -> None:
+    """清空模块级缓存（设计文档 79：切 DomainPack 后调用，下次 get 重建含 pack 目录）。"""
+    global _loader
+    _loader = None
 
 
 def get_skill_loader(skills_dir: Path | str | None = None) -> SkillLoader:

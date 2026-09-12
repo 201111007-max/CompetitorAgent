@@ -1,5 +1,12 @@
 # 设计文档 81 —— 第三十一轮：ADR——自然收敛策略的停滞检测补充（工单 10）
 
+> **实施说明（2026-09-09，ADR + 实现全落地）**：
+> ① **ADR 决策维持**：`max_steps=None` 自然收敛保留为主路径（doc 62 语境不变），停滞检测为注入式客观信号、不强制截断（截断权留给用户取消与预算）——本文档即决策记录。
+> ② **检测器**（新 `agent/stagnation.py`）：`StagnationDetector`（窗口最近 N 步）——`signature=(tool, 规范化 args)`（ignore_arg_keys 剔除时间戳/nonce 噪声）重复 ≥3 或 结果 tokenize jaccard 均值 >0.85 连续 2 轮 → 触发；提示**最多 2 次**（第 2 次为警示文案），此后静默。**偏差**：提示只含统计证据（签名计数/重复率）不含工具结果原文——无不可信内容可包，比设计的 wrap_untrusted 包裹更收敛。
+> ③ **接线**：`ReactAgent._run_native` 回合末统计 + system 提示注入消息流末尾（下一轮 LLM 可见；检测失败不阻塞循环）；`ReactLoop` 构造 `stagnation=StagnationConfig`（每 run 独立实例防状态泄漏）+ on_hint → `progress` 事件（phase=stagnation，可观测不截断）；`api._react_loop` 从 `config.agent.stagnation_*` 装配（6 个可配字段 + enabled 开关，默认开启）。
+> ④ **配置**：`AgentConfig.stagnation_{enabled,window,dup_threshold,sig_repeat,max_hints,ignore_arg_keys}`（review_config.yaml agent 段可覆盖）。
+> ⑤ **测试**：`test_stagnation_81.py` 9——签名重复/重复率连续 2 轮/**分页不误触**/ignore_arg_keys/提示上限 2 次+警示文案/disabled/ReactLoop 注入+progress 事件+上限/预算耗尽 → partial（评测用例：IterationBudget(max_iterations=2) → budget_exhausted → assemble partial + 终态标注 + gaps_pending 可审计——**偏差**：评测用例入 test 组而非 benchmark gate fixture，保门禁口径稳定，行为由测试保证）。回归：tests/unit/agent 207 + tests/unit/facade 204 + benchmark gate 13 + 并发压测 5 全绿（检测器默认开启下 mock 门禁数字逐位不变）。
+
 > 形态：**ADR（架构决策记录）**，叙事为「演进而非推翻」——`max_steps=None` 是 doc 62 写进代码注释的刻意决策（「移除迭代次数限制，靠 LLM 自然收敛 Final Answer；防失控退化为子 Agent 各自的 max_steps 兜底 + 硬性安全护栏」），本决策不推翻它，而是补充一个**客观收敛信号**。
 >
 > 本文档为**设计**（不实现）。

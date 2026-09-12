@@ -95,8 +95,18 @@ def _summarize_change(dim: str, prev: dict[str, Any], cur: dict[str, Any]) -> st
     p = " ".join(str(prev.get("summary") or prev.get("details") or "").split())[:60]
     c = " ".join(str(cur.get("summary") or cur.get("details") or "").split())[:60]
     if p == c:
-        return f"{dim} 发生变化（{_iso_short(cur.get('timestamp', ''))}）"
-    return f"{dim}: {p} → {c}"
+        summary = f"{dim} 发生变化（{_iso_short(cur.get('timestamp', ''))}）"
+    else:
+        summary = f"{dim}: {p} → {c}"
+    # 设计文档 80 §2.2：score_change 事件强制携带跑分口径尾注（无口径显式「口径未声明」）
+    if dim == "performance":
+        from competitor_agent.domain_types.benchmark import (
+            first_benchmark_entry,
+            provenance_note_from_entry,
+        )
+
+        summary += provenance_note_from_entry(first_benchmark_entry(cur.get("details")))
+    return summary
 
 
 def _iso_short(value: str) -> str:

@@ -1,0 +1,65 @@
+# Domain Pack: saas_pm（设计文档 79 §2.1 第二实例：SaaS 项目管理工具）
+# 验收硬指标（doc 79 §4.2/§4.3）：换本 pack 后全链路（注册表/维度/数据源/品类）
+# 独立生效，产出报告**全文无 coding agent 叙事**。
+domain: saas_pm
+category_label: "saas_project_management"
+dimensions:
+  - name: pricing
+    description: "分析竞品定价：免费档、按席位订阅、年付折扣与用量计费（成员数阶梯）。"
+    tools: [web_extract, web_search, analyze_pricing]
+    skills: [pricing_analysis, fact_verification, confidence_disclosure]
+    data_sources:
+      - name: official_pricing_page
+        notes: "席位计费随成员数变化，引用需带 as_of 与席位假设"
+  - name: feature
+    description: "分析竞品核心功能：任务/文档/看板/自动化与协作能力。"
+    tools: [web_extract, web_search]
+    skills: [feature_analysis, fact_verification, confidence_disclosure]
+  - name: integrations
+    description: "分析竞品集成生态：第三方应用目录、API/Webhook、导入导出通道。"
+    tools: [web_extract, web_search]
+    skills: [integrations_analysis, fact_verification, confidence_disclosure]
+    data_sources:
+      - name: integration_directory
+        notes: "官方集成目录数量与分类，引用带 as_of"
+  - name: adoption
+    description: "分析竞品采用度：团队规模分布、知名客户、社区活跃与增长信号。"
+    tools: [web_extract, web_search, github_stars, github_releases, github_commits]
+    skills: [adoption_analysis, fact_verification, confidence_disclosure]
+  - name: sentiment
+    description: "分析竞品口碑：用户评价正负极性、社区讨论与迁移动向。"
+    tools: [web_extract, web_search, sentiment_sampling]
+    skills: [sentiment_analysis, fact_verification, confidence_disclosure]
+    data_sources:
+      - name: sentiment_sampling
+        notes: "结构化采样带样本量/时间窗"
+  - name: roadmap
+    description: "分析竞品路线图：版本发布节奏、公开 changelog 与规划方向。"
+    tools: [web_extract, web_search, github_releases, github_commits]
+    skills: [roadmap_analysis, fact_verification, confidence_disclosure]
+registry_seeds:
+  - name: notion
+    aliases: [notion ai, not so]
+    official_links:
+      home: "https://www.notion.com"
+      pricing: "https://www.notion.com/pricing"
+      docs: "https://www.notion.com/help"
+  - name: linear
+    aliases: [linear app, linear.app]
+    official_links:
+      home: "https://linear.app"
+      pricing: "https://linear.app/pricing"
+      docs: "https://linear.app/docs"
+  - name: asana
+    aliases: [asana com]
+    official_links:
+      home: "https://asana.com"
+      pricing: "https://asana.com/pricing"
+      docs: "https://help.asana.com"
+default_dimension_weights:
+  pricing: 0.2
+  feature: 0.25
+  integrations: 0.2
+  adoption: 0.15
+  sentiment: 0.1
+  roadmap: 0.1
