@@ -124,3 +124,12 @@ deployment.md §5 增补一小节，给出两条可直接执行的命令：
 - 网络探测误伤（有网但 pypi 不可达）：探测目标选 pypi.org 是因为测试依赖安装即来自
   pypi；若探测失败但个别用例实际可达其他站点，最坏结果多 skip 几个用例，可接受，
   且探测仅作用于显式打了 network 标记的用例。
+
+> **实施修正⑤（2026-09-12，CI 首跑发现）**：初版 lock 在本机 3.11 下编译，
+> `--universal` 未产生 python_version 分叉——websockets==17.1（requires>=3.11，
+> uvicorn 间接依赖）在 CI 3.10 job 安装步骤即失败（c628a5c run 34677573363 红，
+> 3.11/3.12 fail-fast 被取消）。修正：重生成时加 `--python-version 3.10` 声明矩阵
+> 下限，uv 正确分叉 `websockets==16.1.1 ; python_full_version < '3.11'` +
+> `17.1 ; >= '3.11'`；全量 71 项复查无其他 3.10 不兼容（httpx2-jsfetch 仅
+> emscripten 标记，CI CPython 不安装）。教训：universal lock 的"universal"以
+> `--python-version` 声明为准，不声明则按编译解释器解析。
