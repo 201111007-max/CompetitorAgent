@@ -30,7 +30,6 @@ from competitor_agent.domain_types import distilled
 from competitor_agent.domain_types.enums import ObservationStatus
 from competitor_agent.domain_types.observation import Observation, SourceEvidence
 from competitor_agent.evaluation.accuracy_eval import AccuracyEvaluator, AccuracyMetrics, EvalCase
-from competitor_agent.knowledge_base.competitor_store import CompetitorStore
 from competitor_agent.evaluation.behavior_eval import (
     BehaviorMetrics,
     FoldRecallEvaluator,
@@ -50,6 +49,7 @@ from competitor_agent.evaluation.strategy_eval import StrategyCase, StrategyEval
 from competitor_agent.facade.api import CompetitorAnalysisAPI
 from competitor_agent.interfaces.context import SourceContext
 from competitor_agent.interfaces.exceptions import DataSourceUnavailableError
+from competitor_agent.knowledge_base.competitor_store import CompetitorStore
 from competitor_agent.llm.client import LLMClient, ToolCallReply
 from competitor_agent.memory.timeline_memory import TimelineMemory
 from competitor_agent.secret_vault import get_reports_dir
@@ -1161,7 +1161,7 @@ def build_benchmark_api(
     enable_rag: bool = True,
     enable_memory: bool = True,
     memory: object | None = None,
-    rag_store: "CompetitorStore | None" = None,
+    rag_store: CompetitorStore | None = None,
     timeline: object | None = None,
     engine: str = "react",
     llm_call_counter: list[int] | None = None,
