@@ -128,6 +128,7 @@ markers = [
     "integration: Integration tests",
     "evaluation: Ground-truth evaluation",
     "e2e: Full-chain end-to-end tests",
+    "network: 需要真实网络的用例（无网环境由 conftest 自动 skip，设计文档 89 §2）",
 ]
 
 [tool.coverage.run]

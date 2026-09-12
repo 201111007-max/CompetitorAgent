@@ -37,9 +37,13 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
+        # 设计文档 89 §1：第三方依赖按 requirements-dev.lock 钉版（uv pip compile --universal
+        # 生成，pip 兼容格式）；包自身 editable --no-deps，防止 pip 重解析区间覆盖 lock。
+        # 升级依赖 = 显式重生成 lock（命令见 lock 文件头注释）走 PR，漂移可见可归因。
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -r requirements-dev.lock
+          pip install -e . --no-deps
 
       - name: Lint with ruff
         run: ruff check .

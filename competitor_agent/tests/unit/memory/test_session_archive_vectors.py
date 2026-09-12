@@ -70,9 +70,17 @@ def _session(
     )
 
 
+def _days_ago(n: int) -> str:
+    """相对今天的 ISO 日期（设计文档 89 §2.4）：硬编码日期会被 30 天 TTL 老化剔除，
+    套件随日历时间推移必红（2026-09-09 实证），一律相对日期。"""
+    from datetime import datetime, timedelta, timezone
+
+    return (datetime.now(timezone.utc) - timedelta(days=n)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 # 旧会话（pricing_sem 标记 → 向量 [1,0]），新会话（无标记 → [0,1]）
-_OLD = _session("s_old", "2026-08-01T00:00:00Z", "pricing_sem 收费模式：订阅制分层")
-_NEW = _session("s_new", "2026-08-10T00:00:00Z", "社区口碑与生态插件丰富")
+_OLD = _session("s_old", _days_ago(10), "pricing_sem 收费模式：订阅制分层")
+_NEW = _session("s_new", _days_ago(2), "社区口碑与生态插件丰富")
 
 
 class TestVectorRecall:
@@ -100,7 +108,7 @@ class TestVectorRecall:
         vs = _vector_store(tmp_path)
         archive = SessionArchive(tmp_path, vector_store=vs)
         archive.archive(_OLD)
-        archive.archive(_session("s_w", "2026-08-05T00:00:00Z", "pricing_sem windsurf 收费", competitor="windsurf"))
+        archive.archive(_session("s_w", _days_ago(5), "pricing_sem windsurf 收费", competitor="windsurf"))
         ctx = archive.recent_context("cursor", top_k=5, query="pricing_sem 收费")
         assert any("订阅制分层" in line for line in ctx)
         assert not any("windsurf" in line for line in ctx)
@@ -195,7 +203,7 @@ class TestVectorSync:
         """TTL 老化：超龄会话归档时即被 _age_out 剔除，不进入向量集合也不被召回。"""
         vs = _vector_store(tmp_path)
         archive = SessionArchive(tmp_path, ttl_days=30, vector_store=vs)
-        expired = _session("s_expired", "2026-01-01T00:00:00Z", "pricing_sem 过期会话结论")
+        expired = _session("s_expired", _days_ago(60), "pricing_sem 过期会话结论")
         archive.archive(expired)  # 距今 > 30 天：_rebuild_context 的 _age_out 直接剔除
         assert "cursor:s_expired" not in vs.list_ids(where={"competitor": "cursor"})
         archive.archive(_NEW)

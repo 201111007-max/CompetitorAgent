@@ -6,6 +6,8 @@
 - memory：临时数据目录的四层记忆（tmp_path 隔离，测试后自动清理）
 """
 
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 
@@ -79,3 +81,30 @@ def _isolate_llm_env():
 @pytest.fixture
 def memory(tmp_path: Path) -> FourLayerMemory:
     return FourLayerMemory(tmp_path / "memory")
+
+
+_network_available: bool | None = None
+
+
+def _probe_network() -> bool:
+    """轻量网络探测（设计文档 89 §2）：真实 DNS 解析 example.com，会话级缓存。
+
+    当前 network 标记家族的共同依赖是 url_guard 的**直接 DNS 解析**
+    （SSRF 防护，不经过 http 代理）——所以探针测 DNS 而非 HTTP：本机类
+    代理环境 HTTP 经代理可用但 DNS 不直连，用例仍会失败，必须 skip。
+    """
+    global _network_available
+    if _network_available is None:
+        import socket
+
+        try:
+            socket.getaddrinfo("example.com", 443)
+            _network_available = True
+        except OSError:
+            _network_available = False
+    return _network_available
+
+
+def pytest_runtest_setup(item: pytest.Item) -> None:
+    if item.get_closest_marker("network") is not None and not _probe_network():
+        pytest.skip("无网络环境（network 标记用例自动跳过）")

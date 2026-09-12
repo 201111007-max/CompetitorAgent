@@ -516,6 +516,7 @@ class TestBenchmarkVerificationWiring:
         )
         return fixtures
 
+    @pytest.mark.network  # 链路经 url_guard 真实 DNS 解析（设计文档 89 §2）
     def test_mock_deterministic_two_runs(self, tmp_path: Path) -> None:
         from competitor_agent.evaluation.benchmark import Benchmark
 

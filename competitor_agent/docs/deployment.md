@@ -85,6 +85,31 @@ CORS 来源白名单在 `competitor_agent/config/review_config.yaml` 的 `securi
 
 删卷即清空全部记忆与报告：`docker compose down -v`（谨慎）。
 
+### 5.1 备份与恢复（设计文档 89 §3）
+
+本机（数据在 `~/.competitor_agent`）：
+
+```bash
+# 备份
+tar czf competitor-agent-backup-$(date +%F).tar.gz -C ~ .competitor_agent
+# 恢复（先停服务）
+tar xzf competitor-agent-backup-YYYY-MM-DD.tar.gz -C ~
+```
+
+Docker 卷（`competitor-data`）：
+
+```bash
+# 备份（一次性容器把卷打包到宿主当前目录）
+docker run --rm -v competitor-data:/data:ro -v "$PWD":/backup alpine \
+  tar czf /backup/competitor-data-$(date +%F).tar.gz -C /data .
+# 恢复（先 docker compose stop web）
+docker run --rm -v competitor-data:/data -v "$PWD":/backup alpine \
+  sh -c 'rm -rf /data/* && tar xzf /backup/competitor-data-YYYY-MM-DD.tar.gz -C /data'
+```
+
+个人项目手动执行即可；需要定期备份时把本机备份命令挂 cron（如每周日 3 点：
+`0 3 * * 0 tar czf ~/backups/competitor-agent-$(date +\%F).tar.gz -C ~ .competitor_agent`）。
+
 ## 6. 安全
 
 - **镜像零密钥**：所有密钥运行时 `-e` / `env_file` 注入；`.dockerignore` 排除 `.env*`，

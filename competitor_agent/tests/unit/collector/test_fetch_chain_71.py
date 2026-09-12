@@ -140,6 +140,9 @@ class TestTrafilaturaProvider:
 
 
 class TestJinaProvider:
+    # 用例经 url_guard 真实 DNS 解析（设计文档 89 §2）：无网/DNS 不直连环境自动 skip
+    pytestmark = pytest.mark.network
+
     def _provider(self, api_key="", handler=None):
         from competitor_agent.collector.fetch_providers.jina_fetch import JinaFetchProvider
 
@@ -213,6 +216,9 @@ class _FakeCrawl4ai:
 
 
 class TestCrawl4aiProvider:
+    # 同 TestJinaProvider：url_guard 真实 DNS 解析依赖（设计文档 89 §2）
+    pytestmark = pytest.mark.network
+
     @pytest.fixture
     def fake_crawl4ai(self, monkeypatch):
         monkeypatch.setitem(sys.modules, "crawl4ai", _FakeCrawl4ai())
@@ -233,11 +239,13 @@ class TestBuildFetchRouter:
     def test_fetch_disabled_returns_none(self):
         assert build_fetch_router(CollectorConfig(fetch_enabled=False)) is None
 
+    @pytest.mark.network  # trafilatura 可用性探测触网（设计文档 89 §2）
     def test_default_chain_trafilatura_jina(self):
         router = build_fetch_router(CollectorConfig(fetch_enabled=True))
         assert router is not None
         assert [p.source_provider for p in router.providers] == ["trafilatura", "jina"]
 
+    @pytest.mark.network  # 同上
     def test_crawl4ai_inserted_when_pool_and_extra(self, monkeypatch):
         monkeypatch.setitem(sys.modules, "crawl4ai", _FakeCrawl4ai())
         cfg = CollectorConfig(fetch_enabled=True, crawler_browser_pool=1)
@@ -250,6 +258,7 @@ class TestBuildFetchRouter:
         router = build_fetch_router(CollectorConfig(fetch_enabled=True, crawler_browser_pool=0))
         assert "crawl4ai" not in [p.source_provider for p in router.providers]
 
+    @pytest.mark.network  # 同上
     def test_jina_disabled_removes_level(self):
         router = build_fetch_router(
             CollectorConfig(fetch_enabled=True, jina_reader_enabled=False)
