@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 
@@ -64,6 +65,9 @@ class TestAtomicWrite:
         _atomic_write(path, {"version": 1})
         stale = tmp_path / ".s2.1234.deadbeef.tmp"
         stale.write_text("{broken json", encoding="utf-8")
+        # 设计文档 94：sweep 只清超阈值陈旧 tmp（防误删他进程活跃写入），陈旧化后语义不变
+        old = stale.stat().st_mtime - 7200
+        os.utime(stale, (old, old))
         _atomic_write(path, {"version": 2})
         assert json.loads(path.read_text(encoding="utf-8")) == {"version": 2}
         assert not stale.exists(), "陈旧 tmp 应被清理"
@@ -152,6 +156,9 @@ class TestSaveLoadDelete:
         path = _checkpoint_path(session_id)
         stale = tmp_path / f".{path.stem}.1234.deadbeef.tmp"
         stale.write_text("x", encoding="utf-8")
+        # 设计文档 94：sweep 只清超阈值陈旧 tmp（防误删他进程活跃写入），陈旧化后语义不变
+        old = stale.stat().st_mtime - 7200
+        os.utime(stale, (old, old))
         delete_checkpoint(session_id)
         assert not path.exists()
         assert not _backup_path(path).exists()
@@ -225,3 +232,40 @@ class TestConcurrency:
             assert lock_file.exists()
         with CheckpointLock(path):  # 释放后再获取应无死锁
             assert lock_file.exists()
+
+
+class TestSweepStaleTmpRace:
+    """设计文档 94：sweep 不得误删他进程活跃写入的 tmp（xdist 偶发失败根因）"""
+
+    def test_fresh_tmp_survives_sweep(self, tmp_path):
+        from competitor_agent.core.checkpoint import _sweep_stale_tmp
+
+        target = tmp_path / "cursor___windsurf.json"
+        active = tmp_path / ".cursor___windsurf.99999.abcd1234.tmp"
+        active.write_bytes(b"writing-in-progress")
+        _sweep_stale_tmp(target)
+        assert active.exists(), "新鲜 tmp（他进程活跃写入）不得被 sweep 删除"
+
+    def test_old_tmp_swept(self, tmp_path):
+        import os
+
+        from competitor_agent.core.checkpoint import _sweep_stale_tmp
+
+        target = tmp_path / "cursor___windsurf.json"
+        stale = tmp_path / ".cursor___windsurf.99999.deadbeef.tmp"
+        stale.write_bytes(b"crashed-leftover")
+        old = stale.stat().st_mtime - 7200
+        os.utime(stale, (old, old))
+        _sweep_stale_tmp(target)
+        assert not stale.exists(), "超阈值陈旧 tmp 应被 sweep 删除"
+
+    def test_atomic_write_preserves_concurrent_fresh_tmp(self, tmp_path):
+        """回归场景：进程 B 完成原子写触发 sweep，进程 A 的活跃 tmp 不受影响"""
+        from competitor_agent.core.checkpoint import _write_bytes_atomic
+
+        target = tmp_path / "report.json"
+        foreign_active = tmp_path / ".report.99999.1234abcd.tmp"
+        foreign_active.write_bytes(b"other-process-active")
+        _write_bytes_atomic(target, b'{"ok": true}')
+        assert target.read_bytes() == b'{"ok": true}'
+        assert foreign_active.exists(), "原子写成功后的 sweep 不得删他进程活跃 tmp"

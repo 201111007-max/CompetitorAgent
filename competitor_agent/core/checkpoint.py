@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import threading
+import time
 import uuid
 import weakref
 from dataclasses import asdict, dataclass, field
@@ -83,9 +84,18 @@ def _tmp_path(path: Path) -> Path:
     return path.with_name(f".{path.stem}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp")
 
 
+_TMP_STALE_SECONDS = 3600.0
+
+
 def _sweep_stale_tmp(path: Path) -> None:
+    # 只删 mtime 超过阈值的 tmp：glob 无法区分他进程崩溃残留与他进程活跃写入
+    # （设计文档 94）——活跃写入为毫秒级，1 小时阈值不可能误删；崩溃残留延迟
+    # 至多 1 小时被清扫，可接受。
+    cutoff = time.time() - _TMP_STALE_SECONDS
     for stale in path.parent.glob(f".{path.stem}.*.tmp"):
         try:
+            if stale.stat().st_mtime > cutoff:
+                continue
             stale.unlink(missing_ok=True)
         except OSError as exc:
             logger.debug("陈旧 checkpoint 临时文件清理失败: %s (%s)", stale, exc)
