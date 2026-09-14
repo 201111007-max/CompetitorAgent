@@ -19,11 +19,11 @@ import json
 import logging
 import time
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable
 from contextlib import asynccontextmanager
 from importlib import resources
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
@@ -31,6 +31,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
 
 from competitor_agent import CompetitorAnalysisAPI
 from competitor_agent.config.loader import AppConfig, load_config
@@ -616,7 +617,9 @@ class _NoCacheStatic(BaseHTTPMiddleware):
     SSE /api 流不受影响（仅注入 /static/ 路径）。
     """
 
-    async def dispatch(self, request: Request, call_next):
+    async def dispatch(
+        self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
         response = await call_next(request)
         if request.url.path.startswith("/static/"):
             response.headers["Cache-Control"] = "no-cache"

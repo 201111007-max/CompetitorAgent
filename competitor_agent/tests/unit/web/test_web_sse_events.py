@@ -406,8 +406,10 @@ class TestStaticServing:
     def test_index_serves_frontend(self) -> None:
         import asyncio
 
-        html = asyncio.run(web_app.index())
+        resp = asyncio.run(web_app.index())
         # 设计文档 63：对话页（消息区 + 底部发送框），无开始分析按钮/进度条
+        # index() 自设计文档 70 起返回 HTMLResponse(Content-Type: text/html, Cache-Control: no-cache)
+        html = resp.body.decode("utf-8")
         assert 'id="messages"' in html
         assert 'id="send-btn"' in html
         assert 'id="input"' in html
