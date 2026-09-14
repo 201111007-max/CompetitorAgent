@@ -718,12 +718,30 @@ function closeEventSource() {
   if (eventSource) { eventSource.close(); eventSource = null; }
 }
 
+function markStreamTerminated() {
+  if (!activeMid) return;
+  const s = streams.get(activeMid);
+  if (!s) return;
+  finishStream(s);  // 收尾当前段并移除流式光标（▊）
+  const note = document.createElement('div');
+  note.className = 'terminated';
+  note.textContent = '回答已被终止：当前内容可能不完整，可重新发送以继续分析。';
+  s.el.appendChild(note);
+  scrollBottom();
+  activeMid = null;
+}
+
 function stopAnalysis() {
   if (sessionId) {
     fetch('/api/cancel/' + sessionId, { method: 'POST' }).catch(function () {});
     setStatus('正在停止…');
   }
   closeEventSource();
+  markStreamTerminated();
+  // SSE 已断开，接下来不会再收到 cancelled/message.stop 终态事件来触发 setBusy(false)，
+  // 若不在此本地复位，按钮会一直卡在停止态、"正在停止…"常驻（用户反馈）。模型已停止，立即恢复发送态。
+  setBusy(false);
+  setStatus('', false);
 }
 
 function newSession() {
@@ -740,14 +758,24 @@ function newSession() {
 
 function setBusy(on) {
   busy = on;
-  $id('send-btn').disabled = on;
-  $id('stop-btn').disabled = !on;
+  const sb = $id('send-btn');
+  sb.classList.toggle('busy', on);
+  // 空闲态：输入为空则禁用发送；busy 态必须可点（用于中断），故恒可点
+  sb.disabled = on ? false : $id('input').value.trim() === '';
+  sb.setAttribute('aria-label', on ? '停止' : '发送');
+  sb.setAttribute('title', on ? '中断模型输出' : '发送（Enter）');
   if (on) {
     $id('input').setAttribute('disabled', 'disabled');
   } else {
     $id('input').removeAttribute('disabled');
     $id('input').focus();
   }
+}
+
+function updateSendState() {
+  // 输入变化时同步发送按钮可用性（仅空闲时控制；busy 交给 setBusy）
+  if (busy) { return; }
+  $id('send-btn').disabled = $id('input').value.trim() === '';
 }
 
 function setStatus(text, isError) {
@@ -842,8 +870,9 @@ function sendCurrent() {
   if (val) { startAnalysis(val); $id('input').value = ''; }
 }
 
-$id('send-btn').addEventListener('click', sendCurrent);
-$id('stop-btn').addEventListener('click', stopAnalysis);
+$id('send-btn').addEventListener('click', function () {
+  if (busy) { stopAnalysis(); } else { sendCurrent(); }
+});
 $id('new-btn').addEventListener('click', newSession);
 $id('input').addEventListener('keydown', function (e) {
   if (e.key === 'Enter' && !e.shiftKey) {
@@ -851,6 +880,8 @@ $id('input').addEventListener('keydown', function (e) {
     sendCurrent();
   }
 });
+$id('input').addEventListener('input', updateSendState);
+updateSendState();  // 初始：输入为空 → 发送按钮禁用
 $id('rail-toggle').addEventListener('click', function () {
   $id('rail').classList.add('open');
   $id('rail-scrim').hidden = false;

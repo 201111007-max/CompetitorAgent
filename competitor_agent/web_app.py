@@ -30,6 +30,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from competitor_agent import CompetitorAnalysisAPI
 from competitor_agent.config.loader import AppConfig, load_config
@@ -600,13 +601,34 @@ def require_auth(
 
 
 @app.get("/", response_class=HTMLResponse)
-async def index() -> str:
+async def index() -> HTMLResponse:
     """前端页面：从包内 static/index.html 读取（设计文档 50 §2.4/§3.2）。"""
-    return _STATIC_DIR.joinpath("index.html").read_text(encoding="utf-8")
+    return HTMLResponse(
+        content=_STATIC_DIR.joinpath("index.html").read_text(encoding="utf-8"),
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+class _NoCacheStatic(BaseHTTPMiddleware):
+    """静态资源响应加 Cache-Control: no-cache——前端改动后浏览器每次重新校验（配合 etag 可 304）。
+
+    不加的话浏览器会启发式缓存 css/js，下次改版强刷仍拿旧文件（见二态发送按钮踩到的缓存坑）。
+    SSE /api 流不受影响（仅注入 /static/ 路径）。
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
 
 
 # 静态资源（css/js/vendor）：设计文档 50 P2 抽离内嵌 HTML，避免改动前端需动 .py
 app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
+
+
+# 中间件顺序：先 add 的在外层；CORS 已注册，本中间件在其内部注入 no-cache
+app.add_middleware(_NoCacheStatic)
 
 
 @app.get("/api/analyze")

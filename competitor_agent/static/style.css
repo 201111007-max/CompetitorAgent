@@ -249,7 +249,6 @@ body {
   text-transform: uppercase;
   white-space: nowrap;
 }
-.top-actions { margin-left: auto; display: flex; gap: 8px; }
 
 /* ── 按钮 ──────────────────────────────────────────────────── */
 .btn {
@@ -625,6 +624,15 @@ body {
 }
 .msg.assistant .bubble > .info { color: var(--text-dim); }
 .msg.assistant .bubble > span.error, .msg.assistant .bubble > .error { color: var(--red); }
+.msg.assistant .bubble > .terminated {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+  font-size: 12px;
+  color: var(--text-dim);
+  font-style: italic;
+  opacity: 0.9;
+}
 
 /* ── 底部输入 ──────────────────────────────────────────────── */
 .composer {
@@ -653,6 +661,70 @@ body {
 .composer-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
 .status { font-family: var(--mono); font-size: 11px; color: var(--text-dim); }
 .status.err { color: var(--red); }
+
+/* 二态发送按钮：空闲 = 圆形浅底 + ↑ 箭头；忙碌 = 同圆 + 深色停止方块 + 呼吸光照 */
+.send-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  flex: none;
+  border: none;
+  border-radius: 50%;
+  background: var(--blue-soft);
+  color: var(--blue);
+  cursor: pointer;
+  transition: background 160ms ease, transform 120ms ease;
+}
+.send-btn svg { width: 20px; height: 20px; }
+.send-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--blue) 22%, transparent);
+}
+.send-btn:active:not(:disabled) { transform: scale(0.94); }
+.send-btn:disabled { cursor: default; opacity: 0.45; }
+.send-btn .send-hint { display: none; }
+.send-btn .stop-mark { display: none; width: 13px; height: 13px; border-radius: 2px; background: var(--blue); }
+
+.send-btn.busy { animation: send-breathe 1.4s ease-in-out infinite; }
+.send-btn.busy .send-icon { display: none; }
+.send-btn.busy .stop-mark { display: block; }
+@keyframes send-breathe {
+  0%, 100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--blue) 16%, transparent),
+                0 0 0 0 color-mix(in srgb, var(--blue) 6%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--blue) 20%, transparent),
+                0 0 0 13px color-mix(in srgb, var(--blue) 7%, transparent);
+  }
+}
+.send-btn.busy:hover .send-hint {
+  display: block !important;
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 5px 10px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.82);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+.send-btn.busy:hover .send-hint::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: rgba(0, 0, 0, 0.82);
+}
 
 /* ── 响应式：抽屉式报告库 ──────────────────────────────────── */
 @media (max-width: 900px) {
