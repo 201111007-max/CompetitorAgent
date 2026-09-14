@@ -133,3 +133,9 @@ deployment.md §5 增补一小节，给出两条可直接执行的命令：
 > `17.1 ; >= '3.11'`；全量 71 项复查无其他 3.10 不兼容（httpx2-jsfetch 仅
 > emscripten 标记，CI CPython 不安装）。教训：universal lock 的"universal"以
 > `--python-version` 声明为准，不声明则按编译解释器解析。
+
+> **实施修正⑥（2026-09-14，用户拍板）**：`-n auto` 从 CI 命令行迁入 pyproject
+> `addopts`——当初"addopts 有意不动"的顾虑（未装 xdist 环境全灭）已不成立：
+> xdist 在 dev lock 内（CI/本机均装）；另实测发现本机长期无 xdist 的真因是
+> 华为内网镜像无该包（`from versions: none`），需 `-i https://pypi.org/simple`
+> 安装。本机 tests/unit 并行实测 95s→28s（3.4×）。

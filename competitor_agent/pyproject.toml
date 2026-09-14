@@ -122,6 +122,7 @@ addopts = [
     "-v",
     "--strict-markers",
     "--tb=short",
+    "-n", "auto",
 ]
 markers = [
     "unit: Unit tests",
