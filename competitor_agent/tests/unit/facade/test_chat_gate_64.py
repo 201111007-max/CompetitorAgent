@@ -86,10 +86,12 @@ class TestChatGate:
     def test_run_chat_uses_chat_loop_not_make_plan(self, monkeypatch):
         """对话式分支应传 build_chat_system_prompt + plan_first=False + final_as_payload=False。"""
         from competitor_agent.agent.prompts.react_system import build_chat_system_prompt
-        from competitor_agent.facade import api as api_mod
+
+        # doc 78 拆分：_react_loop 宿主迁至 analysis_service.AnalysisService（仅 patch 路径调整）
+        from competitor_agent.facade import analysis_service as analysis_mod
 
         seen: dict[str, object] = {}
-        orig = api_mod.CompetitorAnalysisAPI._react_loop
+        orig = analysis_mod.AnalysisService._react_loop
 
         def _spy(self, task, session_id, **kwargs):
             seen["system_prompt"] = kwargs.get("system_prompt")
@@ -97,7 +99,7 @@ class TestChatGate:
             seen["final_as_payload"] = kwargs.get("final_as_payload")
             return orig(self, task, session_id, **kwargs)
 
-        monkeypatch.setattr(api_mod.CompetitorAnalysisAPI, "_react_loop", _spy)
+        monkeypatch.setattr(analysis_mod.AnalysisService, "_react_loop", _spy)
         result = _chat_api().run("普通问题")
         assert isinstance(result, ChatResult)
         assert seen["system_prompt"] == build_chat_system_prompt()

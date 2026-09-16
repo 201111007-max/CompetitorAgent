@@ -102,7 +102,7 @@ class WebExtractor:
             ) from exc
         try:
             soup = BeautifulSoup(html, "lxml")
-        except Exception:  # noqa: BLE001 - lxml 解析器失败时回退标准库 html.parser
+        except Exception:
             logger.warning(
                 "lxml 解析失败，回退 html.parser: url=%s len=%d", url, len(html), exc_info=True
             )

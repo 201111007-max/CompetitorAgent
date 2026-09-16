@@ -83,7 +83,7 @@ class FetchCache:
                 )
                 for h in (data.get("hits") or [])
             ]
-        except Exception:  # noqa: BLE001 - 缓存损坏视为未命中
+        except Exception:
             logger.warning(
                 "搜索缓存解析失败（视为未命中）: engine=%s query=%r",
                 engine, query, exc_info=True,
@@ -137,7 +137,7 @@ class FetchCache:
                 reason=str(data.get("reason") or ""),
                 fetched_at=float(data.get("fetched_at") or 0.0),
             )
-        except Exception:  # noqa: BLE001 - 缓存损坏视为未命中
+        except Exception:
             logger.warning(
                 "正文缓存解析失败（视为未命中）: url=%s", url, exc_info=True,
             )

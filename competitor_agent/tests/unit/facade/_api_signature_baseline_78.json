@@ -1,0 +1,90 @@
+{
+  "__init__": {
+    "kind": "sync",
+    "signature": "(self, llm: 'LLMClient | None' = None, use_llm: 'bool' = True, max_iterations: 'int | None' = None, event_sink: 'Callable[[ProgressEvent], None] | None' = None, stream_sink: 'Callable[[Any], None] | None' = None, extractor: 'WebExtractor | None' = None, memory: 'IFourLayerMemory | None' = None, config: 'AppConfig | None' = None, web_tool: 'Callable[[str], list[dict]] | None' = None, timeline: 'TimelineMemory | None' = None, enable_rag: 'bool' = True, enable_memory: 'bool' = True, rag_store: 'CompetitorStore | None' = None, vector_store: 'VectorStore | None' = None, reranker: 'CrossEncoderReranker | None' = None, tool_dispatcher: 'object | None' = None, engine: 'str' = 'react', tracer: 'Any' = None, max_parallel_tool_calls: 'int' = 4) -> 'None'"
+  },
+  "analyze": {
+    "kind": "sync",
+    "signature": "(self, task: 'str', conversation_history: 'list[ChatMessage] | None' = None, mode: 'str' = 'team', session_id: 'str | None' = None) -> 'CompetitorReport | ChatResult'"
+  },
+  "analyze_react": {
+    "kind": "sync",
+    "signature": "(self, task: 'str', session_id: 'str | None' = None) -> 'str'"
+  },
+  "analyze_react_report": {
+    "kind": "sync",
+    "signature": "(self, task: 'str', session_id: 'str | None' = None) -> 'CompetitorReport'"
+  },
+  "analyze_stream": {
+    "kind": "sync",
+    "signature": "(self, task: 'str', session_id: 'str | None' = None) -> 'AsyncIterator[ProgressEvent]'"
+  },
+  "analyze_team": {
+    "kind": "sync",
+    "signature": "(self, task: 'str', session_id: 'str | None' = None, max_retries: 'int' = 1) -> 'CompetitorReport | ChatResult'"
+  },
+  "analyze_team_async": {
+    "kind": "async",
+    "signature": "(self, task: 'str', session_id: 'str | None' = None, max_retries: 'int' = 1, max_parallel: 'int' = 4) -> 'CompetitorReport | ChatResult'"
+  },
+  "build_dossier": {
+    "kind": "sync",
+    "signature": "(self, competitor: 'str', window_days: 'int | None' = None) -> 'Any'"
+  },
+  "build_weekly_report": {
+    "kind": "sync",
+    "signature": "(self) -> 'tuple[Path, Path]'"
+  },
+  "cancel": {
+    "kind": "sync",
+    "signature": "(self, session_id: 'str') -> 'None'"
+  },
+  "compare": {
+    "kind": "sync",
+    "signature": "(self, *competitors: 'str') -> 'ComparisonReport'"
+  },
+  "continue_analysis": {
+    "kind": "sync",
+    "signature": "(self, session_id: 'str') -> 'CompetitorReport'"
+  },
+  "discover": {
+    "kind": "sync",
+    "signature": "(self, task: 'str') -> 'ComparisonReport'"
+  },
+  "get_history": {
+    "kind": "sync",
+    "signature": "(self, competitor: 'str | None' = None) -> 'list[CompetitorReport]'"
+  },
+  "memory": {
+    "kind": "property",
+    "signature": "(self) -> 'IFourLayerMemory | None'"
+  },
+  "refresh_stale": {
+    "kind": "sync",
+    "signature": "(self, ttl_override: 'dict[str, int] | None' = None, recompute_all: 'bool' = False) -> 'list[CompetitorReport]'"
+  },
+  "report_diff": {
+    "kind": "sync",
+    "signature": "(self, prev: 'CompetitorReport', cur: 'CompetitorReport') -> 'list[Alert]'"
+  },
+  "resume": {
+    "kind": "sync",
+    "signature": "(self, session_id: 'str') -> 'CompetitorReport'"
+  },
+  "run": {
+    "kind": "sync",
+    "signature": "(self, task: 'str', *, session_id: 'str | None' = None, history_messages: 'list[dict[str, str]] | None' = None) -> 'CompetitorReport | ComparisonReport | ChatResult'"
+  },
+  "run_scheduled": {
+    "kind": "sync",
+    "signature": "(self, competitors: 'list[str] | None' = None, alert_sink: 'AlertSink | None' = None) -> 'list[CompetitorReport]'"
+  },
+  "timeline": {
+    "kind": "property",
+    "signature": "(self) -> 'TimelineMemory'"
+  },
+  "verify_report": {
+    "kind": "sync",
+    "signature": "(self, competitor: 'str', mode: 'str | None' = None) -> 'Any'"
+  }
+}

@@ -1,8 +1,8 @@
 # 设计文档 78 —— 第二十八轮：facade/api.py 拆分 + 并发压测（工单 8 + 9'）
 
-> **实施说明（2026-09-09，§2.3 压测落地 / §2 拆分待实施）**：
+> **实施说明（2026-09-17，§2.3 压测 ✅ / §2 拆分 ✅）**：
 > ① **并发压测 ✅**（新 `tests/evaluation/test_concurrency_stress.py`，5 用例 11.6s）：DelegateRunner 满负荷 6 并发 + 脚本化子 Agent（固定调用次数/文本长度 → 逐调用成本确定性）——**A1 成本恒等**（并行 vs 串行同负载 `total_cost_usd` round(,9) 逐位一致，容忍求和顺序）、**A2 无丢失**（runner 6/6 状态完成 + compare 6 候选 `delegate_collector` 全收集）、**A3 wall 收敛**（并行 < 串行×0.6，防假并行）、**A4 取消传播**（取消信号贯穿编排 60s 内终止）。asyncio 迁移维持否决不实施。
-> ② **facade 拆分 📝 待实施**（1.5 天工作量，建议独立会话执行）：方法清点已完成（api.py 2063 行 / ~50 方法；迁移映射：schedule 簇 run_scheduled/build_weekly_report/get_history/resume/refresh_stale → schedule_service；compare/discover/_task_with_sources/_export_comparison_json → compare_service；Lead 编排 `_react_loop` 闭包组整体 → analysis_service；`__init__` 装配 → assembly.Dependencies）。验收三件套不变：签名冻结 + 既有断言零改动 + benchmark 全绿。
+> ② **facade 拆分 ✅**（2026-09-17）：api.py 290 行薄路由 + `assembly.py`（Dependencies 只读快照 + build_dependencies + ServiceBase + build_default_llm）+ `analysis_service.py`（_react_loop 闭包组整体 + run/analyze/chat/langgraph + 记忆/RAG/复核簇）/`compare_service.py`/`schedule_service.py` 三宿主。验收三件套达成：**签名冻结**（22 项公共面快照单测 `test_api_signature_freeze_78.py` 逐位比对）、**既有断言零改动**（仅 test_chat_gate_64 类级 patch 目标 1 处路径调整；其余 1518 用例零改动，测试实例级 patch 接缝经 api 私有薄路由 + host 委派保持语义）、**benchmark 门禁 7/7 全绿**。完整映射/接缝/回滚见 `doc/plan/migration_map_78_facade_split.md`。§4.3 行数上限与规则 1 闭包组整体迁移算术不可兼得，用户拍板**映射优先**：analysis_service 1454 行豁免（api/compare/schedule/assembly 全部达标），已在冻结单测中守护。跨服务调用一律经 host=门面编排（服务间零互相 import）；日志命名空间 `competitor_agent.facade.api` 四模块统一保持（caplog 兼容）。
 
 > 目标：① 把 ~1700 行的 `facade/api.py`（god object）按职责拆为「门面路由 + 四个服务模块」，`CompetitorAnalysisAPI` 公共签名逐位不变；② 落地并发压测断言（工单 9 降级后的保留项）：`max_parallel_subagents` 满负荷下成本核算误差 = 0。
 > **本设计包含一次显式否决**：asyncio 迁移被砍（doc 75 §1 工单 9——论据不成立 + 改动面叠加），本文档只做纯重构 + 压测。
