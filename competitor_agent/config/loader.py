@@ -79,6 +79,12 @@ class CollectorConfig:
     # 分级缓存 TTL（搜索 24h / 正文 7d；缺省沿用现有 cache_ttl_seconds=86400）
     cache_ttl_search_hours: int = 24
     cache_ttl_fetch_days: int = 7
+    # 外部通道熔断（设计文档 74 §3.5-1）：同一源连续失败 threshold 次 → 熔断
+    # cooldown_seconds 秒并切备用源（半开探测成功恢复；重复熔断冷却指数退避封顶 8×）
+    breaker_threshold: int = 3
+    breaker_cooldown_seconds: float = 60.0
+    # stale-while-revalidate（设计文档 74 §3.5-3）：抓取失败 → 过期旧缓存兜底 + as_of 标注
+    stale_cache_on_failure: bool = True
     # 榜单结构化直连（设计文档 67 §2.1）："swebench" | "terminalbench" | "aider" / ""
     benchmark_provider: str = ""
     # 舆情采样源（设计文档 67 §2.2）："hackernews" | "reddit" / ""
@@ -99,11 +105,8 @@ class ReportConfig:
     include_confidence: bool = True
     include_evidence_urls: bool = True
     output_dir: str = "~/.competitor_agent/reports/competitor"  # 仓库外，避免写入工作树
-    # 设计文档 70 M1：Lead 两段式 Final Answer（正文 + JSON）默认开；false 全回退模板。
-    # 配合 review_config.yaml 的 output_dir: ""（空 = 项目 output/，见 core/report_settings）。
-    # 设计文档 88 §9.1：writer_pass=true 时本开关被取代（Lead body 不再作为报告正文），
-    # 随两段式退役（doc 88 §7 第 7 步）后删除。
-    lead_formatted_body: bool = True
+    # 设计文档 88 §9.1：``lead_formatted_body`` 已随两段式退役（§7 第 7 步）删除，
+    # 正文改由代码渲染 + ``writer_pass`` 叙事槽衍生（单一事实源）。
     # 设计文档 88 §5：writer 叙事槽总开关；false = 纯骨架渲染（mock/CI 确定路径，默认）。
     writer_pass: bool = False
     # N2 保真校验不过的单槽重试次数，仍败 → 槽位「解读暂缺」注记降级（不影响骨架/他槽）。

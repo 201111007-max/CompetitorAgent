@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import logging
+import time
 import urllib.parse
 
 import httpx
@@ -87,12 +88,22 @@ def _format_fetch(result: FetchResult, max_chars: int) -> str:
     提示注入过滤（设计文档 91）在此统一执行——新鲜抓取/单跑去重回读/磁盘缓存
     命中三路都经本函数格式化，是抓取链文本进入 LLM 上下文前的唯一出口；
     历史缓存中的未过滤条目读出时同样被拦。
+    设计文档 74 §3.5-3：``stale=True``（SWR 回旧缓存）→ via 行附 as_of 日期，
+    提示「实时抓取失败、内容可能过期」供报告侧待核验标注。
     """
     body, _hits = strip_prompt_injections(result.content, source=result.url)
     if max_chars and len(body) > max_chars:
         body = body[:max_chars] + "…（截断）"
     if result.provider:
-        return f"via: {result.provider}\n{body}"
+        via = f"via: {result.provider}"
+        if getattr(result, "stale", False):
+            ts = (
+                time.strftime("%Y-%m-%d", time.localtime(result.fetched_at))
+                if result.fetched_at
+                else "未知"
+            )
+            via += f"（stale 缓存 as_of {ts}：实时抓取失败，内容可能过期待核验）"
+        return f"{via}\n{body}"
     return body
 
 
@@ -161,6 +172,12 @@ def _web_extract_impl(
         cache.set_fetch(result)
         policy.record(current, result)
         return _format_fetch(result, max_chars)
+    # 设计文档 74 §3.5-3 stale-while-revalidate：源失败 → 过期旧缓存兜底 + as_of 标注
+    # （反爬/超限站不至于整维无数据；报告侧已有「待核验」标注语义）
+    if getattr(collector, "stale_cache_on_failure", False):
+        stale = cache.get_fetch_stale(current)
+        if stale is not None and stale.success:
+            return _format_fetch(stale, max_chars)
     return f"抓取失败: {result.reason}"
 
 

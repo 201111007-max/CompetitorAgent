@@ -12,9 +12,14 @@
 > 第 X 轮 header blockquote、分节含「问题现状 / 总体架构 / 接口设计 / 配置清单 / 测试验收 /
 > 实施计划 / 风险权衡 / 核心技术点总结」、`README.md` 索引登记），格式模板参考 **doc 73/74**。
 >
-> **状态（2026-09-10）**：**§7 步骤 1-6 已实施**（commit 序列：聚合平移 → 蒸馏层 →
-> 等价性切换 → 配置 → 骨架 → writer 接线 → SSE 骨架事件；步骤 7 Lead prompt 两段式退役
-> 按原计划留待「3 稳定后」）。核心决策已定（§9 ADR）：
+> **状态（2026-09-16，全部 7 步已实施）**：§7 步骤 1-6 于 2026-09-10（commit 序列：聚合平移 →
+> 蒸馏层 → 等价性切换 → 配置 → 骨架 → writer 接线 → SSE 骨架事件）；**步骤 7 于 2026-09-16**
+> 落地——Lead prompt 两段式退役（Final Answer 只输出 REPORT_SCHEMA/comparison JSON）、
+> `_strip_structured_data_section`/`_MARKER` marker 字符串契约删除、
+> `report.lead_formatted_body` 开关删除（`writer_pass` 取代）、聚合结论统一
+> comparison JSON `conclusion` 字段、净化链收敛至 `_fallback_single_dimension`。
+> 验证：全量 unit 1503 passed + integration/e2e 61 passed + benchmark 门禁 7/7 + ruff/mypy 清。
+> 核心决策已定（§9 ADR）：
 > ① 放弃两段式改单一事实源；② 落地形态 D2 非 D1；③ 聚合层代码确定性合并。
 >
 > **实施修正两处（与本文档原始表述的差异，以代码为准）**：

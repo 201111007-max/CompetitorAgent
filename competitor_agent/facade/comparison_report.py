@@ -4,11 +4,13 @@
 - ``candidate_results``：delegate 收集器落盘的候选子 Agent 标准多维度 ``dimensions[]``
   （``{competitor, dimensions, official_links}``，对齐 REPORT_SCHEMA）；
 - ``plan``：``plan.resolution`` 决定分型（compare/discovery）与候选排序；
-- ``lead_answer``：Lead Final Answer 的【市场格局核心结论】段。
+- ``lead_answer``：Lead Final Answer 的 comparison JSON（``conclusion`` 字段 =
+  市场格局核心结论；设计文档 88 §7 第 7 步两段式退役——【市场格局核心结论】marker
+  字符串契约删除，结论统一走结构化字段）。
 
 职责：每候选 ``dimensions[]`` → 最小 CompetitorReport → ``build_comparison`` 渲染
-"维度 × 竞品"矩阵（执行层，不经 LLM）；Lead 结论段拼入。候选缺失/结论缺失时
-矩阵与结论段各自兜底不报错。
+"维度 × 竞品"矩阵（执行层，不经 LLM）；Lead conclusion 字段拼为
+「## 市场格局核心结论」段。候选缺失/结论缺失时矩阵与结论段各自兜底不报错。
 
 设计文档 65 §2.3：``_extract_conclusion`` 复用 ``_extract_json_block``（括号配平），
 兼容"散文前缀 + JSON"形态的 Lead Final Answer（不再要求整体以 ``{`` 开头）。
@@ -19,8 +21,6 @@ from typing import Any
 
 from competitor_agent.domain_types.competitor import Competitor
 from competitor_agent.domain_types.report import ComparisonReport, CompetitorReport
-
-_MARKER = "【市场格局核心结论】"
 
 # 设计文档 70 §8.1 D1d：零候选空报告仍落盘 .md（内容 = 提示），不额外制造垃圾——
 # 矩阵空 + Lead 结论段 + 本提示，报告库可见可点开看原因。
@@ -34,25 +34,20 @@ def assemble_comparison(
     candidate_results: dict[str, dict[str, Any]],
     builder: Any | None = None,
     terminal_state: str = "success",
-    use_lead_body: bool | None = None,
 ) -> ComparisonReport:
-    """把候选 ``dimensions[]`` + Lead 结论组装为 ComparisonReport。
+    """把候选 ``dimensions[]`` + Lead comparison JSON 组装为 ComparisonReport。
 
     - 每候选 ``dimensions[]`` 组装为最小 CompetitorReport（复用什么 ``_dimension_from_item``
       的维度条目解析与置信度封顶兜底）；
     - 矩阵按 ``plan.competitors`` 顺序渲染（缺 plan 时按收集顺序）；
-    - 设计文档 70 M1：Lead Final Answer 正文（剔除 JSON 块后的纯散文，含结论段）在前、
-      代码矩阵附录在后（信息不丢）；正文为空（mock 纯 JSON）→ 保留矩阵 + 提取
-      ``## 市场格局核心结论`` 段（现状行为，确定性不变）。
+    - 设计文档 88（步骤 7 两段式退役）：Lead 结论取 comparison JSON ``conclusion`` 字段
+      （``_extract_conclusion``），markdown = 矩阵 + 「## 市场格局核心结论」段
+      （代码确定性渲染，无 Lead 散文正文）。
     """
     from competitor_agent.core.report_builder import ReportBuilder
     from competitor_agent.facade.react_report import _dimension_from_item
 
     builder = builder or ReportBuilder()
-    if use_lead_body is None:
-        from competitor_agent.config.loader import load_config
-
-        use_lead_body = load_config().report.lead_formatted_body
     per_candidate: dict[str, CompetitorReport] = {}
     for name, payload in candidate_results.items():
         dims = [d for d in (payload.get("dimensions") or []) if isinstance(d, dict)]
@@ -83,16 +78,6 @@ def assemble_comparison(
         comparison = ComparisonReport(competitors=[], reports=[], markdown_report="")
 
     conclusion = _extract_conclusion(lead_answer)
-    if use_lead_body:
-        lead_body = _lead_body_text(lead_answer)
-        if lead_body:
-            # 设计文档 70 M1：Lead 正文在前、代码矩阵附录在后（信息不丢、前端零改动）
-            comparison.markdown_report = (
-                lead_body
-                + "\n\n"
-                + (comparison.markdown_report or "").strip()
-                + "\n"
-            )
     # 设计文档 73 §3.3：追加判断从「字符串存在性」改「布尔标志」语义——模型把提示抄进
     # 正文不再骗过守卫（提示/结论丢失修复）；下二分支即"代码已追加"的布尔语义。
     if not comparison.markdown_report.strip():
@@ -113,37 +98,13 @@ def assemble_comparison(
     return comparison
 
 
-def _lead_body_text(lead_answer: str) -> str:
-    """提取 Lead Final Answer 的正文（设计文档 70 M1）：剔除对比 JSON 块 + 去 Final Answer 前缀。
-
-    正文为空（mock 纯 JSON）→ 空串 → 调用方回退矩阵 + 结论段（确定性不变）。
-    """
-    from competitor_agent.facade.react_report import (
-        _close_orphan_fence,
-        _dedupe_repeated_report,
-        _strip_json_blocks,
-        _strip_structured_data_section,
-    )
-
-    text = _close_orphan_fence(
-        _dedupe_repeated_report(
-            _strip_structured_data_section(_strip_json_blocks(lead_answer or ""))
-        )
-    ).strip()
-    for prefix in ("Final Answer: ", "Final Answer:"):
-        if text.startswith(prefix):
-            text = text[len(prefix):].lstrip()
-            break
-    return text
-
-
 def _extract_conclusion(lead_answer: str) -> str:
-    """从 Lead Final Answer 提取市场格局核心结论段。
+    """从 Lead Final Answer 提取市场格局核心结论（comparison JSON ``conclusion`` 字段）。
 
-    - comparison JSON（含 ``conclusion`` 字段）→ 取字段值（设计文档 65 §2.3：
-      复用 ``_extract_json_block`` 括号配平提取，兼容散文前缀形态）；
-    - 文本含【市场格局核心结论】标记 → 取标记后内容；
-    - 其余文本 → 整段作为结论；JSON 无 conclusion 字段 → 空（矩阵兜底）。
+    设计文档 88 步骤 7：【市场格局核心结论】marker 字符串契约删除——结论统一走
+    结构化字段（comparison JSON 复用 ``_extract_json_block`` 括号配平提取，兼容
+    散文前缀形态）；JSON 无 conclusion 字段 → 空（矩阵兜底）；非 JSON → 整段兜底
+    （真实 LLM 未遵约时不丢结论）。
     """
     from competitor_agent.facade.react_report import _extract_json_block
 
@@ -154,8 +115,6 @@ def _extract_conclusion(lead_answer: str) -> str:
         if text.startswith(prefix):
             text = text[len(prefix):].lstrip()
             break
-    if _MARKER in text:
-        return text.split(_MARKER, 1)[1].strip()
     payload = _extract_json_block(text)
     if isinstance(payload, dict):
         if payload.get("conclusion"):

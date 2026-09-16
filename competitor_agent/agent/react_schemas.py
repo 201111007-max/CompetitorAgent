@@ -50,7 +50,7 @@ _FORMAT_HINT_ALIASES: dict[str, str] = {
 def normalize_format_hint(value: object) -> str:
     """format_hint 归一（§8.4）：匹配枚举/别名 → 枚举值；非法/缺失/占位 → ``"open"``。
 
-    ``open`` 不注入报告结构（走两段式兜底），使历史 plan（无 format_hint）与
+    ``open`` 不注入报告结构（Final Answer 直接输出 JSON），使历史 plan（无 format_hint）与
     模型乱填保持幂等——不改变报告组装语义。
     """
     if value is None:

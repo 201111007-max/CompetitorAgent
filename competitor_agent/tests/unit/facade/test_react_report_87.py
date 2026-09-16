@@ -64,7 +64,6 @@ class TestErrorKindConsumption:
             lead_answer=answer,
             competitor=Competitor(name="x"),
             loop_plan=None,
-            use_lead_body=False,
             error_kind=error_kind,
         )
 
@@ -115,7 +114,6 @@ class TestEvidenceUrlsCoercion:
             lead_answer=answer,
             competitor=Competitor(name="x"),
             loop_plan=None,
-            use_lead_body=False,
         )
         dim = report.dimension_results[0]
         assert [e.url for e in dim.evidence] == ["https://example.com/pricing"]

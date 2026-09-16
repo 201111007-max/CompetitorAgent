@@ -5,10 +5,15 @@
 （① 共享分析段 analyze_with_context/retrieve_rag_text 已随 analyzers/ 删除，设计文档 49）
 """
 import inspect
+from pathlib import Path
 
 import pytest
 from competitor_agent.config.loader import LLMConfig, load_config
 from competitor_agent.llm.client import LLMClient
+
+# 仓库默认 yaml（测试环境可能用 COMPETITOR_AGENT_CONFIG 重定向 load_config 缺省路径——
+# 断网隔离的 conftest 会话级配置；一致性断言必须显式钉住仓库 yaml）
+_REPO_CFG = Path(__file__).resolve().parents[3] / "config" / "review_config.yaml"
 
 # ── ③ 默认值统一 ──────────────────────────────────────────────
 
@@ -59,14 +64,14 @@ class TestPricingConfig:
         assert LLMConfig().pricing_per_1k is None
 
     def test_load_config_parses_pricing(self):
-        cfg = load_config()
+        cfg = load_config(_REPO_CFG)
         assert cfg.llm.pricing_per_1k == {"input": 0.0003, "output": 0.0006}
 
     def test_config_to_client_wiring(self):
         """cli._build_llm 把 config 计价注入 LLMClient。"""
         from competitor_agent.cli import _build_llm
 
-        cfg = load_config()
+        cfg = load_config(_REPO_CFG)
         client = _build_llm(cfg)
         assert client._pricing_per_1k["input"] == cfg.llm.pricing_per_1k["input"]
         assert client._pricing_per_1k["output"] == cfg.llm.pricing_per_1k["output"]
@@ -80,7 +85,7 @@ class TestDesign70ToolDefaults:
     D4d：build_*_provider 据此返回非 None。"""
 
     def test_default_benchmark_provider_enabled(self):
-        cfg = load_config()
+        cfg = load_config(_REPO_CFG)
         assert cfg.collector.benchmark_provider == "swebench"
         from competitor_agent.collector.benchmark_sources import build_benchmark_provider
         from competitor_agent.config.loader import CollectorConfig
@@ -91,7 +96,7 @@ class TestDesign70ToolDefaults:
         assert build_benchmark_provider(c) is not None
 
     def test_default_sentiment_provider_enabled(self):
-        cfg = load_config()
+        cfg = load_config(_REPO_CFG)
         assert cfg.collector.sentiment_provider == "hackernews"
         from competitor_agent.collector.sentiment_sources import build_sentiment_provider
         from competitor_agent.config.loader import CollectorConfig
@@ -102,5 +107,5 @@ class TestDesign70ToolDefaults:
         assert build_sentiment_provider(c) is not None
 
     def test_default_subagent_timeout_300(self):
-        cfg = load_config()
+        cfg = load_config(_REPO_CFG)
         assert cfg.subagents.timeout_seconds == 300

@@ -133,7 +133,13 @@ def run_compare(
         if isinstance(embed_fn, str)
         else (DEFAULT_MODEL if embed_fn is None else str(getattr(embed_fn, "__name__", "custom")))
     )
-    with tempfile.TemporaryDirectory(prefix="retrieval_compare_") as tmp:
+    # ignore_cleanup_errors：chroma PersistentClient 在 Windows 上持有 sqlite/数据文件
+    # 句柄到进程退出（clear_system_cache 亦不释放），临时目录清理会抛 WinError 32——
+    # 已知环境性限制（doc 66 时代记录的 4 个 chroma 文件锁失败即此因），忽略清理错误，
+    # 残留临时目录由 OS temp 策略回收。
+    with tempfile.TemporaryDirectory(
+        prefix="retrieval_compare_", ignore_cleanup_errors=True
+    ) as tmp:
         vs = VectorStore(embed_fn=embed_fn, data_dir=Path(tmp) / "vs")
         vector_ok = _chromadb_available() and vs.is_available()
         store = CompetitorStore(data_dir=tmp, vector_store=vs if vector_ok else None)

@@ -178,13 +178,8 @@ class TestOverallDegradation:
 
 
 class TestAssembleGating:
-    def test_lead_body_ignored_when_writer_pass(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """writer_pass=true → use_lead_body 缺省解析为 False（Lead body 被取代）。"""
-        cfg = AppConfig()
-        cfg.report.writer_pass = True
-        from competitor_agent.config import loader
-
-        monkeypatch.setattr(loader, "load_config", lambda path=None: cfg)
+    def test_lead_body_always_ignored(self) -> None:
+        """设计文档 88 步骤 7：两段式退役——Lead 散文正文不再消费（无论 writer_pass）。"""
         answer = "散文正文，不应成为报告。" + json.dumps(
             {
                 "competitor": "cursor",
@@ -203,7 +198,7 @@ class TestAssembleGating:
             lead_answer=answer, competitor=Competitor(name="cursor"), loop_plan=None
         )
         assert report.markdown_report != "散文正文，不应成为报告。"
-        assert "散文正文" not in report.markdown_report  # 模板渲染，body 被忽略
+        assert "散文正文" not in report.markdown_report  # 模板渲染，body 已退役
 
 
 class TestBenchmarkMockDispatch:

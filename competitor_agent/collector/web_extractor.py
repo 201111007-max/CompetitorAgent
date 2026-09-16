@@ -55,7 +55,7 @@ class WebExtractor:
         if content is None:
             raise DataSourceUnavailableError(f"无法抓取 {url}")
 
-        text = self._clean(content)
+        text = self._clean(content, url=url)
         # 提示注入过滤（设计文档 91）：注入行整行替换，hash/状态均按过滤后文本
         text, _hits = strip_prompt_injections(text, source=url)
         evidence = SourceEvidence(
@@ -93,7 +93,7 @@ class WebExtractor:
     def _get_client(self) -> httpx.Client:
         return httpx.Client()
 
-    def _clean(self, html: str) -> str:
+    def _clean(self, html: str, url: str = "") -> str:
         try:
             from bs4 import BeautifulSoup  # 可选依赖，缺失时优雅降级
         except ImportError as exc:
@@ -103,6 +103,9 @@ class WebExtractor:
         try:
             soup = BeautifulSoup(html, "lxml")
         except Exception:  # noqa: BLE001 - lxml 解析器失败时回退标准库 html.parser
+            logger.warning(
+                "lxml 解析失败，回退 html.parser: url=%s len=%d", url, len(html), exc_info=True
+            )
             soup = BeautifulSoup(html, "html.parser")
         for tag in soup(_SKIP_TAGS):
             tag.decompose()

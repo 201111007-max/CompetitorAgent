@@ -125,8 +125,9 @@ class TestComparisonConclusion:
     def test_pure_json_conclusion(self):
         assert _extract_conclusion('{"conclusion":"B 领先"}') == "B 领先"
 
-    def test_marker_wins(self):
-        assert _extract_conclusion("前言【市场格局核心结论】A 最强") == "A 最强"
+    def test_marker_contract_retired(self):
+        """设计文档 88 步骤 7：marker 字符串契约删除——非 JSON 文本整段兜底为结论。"""
+        assert _extract_conclusion("前言【市场格局核心结论】A 最强") == "前言【市场格局核心结论】A 最强"
 
     def test_prose_no_conclusion(self):
         assert _extract_conclusion("没有结构化结论的散文。") == "没有结构化结论的散文。"

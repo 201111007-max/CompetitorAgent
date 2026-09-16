@@ -2,8 +2,8 @@
 
 Lead 在 DISCOVERY/COMPARE 编排阶段调用：把 delegate 委派回来的候选/维度结论，
 按 Lead 决策的聚合口径（``kind``：compare 明确对比 / position 普查格局）收拢，
-并回填"请给出市场格局核心结论"的结构化引导，使 Lead 下一轮 LLM 输出结论段
-（最佳/最差/趋势/替代关系），而非只交矩阵。
+并回填"请给出市场格局核心结论"的结构化引导，使 Lead 下一轮 LLM 在 comparison JSON
+的 ``conclusion`` 字段输出结论（最佳/最差/趋势/替代关系），而非只交矩阵。
 
 职责边界：本工具只做**聚合决策声明 + 结构校验**（kind/dimensions），不调 LLM、
 不渲染矩阵。矩阵仍由 ``ReportBuilder.build_comparison`` 渲染（执行层保留）。
@@ -46,8 +46,9 @@ def make_aggregate_tool() -> Callable[..., str]:
             f"[aggregate_report 决策] 口径 kind={kind}；范围={dims_text}。\n"
             "以下为各候选竞品的已收集结论（页脚为部分候选缺失标注，可据此对齐）。\n"
             f"{parts}\n"
-            "- 请在最终答复中给出【市场格局核心结论】，含：各维度最优者 best_per_dimension、"
-            "整体最佳/最差、趋势、替代关系；不要只交数据矩阵。矩阵由报告器另行渲染。"
+            "- 请以 comparison JSON 作最终答复：conclusion 字段写市场格局核心结论"
+            "（各维度最优者 best_per_dimension、整体最佳/最差、趋势、替代关系），"
+            "kind/dimensions/gaps 照实填写；不要只交数据矩阵。矩阵由报告器另行渲染。"
         )
 
     return aggregate_report

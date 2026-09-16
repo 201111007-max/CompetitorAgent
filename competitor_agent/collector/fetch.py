@@ -18,6 +18,7 @@ from dataclasses import dataclass
 
 import httpx
 
+from competitor_agent.collector.resilience import CircuitBreaker
 from competitor_agent.config.loader import CollectorConfig
 from competitor_agent.core.url_guard import guard_http_url
 
@@ -37,6 +38,8 @@ class FetchResult:
     provider: str = ""  # 实际命中级："trafilatura"|"crawl4ai"|"jina"（via: 由此而来）
     reason: str = ""  # 失败原因（success=False 时必填）
     fetched_at: float = 0.0
+    # 设计文档 74 §3.5-3 SWR：源失败回旧缓存时为 True（via 行会附 as_of 标注）
+    stale: bool = False
 
 
 class FetchProvider(ABC):
@@ -59,10 +62,23 @@ class FetchRouter:
 
     逐级尝试命中即停；成功且非空壳（``_is_shell``）→ 返回；否则记 fallback_event 降级。
     三级全失败 → 返回 ``FetchResult(success=False, reason=...)``（不抛，工具层 str 出口安全）。
+    设计文档 74 §3.5-1：``breaker_threshold>0`` 时逐级熔断——同一级连续失败 N 次 →
+    冷却期内直接跳过该级（``CircuitBreaker``），冷却到期放行半开探测；全部级熔断中
+    → 返回显式失败结果。
     """
 
-    def __init__(self, providers: list[FetchProvider]) -> None:
+    def __init__(
+        self,
+        providers: list[FetchProvider],
+        *,
+        breaker_threshold: int = 0,
+        breaker_cooldown_seconds: float = 60.0,
+    ) -> None:
         self._providers = [p for p in providers if p.available()]
+        # threshold<=0 = 关闭熔断（直接构造的旧调用方行为不变，黄金回归）
+        self._breaker_threshold = max(0, int(breaker_threshold))
+        self._breaker_cooldown = max(0.0, float(breaker_cooldown_seconds))
+        self._breakers: dict[str, CircuitBreaker] = {}
 
     @property
     def providers(self) -> list[FetchProvider]:
@@ -72,26 +88,56 @@ class FetchRouter:
     def active_count(self) -> int:
         return len(self._providers)
 
+    def _breaker_for(self, level: str) -> CircuitBreaker | None:
+        if self._breaker_threshold <= 0:
+            return None
+        if level not in self._breakers:
+            self._breakers[level] = CircuitBreaker(
+                f"fetch:{level}",
+                threshold=self._breaker_threshold,
+                cooldown_seconds=self._breaker_cooldown,
+            )
+        return self._breakers[level]
+
     def fetch(self, url: str, max_chars: int) -> FetchResult:
         from competitor_agent.collector.fetch_policy import _is_shell
 
         attempted: list[str] = []
+        skipped: list[str] = []
         for provider in self._providers:
             level = provider.source_provider or type(provider).__name__
+            breaker = self._breaker_for(level)
+            if breaker is not None and not breaker.allow():
+                skipped.append(level)
+                self._log_fallback(level, "熔断中（circuit open，切下一级）")
+                continue
             try:
                 result = provider.fetch(url, max_chars=max_chars)
             except Exception as exc:  # noqa: BLE001 - provider 意外异常视为该级失败
                 reason = f"{type(exc).__name__}: {exc}"
+                if breaker is not None:
+                    breaker.record_failure()
                 attempted.append(f"{level}: {reason}")
                 self._log_fallback(level, reason)
                 continue
             if result.success and not _is_shell(result.content):
                 if result.provider:
                     result.provider = level
+                if breaker is not None:
+                    breaker.record_success()
                 return result
             reason = result.reason or "空壳（隐性失败）"
+            if breaker is not None:
+                breaker.record_failure()
             attempted.append(f"{level}: {reason}")
             self._log_fallback(level, reason)
+        if skipped and len(skipped) == len(self._providers):
+            # 全部级熔断中：显式失败原因（不误报「空壳」类逐级失败细节）
+            return FetchResult(
+                success=False,
+                url=url,
+                reason=f"所有抓取级熔断中: {', '.join(skipped)}",
+            )
         return FetchResult(
             success=False,
             url=url,
@@ -160,7 +206,12 @@ def build_fetch_router(cfg: CollectorConfig) -> FetchRouter | None:
                 logger.info("jina_reader 未启用（jina_reader.enabled=false），链中跳过该级")
     if not providers:
         return None
-    return FetchRouter(providers)
+    # 设计文档 74 §3.5-1：逐级熔断（阈值/冷却配置化；CollectorConfig 缺省 3 次/60s）
+    return FetchRouter(
+        providers,
+        breaker_threshold=getattr(cfg, "breaker_threshold", 0),
+        breaker_cooldown_seconds=getattr(cfg, "breaker_cooldown_seconds", 60.0),
+    )
 
 
 def _guarded_get(

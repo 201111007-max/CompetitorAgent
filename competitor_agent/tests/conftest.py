@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -70,12 +71,69 @@ def mock_llm() -> LLMClient:
 
 
 @pytest.fixture(autouse=True)
-def _isolate_llm_env():
-    """确保单测不触发真实 LLM 调用：清除 API Key 环境变量"""
+def _isolate_llm_env() -> None:
+    """确保单测不触发真实 LLM/搜索调用：清除 API Key 与搜索增强 Key 环境变量"""
     import os
 
-    for key in ("OPENAI_API_KEY", "DEEPSEEK_API_KEY", "LLM_API_KEY"):
+    for key in ("OPENAI_API_KEY", "DEEPSEEK_API_KEY", "LLM_API_KEY", "TAVILY_API_KEY"):
         os.environ.pop(key, None)
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _disable_real_search(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    """禁用测试内真实联网搜索（doc 89 断网隔离纪律延伸）。
+
+    doc 71 后 DDG 为免 Key 恒可用主力：无显式 web_tool 时装配层自动注入
+    ``build_search_router``——mock LLM 的 discovery 编排（web_search_candidates）
+    会发出真实 HTTP 请求，断网/死代理环境表现为超时假死而非快速降级。
+    会话级用 ``COMPETITOR_AGENT_CONFIG`` 指向 ``enable_external_sources: false``
+    的最小配置，使搜索注入确定关闭；显式注入 web_tool 的用例不受影响
+    （显式优先于自动注入，doc 61 契约）。
+    """
+    import os
+
+    cfg_file = tmp_path_factory.mktemp("config") / "test_config.yaml"
+    cfg_file.write_text("collector:\n  enable_external_sources: false\n", encoding="utf-8")
+    os.environ["COMPETITOR_AGENT_CONFIG"] = str(cfg_file)
+    yield
+    os.environ.pop("COMPETITOR_AGENT_CONFIG", None)
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _offline_huggingface() -> Iterator[None]:
+    """嵌入/精排层权重探测禁止触网（doc 89 断网隔离纪律的延伸）。
+
+    HF 本地缓存不全时 sentence_transformers 会对缺失文件在线补拉（HEAD + 5 次重试），
+    无网/死代理环境表现为分钟级假死而非快速降级。离线模式语义：
+    缓存完整 → 正常加载；缓存缺失 → 立即抛错 → ``is_available()=False`` 确定性降级
+    （与无权重机器逐位一致，回归安全阀不变）。
+    """
+    import os
+
+    set_keys = []
+    for key in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "HF_HUB_DISABLE_TELEMETRY"):
+        if key not in os.environ:
+            os.environ[key] = "1"
+            set_keys.append(key)
+    yield
+    for key in set_keys:
+        os.environ.pop(key, None)
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _isolate_user_data_dir(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    """单测不触碰真实用户数据目录（``~/.competitor_agent``）。
+
+    会话级把 ``COMPETITOR_AGENT_DATA_DIR`` 指向临时目录：知识库/记忆/缓存全部隔离。
+    动机：真实 KB 已增长到万级 chunk，无持久化 chroma 时 API 构建期会全量 CPU 重嵌
+    （分钟级假死）；且真实数据损坏会误伤无关用例。与 doc 89 断网隔离同思路——
+    个别需覆盖默认路径解析的用例自行 delenv/setenv（显式管理优先于本隔离）。
+    """
+    import os
+
+    os.environ["COMPETITOR_AGENT_DATA_DIR"] = str(tmp_path_factory.mktemp("user_data"))
+    yield
+    os.environ.pop("COMPETITOR_AGENT_DATA_DIR", None)
 
 
 @pytest.fixture

@@ -19,6 +19,7 @@ from typing import Any
 
 import httpx
 
+from competitor_agent.collector.resilience import CircuitBreaker
 from competitor_agent.config.loader import CollectorConfig
 from competitor_agent.core.competitor_discoverer import json_loads_array
 from competitor_agent.llm.client import LLMClient
@@ -167,20 +168,55 @@ class SearchRouter(SearchProvider):
       ``fetched_at``（旧 provider 返回的默认空字段由路由补全，无需改 provider）。
     - 全部 provider 均抛错 → 抛最后一个 ``SearchError``（含 ``kind``，供日志区分
       限流/网络）；全部为空 → 返回空列表（上层报「未搜索到」，不编造）。
+    - 设计文档 74 §3.5-1：``breaker_threshold>0`` 时逐源熔断——同一源连续失败 N 次
+      → 冷却期内直接跳过该源切备用（``CircuitBreaker``），冷却到期放行半开探测；
+      全部源熔断中 → 抛 ``SearchError(kind="network")``。
     """
 
     source_engine = "router"
 
-    def __init__(self, providers: list[SearchProvider]) -> None:
+    def __init__(
+        self,
+        providers: list[SearchProvider],
+        *,
+        breaker_threshold: int = 0,
+        breaker_cooldown_seconds: float = 60.0,
+    ) -> None:
         self._providers = list(providers)
+        # threshold<=0 = 关闭熔断（直接构造的旧调用方行为不变，黄金回归）
+        self._breaker_threshold = max(0, int(breaker_threshold))
+        self._breaker_cooldown = max(0.0, float(breaker_cooldown_seconds))
+        self._breakers: dict[str, CircuitBreaker] = {}
+
+    def _breaker_for(self, engine: str) -> CircuitBreaker | None:
+        if self._breaker_threshold <= 0:
+            return None
+        if engine not in self._breakers:
+            self._breakers[engine] = CircuitBreaker(
+                f"search:{engine}",
+                threshold=self._breaker_threshold,
+                cooldown_seconds=self._breaker_cooldown,
+            )
+        return self._breakers[engine]
 
     def search(self, query: str, max_results: int = 8) -> list[SearchHit]:
         last_err: SearchError | None = None
+        skipped: list[str] = []
         for provider in self._providers:
             engine = getattr(provider, "source_engine", "") or type(provider).__name__
+            breaker = self._breaker_for(engine)
+            if breaker is not None and not breaker.allow():
+                skipped.append(engine)
+                logger.warning(
+                    "search.circuit_skipped engine=%s（熔断中，切备用源）", engine,
+                    extra={"fallback_event": f"search:circuit_open:{engine}"},
+                )
+                continue
             try:
                 hits = provider.search(query, max_results=max_results)
             except SearchError as exc:
+                if breaker is not None:
+                    breaker.record_failure()
                 last_err = exc
                 logger.warning(
                     "search.fallback_event engine=%s kind=%s msg=%s",
@@ -191,9 +227,16 @@ class SearchRouter(SearchProvider):
                 continue
             if not hits:
                 continue  # 空结果也尝试下一级（增强可能更全）
+            if breaker is not None:
+                breaker.record_success()
             return [self._stamp(h, engine) for h in hits]
         if last_err is not None:
             raise last_err
+        if skipped and len(skipped) == len(self._providers):
+            # 全部源熔断中：显式不可用（不编造空结果伪装「未搜索到」）
+            raise SearchError(
+                f"所有搜索源熔断中: {', '.join(skipped)}", kind="network"
+            )
         return []
 
     @staticmethod
@@ -243,7 +286,12 @@ def build_search_router(cfg: CollectorConfig) -> SearchRouter | None:
 
     if tavily is not None and providers[0] is not tavily:
         providers.append(tavily)
-    return SearchRouter(providers)
+    # 设计文档 74 §3.5-1：逐源熔断（阈值/冷却配置化；CollectorConfig 缺省 3 次/60s）
+    return SearchRouter(
+        providers,
+        breaker_threshold=getattr(cfg, "breaker_threshold", 0),
+        breaker_cooldown_seconds=getattr(cfg, "breaker_cooldown_seconds", 60.0),
+    )
 
 
 def web_search_candidates(

@@ -84,6 +84,10 @@ class FetchCache:
                 for h in (data.get("hits") or [])
             ]
         except Exception:  # noqa: BLE001 - 缓存损坏视为未命中
+            logger.warning(
+                "搜索缓存解析失败（视为未命中）: engine=%s query=%r",
+                engine, query, exc_info=True,
+            )
             return None
 
     def set_search(
@@ -105,6 +109,24 @@ class FetchCache:
         data = self._read(self._fetch_dir / f"{key}.json", self._fetch_ttl)
         if data is None:
             return None
+        return self._fetch_from(data, url)
+
+    def get_fetch_stale(self, url: str) -> FetchResult | None:
+        """过期缓存兜底读（设计文档 74 §3.5-3 SWR）：源失败时回旧缓存。
+
+        与 ``get_fetch`` 同 key 但**不检查 TTL**（有历史成功条目即回），
+        返回结果 ``stale=True``（调用方在 via 行附 as_of 标注，报告侧待核验语义）。
+        """
+        key = self._key(self.canonical_url(url))
+        data = self._read(self._fetch_dir / f"{key}.json", float("inf"))
+        if data is None:
+            return None
+        result = self._fetch_from(data, url)
+        if result is not None and result.success:
+            result.stale = True
+        return result
+
+    def _fetch_from(self, data: dict[str, Any], url: str) -> FetchResult | None:
         try:
             return FetchResult(
                 success=bool(data.get("success")),
@@ -116,6 +138,9 @@ class FetchCache:
                 fetched_at=float(data.get("fetched_at") or 0.0),
             )
         except Exception:  # noqa: BLE001 - 缓存损坏视为未命中
+            logger.warning(
+                "正文缓存解析失败（视为未命中）: url=%s", url, exc_info=True,
+            )
             return None
 
     def set_fetch(self, result: FetchResult) -> None:

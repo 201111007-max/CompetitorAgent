@@ -4,7 +4,8 @@
 ① PLAN_SCHEMA 增三个可选字段（output_intent/format_hint/need_history），
    make_plan 校验通过且原样回传；
 ② 兼容旧 plan（无新字段）→ 校验仍通过（只定调不强制）；
-③ Lead 系统提示两段式 Final Answer + M2 字段说明（正文+JSON、reuse_dimension_results 提示）。
+③ Lead 系统提示 JSON-only Final Answer（doc 88 步骤 7 两段式退役）+ M2 字段说明
+   （reuse_dimension_results 提示）。
 """
 from __future__ import annotations
 
@@ -46,12 +47,21 @@ class TestPlanSchemaFields:
 
 
 class TestLeadPromptM1M2:
-    def test_prompt_has_two_part_final_answer(self) -> None:
+    def test_prompt_json_only_final_answer(self) -> None:
+        """设计文档 88 步骤 7：两段式退役——Final Answer 只输出 REPORT_SCHEMA JSON。"""
         prompt = build_lead_system_prompt()
-        assert "① 报告正文" in prompt
-        assert "② 结构化数据" in prompt
+        assert "REPORT_SCHEMA JSON" in prompt
         assert "只输出一份 JSON" in prompt
-        assert "两者缺一不可" in prompt
+        assert "不要求你写 Markdown 正文" in prompt
+        assert "① 报告正文" not in prompt
+        assert "② 结构化数据" not in prompt
+        assert "两者缺一不可" not in prompt
+
+    def test_prompt_aggregate_conclusion_field_contract(self) -> None:
+        """marker 字符串契约删除：聚合引导改 comparison JSON conclusion 字段。"""
+        prompt = build_lead_system_prompt()
+        assert "【市场格局核心结论】" not in prompt
+        assert "conclusion 字段" in prompt
 
     def test_prompt_mentions_m2_fields_and_reuse_tool(self) -> None:
         prompt = build_lead_system_prompt()

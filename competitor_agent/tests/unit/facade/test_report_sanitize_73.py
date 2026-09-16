@@ -3,18 +3,21 @@
 - H1 归并去重（草稿+正式稿 → 只留正式稿；单 H1 逐字节不变）；
 - 未闭合围栏兜底（``` 失衡 → 补闭合；配平原样）；
 - 追加守卫布尔化（模型把提示抄进正文 → 代码仍按布尔标志追加，提示不丢）。
+
+设计文档 88 步骤 7（两段式退役）：净化链收敛进 `_fallback_single_dimension`
+（`_strip_structured_data_section` 随 Lead 散文正文概念退役删除）。
 """
 
 from __future__ import annotations
 
 from competitor_agent.facade.comparison_report import (
     _ZERO_CANDIDATE_HINT,
-    _lead_body_text,
     assemble_comparison,
 )
 from competitor_agent.facade.react_report import (
     _close_orphan_fence,
     _dedupe_repeated_report,
+    _strip_json_blocks,
 )
 
 
@@ -64,24 +67,26 @@ def test_fence_balanced_unchanged() -> None:
     assert _close_orphan_fence(text) == text
 
 
-def test_lead_body_chain_dedupes_and_closes_fence() -> None:
-    """组合：草稿+正式稿 + 结构化数据段 + 截断围栏 → 净化后只留正式稿、无未闭合围栏。"""
+def test_fallback_chain_dedupes_and_closes_fence() -> None:
+    """组合：草稿+正式稿 + 截断围栏 → 兜底净化后只留正式稿、无未闭合围栏。
+
+    设计文档 88 步骤 7：两段式退役后净化链唯一存活消费方 = `_fallback_single_dimension`
+    （`_strip_structured_data_section` 已删除，不再断言"结构化数据"段剥离）。
+    """
     draft = "# Coding Agent 市场分析报告\n\n草稿正文（丢）\n\n## 市场格局核心结论\n\n草稿结论（丢）\n\n"
-    formal = "# Coding Agent 市场分析报告\n\n## 一、结论先行\n\n正式结论\n\n## 七、结构化数据（JSON）\n\n```json\n{\"x\": 1}\n"
-    lead_answer = draft + formal
-    body = _lead_body_text(lead_answer)
-    assert body.count("# Coding Agent 市场分析报告") == 1
-    assert "草稿正文" not in body
-    assert "正式结论" in body
-    assert "七、结构化数据" not in body
-    assert body.count("```") % 2 == 0, "无未闭合围栏"
+    formal = "# Coding Agent 市场分析报告\n\n## 一、结论先行\n\n正式结论\n\n```json\n{\"x\": 1}\n"
+    text = _close_orphan_fence(_dedupe_repeated_report(_strip_json_blocks(draft + formal)))
+    assert text.count("# Coding Agent 市场分析报告") == 1
+    assert "草稿正文" not in text
+    assert "正式结论" in text
+    assert text.count("```") % 2 == 0, "无未闭合围栏"
 
 
 def test_guard_boolean_appends_despite_copied_hint() -> None:
     """§3.3：模型把提示文本抄进正文中间 → 代码仍按布尔标志追加（提示不丢）。
 
     旧实现按「字符串存在性」判断 → 模型抄写后代码跳过追加（提示只有 1 处）；
-    新实现按布尔标志 → 追加生效（正文 1 处 + 末尾 1 处 = 2）。
+    新实现按布尔标志 → 追加生效（提示留痕 1 处 + 结论兜底段携带 1 处 = 2）。
     """
     lead_answer = (
         "# 对比报告\n\n未收集到候选数据，对比矩阵为空。\n\n一些正文内容\n\n"
@@ -91,7 +96,6 @@ def test_guard_boolean_appends_despite_copied_hint() -> None:
         lead_answer=lead_answer,
         plan=None,
         candidate_results={},
-        use_lead_body=True,
     )
     assert report.competitors == []
     assert report.markdown_report.count(_ZERO_CANDIDATE_HINT) == 2
@@ -104,20 +108,23 @@ def test_guard_boolean_no_duplicate_when_no_copied() -> None:
         lead_answer=lead_answer,
         plan=None,
         candidate_results={},
-        use_lead_body=True,
     )
     assert report.markdown_report.count(_ZERO_CANDIDATE_HINT) == 1
 
 
 def test_export_skips_empty_shell_for_survey() -> None:
-    """设计文档 73 §3.4 + D1 方案 A：普查/零候选不落空壳矩阵 compare.json。"""
+    """设计文档 73 §3.4 + D1 方案 A：普查/零候选不落空壳矩阵 compare.json。
+
+    enable_rag=False：导出逻辑与知识库无关，不得触碰真实用户数据目录
+    （真实 KB 全量重嵌向量层，单测必须隔离——项目测试纪律）。
+    """
     from competitor_agent.config.loader import AppConfig
     from competitor_agent.domain_types.report import ComparisonReport
     from competitor_agent.facade.api import CompetitorAnalysisAPI
 
     cfg = AppConfig()
     cfg.report.export_json = True
-    api = CompetitorAnalysisAPI(config=cfg)
+    api = CompetitorAnalysisAPI(config=cfg, enable_rag=False)
     survey = ComparisonReport(
         competitors=[],
         reports=[],

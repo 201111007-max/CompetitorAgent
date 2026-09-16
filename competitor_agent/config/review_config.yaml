@@ -70,6 +70,13 @@ collector:
     enabled: true                 # 云端兜底开关
   cache_ttl_search_hours: 24      # 搜索缓存 TTL（缺省沿用现有 cache_ttl_seconds=86400）
   cache_ttl_fetch_days: 7         # 正文缓存 TTL
+  # 外部通道熔断（设计文档 74 §3.5-1）：同一源连续失败 threshold 次 → 熔断
+  # cooldown_seconds 秒并切备用源（半开探测成功恢复；重复熔断冷却指数退避封顶 8×）
+  breaker_threshold: 3
+  breaker_cooldown_seconds: 60
+  # stale-while-revalidate（设计文档 74 §3.5-3）：抓取失败 → 过期旧缓存兜底，
+  # via 行附 as_of 标注（反爬/超限站不至于整维无数据，报告侧待核验语义）
+  stale_cache_on_failure: true
   # 榜单结构化直连（设计文档 67 §2.1）：swebench | terminalbench | aider / 空=不启用。
   # 配合 enable_external_sources 主开关；performance 维度子 Agent 工具面自动加 benchmark_scores。
   # 设计文档 70 §8.4 D4a：官方 SWE-bench 榜单表最稳、与 coding agent 最相关 → 默认 swebench。
@@ -94,9 +101,8 @@ report:
   # 设计文档 70：output_dir 置空 = 项目默认 <项目根>/output（Web /api/settings 可改，
   # 持久化 <data_dir>/settings.json；优先级 显式 > settings > yaml > 项目默认）。
   output_dir: ""   # 空 = 项目 output/（旧值 ~/.competitor_agent/reports/competitor 读侧回退不迁移）
-  lead_formatted_body: true   # 设计文档 70 M1：Lead 两段式 Final Answer（正文+JSON），关则全回退模板
+  # 设计文档 88 §7 第 7 步：lead_formatted_body 键已随两段式退役删除（未知键被忽略，旧 yaml 兼容）。
   # 设计文档 88 §5：writer 叙事槽（骨架代码渲染 + LLM 只填解读槽）；false = 纯骨架渲染（mock/CI 确定路径）
-  # writer_pass=true 时 lead_formatted_body 被取代（Lead body 不再作为正文）；两段式退役后删除该键
   writer_pass: false
   writer_slot_max_retries: 1   # N2 保真校验不过的单槽重试次数，仍败 → 槽位「解读暂缺」注记降级
   export_json: true          # 结构化 JSON 导出（设计文档 28），与 .md 同目录同名

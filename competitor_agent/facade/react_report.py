@@ -57,31 +57,21 @@ def assemble(
     transcript: list[dict] | None = None,
     builder: Any | None = None,
     terminal_state: str = "success",
-    use_lead_body: bool | None = None,
     error_kind: str = "",
 ) -> CompetitorReport:
-    """把 Lead Final Answer 组装为 CompetitorReport。
+    """把 Lead Final Answer 组装为 CompetitorReport（设计文档 88 单一事实源）。
 
-    设计文档 70 M1：Final Answer 两段式——①报告正文（Markdown，给人读）②结构化
-    REPORT_SCHEMA JSON（给机器用）。``_split_body_and_payload`` 把两者拆开：
-    ``markdown_report = body or 模板``（body 为空 → ``MarkdownRenderer`` 模板保底，
-    mock 纯 JSON 输出确定性不变、既有模板断言零改动）；``dimension_results`` 仍从
-    payload 解析（现状不变）。``use_lead_body=None`` 时取
-    ``config.report.lead_formatted_body``（默认开，见设计文档 70 §7 #1）。
+    设计文档 88 §7 第 7 步（两段式退役）：Lead Final Answer 只含 REPORT_SCHEMA JSON，
+    散文正文不再消费——``_parse_report`` 括号配平提取 payload →
+    ``aggregate_researcher_results`` 确定性合并 → ``ReportBuilder.build`` 代码渲染；
+    ``writer_pass`` 开启时正文由 facade 收尾的 writer pass 以骨架+叙事槽改写
+    （见 ``facade/writer_pass.py``）。Lead 答非 JSON（解析失败/超步数/取消）→
+    ``_fallback_single_dimension`` 兜底（净化链仍生效）。
     """
     from competitor_agent.core.report_builder import ReportBuilder
 
     builder = builder or ReportBuilder()
-    if use_lead_body is None:
-        from competitor_agent.config.loader import load_config
-
-        report_cfg = load_config().report
-        # 设计文档 88 §9.1：writer_pass 开 → Lead body 被取代（正文由骨架+writer 槽衍生），
-        # 两段式 body 不再作为报告正文（prompt 侧退役为 §7 第 7 步，过渡期 body 被忽略）
-        use_lead_body = report_cfg.lead_formatted_body and not report_cfg.writer_pass
-        if report_cfg.lead_formatted_body and report_cfg.writer_pass:
-            logger.info("writer_pass 开启，lead_formatted_body 被取代（Lead body 不再作为正文）")
-    body, payload = _split_body_and_payload(lead_answer)
+    payload = _parse_report(lead_answer)
     if payload is None:
         return _fallback_single_dimension(
             lead_answer, competitor, builder, terminal_state, loop_plan, error_kind=error_kind
@@ -99,29 +89,9 @@ def assemble(
         gaps_pending=gaps_pending,
         terminal_state=terminal_state,
     )
-    # 设计文档 70 M1：正文优先（body 非空 → 用 Lead 生成正文，模板仅保底）
-    if use_lead_body and body:
-        report.markdown_report = body
     if conflict_note and report.markdown_report:
         report.markdown_report = report.markdown_report.rstrip() + "\n\n" + conflict_note
     return report
-
-
-def _split_body_and_payload(lead_answer: str) -> tuple[str, dict[str, Any] | None]:
-    """把 Lead Final Answer 拆成 (正文 body, 结构化 payload)（设计文档 70 M1）。
-
-    - ``body``：剔除 JSON 块后的纯散文（复用 doc 65 ``_strip_json_blocks`` 防残留）；
-    - ``payload``：REPORT_SCHEMA JSON（复用 ``_parse_report`` 括号配平提取 + 无 dimensions
-      的兜底单 react 维度）。
-    mock LLM 无正文（纯 JSON）→ body 空 → 模板保底（既有断言零改动）。
-    """
-    body = _close_orphan_fence(
-        _dedupe_repeated_report(
-            _strip_structured_data_section(_strip_json_blocks(lead_answer or ""))
-        )
-    )
-    payload = _parse_report(lead_answer)
-    return body, payload
 
 
 def _dedupe_repeated_report(text: str) -> str:
@@ -151,24 +121,6 @@ def _close_orphan_fence(text: str) -> str:
     if text and text.count("```") % 2 != 0:
         return text.rstrip() + "\n```\n"
     return text
-
-
-def _strip_structured_data_section(text: str) -> str:
-    """移除「结构化数据（JSON）」机器段（设计文档 70 M1 第②段）整节。
-
-    JSON 内容块已由 ``_strip_json_blocks`` 剥除；此处把「结构化数据」标题（含编号
-    形态如 ``## 七、结构化数据（JSON）``）及其下直到下一个 Markdown 标题之间的内容
-    （散文、空 ```json 围栏等）一并剔除——该段是给机器/矩阵/compare.json 用的，
-    不应出现在给人读的报告正文。结构化数据仍保留在原始 answer 中供矩阵/导出提取。
-    """
-    if not text:
-        return ""
-    return re.sub(
-        r"^#{1,6}\s*[^\n]*结构化数据[^\n]*\n(?:(?!^#{1,6}\s).*\n?)*",
-        "",
-        text,
-        flags=re.MULTILINE,
-    )
 
 
 def _parse_report(answer: str) -> dict[str, Any] | None:
@@ -290,7 +242,9 @@ def _fallback_single_dimension(
     """非 JSON / 无 dimensions：单 react 维度 PARTIAL（LLM 不可用/超步数文案）。
 
     设计文档 65 §2.2 兜底净化：即使无有效 JSON，赋给 react 维度 summary 前先剔除文中
-    的 JSON 块（复用括号配平定位），只保留纯散文——用户不再看到一坨 JSON dump。
+    的 JSON 块（复用括号配平定位），只保留纯散文——用户不再看到一坨 JSON dump；
+    doc 73 P1 净化链（H1 归并去重 + 未闭合围栏兜底）在兜底路径继续生效
+    （设计文档 88 步骤 7：两段式正文退役后，这是净化链唯一存活消费方）。
 
     设计文档 87 §1.3：unavailable 判定改结构化信号——``error_kind`` 非空（unavailable/
     max_steps/stopped）即非正常终止，置信度 0.1；不再做中文字符串包含匹配。
@@ -300,7 +254,7 @@ def _fallback_single_dimension(
     """
     text = (answer or "").strip()
     if text:
-        text = _strip_json_blocks(text)
+        text = _close_orphan_fence(_dedupe_repeated_report(_strip_json_blocks(text)))
     status = ResultStatus.PARTIAL
     confidence = 0.1 if error_kind else 0.4
     dr = DimensionResult(

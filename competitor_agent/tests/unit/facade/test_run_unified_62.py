@@ -140,11 +140,14 @@ class TestComparisonAssembler:
         assert comparison.reports == []
         assert "无候选" in comparison.markdown_report
 
-    def test_extract_conclusion_json_and_marker(self) -> None:
+    def test_extract_conclusion_json_contract(self) -> None:
+        """设计文档 88 步骤 7：结论走 comparison JSON conclusion 字段（marker 契约删除）。"""
         from competitor_agent.facade.comparison_report import _extract_conclusion
 
         assert _extract_conclusion('{"conclusion": "X 领先"}') == "X 领先"
-        assert _extract_conclusion("Final Answer: 【市场格局核心结论】Cursor 最佳") == "Cursor 最佳"
+        assert _extract_conclusion("Final Answer: 【市场格局核心结论】Cursor 最佳") == (
+            "【市场格局核心结论】Cursor 最佳"
+        )
         assert _extract_conclusion("Cursor 整体领先") == "Cursor 整体领先"
         assert _extract_conclusion('{"kind": "compare"}') == ""  # JSON 无 conclusion → 空结论段
 
