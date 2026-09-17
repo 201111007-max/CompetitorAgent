@@ -649,6 +649,7 @@ async def analyze(
         try:
             async for event in _event_generator(sid, task):
                 if await request.is_disconnected():
+                    logger.warning("会话 %s 客户端断连（is_disconnected），自动取消后台分析", sid)
                     _sessions[sid]["cancelled"] = True
                     set_cancel(sid)  # 断连也触发协作式取消，停止后台分析
                     break
@@ -664,6 +665,7 @@ async def cancel(session_id: str, _: None = Depends(require_auth)) -> JSONRespon
     """取消运行中的分析会话"""
     if session_id not in _sessions:
         raise HTTPException(status_code=404, detail=f"会话 {session_id} 不存在")
+    logger.info("会话 %s 收到取消请求（POST /api/cancel）", session_id)
     _sessions[session_id]["cancelled"] = True
     # 内部取消标志与 web sid 打通：运行中的 analyze 轮询感知后协作式终止
     set_cancel(session_id)

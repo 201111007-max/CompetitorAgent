@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -29,6 +30,22 @@ logger = logging.getLogger("competitor_agent.collector.search")
 _TAVILY_SEARCH_URL = "https://api.tavily.com/search"
 _TAVILY_KEY_ENV = "TAVILY_API_KEY"
 _DEFAULT_USER_AGENT = "competitor-agent/0.1"
+
+# 进程级共享 httpx.Client（线程安全）：mcp web_search 每次调用重建 router/provider，
+# 若每个 provider 各自 new httpx.Client，SSL 上下文（CA 证书包加载）会被反复构造——
+# 实测 83% CPU 烧在 _get_client，事件循环被饿死。缺省一律复用共享实例；测试仍可
+# 经构造参数注入独立 client（互不影响）。
+_SHARED_HTTP_CLIENT: httpx.Client | None = None
+_SHARED_CLIENT_LOCK = threading.Lock()
+
+
+def _shared_http_client() -> httpx.Client:
+    global _SHARED_HTTP_CLIENT
+    if _SHARED_HTTP_CLIENT is None:
+        with _SHARED_CLIENT_LOCK:
+            if _SHARED_HTTP_CLIENT is None:
+                _SHARED_HTTP_CLIENT = httpx.Client()
+    return _SHARED_HTTP_CLIENT
 
 # 候选归纳 prompt（LLM 从搜索 hits 归纳 name/home/pricing/docs）
 _LLM_CANDIDATES_PROMPT = (
@@ -140,7 +157,7 @@ class TavilySearchProvider(SearchProvider):
 
     def _get_client(self) -> httpx.Client:
         if self._client is None:
-            self._client = httpx.Client()
+            return _shared_http_client()
         return self._client
 
 

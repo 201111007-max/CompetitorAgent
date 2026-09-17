@@ -15,7 +15,12 @@ import urllib.parse
 
 import httpx
 
-from competitor_agent.collector.search import SearchError, SearchHit, SearchProvider
+from competitor_agent.collector.search import (
+    SearchError,
+    SearchHit,
+    SearchProvider,
+    _shared_http_client,
+)
 
 logger = logging.getLogger("competitor_agent.collector.search.ddg")
 
@@ -88,7 +93,7 @@ class DuckDuckGoSearchProvider(SearchProvider):
 
     def _get_client(self) -> httpx.Client:
         if self._client is None:
-            self._client = httpx.Client()
+            return _shared_http_client()
         return self._client
 
 
