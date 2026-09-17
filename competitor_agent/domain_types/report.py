@@ -63,9 +63,10 @@ class ComparisonReport:
 
 @dataclass
 class ChatResult:
-    """对话式分支产物（设计文档 64 §5）：无报告面板，答案经 Stream 通道（text_delta）呈现。
+    """对话环产物（设计文档 96，取代 doc 64 §5 对话分支）：run_conversation() 返回类型。
 
-    ``answer`` 为 Lead 对话式 Final Answer（自由 prose，非 REPORT_SCHEMA JSON）。
+    ``answer`` 为对话 Lead 的 Final Answer（自由 prose）；``report`` 非 None 表示
+    本轮触发了 generate_report 工具（web 据此切换报告面板渲染，不再依赖入口预判）。
     ``transcript``/``terminal_state``/``cancelled`` 沿用 ReAct 运行结果语义。
     """
 
@@ -74,3 +75,5 @@ class ChatResult:
     terminal_state: str = "success"
     cancelled: bool = False
     session_id: str = ""
+    # 设计文档 96：generate_report 触发产物（CancelledResult 为 CompetitorReport 子类）
+    report: CompetitorReport | ComparisonReport | None = None
