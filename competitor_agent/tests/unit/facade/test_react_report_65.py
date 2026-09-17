@@ -156,28 +156,18 @@ class TestMalformedJsonLightFix:
 
 
 class TestPlanResolution:
-    def test_multi_candidate_inferred_discovery(self):
-        from competitor_agent.core.task_parser import ResolutionDecision
+    """设计文档 96：parse_task 判型回退退役——_plan_resolution 只看 plan + candidate_count。"""
+
+    def test_resolution_precedence_and_fallbacks(self):
         from competitor_agent.facade.api import CompetitorAnalysisAPI
 
-        class P:
-            resolution = ResolutionDecision.DISCOVERY
-
-        class C:
-            resolution = ResolutionDecision.COMPARE
-
-        class R:
-            resolution = ResolutionDecision.REGISTRY
-
-        # plan 缺 resolution/competitors，但 candidate_count>0 → discovery
-        assert CompetitorAnalysisAPI._plan_resolution({"competitor": "A"}, P(), candidate_count=3) == "discovery"
-        # 设计文档 66 §3.2：parse_task（LLM）判 COMPARE/DISCOVERY 且 plan 缺字段
-        # （零候选）→ 尊重主 Agent 意图 → 走 comparison 组装（不落 registry 单报告路径）
-        assert CompetitorAnalysisAPI._plan_resolution({"competitor": "A"}, P()) == "discovery"
-        assert CompetitorAnalysisAPI._plan_resolution({"competitor": "A"}, C()) == "compare"
-        # registry + 单值仍归 registry（回归）
-        assert CompetitorAnalysisAPI._plan_resolution({"competitor": "A"}, R()) == "registry"
-        # plan.competitors 存在 + COMPARE → compare
-        assert CompetitorAnalysisAPI._plan_resolution({"competitors": ["A", "B"]}, C()) == "compare"
-        # plan.resolution 优先
-        assert CompetitorAnalysisAPI._plan_resolution({"resolution": "registry"}, P(), candidate_count=3) == "registry"
+        # plan.resolution 优先（存在即直取）
+        assert CompetitorAnalysisAPI._plan_resolution({"resolution": "registry"}, candidate_count=3) == "registry"
+        assert CompetitorAnalysisAPI._plan_resolution({"resolution": "discovery"}) == "discovery"
+        # plan 缺 resolution：competitors → compare（用户点名多竞品）
+        assert CompetitorAnalysisAPI._plan_resolution({"competitors": ["A", "B"]}) == "compare"
+        # plan 缺 resolution/competitors 但有候选委派 → discovery（doc 65 §2.3 回归）
+        assert CompetitorAnalysisAPI._plan_resolution({"competitor": "A"}, candidate_count=3) == "discovery"
+        # 全缺 → registry
+        assert CompetitorAnalysisAPI._plan_resolution({"competitor": "A"}) == "registry"
+        assert CompetitorAnalysisAPI._plan_resolution({}) == "registry"

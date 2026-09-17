@@ -50,11 +50,13 @@ class TestHistoryContext:
         assert second.competitor.name == "cursor"
 
     def test_no_history_keeps_unknown(self, mock_llm):
-        """无历史时相对指代解析为 unknown；analyze 产出 unknown 竞品报告（doc 49 不报错）。"""
-        from competitor_agent.core.task_parser import parse_task
+        """无历史时相对指代解析为 unknown；analyze 产出 unknown 竞品报告（doc 49 不报错）。
 
-        parsed = parse_task("那定价呢", llm=mock_llm, use_llm=True)
-        assert parsed.primary_competitor == "unknown"
+        设计文档 96：竞品解析回退 = 注册表子串匹配（parse_task 退役）。
+        """
+        from competitor_agent.core.competitor_registry import match_competitor_from_text
+
+        assert match_competitor_from_text("那定价呢") is None
         api = _api(mock_llm)
         report = api.analyze("那定价呢")
         assert report.competitor.name == "unknown"

@@ -12,7 +12,6 @@ from typing import Any, cast
 
 from competitor_agent.agent.react_loop import ReactLoop, ReactRunResult
 from competitor_agent.core.report_exporter import export_comparison_json
-from competitor_agent.core.task_parser import parse_task
 from competitor_agent.domain_types.competitor import Competitor
 from competitor_agent.domain_types.events import ProgressEvent
 from competitor_agent.domain_types.report import ComparisonReport
@@ -40,6 +39,8 @@ class CompareService(ServiceBase):
         plan: dict[str, Any],
         sid: str,
         terminal: str,
+        *,
+        own_context: bool = True,
     ) -> ComparisonReport:
         """compare/discovery 组装 + 收尾（矩阵 + 结论段 + 导出 + 事件/trace）。
 
@@ -47,6 +48,9 @@ class CompareService(ServiceBase):
         ``build_comparison`` 矩阵（执行层）；设计文档 95：结论段走 writer 通道
         （``report.writer_pass`` 开关 + 正常终态，与单竞品路径同门控），writer 关闭/
         失败/零候选一律不追加结论段——矩阵自身说话，不回退解析 Lead 文本。
+
+        ``own_context``（设计文档 96）：False = generate_report 子流程——close log 与
+        end_trace 归对话环拥有，此处跳过（其余收尾照常）。
         """
         from competitor_agent.facade.comparison_report import assemble_comparison
 
@@ -67,7 +71,8 @@ class CompareService(ServiceBase):
                 on_skeleton=self._emit_report_skeleton,
             )
         self._export_comparison_json(report)
-        close_session_log(sid)
+        if own_context:
+            close_session_log(sid)
         self._emit(
             ProgressEvent(
                 event="report",
@@ -76,7 +81,8 @@ class CompareService(ServiceBase):
                 message=f"报告生成完成，终态={terminal}",
             )
         )
-        self._tracer.end_trace(sid, status=terminal, output_brief=report.markdown_report)
+        if own_context:
+            self._tracer.end_trace(sid, status=terminal, output_brief=report.markdown_report)
         return report
 
     def _export_comparison_json(self, report: ComparisonReport) -> Path | None:
@@ -105,20 +111,27 @@ class CompareService(ServiceBase):
     def compare(self, *competitors: str) -> ComparisonReport:
         """兼容保留（设计文档 62 §3.5）：= run(task) 的 COMPARE 语义路径（deprecated 告警）。
 
-        兼容旧签名 compare(a, b=None)：单个参数会被解析（"对比 A 和 B" / "A vs B"）；
-        多个参数逐个作为竞品名处理；最终统一委托 run()（单 Lead loop）执行。
+        兼容旧签名 compare(a, b=None)：单个参数会按注册表子串取任务文本全部命中名
+        （设计文档 96：parse_task 退役）；多个参数逐个匹配；最终统一委托 run() 执行。
         """
         logger.warning("compare() 已废弃（历史兼容）：请改用 run() 统一入口")
         names: list[str] = []
         if len(competitors) == 1:
-            parsed = parse_task(competitors[0], llm=self._llm, use_llm=self._use_llm)
-            names = list(parsed.competitors)
+            from competitor_agent.core.competitor_registry import COMPETITOR_REGISTRY
+
+            lowered = competitors[0].lower()
+            names = [
+                comp.name
+                for canon, comp in COMPETITOR_REGISTRY.items()
+                if canon in lowered or any(a in lowered for a in comp.aliases)
+            ]
         else:
+            from competitor_agent.core.competitor_registry import match_competitor_from_text
+
             for c in competitors:
-                parsed = parse_task(c, llm=self._llm, use_llm=self._use_llm)
-                primary = parsed.primary_competitor
-                if primary and primary != "unknown" and primary not in names:
-                    names.append(primary)
+                competitor = match_competitor_from_text(c)
+                if competitor is not None and competitor.name not in names:
+                    names.append(competitor.name)
         if len(names) < 2:
             raise ValueError("对比需要两个及以上竞品（或用 /compare A 和 B）")
         return cast(ComparisonReport, self._host.run(f"对比 {' 和 '.join(names)}"))
@@ -127,8 +140,8 @@ class CompareService(ServiceBase):
     def _task_with_sources(competitor: Competitor) -> str:
         """把发现竞品的 official_links 注入任务文本，使 Lead 拿到官方源。
 
-        复用 parse_task 的 custom_sources 提取（"官网是 …"/"定价页是 …"），
-        避免发现出的未知竞品因无官方源而 0 候选 → 0 维度。
+        来源提示沿用自然语言格式（"官网是 …"/"定价页是 …"），避免发现出的未知
+        竞品因无官方源而 0 候选 → 0 维度。
         """
         parts = [f"分析 {competitor.name}"]
         label = {"home": "官网是", "pricing": "定价页是", "docs": "文档是", "changelog": "更新日志是"}

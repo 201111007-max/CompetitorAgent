@@ -5,7 +5,7 @@
   },
   "analyze": {
     "kind": "sync",
-    "signature": "(self, task: 'str', conversation_history: 'list[ChatMessage] | None' = None, mode: 'str' = 'team', session_id: 'str | None' = None) -> 'CompetitorReport | ChatResult'"
+    "signature": "(self, task: 'str', conversation_history: 'list[ChatMessage] | None' = None, mode: 'str' = 'team', session_id: 'str | None' = None) -> 'CompetitorReport'"
   },
   "analyze_react": {
     "kind": "sync",
@@ -21,11 +21,11 @@
   },
   "analyze_team": {
     "kind": "sync",
-    "signature": "(self, task: 'str', session_id: 'str | None' = None, max_retries: 'int' = 1) -> 'CompetitorReport | ChatResult'"
+    "signature": "(self, task: 'str', session_id: 'str | None' = None, max_retries: 'int' = 1) -> 'CompetitorReport'"
   },
   "analyze_team_async": {
     "kind": "async",
-    "signature": "(self, task: 'str', session_id: 'str | None' = None, max_retries: 'int' = 1, max_parallel: 'int' = 4) -> 'CompetitorReport | ChatResult'"
+    "signature": "(self, task: 'str', session_id: 'str | None' = None, max_retries: 'int' = 1, max_parallel: 'int' = 4) -> 'CompetitorReport'"
   },
   "build_dossier": {
     "kind": "sync",
@@ -73,7 +73,7 @@
   },
   "run": {
     "kind": "sync",
-    "signature": "(self, task: 'str', *, session_id: 'str | None' = None, history_messages: 'list[dict[str, str]] | None' = None) -> 'CompetitorReport | ComparisonReport | ChatResult'"
+    "signature": "(self, task: 'str', *, session_id: 'str | None' = None, history_messages: 'list[dict[str, str]] | None' = None) -> 'CompetitorReport | ComparisonReport'"
   },
   "run_scheduled": {
     "kind": "sync",

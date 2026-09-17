@@ -57,7 +57,8 @@ def test_no_reverse_import_of_api_in_services() -> None:
 
 
 def test_facade_file_size_budget() -> None:
-    """doc 78 §4.3：api.py ≤ 300 行（analysis_service 豁免见迁移表——闭包组整体迁移）。"""
-    assert len((_FACADE_DIR / "api.py").read_text(encoding="utf-8").splitlines()) <= 300
+    """doc 78 §4.3：api.py ≤ 320 行（300 基线 + doc96 新增 run_conversation 公共入口，设计文档 96）；
+    analysis_service 豁免见迁移表——闭包组整体迁移。"""
+    assert len((_FACADE_DIR / "api.py").read_text(encoding="utf-8").splitlines()) <= 320
     for py in ("compare_service.py", "schedule_service.py", "assembly.py"):
         assert len((_FACADE_DIR / py).read_text(encoding="utf-8").splitlines()) <= 600, py

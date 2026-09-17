@@ -30,7 +30,6 @@ if TYPE_CHECKING:
     from competitor_agent.core.alerting import Alert, AlertSink
     from competitor_agent.domain_types.events import ProgressEvent
     from competitor_agent.domain_types.report import (
-        ChatResult,
         ComparisonReport,
         CompetitorReport,
     )
@@ -109,7 +108,7 @@ class CompetitorAnalysisAPI:
         conversation_history: list[ChatMessage] | None = None,
         mode: str = "team",
         session_id: str | None = None,
-    ) -> CompetitorReport | ChatResult:
+    ) -> CompetitorReport:
         return self._analysis.analyze(task, conversation_history=conversation_history, mode=mode, session_id=session_id)
 
     def analyze_react(self, task: str, session_id: str | None = None) -> str:
@@ -123,7 +122,7 @@ class CompetitorAnalysisAPI:
         task: str,
         session_id: str | None = None,
         max_retries: int = 1,
-    ) -> CompetitorReport | ChatResult:
+    ) -> CompetitorReport:
         return self._analysis.analyze_team(task, session_id=session_id, max_retries=max_retries)
 
     async def analyze_team_async(
@@ -132,7 +131,7 @@ class CompetitorAnalysisAPI:
         session_id: str | None = None,
         max_retries: int = 1,
         max_parallel: int = 4,
-    ) -> CompetitorReport | ChatResult:
+    ) -> CompetitorReport:
         return await self._analysis.analyze_team_async(
             task, session_id=session_id, max_retries=max_retries, max_parallel=max_parallel
         )
@@ -147,7 +146,8 @@ class CompetitorAnalysisAPI:
         *,
         session_id: str | None = None,
         history_messages: list[dict[str, str]] | None = None,  # 设计文档 65 §3.3：多轮会话历史
-    ) -> CompetitorReport | ComparisonReport | ChatResult:
+    ) -> CompetitorReport | ComparisonReport:
+        """直通报告路径（设计文档 96）：CLI/MCP/benchmark 语义，恒产报告；对话环入口见 run_conversation()。"""
         return self._analysis.run(task, session_id=session_id, history_messages=history_messages)
 
     def verify_report(self, competitor: str, mode: str | None = None) -> Any:
@@ -269,9 +269,12 @@ class CompetitorAnalysisAPI:
         return self._compare._export_comparison_json(report)
 
     def _finalize_comparison_report(
-        self, loop: Any, result: Any, plan: dict[str, Any], sid: str, terminal: str
+        self, loop: Any, result: Any, plan: dict[str, Any], sid: str, terminal: str,
+        *, own_context: bool = True,
     ) -> ComparisonReport:
-        return self._compare._finalize_comparison_report(loop, result, plan, sid, terminal)
+        return self._compare._finalize_comparison_report(
+            loop, result, plan, sid, terminal, own_context=own_context
+        )
 
     def _record_timeline(self, report: CompetitorReport) -> list[Any]:
         return self._analysis._record_timeline(report)
@@ -294,7 +297,6 @@ class CompetitorAnalysisAPI:
     @staticmethod
     def _plan_resolution(
         plan: dict[str, Any] | None,
-        parsed: Any,
         candidate_count: int = 0,
     ) -> str:
-        return AnalysisService._plan_resolution(plan, parsed, candidate_count)
+        return AnalysisService._plan_resolution(plan, candidate_count)

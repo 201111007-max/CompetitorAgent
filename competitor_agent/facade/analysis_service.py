@@ -53,7 +53,6 @@ from competitor_agent.core.checkpoint import (
 from competitor_agent.core.input_sanitizer import sanitize_task
 from competitor_agent.core.report_exporter import export_competitor_json
 from competitor_agent.core.reuse_dimensions import reuse_dimension_results
-from competitor_agent.core.task_parser import ResolutionDecision, parse_task
 from competitor_agent.core.url_guard import URLError, guard_http_url
 from competitor_agent.domain_types.competitor import Competitor
 from competitor_agent.domain_types.enums import GapStatus
@@ -136,27 +135,24 @@ class AnalysisService(ServiceBase):
         conversation_history: list[ChatMessage] | None = None,
         mode: str = "team",
         session_id: str | None = None,
-    ) -> CompetitorReport | ChatResult:
+    ) -> CompetitorReport:
         """单竞品分析（设计文档 49）：Lead ReAct 编排 → CompetitorReport。
 
         Args:
             task: 用户任务文本（入站先做浅清洗 sanitize_task）
             conversation_history: 上一轮对话历史（ChatMessage 列表），
-                传入则把前序上下文摘要并入任务解析，支持多轮追问。
+                传入则按注册表子串匹配消歧（承接上文竞品），支持多轮追问。
             mode: 已废弃（历史兼容，仅告警）；统一走 Lead ReAct 编排。
             session_id: 外部会话 ID（如 Web 端 sid）。传入时复用，使内部取消标志
                 与外部一致（解决 Web 取消断链）；留空则自动生成。
 
-        设计文档 64 §5：入口意图门控——``parse_task`` 判定 ``CHAT`` 时走对话式分支
-        （返回 ``ChatResult``，无报告面板）。
+        设计文档 96：意图门控随 parse_task 退役而删除——本方法恒产报告
+        （对话语义请走 ``run_conversation()``）。
         """
         if mode != "team":
             logger.warning("mode 参数已废弃（历史兼容），统一走 Lead ReAct 编排，忽略 mode=%s", mode)
         task = sanitize_task(task)
         task = self._disambiguate_with_history(task, conversation_history)
-        parsed = parse_task(task, llm=self._llm, use_llm=self._use_llm)
-        if parsed.is_chat:
-            return self._run_chat(task, session_id)
         sid = session_id or f"sess_{uuid.uuid4().hex[:8]}"
         set_current_session(sid)
         # 设计文档 54：trace 生命周期——trace_id 即 session_id，覆盖本次分析
@@ -211,12 +207,17 @@ class AnalysisService(ServiceBase):
         sid: str,
         transcript: list[dict],
         terminal: str,
+        *,
+        own_context: bool = True,
     ) -> CompetitorReport:
         """单竞品报告组装后收尾（log/记忆/取消 checkpoint/时间线/归档/导出/事件/trace）。
 
         由 analyze()（registry 单竞品）与 run()（registry 分型）共用；返回最终报告
         （正常 CompetitorReport 或取消时的 CancelledResult）。异常路径的 trace 闭合
         由调用方 try/except 负责。
+
+        ``own_context``（设计文档 96）：False = generate_report 子流程——close log 与
+        end_trace 归对话环拥有，此处跳过（其余收尾照常）。
         """
         # 设计文档 88 §4.4：writer 叙事槽（report.writer_pass 开关，默认关）。挂在 finalize
         # 顶部 = analyze 双引擎（react/langgraph）与 run 两路径的单点汇聚；仅正常终态写作
@@ -244,7 +245,8 @@ class AnalysisService(ServiceBase):
             # 取消完成：保留 checkpoint 供 /resume 续跑，返回带部分结果的取消报告
             logger.info("会话 %s 取消后返回部分结果（%d 个维度）", sid, len(report.dimension_results))
             self._save_checkpoint_for_resume(sid, task, report)
-            close_session_log(sid)
+            if own_context:
+                close_session_log(sid)
             self._emit(
                 ProgressEvent(
                     event="cancelled",
@@ -252,9 +254,10 @@ class AnalysisService(ServiceBase):
                     message=f"分析已取消，返回 {len(report.dimension_results)} 个已完成维度",
                 )
             )
-            self._tracer.end_trace(
-                sid, status="cancelled", output_brief=report.markdown_report
-            )
+            if own_context:
+                self._tracer.end_trace(
+                    sid, status="cancelled", output_brief=report.markdown_report
+                )
             return CancelledResult(
                 competitor=report.competitor,
                 dimension_results=report.dimension_results,
@@ -278,7 +281,8 @@ class AnalysisService(ServiceBase):
             is_new_competitor=is_new_competitor,
         )
         delete_checkpoint(sid)
-        close_session_log(sid)
+        if own_context:
+            close_session_log(sid)
         self._emit(
             ProgressEvent(
                 event="report",
@@ -287,34 +291,32 @@ class AnalysisService(ServiceBase):
                 message=f"报告生成完成，终态={terminal}",
             )
         )
-        self._tracer.end_trace(sid, status=terminal, output_brief=report.markdown_report)
+        if own_context:
+            self._tracer.end_trace(sid, status=terminal, output_brief=report.markdown_report)
         return report
 
     @staticmethod
     def _plan_resolution(
         plan: dict[str, Any] | None,
-        parsed: Any,
         candidate_count: int = 0,
     ) -> str:
-        """组装分型的 resolution：优先 plan.resolution（Lead 声明），缺失按 plan/解析推断。
+        """组装分型（设计文档 96：parse_task 判型回退退役）：plan.resolution 优先。
 
         registry（单竞品）→ CompetitorReport；compare/discovery → ComparisonReport。
 
-        设计文档 65 §2.3：plan 缺 resolution/competitors 时，若 Lead 实际做了候选枚举/委派
-        （``candidate_count`` > 0）→ 归 discovery/compare，避免多竞品任务误判 registry
-        走单报告路径（真实 LLM 复现：make_plan 只声明 competitor，但 DISCOVERY 已委派多个候选）。
-
-        设计文档 66 §3.2：parse_task（LLM）明确判为 COMPARE/DISCOVERY 时，即使 plan 缺
-        resolution/competitors 且候选为零，也尊重主 Agent（Lead）意图 → 走 comparison 组装
-        （空候选矩阵 + Lead 市场格局核心结论段优雅降级），不把市场普查误判为单竞品 registry。
+        plan 缺 resolution 时：plan.competitors → compare（用户点名多竞品）；
+        candidate_count > 0 → discovery（Lead 实际做了候选枚举/委派，设计文档 65 §2.3
+        回归——避免多候选任务误判 registry 走单报告路径）；否则 registry。
+        设计文档 66 §3.2 的 parse_task（LLM）意图回退随 parse_task 退役而移除
+        （generate_report 结构化参数并入子任务文本，由子 loop make_plan 补偿）。
         """
         resolution = str((plan or {}).get("resolution") or "").lower()
         if resolution:
             return resolution
-        if (plan or {}).get("competitors") or candidate_count > 0:
-            return "discovery" if parsed.resolution == ResolutionDecision.DISCOVERY else "compare"
-        if parsed.resolution in (ResolutionDecision.COMPARE, ResolutionDecision.DISCOVERY):
-            return parsed.resolution.value
+        if (plan or {}).get("competitors"):
+            return "compare"
+        if candidate_count > 0:
+            return "discovery"
         return "registry"
 
     def _web_search_candidates(self, scope: str) -> str:
@@ -749,21 +751,13 @@ class AnalysisService(ServiceBase):
         return loop
 
     def _react_competitor(self, task: str) -> Competitor:
-        """从任务解析竞品（注册表命中带官方源；未知竞品退化为裸名）。"""
-        from competitor_agent.core.competitor_registry import resolve_competitor
+        """从任务解析竞品（注册表子串匹配，设计文档 96；未命中退化为裸名 unknown）。"""
+        from competitor_agent.core.competitor_registry import match_competitor_from_text
 
-        try:
-            name = parse_task(task, llm=self._llm, use_llm=self._use_llm).primary_competitor
-        except Exception:  # noqa: BLE001 — 解析失败不影响 ReAct 产物
-            name = ""
-        if name and name != "unknown":
-            try:
-                competitor = resolve_competitor(name)
-            except ValueError:
-                competitor = None
-            if competitor is not None:
-                return competitor
-        return Competitor(name=name or "unknown")
+        competitor = match_competitor_from_text(task)
+        if competitor is not None:
+            return competitor
+        return Competitor(name="unknown")
 
     def _lead_competitor(self, task: str, plan: dict | None) -> Competitor:
         """报告竞品：优先用 plan 的 competitor（注册表命中带官方源），否则从任务解析。"""
@@ -1114,10 +1108,10 @@ class AnalysisService(ServiceBase):
         task: str,
         session_id: str | None = None,
         max_retries: int = 1,
-    ) -> CompetitorReport | ChatResult:
+    ) -> CompetitorReport:
         """历史兼容入口：委托 analyze()（Lead ReAct 编排，设计文档 49）。
 
-        设计文档 64 §5：普通提问经入口意图门控走对话式分支（返回 ChatResult）。
+        设计文档 96：意图门控退役——恒产报告（对话语义走 run_conversation()）。
         """
         if max_retries != 1:
             logger.warning("analyze_team 的 max_retries 参数已废弃，忽略")
@@ -1129,7 +1123,7 @@ class AnalysisService(ServiceBase):
         session_id: str | None = None,
         max_retries: int = 1,
         max_parallel: int = 4,
-    ) -> CompetitorReport | ChatResult:
+    ) -> CompetitorReport:
         """历史兼容异步入口：线程池包装 analyze()（签名不变，设计文档 49）。"""
         if max_retries != 1 or max_parallel != 4:
             logger.warning("analyze_team_async 的 max_retries/max_parallel 参数已废弃，忽略")
@@ -1155,16 +1149,6 @@ class AnalysisService(ServiceBase):
 
         loop = asyncio.get_running_loop()
         report = await loop.run_in_executor(None, self.analyze, task, None, "team", sid)
-
-        # 设计文档 64 §5：对话式分支 → 无报告面板，答案经消息事件呈现
-        if isinstance(report, ChatResult):
-            yield ProgressEvent(
-                event="message.stop",
-                phase="lead",
-                message="对话完成",
-                payload={"session_id": sid, "summary": report.answer or "对话完成"},
-            )
-            return
 
         yield ProgressEvent(
             event="report",
@@ -1211,18 +1195,15 @@ class AnalysisService(ServiceBase):
     ) -> str:
         """结合会话历史消歧：上一轮已分析的竞品可作为本轮上下文。
 
-        若任务解析出的竞品是 unknown（相对指代如"再对比下 Windsurf"），
+        若任务文本未命中注册表竞品（相对指代如"再对比下 Windsurf"），
         尝试从历史消息中提取最近竞品，拼成可解析的任务文本。
-        解析失败（LLM 不可用）直接返回原 task——消歧是可选增强（设计文档 47）。
+        设计文档 96：竞品命中判定改注册表子串匹配（parse_task 退役，零 LLM）。
         """
         if not conversation_history:
             return task
-        try:
-            parsed = parse_task(task, llm=self._llm, use_llm=self._use_llm)
-        except Exception:
-            logger.warning("历史消歧任务解析失败，返回原 task", exc_info=True)
-            return task
-        if parsed.primary_competitor != "unknown":
+        from competitor_agent.core.competitor_registry import match_competitor_from_text
+
+        if match_competitor_from_text(task) is not None:
             return task
         last_competitor = self._last_competitor_from_history(conversation_history)
         if last_competitor:
@@ -1247,29 +1228,39 @@ class AnalysisService(ServiceBase):
         *,
         session_id: str | None = None,
         history_messages: list[dict[str, str]] | None = None,  # 设计文档 65 §3.3：多轮会话历史
-    ) -> CompetitorReport | ComparisonReport | ChatResult:
-        """统一入口（设计文档 62 §3.5）：全部 resolution 同走一条单 Lead loop。
+    ) -> CompetitorReport | ComparisonReport:
+        """直通报告路径（设计文档 96）：CLI/MCP/benchmark/golden 语义——一律产报告。
 
-        parse_task（LLM）→ 构建单个 Lead ReactLoop（resolution 仅作 querySource 标注、
-        不分派）→ 运行 → 组装按 ``plan.resolution`` 统一分型：registry→CompetitorReport、
-        compare/discovery→ComparisonReport（矩阵 + 市场格局核心结论段）。
-
-        run() 内无 resolution 分派 if-else——DISCOVERY/COMPARE 的候选枚举、并行、聚合
-        由 Lead 回合内自调 web_tool/delegate/aggregate_report 完成，代码只守硬上限。
-
-        设计文档 64 §5：入口意图门控——``parse_task`` 判定 ``CHAT``（普通提问/闲聊）时
-        走对话式分支（``_run_chat``，返回 ``ChatResult``，无报告面板）。
+        对话环入口见 ``run_conversation()``（web 专用）；本方法不再做意图门控
+        （设计文档 64 §5 的 parse_task CHAT 门控随 parse_task 退役而删除）。
+        全部 resolution 同走一条单 Lead loop，组装按 ``plan.resolution`` 统一分型：
+        registry→CompetitorReport、compare/discovery→ComparisonReport。
         """
         task = sanitize_task(task)
-        parsed = parse_task(task, llm=self._llm, use_llm=self._use_llm)
-        if parsed.is_chat:
-            return self._run_chat(task, session_id, history_messages)
         sid = session_id or f"sess_{uuid.uuid4().hex[:8]}"
+        return self._run_report_flow(task, sid, history_messages, own_context=True)
+
+    def _run_report_flow(
+        self,
+        task: str,
+        sid: str,
+        history_messages: list[dict[str, str]] | None,
+        *,
+        own_context: bool,
+    ) -> CompetitorReport | ComparisonReport:
+        """报告流水线主体（设计文档 96）：单 Lead loop → 按 plan 分型组装。
+
+        ``own_context``：True = 独立入口（run()），拥有 trace/session log 生命周期；
+        False = generate_report 工具子流程（对话环调用）——复用对话 sid（取消级联/
+        共享预算/同一 session log），trace 与 log 收尾归对话环（决策①）。
+        """
         set_current_session(sid)
-        self._tracer.start_trace("run", trace_id=sid, input_brief=task)
+        if own_context:
+            self._tracer.start_trace("run", trace_id=sid, input_brief=task)
         try:
             slog = get_session_logger(sid)
-            log_event(slog, "session_started", "init", f"会话 {sid} 启动", task=task)
+            if own_context:
+                log_event(slog, "session_started", "init", f"会话 {sid} 启动", task=task)
             self._emit(
                 ProgressEvent(
                     event="phase_start",
@@ -1287,10 +1278,12 @@ class AnalysisService(ServiceBase):
             # 组装按 plan.resolution 统一分型（同一单 Lead loop 产物）
             # 设计文档 65 §2.3：candidate_count 让多候选 DISCOVERY 即使 plan 缺
             # resolution/competitors 也不误判 registry（走单报告路径）
-            if self._plan_resolution(plan, parsed, candidate_count=len(
+            if self._plan_resolution(plan, candidate_count=len(
                 getattr(loop, "_delegate_collector", {}) or {}
             )) in ("compare", "discovery"):
-                return self._host._finalize_comparison_report(loop, result, plan, sid, terminal)
+                return self._host._finalize_comparison_report(
+                    loop, result, plan, sid, terminal, own_context=own_context
+                )
             report = react_report.assemble(
                 lead_answer=result.answer,
                 competitor=self._lead_competitor(task, plan),
@@ -1300,10 +1293,13 @@ class AnalysisService(ServiceBase):
                 terminal_state=terminal,
                 error_kind=result.error_kind,
             )
-            return self._finalize_competitor_report(report, task, sid, result.transcript, terminal)
+            return self._finalize_competitor_report(
+                report, task, sid, result.transcript, terminal, own_context=own_context
+            )
         except Exception:
             logger.warning("run 会话 %s 异常终止", sid, exc_info=True)
-            self._tracer.end_trace(sid, status="error", output_brief="")
+            if own_context:
+                self._tracer.end_trace(sid, status="error", output_brief="")
             raise
 
     def _run_chat(
