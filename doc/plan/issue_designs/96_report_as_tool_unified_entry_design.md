@@ -4,8 +4,19 @@
 > 报告，生成报告应该作为一个 skill 或者工具，LLM 自行根据用户输入判断要不要使用
 > 这个 skill"。
 >
-> 状态：**已立项，未排期**。本文档固化方向、目标架构与迁移路径；实施前需逐项
-> 拍板 §5 待决策点。
+> 状态：**✅ 已实施（2026-09-18）**。§5 五项待决策点已拍板（全部采纳推荐项）：
+> ① generate_report 沿用共享服务预算 + 会话级联取消（复用对话 sid，零新取消机制）；
+> ② parse_task 完全退役（task_parser.py/ResolutionDecision 删除，竞品解析回退改
+> 注册表子串匹配 `competitor_registry.match_competitor()`，误判由确定性路由测试守）；
+> ③ 两段式工具面（对话环常驻 {web_search, kb_recall, generate_report}，报告工具面
+> 全量只在 generate_report 内部子 loop）；④ CLI run/MCP analyze 保留直通报告路径
+> （新 `run_report()` 直通方法，web 为唯一对话环入口）；⑤ 一次性切换（HARNESS_VERSION
+> 升版 + mock 对话环分支 + golden 改走 run_report + 路由测试补"应触发未触发"用例）。
+>
+> 实施偏差（相对本文草案）：代价 #4 的"tool 语义消息"简化为 assistant 摘要消息
+> （"[报告已生成: 标题] 摘要"，SessionHistory 零 schema 变化——tool 角色会破坏
+> user/assistant 交替压缩逻辑）；doc 66 §3.2 的 parse_task 判型回退随 parse_task
+> 退役而移除（generate_report 结构化参数并入子任务文本，由子 loop make_plan 补偿）。
 
 ---
 
@@ -69,7 +80,7 @@
 | 4 | **会话历史双语义**：chat 落 user/assistant 消息、报告落紧凑摘要（web_app.py 收尾两套），同环后须统一 | 工具调用轮落 `tool` 语义消息（含 report 引用），web 收尾逻辑合并 |
 | 5 | **流式协议**：报告生成期间的事件（phase_start/delegate/report）与对话 text_delta 同流混排 | 事件 schema 不变（doc 63/64/66），前端按 message_id/turn 归位已支持；补"工具触发中"活动事件（与 doc95 排查中暴露的"收集期零反馈"缺陷一并治理） |
 
-## 5. 待决策点（实施前拍板）
+## 5. 待决策点（已拍板 2026-09-18：五项均采纳推荐项，结论见头注）
 
 1. `generate_report` 触发后的预算/取消语义：报告子流程沿用独立 budget 还是共享
    对话环 budget（doc 39 成本钩子挂点）；
