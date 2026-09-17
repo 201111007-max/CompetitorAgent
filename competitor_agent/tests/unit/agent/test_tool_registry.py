@@ -24,6 +24,28 @@ def _config() -> AppConfig:
     return AppConfig()
 
 
+class TestOnlyWhitelist:
+    """设计文档 96：对话环两段式工具面——only 白名单只注册命中的 MCP 工具。"""
+
+    def test_only_web_search(self):
+        d = build_react_dispatcher(config=_config(), only=("web_search",))
+        assert "web_search" in d.specs
+        assert "web_extract" not in d.specs
+        assert "analyze_competitor" not in d.specs
+        assert d.tool_count == 1
+
+    def test_only_empty_registers_all(self):
+        d = build_react_dispatcher(config=_config())
+        assert d.tool_count == len(TOOLS)
+
+    def test_only_combined_with_extra_tools(self):
+        d = build_react_dispatcher(
+            config=_config(), only=("web_search",), extra_tools={"generate_report": lambda task: task}
+        )
+        assert "web_search" in d.specs and "generate_report" in d.specs
+        assert d.tool_count == 2
+
+
 class TestRegistryConsistency:
     """注册表一致：tool_count == len(TOOLS)，每个工具描述含参数类型与描述（schema 生效）"""
 

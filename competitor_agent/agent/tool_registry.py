@@ -117,12 +117,14 @@ def build_react_dispatcher(
     exclude: tuple[str, ...] = (),
     extra_tools: dict[str, Callable[..., str] | ToolSpec] | None = None,
     tracer: Any = None,  # 设计文档 54：tool.call span
+    only: tuple[str, ...] = (),  # 设计文档 96：对话环两段式白名单
 ) -> ToolDispatcher:
     """把 MCP 工具集（TOOLS + TOOL_SPECS）注册进 ToolDispatcher。
 
     - 默认全部工具走 ``mcp_server.tools`` 实现；
     - ``web_extract`` 非 None 时覆盖为该实现（facade 传 ``_react_web_extract``）；
     - ``exclude``：从工具面剔除的工具名（如防递归的 ``analyze_competitor``）；
+    - ``only``：白名单（设计文档 96 对话环两段式）——非空时仅注册命中工具；
     - ``extra_tools``：追加的非 MCP 工具（Lead 编排的 make_plan/delegate/复核工具、
       设计文档 56 的 kb_recall 等）；值为 ToolSpec 时携带描述/schema 注册；
     - 默认超时读 ``config.collector.timeout_seconds``（未给 config 则尝试 load_config）。
@@ -133,7 +135,7 @@ def build_react_dispatcher(
         config = load_config()
     dispatcher = ToolDispatcher(default_timeout=config.collector.timeout_seconds, tracer=tracer)
     for name, spec in TOOL_SPECS.items():
-        if name in exclude:
+        if name in exclude or (only and name not in only):
             continue
         func = web_extract if name == "web_extract" and web_extract is not None else TOOLS[name]
         dispatcher.register(name, func, spec=spec)
