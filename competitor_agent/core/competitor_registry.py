@@ -203,3 +203,18 @@ def resolve_competitor(name: str) -> Competitor:
             return competitor
 
     raise ValueError(f"注册表未收录竞品: {name!r}（请由 LLM 输出规范名，或先 discover 发现）")
+
+
+def match_competitor_from_text(text: str) -> Competitor | None:
+    """任务文本 → 注册表竞品（子串匹配，设计文档 96）：parse_task 退役后的零 LLM 回退。
+
+    匹配规则与 ``resolve_competitor`` 步骤 1 一致（竞品名/别名子串、大小写不敏感）；
+    未命中返回 None（调用方自行降级，如 Competitor(name="unknown")）。
+    """
+    lowered = (text or "").lower()
+    if not lowered:
+        return None
+    for canon, competitor in COMPETITOR_REGISTRY.items():
+        if canon in lowered or any(alias in lowered for alias in competitor.aliases):
+            return competitor
+    return None

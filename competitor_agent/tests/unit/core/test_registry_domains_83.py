@@ -60,3 +60,34 @@ class TestDomesticRegistryEntries:
     def test_canonicalize_consistency(self) -> None:
         assert canonicalize("Kimi Kcode") == "kimi-kcode"
         assert canonicalize("DeepSeek Harness") == "deepseek-harness"
+
+
+class TestMatchCompetitorFromText:
+    """设计文档 96：parse_task 退役后竞品解析回退——注册表子串匹配（零 LLM）。"""
+
+    def test_matches_registry_name(self) -> None:
+        from competitor_agent.core.competitor_registry import match_competitor_from_text
+
+        c = match_competitor_from_text("帮我分析 Cursor 的定价")
+        assert c is not None and c.name == "cursor"
+
+    def test_matches_alias(self) -> None:
+        from competitor_agent.core.competitor_registry import match_competitor_from_text
+
+        alias_entry = next((comp for comp in COMPETITOR_REGISTRY.values() if comp.aliases), None)
+        assert alias_entry is not None, "注册表应存在带别名的条目"
+        c = match_competitor_from_text(f"介绍一下 {alias_entry.aliases[0]}")
+        assert c is not None and c.name == alias_entry.name
+
+    def test_no_match_returns_none(self) -> None:
+        from competitor_agent.core.competitor_registry import match_competitor_from_text
+
+        assert match_competitor_from_text("你好，今天天气怎么样") is None
+        assert match_competitor_from_text("") is None
+
+    def test_first_hit_by_registry_order(self) -> None:
+        """多竞品文本命中多个条目 → 返回注册表首个命中（与 resolve_competitor 同序）。"""
+        from competitor_agent.core.competitor_registry import match_competitor_from_text
+
+        c = match_competitor_from_text("对比 Cursor 和 Windsurf")
+        assert c is not None and c.name in ("cursor", "windsurf")
