@@ -3,8 +3,8 @@
 覆盖：
 - registry/compare/discovery 每次 run() 恰好构建一条单 Lead loop（无 resolution 分派 if-else），
   组装按 plan.resolution 分型（CompetitorReport / ComparisonReport）；
-- 候选子 Agent 标准多维度 dimensions[] → 每候选最小 CompetitorReport → build_comparison 矩阵 +
-  Lead Final Answer 市场格局核心结论段；
+- 候选子 Agent 标准多维度 dimensions[] → 每候选最小 CompetitorReport → build_comparison 矩阵
+  （设计文档 95：结论段走 writer 通道，组装层不再消费 Lead Final Answer）；
 - delegate 候选数硬上限（max_discover_candidates）与结构化结果收集器；
 - 候选子 Agent 系统提示要求输出 dimensions[]（对齐 REPORT_SCHEMA）。
 """
@@ -69,7 +69,7 @@ class TestRunSingleLoopUnified:
         assert len(calls) == 3  # 每次 run 恰好一条单 Lead loop，无三分支各自构建循环
 
     def test_compare_report_has_per_candidate_multi_dimensions(self, mock_llm) -> None:
-        """compare：候选子 Agent dimensions[] → 每候选多维度 CompetitorReport → 矩阵 + 结论段。"""
+        """compare：候选子 Agent dimensions[] → 每候选多维度 CompetitorReport → 矩阵。"""
         result = _api(mock_llm).run("对比 Cursor 和 Windsurf")
         assert isinstance(result, ComparisonReport)
         assert [r.competitor.name for r in result.reports] == ["cursor", "windsurf"]
@@ -79,15 +79,16 @@ class TestRunSingleLoopUnified:
             assert "pricing" in dims and "feature" in dims, f"{report.competitor.name} 缺维度条目"
         md = result.markdown_report
         assert "品类格局矩阵" in md
-        assert "市场格局核心结论" in md  # Lead Final Answer 结论段拼入
+        # 设计文档 95：writer 默认关闭 → 无结论段；Lead 文本不泄漏进正文
+        assert "## 市场格局核心结论" not in md
 
-    def test_discovery_report_matrix_and_conclusion(self, mock_llm) -> None:
-        """discovery：web_search_candidates → delegate 候选 → 矩阵 + 结论段。"""
+    def test_discovery_report_matrix(self, mock_llm) -> None:
+        """discovery：web_search_candidates → delegate 候选 → 矩阵。"""
         result = _api(mock_llm, web_tool=_two_candidate_web_tool).run("帮我找市场上所有 coding agent")
         assert isinstance(result, ComparisonReport)
         assert len(result.reports) >= 2
         assert "品类格局矩阵" in result.markdown_report
-        assert "市场格局核心结论" in result.markdown_report
+        assert "## 市场格局核心结论" not in result.markdown_report
 
 
 class TestComparisonAssembler:
@@ -115,41 +116,26 @@ class TestComparisonAssembler:
         }
         return plan, candidate_results
 
-    def test_assemble_builds_matrix_and_conclusion(self) -> None:
+    def test_assemble_builds_matrix(self) -> None:
         from competitor_agent.facade.comparison_report import assemble_comparison
 
         plan, cands = self._payload()
-        lead_answer = json.dumps(
-            {"competitors": ["cursor", "windsurf"], "kind": "compare",
-             "conclusion": "Cursor 综合领先（定价 Cursor 更贵但功能更全）"}, ensure_ascii=False
-        )
-        comparison = assemble_comparison(lead_answer, plan, cands)
+        comparison = assemble_comparison(plan, cands)
         assert [r.competitor.name for r in comparison.reports] == ["cursor", "windsurf"]
         assert comparison.reports[0].dimension_results[0].dimension == "pricing"
         assert comparison.reports[0].dimension_results[0].confidence == 0.8
         assert "品类格局矩阵" in comparison.markdown_report
-        assert "## 市场格局核心结论" in comparison.markdown_report
-        assert "Cursor 综合领先" in comparison.markdown_report
+        # 设计文档 95：组装层只产矩阵，结论段由 writer 通道另行追加
+        assert "## 市场格局核心结论" not in comparison.markdown_report
 
     def test_assemble_empty_candidates_graceful(self) -> None:
-        """无候选结果 → 空矩阵 + 结论段兜底，不报错（设计文档 62 §5）。"""
+        """无候选结果 → 空矩阵 + 提示留痕，不报错（设计文档 62 §5）。"""
         from competitor_agent.facade.comparison_report import assemble_comparison
 
-        comparison = assemble_comparison("Final Answer: {\"conclusion\": \"无候选\"}", {"resolution": "discovery"}, {})
+        comparison = assemble_comparison({"resolution": "discovery"}, {})
         assert isinstance(comparison, ComparisonReport)
         assert comparison.reports == []
-        assert "无候选" in comparison.markdown_report
-
-    def test_extract_conclusion_json_contract(self) -> None:
-        """设计文档 88 步骤 7：结论走 comparison JSON conclusion 字段（marker 契约删除）。"""
-        from competitor_agent.facade.comparison_report import _extract_conclusion
-
-        assert _extract_conclusion('{"conclusion": "X 领先"}') == "X 领先"
-        assert _extract_conclusion("Final Answer: 【市场格局核心结论】Cursor 最佳") == (
-            "【市场格局核心结论】Cursor 最佳"
-        )
-        assert _extract_conclusion("Cursor 整体领先") == "Cursor 整体领先"
-        assert _extract_conclusion('{"kind": "compare"}') == ""  # JSON 无 conclusion → 空结论段
+        assert "未收集到候选数据" in comparison.markdown_report
 
 
 class TestCandidatePromptAndDelegate:

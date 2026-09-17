@@ -220,6 +220,9 @@ class DimensionFacts:
     summary: str
     facts: list[DistilledFact] = field(default_factory=list)
     evidence_urls: list[str] = field(default_factory=list)
+    # 设计文档 95：comparison 路径由 writer pass 回填候选竞品名（写入 facts payload，
+    # 供横向格局 prose 说清"谁在何维度领先"）；单竞品路径留空 → payload 不含该键。
+    competitor: str = ""
 
 
 def _to_maybe_float(value: Any) -> float | None:

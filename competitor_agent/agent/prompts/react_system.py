@@ -207,9 +207,9 @@ def build_lead_system_prompt() -> str:
         "最后调用 aggregate_report(parts, kind=\"compare\"|\"position\") 聚合；\n"
         "- 是否并行由你依据上下文决策：候选多/任务聚焦→并行（parallel=true）；"
         "预算有限或任务依赖→串行/小批（parallel=false），并在 reason 里说明调度意图；\n"
-        "- 聚合完成后以 comparison JSON 作 Final Answer：conclusion 字段写市场格局核心结论"
-        "（各维度最优者、整体最佳/最差、趋势、替代关系），kind/dimensions/best_per_dimension/gaps "
-        "照实填写，不要只交数据矩阵——矩阵由报告器另行渲染。\n"
+        "- 聚合完成后以 comparison JSON（kind/dimensions/best_per_dimension/gaps 照实填写）"
+        "作 Final Answer 收尾，不要只交数据矩阵——矩阵与市场格局核心结论段由报告器"
+        "另行渲染（结论走蒸馏事实生成，无需你撰写结论 prose）。\n"
         "全部维度就绪后，以 Final Answer 只输出一份 REPORT_SCHEMA JSON（设计文档 88 单一事实源："
         "报告正文由代码骨架渲染 + writer 叙事槽衍生，不要求你写 Markdown 正文）：\n"
         '{"competitor": "竞品规范名", "dimensions": [{"dimension": "维度名", '

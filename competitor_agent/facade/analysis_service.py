@@ -1440,15 +1440,3 @@ class AnalysisService(ServiceBase):
                 current,
                 "报告含过期信息（superseded " + str(verification.n_superseded) + " 条），建议重新分析",
             )
-
-    def _emit_report_skeleton(self, skeleton: str) -> None:
-        """设计文档 88 §2.1：骨架就绪即推 ``report_skeleton``（先于槽位 text_delta，
-        前端可预渲染骨架/表格）；未知事件前端 switch 默认忽略，向后兼容。"""
-        self._emit(
-            ProgressEvent(
-                event="report_skeleton",
-                phase="writer",
-                message="报告骨架就绪，撰写叙事槽位",
-                payload={"skeleton": skeleton},
-            )
-        )

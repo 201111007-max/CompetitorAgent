@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
+from typing import Any
 
 from competitor_agent.agent.prompts.trust_boundary import wrap_untrusted
 from competitor_agent.domain_types.distilled import DimensionFacts, numeric_allowlist
@@ -86,30 +87,49 @@ def build_slots(report: CompetitorReport, facts_by_dim: list[DimensionFacts]) ->
     return slots
 
 
-def build_writer_messages(slot: NarrativeSlot) -> list[dict[str, str]]:
+def _fact_payload(df: DimensionFacts) -> dict[str, Any]:
+    """单条 DimensionFacts → writer payload dict；``competitor`` 仅在已回填时出现
+    （comparison 路径携带候选名，单竞品路径 payload 形态不变，设计文档 95）。"""
+    payload: dict[str, Any] = {
+        "dimension": df.dimension,
+        "status": df.status,
+        "confidence": round(df.confidence, 2),
+        "summary": df.summary,
+        "facts": [
+            {"label": f.label, "value": f.value, "unit": f.unit} for f in df.facts
+        ],
+        "evidence_urls": df.evidence_urls,
+    }
+    if df.competitor:
+        payload["competitor"] = df.competitor
+    return payload
+
+
+def build_writer_messages(
+    slot: NarrativeSlot, *, comparison: bool = False
+) -> list[dict[str, str]]:
     """writer prompt：槽位指令 + wrap_untrusted 包裹的蒸馏事实 JSON。
 
     指令即 N2/N3 的模型侧契约：数字只能取自 facts、禁写 URL 与年份（年份是 N2
     误报面）、引用只用 [n] 占位（代码后处理锚定，writer 不接触真实 URL）。
+
+    ``comparison=True``（设计文档 95）：system 指令切换为"维度 × 竞品横向格局
+    结论"形态（谁在何维度最优/整体胜负/替代关系），硬性规则不动；facts payload
+    逐条携带 ``competitor`` 候选名。
     """
     facts_payload = json.dumps(
-        [
-            {
-                "dimension": df.dimension,
-                "status": df.status,
-                "confidence": round(df.confidence, 2),
-                "summary": df.summary,
-                "facts": [
-                    {"label": f.label, "value": f.value, "unit": f.unit} for f in df.facts
-                ],
-                "evidence_urls": df.evidence_urls,
-            }
-            for df in slot.input_facts
-        ],
+        [_fact_payload(df) for df in slot.input_facts],
         ensure_ascii=False,
     )
+    if comparison:
+        focus = (
+            "撰写多竞品横向对比报告的「市场格局核心结论」段：按「维度 × 竞品」横向"
+            "组织，说清谁在何维度领先、整体胜负与替代关系。"
+        )
+    else:
+        focus = f"你在撰写竞品分析报告的「{slot.heading}」段落。"
     system = (
-        f"{WRITER_SYSTEM_MARKER}。你在撰写竞品分析报告的「{slot.heading}」段落。\n"
+        f"{WRITER_SYSTEM_MARKER}。{focus}\n"
         "硬性规则：\n"
         "1. 只能依据下方 <untrusted_data> 中给出的事实（facts）写作，禁止引入任何外部知识；\n"
         "2. 段落中出现的每个数字必须与 facts 中的数值完全一致，禁止估算、四舍五入或编造；\n"

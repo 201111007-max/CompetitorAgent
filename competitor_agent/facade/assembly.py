@@ -301,6 +301,19 @@ class ServiceBase:
         if self._event_sink is not None:
             self._event_sink(event)
 
+    def _emit_report_skeleton(self, skeleton: str) -> None:
+        """设计文档 88 §2.1：骨架就绪即推 ``report_skeleton``（先于槽位 text_delta，
+        前端可预渲染骨架/表格）；未知事件前端 switch 默认忽略，向后兼容。
+        设计文档 95：comparison 路径同位复用（骨架 = writer 前的矩阵 markdown）。"""
+        self._emit(
+            ProgressEvent(
+                event="report_skeleton",
+                phase="writer",
+                message="报告骨架就绪，撰写叙事槽位",
+                payload={"skeleton": skeleton},
+            )
+        )
+
     def _default_llm(self) -> LLMClient:
         """懒构造默认 LLM 客户端——实现在门面（缓存单点），服务经 host 委派。"""
         return self._host._default_llm()

@@ -57,11 +57,12 @@ class TestLeadPromptM1M2:
         assert "② 结构化数据" not in prompt
         assert "两者缺一不可" not in prompt
 
-    def test_prompt_aggregate_conclusion_field_contract(self) -> None:
-        """marker 字符串契约删除：聚合引导改 comparison JSON conclusion 字段。"""
+    def test_prompt_aggregate_conclusion_contract_retired(self) -> None:
+        """设计文档 95：conclusion 字段契约退役——Lead 不再被要求写结论 prose。"""
         prompt = build_lead_system_prompt()
         assert "【市场格局核心结论】" not in prompt
-        assert "conclusion 字段" in prompt
+        assert "conclusion 字段" not in prompt
+        assert "市场格局核心结论段由报告器" in prompt
 
     def test_prompt_mentions_m2_fields_and_reuse_tool(self) -> None:
         prompt = build_lead_system_prompt()

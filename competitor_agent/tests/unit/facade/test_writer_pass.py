@@ -177,6 +177,101 @@ class TestOverallDegradation:
         assert report.markdown_report == "LEGACY"
 
 
+class _ComparisonBuilder:
+    """双候选最小 comparison 组装（复用 assemble_comparison，不依赖 LLM）。"""
+
+    @staticmethod
+    def build() -> Any:
+        from competitor_agent.facade.comparison_report import assemble_comparison
+
+        plan = {"resolution": "compare", "competitors": ["cursor", "windsurf"]}
+        cands = {
+            "cursor": {
+                "competitor": "cursor",
+                "dimensions": [
+                    {"dimension": "pricing", "summary": "Pro $20", "details": {"plans": ["Pro"]},
+                     "confidence": 0.8, "evidence_urls": ["https://cursor.com/pricing"]},
+                ],
+            },
+            "windsurf": {
+                "competitor": "windsurf",
+                "dimensions": [
+                    {"dimension": "pricing", "summary": "$15", "details": {"plans": ["Free"]},
+                     "confidence": 0.7, "evidence_urls": ["https://windsurf.com/pricing"]},
+                ],
+            },
+        }
+        return assemble_comparison(plan, cands)
+
+
+class TestComparisonWriterPass:
+    """设计文档 95 —— maybe_run_comparison_writer_pass 降级三形态均不追加结论段。"""
+
+    def test_overall_exception_keeps_matrix(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        comparison = _ComparisonBuilder.build()
+        before = comparison.markdown_report
+        monkeypatch.setattr(
+            writer_pass, "distill_report", lambda r: (_ for _ in ()).throw(RuntimeError("boom"))
+        )
+        writer_pass.maybe_run_comparison_writer_pass(comparison, llm=None, config=_CFG)
+        assert comparison.markdown_report == before
+        assert "## 市场格局核心结论" not in comparison.markdown_report
+
+    def test_slot_llm_exception_no_section(self) -> None:
+        """单槽 LLM 异常 → 无结论段（矩阵自身说话），矩阵完好。"""
+        comparison = _ComparisonBuilder.build()
+        writer_pass.run_comparison_writer_pass(
+            comparison, llm=_FakeLLM({"市场格局核心结论": [RuntimeError("boom")]}), config=_CFG
+        )
+        assert "## 市场格局核心结论" not in comparison.markdown_report
+        assert "品类格局矩阵" in comparison.markdown_report
+
+    def test_n2_two_failures_no_section(self) -> None:
+        """N2 两败 → 无结论段（comparison 无降级注记概念，直接不追加）。"""
+        comparison = _ComparisonBuilder.build()
+        writer_pass.run_comparison_writer_pass(
+            comparison,
+            llm=_FakeLLM({"市场格局核心结论": ["格局反转 30 美元。", "还是 30 美元。"]}),
+            config=_CFG,
+        )
+        assert "## 市场格局核心结论" not in comparison.markdown_report
+        assert "30 美元" not in comparison.markdown_report
+
+    def test_prose_success_appends_with_competitor_facts(self) -> None:
+        """成功路径：prose 追加结论段；[n] 占位按跨候选 evidence_urls 锚定。"""
+        comparison = _ComparisonBuilder.build()
+        writer_pass.run_comparison_writer_pass(
+            comparison, llm=_FakeLLM({"市场格局核心结论": ["格局稳定。"]}), config=_CFG
+        )
+        assert "## 市场格局核心结论" in comparison.markdown_report
+        assert "格局稳定。" in comparison.markdown_report
+
+    def test_zero_candidates_noop_no_llm_call(self) -> None:
+        """零候选 → 无事实 → 槽位跳过且不触发 LLM 调用。"""
+        from competitor_agent.facade.comparison_report import assemble_comparison
+
+        comparison = assemble_comparison(
+            {"resolution": "discovery", "competitors": []}, {}
+        )
+        llm = _FakeLLM({})
+        writer_pass.run_comparison_writer_pass(comparison, llm=llm, config=_CFG)
+        assert llm.calls == []
+        assert "## 市场格局核心结论" not in comparison.markdown_report
+
+    def test_on_skeleton_receives_prewriter_matrix(self) -> None:
+        comparison = _ComparisonBuilder.build()
+        seen: list[str] = []
+        writer_pass.run_comparison_writer_pass(
+            comparison,
+            llm=_FakeLLM({"市场格局核心结论": ["格局稳定。"]}),
+            config=_CFG,
+            on_skeleton=seen.append,
+        )
+        assert len(seen) == 1
+        assert "品类格局矩阵" in seen[0]
+        assert "## 市场格局核心结论" not in seen[0]  # 骨架先于注入
+
+
 class TestAssembleGating:
     def test_lead_body_always_ignored(self) -> None:
         """设计文档 88 步骤 7：两段式退役——Lead 散文正文不再消费（无论 writer_pass）。"""

@@ -44,17 +44,28 @@ class CompareService(ServiceBase):
         """compare/discovery 组装 + 收尾（矩阵 + 结论段 + 导出 + 事件/trace）。
 
         候选子 Agent 的 ``dimensions[]``（delegate 收集器）→ 每候选最小 CompetitorReport →
-        ``build_comparison`` 矩阵（执行层）；Lead Final Answer 的结论段拼入。
+        ``build_comparison`` 矩阵（执行层）；设计文档 95：结论段走 writer 通道
+        （``report.writer_pass`` 开关 + 正常终态，与单竞品路径同门控），writer 关闭/
+        失败/零候选一律不追加结论段——矩阵自身说话，不回退解析 Lead 文本。
         """
         from competitor_agent.facade.comparison_report import assemble_comparison
 
         report = assemble_comparison(
-            lead_answer=result.answer,
             plan=plan,
             candidate_results=getattr(loop, "_delegate_collector", {}) or {},
             builder=self._builder,
             terminal_state=terminal,
         )
+        if self._config.report.writer_pass and terminal == "success":
+            from competitor_agent.facade import writer_pass as _writer_pass
+
+            _writer_pass.maybe_run_comparison_writer_pass(
+                report,
+                llm=self._llm,
+                stream_sink=self._stream_sink,
+                config=self._config.report,
+                on_skeleton=self._emit_report_skeleton,
+            )
         self._export_comparison_json(report)
         close_session_log(sid)
         self._emit(

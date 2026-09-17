@@ -78,11 +78,14 @@ class TestDiscover:
         assert "品类格局矩阵" in md
 
     def test_discover_without_web_tool_graceful(self, mock_llm):
-        """设计文档 62 §3.5：无 web_tool → 候选枚举返回可读回灌，Lead 优雅收尾（空矩阵 + 结论），不报错。"""
+        """设计文档 62 §3.5：无 web_tool → 候选枚举返回可读回灌，Lead 优雅收尾（空矩阵 + 提示留痕），不报错。
+
+        设计文档 95：正文提示 = 代码确定性文案（Lead conclusion 兜底已退役）。
+        """
         api = _api(mock_llm)
         result = api.discover("市场上所有 AI coding agent")
         assert isinstance(result, ComparisonReport)
-        assert "未发现候选竞品" in result.markdown_report
+        assert "未收集到候选数据" in result.markdown_report
 
     def test_discover_emits_discovery_event(self, mock_llm):
         events = []

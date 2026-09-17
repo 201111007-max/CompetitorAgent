@@ -6,15 +6,13 @@
 ② `_parse_report` 四类输入：散文前缀+JSON → 多维度 / 纯 JSON → 多维度 /
    纯散文 → None / 损坏 JSON → None；缺 dimensions 的 dict → 可溯源单 react 维度；
 ③ `_fallback_single_dimension` 兜底净化：解析失败时 react 维度 summary 不含 JSON 块；
-④ `comparison_report._extract_conclusion` 复用提取器（散文前缀 + conclusion）；
-⑤ `_plan_resolution` 多候选推断（candidate_count > 0 → discovery/compare）。
+④ `_plan_resolution` 多候选推断（candidate_count > 0 → discovery/compare）。
 """
 from __future__ import annotations
 
 import json
 
 from competitor_agent.domain_types.competitor import Competitor
-from competitor_agent.facade.comparison_report import _extract_conclusion
 from competitor_agent.facade.react_report import (
     _extract_json_block,
     _fallback_single_dimension,
@@ -116,21 +114,6 @@ class TestFallbackSanitize:
     def test_assemble_broken_json_no_crash(self):
         report = assemble('{"competitor": "A", broken', Competitor(name="A"), loop_plan=None)
         assert report.dimension_results[0].dimension == "react"
-
-
-class TestComparisonConclusion:
-    def test_prose_prefix_conclusion(self):
-        assert _extract_conclusion('Final Answer: 数据已齐备。\n\n{"conclusion":"市场格局核心结论：A 领先"}') == "市场格局核心结论：A 领先"
-
-    def test_pure_json_conclusion(self):
-        assert _extract_conclusion('{"conclusion":"B 领先"}') == "B 领先"
-
-    def test_marker_contract_retired(self):
-        """设计文档 88 步骤 7：marker 字符串契约删除——非 JSON 文本整段兜底为结论。"""
-        assert _extract_conclusion("前言【市场格局核心结论】A 最强") == "前言【市场格局核心结论】A 最强"
-
-    def test_prose_no_conclusion(self):
-        assert _extract_conclusion("没有结构化结论的散文。") == "没有结构化结论的散文。"
 
 
 class TestMalformedJsonLightFix:

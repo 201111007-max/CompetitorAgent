@@ -86,3 +86,38 @@ class TestWriterMessages:
 
     def test_dimension_slot_id(self) -> None:
         assert dimension_slot_id("pricing") == "dimension_insight:pricing"
+
+
+class TestComparisonMessages:
+    """设计文档 95 —— comparison 形态 writer messages（横向格局指令 + competitor 载荷）。"""
+
+    def _comparison_slot(self):
+        from competitor_agent.agent.writer_slots import SLOT_CONCLUSION, NarrativeSlot
+
+        facts = distill_report(_report())
+        for df in facts:
+            df.competitor = "cursor"
+        return NarrativeSlot(
+            slot_id=SLOT_CONCLUSION, heading="市场格局核心结论", input_facts=facts
+        )
+
+    def test_comparison_system_instruction(self) -> None:
+        slot = self._comparison_slot()
+        messages = build_writer_messages(slot, comparison=True)
+        system = messages[0]["content"]
+        assert "叙事槽位撰写器" in system  # mock 分发标记不动
+        assert "市场格局核心结论" in system
+        assert "维度 × 竞品" in system
+        assert "横向" in system
+        assert "只能依据下方" in system and "[n] 占位" in system  # 硬性规则不动
+
+    def test_comparison_payload_carries_competitor(self) -> None:
+        slot = self._comparison_slot()
+        messages = build_writer_messages(slot, comparison=True)
+        assert '"competitor": "cursor"' in messages[1]["content"]
+
+    def test_single_path_payload_has_no_competitor_key(self) -> None:
+        """单竞品路径 facts 不回填 competitor → payload 形态不变。"""
+        slot = build_slots(_report(), distill_report(_report()))[1]
+        messages = build_writer_messages(slot)
+        assert '"competitor"' not in messages[1]["content"]

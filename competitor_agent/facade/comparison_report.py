@@ -1,19 +1,17 @@
 """ComparisonReport 组装器（设计文档 62 §3.5）— 从单 Lead loop 产物组装对比/发现报告
 
-数据源（全部来自同一条单 Lead loop，无第二次 LLM 调用）：
+数据源（全部来自同一条单 Lead loop）：
 - ``candidate_results``：delegate 收集器落盘的候选子 Agent 标准多维度 ``dimensions[]``
   （``{competitor, dimensions, official_links}``，对齐 REPORT_SCHEMA）；
-- ``plan``：``plan.resolution`` 决定分型（compare/discovery）与候选排序；
-- ``lead_answer``：Lead Final Answer 的 comparison JSON（``conclusion`` 字段 =
-  市场格局核心结论；设计文档 88 §7 第 7 步两段式退役——【市场格局核心结论】marker
-  字符串契约删除，结论统一走结构化字段）。
+- ``plan``：``plan.resolution`` 决定分型（compare/discovery）与候选排序。
 
 职责：每候选 ``dimensions[]`` → 最小 CompetitorReport → ``build_comparison`` 渲染
-"维度 × 竞品"矩阵（执行层，不经 LLM）；Lead conclusion 字段拼为
-「## 市场格局核心结论」段。候选缺失/结论缺失时矩阵与结论段各自兜底不报错。
+"维度 × 竞品"矩阵（执行层，不经 LLM）。候选缺失时矩阵兜底不报错。
 
-设计文档 65 §2.3：``_extract_conclusion`` 复用 ``_extract_json_block``（括号配平），
-兼容"散文前缀 + JSON"形态的 Lead Final Answer（不再要求整体以 ``{`` 开头）。
+设计文档 95：Lead Final Answer 从报告链路退役——「## 市场格局核心结论」段的唯一
+合法来源 = writer LLM 从蒸馏事实生成的 prose（``writer_pass.maybe_run_comparison_writer_pass``，
+由 ``compare_service._finalize_comparison_report`` 接线），组装层不再解析 Lead 文本
+（原 ``_extract_conclusion`` 的解析兜底正是 JSON 泄漏入口，整体删除）。
 """
 from __future__ import annotations
 
@@ -23,26 +21,23 @@ from competitor_agent.domain_types.competitor import Competitor
 from competitor_agent.domain_types.report import ComparisonReport, CompetitorReport
 
 # 设计文档 70 §8.1 D1d：零候选空报告仍落盘 .md（内容 = 提示），不额外制造垃圾——
-# 矩阵空 + Lead 结论段 + 本提示，报告库可见可点开看原因。
+# 矩阵空 + 本提示，报告库可见可点开看原因。
 # 文案中性化：不臆断「超时/失败」（可能是未委派候选或结果未收集），也不展示置信度。
 _ZERO_CANDIDATE_HINT = "未收集到候选数据，对比矩阵为空。"
 
 
 def assemble_comparison(
-    lead_answer: str,
     plan: dict[str, Any] | None,
     candidate_results: dict[str, dict[str, Any]],
     builder: Any | None = None,
     terminal_state: str = "success",
 ) -> ComparisonReport:
-    """把候选 ``dimensions[]`` + Lead comparison JSON 组装为 ComparisonReport。
+    """把候选 ``dimensions[]`` 组装为 ComparisonReport。
 
     - 每候选 ``dimensions[]`` 组装为最小 CompetitorReport（复用什么 ``_dimension_from_item``
       的维度条目解析与置信度封顶兜底）；
     - 矩阵按 ``plan.competitors`` 顺序渲染（缺 plan 时按收集顺序）；
-    - 设计文档 88（步骤 7 两段式退役）：Lead 结论取 comparison JSON ``conclusion`` 字段
-      （``_extract_conclusion``），markdown = 矩阵 + 「## 市场格局核心结论」段
-      （代码确定性渲染，无 Lead 散文正文）。
+    - 设计文档 95：结论段不再在本层拼接（writer 通道另行追加，矩阵自身说话）。
     """
     from competitor_agent.core.report_builder import ReportBuilder
     from competitor_agent.facade.react_report import _dimension_from_item
@@ -77,50 +72,10 @@ def assemble_comparison(
         # 无候选结果：空矩阵兜底（aggregate_report/delegate 缺失不报错，设计文档 62 §5）
         comparison = ComparisonReport(competitors=[], reports=[], markdown_report="")
 
-    conclusion = _extract_conclusion(lead_answer)
-    # 设计文档 73 §3.3：追加判断从「字符串存在性」改「布尔标志」语义——模型把提示抄进
-    # 正文不再骗过守卫（提示/结论丢失修复）；下二分支即"代码已追加"的布尔语义。
     if not comparison.markdown_report.strip():
-        # 设计文档 70 §8.1 D1d：零候选且无正文/结论 → 提示留痕，保证 .md 非空可落盘
+        # 设计文档 70 §8.1 D1d：零候选无正文 → 提示留痕，保证 .md 非空可落盘
         comparison.markdown_report = _ZERO_CANDIDATE_HINT + "\n"
-    elif not reports:
-        # 零候选但有正文/结论 → 正文/结论在前、提示追加在后
-        comparison.markdown_report = (
-            comparison.markdown_report.rstrip() + "\n\n" + _ZERO_CANDIDATE_HINT + "\n"
-        )
-    if conclusion and "## 市场格局核心结论" not in comparison.markdown_report:
-        comparison.markdown_report = (
-            comparison.markdown_report.rstrip()
-            + "\n\n## 市场格局核心结论\n\n"
-            + conclusion
-            + "\n"
-        )
     return comparison
 
 
-def _extract_conclusion(lead_answer: str) -> str:
-    """从 Lead Final Answer 提取市场格局核心结论（comparison JSON ``conclusion`` 字段）。
-
-    设计文档 88 步骤 7：【市场格局核心结论】marker 字符串契约删除——结论统一走
-    结构化字段（comparison JSON 复用 ``_extract_json_block`` 括号配平提取，兼容
-    散文前缀形态）；JSON 无 conclusion 字段 → 空（矩阵兜底）；非 JSON → 整段兜底
-    （真实 LLM 未遵约时不丢结论）。
-    """
-    from competitor_agent.facade.react_report import _extract_json_block
-
-    text = (lead_answer or "").strip()
-    if not text:
-        return ""
-    for prefix in ("Final Answer: ", "Final Answer:"):
-        if text.startswith(prefix):
-            text = text[len(prefix):].lstrip()
-            break
-    payload = _extract_json_block(text)
-    if isinstance(payload, dict):
-        if payload.get("conclusion"):
-            return str(payload["conclusion"])
-        return ""
-    return text
-
-
-__all__ = ["_extract_conclusion", "assemble_comparison"]
+__all__ = ["assemble_comparison"]

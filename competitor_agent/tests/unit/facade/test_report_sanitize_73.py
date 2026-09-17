@@ -2,7 +2,7 @@
 
 - H1 归并去重（草稿+正式稿 → 只留正式稿；单 H1 逐字节不变）；
 - 未闭合围栏兜底（``` 失衡 → 补闭合；配平原样）；
-- 追加守卫布尔化（模型把提示抄进正文 → 代码仍按布尔标志追加，提示不丢）。
+- 零候选提示留痕（设计文档 95：结论兜底退役后恰好追加 1 处）。
 
 设计文档 88 步骤 7（两段式退役）：净化链收敛进 `_fallback_single_dimension`
 （`_strip_structured_data_section` 随 Lead 散文正文概念退役删除）。
@@ -82,33 +82,10 @@ def test_fallback_chain_dedupes_and_closes_fence() -> None:
     assert text.count("```") % 2 == 0, "无未闭合围栏"
 
 
-def test_guard_boolean_appends_despite_copied_hint() -> None:
-    """§3.3：模型把提示文本抄进正文中间 → 代码仍按布尔标志追加（提示不丢）。
-
-    旧实现按「字符串存在性」判断 → 模型抄写后代码跳过追加（提示只有 1 处）；
-    新实现按布尔标志 → 追加生效（提示留痕 1 处 + 结论兜底段携带 1 处 = 2）。
-    """
-    lead_answer = (
-        "# 对比报告\n\n未收集到候选数据，对比矩阵为空。\n\n一些正文内容\n\n"
-        "【市场格局核心结论】\n整体格局稳定。\n"
-    )
-    report = assemble_comparison(
-        lead_answer=lead_answer,
-        plan=None,
-        candidate_results={},
-    )
+def test_zero_candidate_hint_appended_once() -> None:
+    """零候选：提示恰好追加 1 处（设计文档 95：结论兜底退役，双追加布尔守卫随之消亡）。"""
+    report = assemble_comparison(plan=None, candidate_results={})
     assert report.competitors == []
-    assert report.markdown_report.count(_ZERO_CANDIDATE_HINT) == 2
-
-
-def test_guard_boolean_no_duplicate_when_no_copied() -> None:
-    """正常零候选：正文无提示 → 代码追加恰好 1 处。"""
-    lead_answer = "# 对比报告\n\n只有正文，没有抄写提示。\n"
-    report = assemble_comparison(
-        lead_answer=lead_answer,
-        plan=None,
-        candidate_results={},
-    )
     assert report.markdown_report.count(_ZERO_CANDIDATE_HINT) == 1
 
 

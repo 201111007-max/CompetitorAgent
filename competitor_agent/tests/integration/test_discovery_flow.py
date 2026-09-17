@@ -59,7 +59,11 @@ class TestDiscoveryIntegration:
         assert any(r.dimension_results for r in result.reports)
 
     def test_discovery_without_web_tool_graceful(self, fake_extractor, mock_llm) -> None:
-        """设计文档 62 §5：无 web_tool 的 run(DISCOVERY) 优雅降级——空候选矩阵 + 提示结论，不抛错。"""
+        """设计文档 62 §5：无 web_tool 的 run(DISCOVERY) 优雅降级——空候选矩阵 + 提示留痕，不抛错。
+
+        设计文档 95：结论不再取自 Lead Final Answer（mock conclusion 退役），
+        零候选正文 = 代码确定性提示。
+        """
         api = CompetitorAnalysisAPI(
             extractor=fake_extractor, llm=mock_llm, use_llm=True, max_iterations=10
         )
@@ -68,7 +72,7 @@ class TestDiscoveryIntegration:
 
         assert isinstance(result, ComparisonReport)
         assert result.reports == []  # 无候选不产假竞品
-        assert "未发现候选竞品" in result.markdown_report
+        assert "未收集到候选数据" in result.markdown_report
 
     def test_full_analyze_discovery_task_via_cli_path(self, fake_extractor, capsys, mock_llm) -> None:
         """普查任务经 analyze 路由：真实产出矩阵而非 0 维度（问题 20 主诉求）。"""
