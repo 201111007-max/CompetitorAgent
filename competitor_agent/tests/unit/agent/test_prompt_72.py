@@ -140,7 +140,9 @@ class TestInjection:
     def test_chat_injects_at_tail(self):
         prompt = build_chat_system_prompt()
         assert _AGENT_MD_MARK in prompt
-        assert "回答完成后直接结束" in prompt
+        # 设计文档 96：对话环提示强约束 generate_report（mock 对话环分支的判定字样）
+        assert "generate_report" in prompt
+        assert "必须调用" in prompt
 
     def test_dimension_subagent_injects(self):
         for dim in DIMENSIONS:
