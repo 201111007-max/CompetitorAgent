@@ -411,6 +411,20 @@ class BenchmarkMockLLM:
         if "语义解析器" in system:
             # 任务解析 prompt：从任务文本提取竞品 + 分辨率（mock 固定 oracle）
             return self._parse_task(user)
+        if "对话助手" in system and "generate_report" in system:
+            # 对话环（设计文档 96）：分析语义 → generate_report 工具调用；
+            # 报告摘要回灌后以 prose 收尾（「应触发未触发」由路由测试守）
+            obs = self._last_observation(messages)
+            if obs:
+                return "Final Answer: " + (obs.splitlines()[0][:200] if obs else "报告已完成。")
+            if self._registry_competitors(user) or any(
+                m in user.lower() for m in self._DISCOVERY_MARKERS
+            ):
+                return (
+                    "Thought: 用户请求竞品分析，调用报告工具\nAction: generate_report\n"
+                    f"Args: {json.dumps({'task': user}, ensure_ascii=False)}"
+                )
+            return "Final Answer: 好的，这是一次对话回答。"
         if "Lead Agent" in system:
             # 主路径 Lead 会话（先于"维度子 Agent"判定——Lead 提示也含该词）
             return self._lead_step(messages)
@@ -1221,9 +1235,9 @@ def build_benchmark_api(
         max_iterations=8,
         enable_rag=enable_rag,
         enable_memory=enable_memory,
-        memory=memory,  # type: ignore[arg-type]
+        memory=memory,
         rag_store=rag_store,
-        timeline=timeline,  # type: ignore[arg-type]
+        timeline=timeline,
         config=cfg,
         engine=engine,
     )

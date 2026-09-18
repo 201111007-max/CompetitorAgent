@@ -1302,19 +1302,22 @@ class AnalysisService(ServiceBase):
                 self._tracer.end_trace(sid, status="error", output_brief="")
             raise
 
-    def _run_chat(
+    def run_conversation(
         self,
         task: str,
-        session_id: str | None,
+        *,
+        session_id: str | None = None,
         history_messages: list[dict[str, str]] | None = None,  # 设计文档 65 §3.3
     ) -> ChatResult:
-        """对话式分支（设计文档 64 §5.2）：普通提问/闲聊 → 自由 prose 回答，不产报告面板。
+        """对话环入口（设计文档 96）：一切输入都是对话，报告是一次 generate_report 工具调用。
 
-        与 ``run()`` 的分析链路相对：不再强制 make_plan（``plan_first=False``）、改用
-        对话形态 Lead system prompt（无 PLAN/REPORT schema 约束）、不调用
-        ``react_report.assemble`` 与 ``report`` 事件——答案经 Stream 通道
-        （``text_delta``/``thinking_delta``）以普通会话消息呈现（无面板/无维度/无置信度）。
+        chat-first Lead loop（``build_chat_system_prompt`` + ``plan_first=False`` +
+        ``final_as_payload=False``），两段式工具面常驻 {web_search, kb_recall,
+        generate_report}（决策③）；generate_report 触发时执行 ``_run_report_flow``
+        （复用对话 sid：级联取消/共享预算/同一 session log——决策①），产物挂
+        ``ChatResult.report``（web 据此切渲染，代价 #4/#5 治理点）。
         """
+        task = sanitize_task(task)
         sid = session_id or f"sess_{uuid.uuid4().hex[:8]}"
         set_current_session(sid)
         self._tracer.start_trace("chat", trace_id=sid, input_brief=task)
@@ -1324,14 +1327,8 @@ class AnalysisService(ServiceBase):
             self._emit(
                 ProgressEvent(event="phase_start", phase="react", message=f"对话: {task}")
             )
-            loop = self._react_loop(
-                task,
-                sid,
-                system_prompt=build_chat_system_prompt(),
-                plan_first=False,
-                final_as_payload=False,
-                history_messages=history_messages,
-            )
+            captured: dict[str, Any] = {"report": None}
+            loop = self._conversation_loop(task, sid, history_messages, captured)
             try:
                 result = loop.run_with_result(task)
             finally:
@@ -1353,11 +1350,165 @@ class AnalysisService(ServiceBase):
                 terminal_state=terminal,
                 cancelled=result.cancelled,
                 session_id=sid,
+                report=captured["report"],
             )
         except Exception:
-            logger.warning("chat 会话 %s 异常终止", sid, exc_info=True)
+            logger.warning("conversation 会话 %s 异常终止", sid, exc_info=True)
             self._tracer.end_trace(sid, status="error", output_brief="")
             raise
+
+    def _conversation_loop(
+        self,
+        task: str,
+        sid: str,
+        history_messages: list[dict[str, str]] | None,
+        captured: dict[str, Any],
+    ) -> ReactLoop:
+        """对话环 ReactLoop（设计文档 96 决策③两段式）：轻量工具面 + generate_report。
+
+        与 ``_react_loop``（报告流水线全工具面）相对：无 make_plan/delegate/聚合工具，
+        仅常驻 web_search（MCP 白名单）+ kb_recall + generate_report（extra_tools）。
+        """
+        from competitor_agent.core.competitor_registry import match_competitor_from_text
+
+        def _chat_competitor_name() -> str:
+            competitor = match_competitor_from_text(task)
+            return competitor.name if competitor is not None else ""
+
+        extra_tools: dict[str, Callable[..., str] | ToolSpec] = {
+            "kb_recall": self._build_kb_recall(_chat_competitor_name),
+            "generate_report": self._build_generate_report_tool(sid, history_messages, captured),
+        }
+        dispatcher = build_react_dispatcher(
+            config=self._config,
+            only=("web_search",),
+            extra_tools=extra_tools,
+            tracer=self._tracer,  # 设计文档 54：tool.call span 挂对话 trace
+        )
+        agent = ReactAgent(
+            llm=self._llm or self._default_llm(),
+            dispatcher=dispatcher,
+            max_parallel_tool_calls=self._max_parallel_tool_calls,
+        )
+        return ReactLoop(
+            agent,
+            max_steps=None,
+            event_sink=self._event_sink,
+            session_id=sid,
+            budget=None,
+            memory_context_fn=self._host._react_memory_context,
+            rag_fn=self._host._react_rag_context,
+            obs_max_chars=self._config.collector.max_content_chars,
+            system_prompt_override=build_chat_system_prompt(),
+            plan_first=False,
+            max_history_steps=self._config.lead.max_history_steps,
+            stream_sink=self._stream_sink,  # 设计文档 63 §5.5：对话文本走 Stream 通道
+            final_as_payload=False,
+            history_messages=history_messages,
+            stagnation=StagnationConfig(  # 设计文档 81：停滞检测（自然收敛信号）
+                enabled=self._config.agent.stagnation_enabled,
+                window=self._config.agent.stagnation_window,
+                dup_threshold=self._config.agent.stagnation_dup_threshold,
+                sig_repeat=self._config.agent.stagnation_sig_repeat,
+                max_hints=self._config.agent.stagnation_max_hints,
+                ignore_arg_keys=tuple(self._config.agent.stagnation_ignore_arg_keys),
+            ),
+        )
+
+    def _build_generate_report_tool(
+        self,
+        sid: str,
+        history_messages: list[dict[str, str]] | None,
+        captured: dict[str, Any],
+    ) -> ToolSpec:
+        """generate_report 工具（设计文档 96）：报告流水线降格为对话环工具。
+
+        执行体 = ``_run_report_flow(own_context=False)``（复用对话 sid——取消级联/
+        共享预算/同一 session log；trace 归对话环拥有）；结构化参数并入子任务文本
+        由子 loop 的 make_plan 消化；入口发 ``phase_start(phase="report_tool")``
+        活动事件（代价 #5「工具触发中」，收集期零反馈治理）；返回 prose 摘要回灌。
+        """
+
+        def generate_report(
+            task: str,
+            competitors: list | None = None,
+            dimensions: list | None = None,
+            custom_sources: dict | None = None,
+        ) -> str:
+            self._emit(
+                ProgressEvent(
+                    event="phase_start",
+                    phase="report_tool",
+                    message=f"生成报告: {task}",
+                    payload={"tool": "generate_report", "task": task},
+                )
+            )
+            self._budget.record_iteration()
+            sub_task = self._compose_report_task(task, competitors, dimensions, custom_sources)
+            report = self._run_report_flow(sub_task, sid, history_messages, own_context=False)
+            captured["report"] = report
+            if isinstance(report, CancelledResult):
+                kind = "cancelled"
+            elif isinstance(report, ComparisonReport):
+                kind = "comparison"
+            else:
+                kind = "competitor"
+            markdown = getattr(report, "markdown_report", "") or ""
+            excerpt = markdown[:1500] + ("…（已截断，全文见报告面板）" if len(markdown) > 1500 else "")
+            terminal = str(getattr(report, "terminal_state", "") or "success")
+            return (
+                f"[报告已生成] 类型={kind} 终态={terminal}\n\n{excerpt}"
+            )
+
+        return ToolSpec(
+            name="generate_report",
+            func=generate_report,
+            description=(
+                "生成完整竞品分析报告（采集→分析→矩阵→报告）。一切竞品分析/市场调研/"
+                "多竞品对比/盘点类请求必须调用本工具；task 为分析任务全文，"
+                "competitors/dimensions/custom_sources 为可选结构化补充。"
+            ),
+            params_schema={
+                "type": "object",
+                "properties": {
+                    "task": {"type": "string", "description": "分析任务全文"},
+                    "competitors": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "竞品规范名列表（单竞品/对比点名时填）",
+                    },
+                    "dimensions": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "维度白名单（缺省全部维度）",
+                    },
+                    "custom_sources": {
+                        "type": "object",
+                        "description": "用户指定来源 {home|pricing|docs: URL}",
+                    },
+                },
+                "required": ["task"],
+            },
+        )
+
+    @staticmethod
+    def _compose_report_task(
+        task: str,
+        competitors: list | None,
+        dimensions: list | None,
+        custom_sources: dict | None,
+    ) -> str:
+        """generate_report 参数 → 子流程任务文本（make_plan 可消化的自然语言）。"""
+        parts = [task.strip() or "竞品分析"]
+        if competitors:
+            parts.append("竞品: " + "、".join(str(c) for c in competitors))
+        if dimensions:
+            parts.append("维度: " + "、".join(str(d) for d in dimensions))
+        if isinstance(custom_sources, dict) and custom_sources:
+            label = {"home": "官网是", "pricing": "定价页是", "docs": "文档是", "changelog": "更新日志是"}
+            for key, url in custom_sources.items():
+                parts.append(f"{label.get(str(key), str(key))} {url}")
+        return "，".join(parts)
 
     def _latest_report_text(self, competitor: str) -> str:
         """竞品最新归档报告正文（.md 优先，回退 JSON 内嵌 markdown_report）。"""

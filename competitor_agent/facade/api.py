@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from competitor_agent.core.alerting import Alert, AlertSink
     from competitor_agent.domain_types.events import ProgressEvent
     from competitor_agent.domain_types.report import (
+        ChatResult,
         ComparisonReport,
         CompetitorReport,
     )
@@ -149,6 +150,18 @@ class CompetitorAnalysisAPI:
     ) -> CompetitorReport | ComparisonReport:
         """直通报告路径（设计文档 96）：CLI/MCP/benchmark 语义，恒产报告；对话环入口见 run_conversation()。"""
         return self._analysis.run(task, session_id=session_id, history_messages=history_messages)
+
+    def run_conversation(
+        self,
+        task: str,
+        *,
+        session_id: str | None = None,
+        history_messages: list[dict[str, str]] | None = None,  # 设计文档 65 §3.3：多轮会话历史
+    ) -> ChatResult:
+        """对话环入口（设计文档 96）：web 唯一对话面——报告是一次 generate_report 工具调用。"""
+        return self._analysis.run_conversation(
+            task, session_id=session_id, history_messages=history_messages
+        )
 
     def verify_report(self, competitor: str, mode: str | None = None) -> Any:
         """报告级 NLI 事实校验（设计文档 77 §2.3 产品侧挂点，门面薄路由）。"""

@@ -1,110 +1,16 @@
-"""设计文档 64 §5 — 意图门控（CHAT 决议 + 对话式分支）单测。
+"""设计文档 64 §5 — 对话式分支残留单测（doc 96 迁移中）。
 
 覆盖：
-① run()/analyze() 入口：普通提问（parse_task 判定 chat）→ ChatResult（无报告面板）；
-   分析类请求 → 照旧 CompetitorReport / ComparisonReport（回归）。
-② 对话式分支：plan_first=False + 对话系统提示 + final_as_payload=False，
-   答案经正文呈现；不 assemble、不发 report 事件。
 ③ web_app._stream_sink 透传 turn（§3.4 分段段号）。
+（①意图门控/②对话式分支已随 parse_task 退役迁移至 test_conversation_entry_96.py；
+本文件余项待 doc 96 Task 8 迁往 test_web_m2_streaming.py 后整文件删除。）
 """
 from __future__ import annotations
 
 import json
 
-from competitor_agent.domain_types.report import ChatResult, CompetitorReport
-from competitor_agent.facade.api import CompetitorAnalysisAPI
-from competitor_agent.llm.client import LLMClient, StreamDelta, ToolCallReply
-
-
-class ChatScriptedLLM:
-    """脚本化 mock：parse 阶段判 chat，对话循环直接回 prose 最终答案。"""
-
-    def complete(self, messages, model=None, **kwargs):
-        # parse_task 的系统提示含「语义解析器」；普通对话循环则直接给答案
-        system = str(messages[0].get("content", "")) if messages else ""
-        if "语义解析器" in system:
-            return json.dumps(
-                {"resolution": "chat", "competitors": [], "dimensions": None, "custom_sources": {}}
-            )
-        return "你好！我是竞品情报助手，有什么可以帮你？"
-
-    def __call__(self, messages, model=None, **kwargs):
-        # complete_with_tools 非流式路径（tools kwarg 出现）→ 直接 ToolCallReply
-        if kwargs.get("tools") is not None:
-            return ToolCallReply(content="你好！我是竞品情报助手，有什么可以帮你？")
-        return self.complete(messages, model=model, **kwargs)
-
-
-class FakeExtractor:
-    def fetch(self, gap, context):
-        from competitor_agent.domain_types import Observation, SourceEvidence
-
-        url = str(context.kwargs.get("url"))
-        ev = SourceEvidence(source_name="web_extractor", url=url, content_hash=str(hash(url)), trust_level=0.9)
-        return Observation(gap_field=str(getattr(gap, "field", "")), source="web_extractor", raw_text="x", evidence=ev)
-
-
-def _chat_api(**kwargs) -> CompetitorAnalysisAPI:
-    return CompetitorAnalysisAPI(
-        extractor=FakeExtractor(),
-        llm=LLMClient(call_func=ChatScriptedLLM()),
-        use_llm=True,
-        **kwargs,
-    )
-
-
-class TestChatGate:
-    def test_run_plain_question_returns_chat_result(self):
-        api = _chat_api()
-        result = api.run("今天天气怎么样")
-        assert isinstance(result, ChatResult)
-        # 对话式分支：答案来自正文流（chat system prompt 下 Lead 直接 prose 收尾）
-        assert result.answer
-        assert not isinstance(result, CompetitorReport)
-
-    def test_analyze_plain_question_returns_chat_result(self):
-        api = _chat_api()
-        result = api.analyze("介绍一下你自己")
-        assert isinstance(result, ChatResult)
-
-    def test_run_chat_emits_no_report_event(self):
-        events = []
-        api = _chat_api(event_sink=events.append)
-        result = api.run("你好")
-        assert isinstance(result, ChatResult)
-        assert not any(e.event == "report" for e in events)
-
-    def test_run_analysis_still_returns_report(self, mock_llm):
-        """回归：分析类请求不受影响，照旧 CompetitorReport（意图门控只拦 chat）。"""
-        api = CompetitorAnalysisAPI(
-            extractor=FakeExtractor(), llm=mock_llm, use_llm=True
-        )
-        report = api.run("分析 Cursor")
-        assert isinstance(report, CompetitorReport)
-        assert report.competitor.name == "cursor"
-
-    def test_run_chat_uses_chat_loop_not_make_plan(self, monkeypatch):
-        """对话式分支应传 build_chat_system_prompt + plan_first=False + final_as_payload=False。"""
-        from competitor_agent.agent.prompts.react_system import build_chat_system_prompt
-
-        # doc 78 拆分：_react_loop 宿主迁至 analysis_service.AnalysisService（仅 patch 路径调整）
-        from competitor_agent.facade import analysis_service as analysis_mod
-
-        seen: dict[str, object] = {}
-        orig = analysis_mod.AnalysisService._react_loop
-
-        def _spy(self, task, session_id, **kwargs):
-            seen["system_prompt"] = kwargs.get("system_prompt")
-            seen["plan_first"] = kwargs.get("plan_first")
-            seen["final_as_payload"] = kwargs.get("final_as_payload")
-            return orig(self, task, session_id, **kwargs)
-
-        monkeypatch.setattr(analysis_mod.AnalysisService, "_react_loop", _spy)
-        result = _chat_api().run("普通问题")
-        assert isinstance(result, ChatResult)
-        assert seen["system_prompt"] == build_chat_system_prompt()
-        assert seen["plan_first"] is False
-        assert seen["final_as_payload"] is False
+from competitor_agent.domain_types.report import CompetitorReport
+from competitor_agent.llm.client import StreamDelta
 
 
 class TestStreamSinkTurn:
